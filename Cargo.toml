@@ -1,0 +1,106 @@
+[package]
+name = "grob"
+version = "0.7.0"
+edition = "2021"
+license = "ELv2"
+description = "High-performance LLM routing proxy — routes to Anthropic, OpenAI, Gemini, DeepSeek, Ollama & more with streaming, tool calling, and multi-provider fallback"
+repository = "https://github.com/azerozero/grob"
+keywords = ["llm", "proxy", "router", "openai", "anthropic"]
+categories = ["command-line-utilities", "web-programming"]
+
+[[bin]]
+name = "grob"
+path = "src/main.rs"
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }.tar.gz"
+bin-dir = "{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[dependencies]
+# Web Framework
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace"] }
+
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "0.1", features = ["io-util"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+
+# HTTP Client
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "native-tls", "native-tls-vendored"] }
+bytes = "1"
+pin-project = "1"
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Configuration
+config = "0.14"
+toml = "0.8"
+
+# Token Counting
+tiktoken-rs = "0.5"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error Handling
+anyhow = "1"
+thiserror = "1"
+
+# Utilities
+dashmap = "5"              # Concurrent HashMap
+once_cell = "1"            # Lazy statics
+async-trait = "0.1"        # Async trait support
+dirs = "5"                 # User directories
+regex = "1"                # Regular expressions
+uuid = { version = "1.0", features = ["v4", "serde"] }  # UUID generation for streaming
+
+# OAuth & Auth
+oauth2 = "4"               # OAuth 2.0 client
+base64 = "0.22"            # Base64 encoding
+sha2 = "0.10"              # SHA-256 for PKCE
+rand = "0.8"               # Random generation for PKCE
+chrono = { version = "0.4", features = ["serde"] }  # Timestamps
+url = "2"                  # URL parsing
+secrecy = "0.8"            # Secure secret handling
+
+# Metrics
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal"] }  # Unix signals
+
+[dev-dependencies]
+# Testing
+tokio-test = "0.4"
+mockito = "1"
+criterion = "0.5"          # Benchmarking
+tempfile = "3"             # Temporary directory testing
+
+# Property Testing
+proptest = "1"
+
+[[bench]]
+name = "routing"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+
+[profile.test]
+opt-level = 0

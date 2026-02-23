@@ -1,0 +1,44 @@
+# Claude Max OAuth Configuration Example
+# This shows how to configure claude-code-mux to use Claude Pro/Max subscription via OAuth
+
+[server]
+host = "127.0.0.1"
+port = 13456
+log_level = "info"
+
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000
+
+[router]
+default = "claude-sonnet-4.5"
+think = "claude-sonnet-4.5"
+websearch = "claude-sonnet-4.5"
+background = "claude-haiku-4.5"
+
+# Claude Max OAuth Provider
+# Uses OAuth authentication instead of API key
+# Zero cost for Max plan subscribers!
+[[providers]]
+name = "claude-max"
+provider_type = "anthropic"
+auth_type = "oauth"  # Use OAuth instead of api_key
+oauth_provider = "anthropic-max"  # References token in TokenStore
+enabled = true
+models = []
+
+[[models]]
+name = "claude-sonnet-4.5"
+
+[[models.mappings]]
+actual_model = "claude-sonnet-4-5-20250929"
+priority = 1
+provider = "claude-max"
+
+[[models]]
+name = "claude-haiku-4.5"
+
+[[models.mappings]]
+actual_model = "claude-haiku-4-5-20250929"
+priority = 1
+provider = "claude-max"

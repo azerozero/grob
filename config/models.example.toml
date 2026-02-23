@@ -1,0 +1,43 @@
+# Model Mapping Configuration
+# Maps external model names to multiple providers with fallback support
+
+# Example: claude-sonnet-4-5 can use multiple providers
+[[models]]
+name = "claude-sonnet-4-5"  # External model name (used in API requests)
+
+  # Primary provider
+  [[models.mappings]]
+  priority = 1
+  provider = "anthropic-native"
+  actual_model = "claude-sonnet-4-5"
+
+  # Fallback provider 1
+  [[models.mappings]]
+  priority = 2
+  provider = "openrouter"
+  actual_model = "anthropic/claude-3.5-sonnet"
+
+# Example: gpt-5.1 mapping
+[[models]]
+name = "gpt-5.1"
+
+  [[models.mappings]]
+  priority = 1
+  provider = "openai"
+  actual_model = "gpt-5.1"
+
+  [[models.mappings]]
+  priority = 2
+  provider = "openrouter"
+  actual_model = "openai/gpt-5.1"
+
+# Example: GLM-4.6 with continuation prompt injection
+# Some models stop prematurely after tool calls, inject_continuation_prompt fixes this
+[[models]]
+name = "GLM-4.6"
+
+  [[models.mappings]]
+  priority = 1
+  provider = "cerebras1"
+  actual_model = "zai-glm-4.6"
+  inject_continuation_prompt = true  # Injects "Please continue with the next task." after tool results

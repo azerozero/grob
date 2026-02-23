@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g., v0.7.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  BINARY_NAME: grob
+
+jobs:
+  validate:
+    name: Validate version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate version
+        id: validate
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            exit 1
+          fi
+
+          CARGO_VERSION="v$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')"
+          if [[ "$VERSION" != "$CARGO_VERSION" && ! "$VERSION" =~ ^${CARGO_VERSION}- ]]; then
+            echo "::error::Tag $VERSION does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            use-cross: true
+
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            use-cross: true
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            use-cross: false
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            use-cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.use-cross
+        run: |
+          curl -fsSL https://github.com/cross-rs/cross/releases/latest/download/cross-x86_64-unknown-linux-musl.tar.gz \
+            | tar xz -C /usr/local/bin
+          cross --version
+
+      - name: Build
+        shell: bash
+        run: |
+          if [[ "${{ matrix.use-cross }}" == "true" ]]; then
+            cross build --locked --release --target ${{ matrix.target }}
+          else
+            cargo build --locked --release --target ${{ matrix.target }}
+          fi
+
+      - name: Package
+        run: |
+          ARCHIVE="${BINARY_NAME}-${{ needs.validate.outputs.version }}-${{ matrix.target }}.tar.gz"
+          tar czf "${ARCHIVE}" \
+            -C target/${{ matrix.target }}/release "${BINARY_NAME}" \
+            -C "${GITHUB_WORKSPACE}" README.md LICENSE
+          shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd artifacts
+          echo "## SHA256 Checksums" > ../CHECKSUMS.md
+          echo '```' >> ../CHECKSUMS.md
+          cat *.sha256 >> ../CHECKSUMS.md
+          echo '```' >> ../CHECKSUMS.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate.outputs.version }}
+          draft: false
+          prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
+          generate_release_notes: true
+          append_body: true
+          body_path: CHECKSUMS.md
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256

@@ -1,0 +1,89 @@
+# Preset: perf - Performance max
+# Anthropic (OAuth/Max) for all primary models, OpenRouter fallbacks
+# Requires: Anthropic OAuth (Max plan) + OPENROUTER_API_KEY
+
+# --- Providers ---
+
+# Anthropic direct via OAuth (plan Max, gratuit)
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+auth_type = "oauth"
+oauth_provider = "anthropic-max"
+enabled = true
+models = []
+
+# OpenRouter (fallback)
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+api_key = "$OPENROUTER_API_KEY"
+enabled = true
+models = []
+
+# --- Models ---
+
+# Think - claude-opus-4-6 (best reasoning)
+[[models]]
+name = "claude-opus-thinking"
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-opus-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 2
+
+# Default - claude-sonnet-4-6 (fast + smart)
+[[models]]
+name = "default"
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "openai/gpt-4o"
+priority = 2
+
+# Background - claude-sonnet-4-6 with gemini fallback
+[[models]]
+name = "background"
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "google/gemini-2.5-flash"
+priority = 2
+
+# WebSearch - claude-sonnet-4-6 with gpt-4o fallback
+[[models]]
+name = "websearch"
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "openai/gpt-4o"
+priority = 2
+
+# --- Router ---
+[router]
+default = "default"
+think = "claude-opus-thinking"
+background = "background"
+websearch = "websearch"
+auto_map_regex = "^claude-"
+background_regex = "(?i)claude.*haiku"
