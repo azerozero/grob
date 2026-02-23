@@ -1,0 +1,15 @@
+target/
+.git/
+.github/
+docs/
+tests/
+benches/
+examples/
+config/
+scripts/
+*.md
+LICENSE
+renovate.json
+release-plz.toml
+cliff.toml
+CLAUDE.md
