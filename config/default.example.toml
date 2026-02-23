@@ -1,0 +1,80 @@
+[[models]]
+name = "glm-4.6"
+
+[[models.mappings]]
+actual_model = "glm-4.6"
+priority = 1
+provider = "zai coding plan"
+
+[[models.mappings]]
+actual_model = "z-ai/glm-4.6"
+priority = 2
+provider = "openrouter"
+
+[[models]]
+name = "glm-4.5-air"
+
+[[models.mappings]]
+actual_model = "glm-4.5-air"
+priority = 1
+provider = "zai coding plan"
+
+[[models.mappings]]
+actual_model = "z-ai/glm-4.5-air"
+priority = 2
+provider = "openrouter"
+
+[[models]]
+name = "kimi-for-coding"
+
+[[models.mappings]]
+actual_model = "claude-sonnet-4-6-20250514"
+priority = 1
+provider = "kimi-for-coding"
+
+[[providers]]
+api_key = "your-zai-api-key-here"
+enabled = true
+models = []
+name = "zai coding plan"
+provider_type = "z.ai"
+
+[[providers]]
+api_key = "your-openrouter-api-key-here"
+enabled = true
+models = []
+name = "openrouter"
+provider_type = "openrouter"
+
+[[providers]]
+api_key = "your-kimi-api-key-here"
+base_url = "https://api.kimi.com/coding/"
+enabled = true
+models = []
+name = "kimi-for-coding"
+provider_type = "anthropic"
+
+[router]
+background = "glm-4.5-air"
+default = "glm-4.6"
+think = "kimi-for-coding"
+websearch = "glm-4.6"
+
+# Prompt-based routing rules (first match wins)
+# Routes to specific models when patterns match user prompt content
+[[router.prompt_rules]]
+pattern = "(?i)(commit|push|merge|rebase).*change"
+model = "glm-4.5-air"
+
+[[router.prompt_rules]]
+pattern = "(?i)write.*test|add.*test"
+model = "kimi-for-coding"
+
+[server]
+host = "127.0.0.1"
+log_level = "info"
+port = 13456
+
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000

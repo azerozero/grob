@@ -1,0 +1,28 @@
+# Rust
+/target
+# Cargo.lock is committed for reproducible builds
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project-specific tooling
+plans/
+rapidspec/
+.rapidspec/
+.claude/
+
+# Private docs (kept in azerozero/grob-internal)
+README-perso.md
+docs/COMMERCIAL_PLAN.md
+docs/JURIDICAL_ANALYSIS.md
+docs/REFACTORING_PLAN.md
+LICENSE-IDENTIFICATION.md
+
+# Configuration

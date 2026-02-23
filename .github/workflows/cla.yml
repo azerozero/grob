@@ -1,0 +1,47 @@
+name: "CLA Assistant"
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  CLAssistant:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "CLA Assistant"
+        if: |
+          (github.event.comment.body == 'recheck' ||
+           github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') ||
+          github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: "signatures/cla.json"
+          path-to-document: "https://github.com/azerozero/grob/blob/main/CLA.md"
+          branch: "cla-signatures"
+          allowlist: "Destynova2,dependabot[bot],renovate[bot],github-actions[bot],release-plz[bot]"
+
+          custom-notsigned-prcomment: |
+            Thank you for your contribution! Before we can merge this PR, you need to sign our [Contributor License Agreement](https://github.com/azerozero/grob/blob/main/CLA.md).
+
+            The CLA ensures that A00 SASU can distribute your contribution under both the AGPL-3.0 and our commercial license. **You retain full copyright** on your contributions.
+
+            To sign, please post a comment with exactly the following text:
+
+            > I have read the CLA Document and I hereby sign the CLA
+
+          custom-pr-sign-comment: "I have read the CLA Document and I hereby sign the CLA"
+          custom-allsigned-prcomment: "All contributors have signed the CLA."
+
+          create-file-commit-message: "chore: create CLA signatures file"
+          signed-commit-message: "chore: record CLA signature for $contributorName (#$pullRequestNo)"
+
+          lock-pullrequest-aftermerge: false
