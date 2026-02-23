@@ -1,0 +1,91 @@
+# Preset: local - Ollama local + Anthropic thinking
+# Runs most tasks on local Ollama, uses Anthropic OAuth for complex reasoning
+# Requires: Ollama running (http://localhost:11434) + Anthropic OAuth
+# Recommended Ollama models: ollama pull qwen2.5-coder:32b && ollama pull qwen2.5-coder:7b
+
+# --- Providers ---
+
+# Anthropic via OAuth (Max plan — included in subscription) — for complex thinking only
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+auth_type = "oauth"
+oauth_provider = "anthropic-max"
+enabled = true
+models = []
+
+# Ollama local (OpenAI-compatible API)
+[[providers]]
+name = "ollama"
+provider_type = "openai"
+api_key = "ollama"
+base_url = "http://localhost:11434/v1"
+enabled = true
+models = []
+
+# --- Models ---
+
+# Think - Anthropic for quality reasoning (local can't match this)
+[[models]]
+name = "claude-opus-thinking"
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-opus-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 2
+
+# Default - Ollama qwen2.5-coder:32b (great for code, 100% local)
+[[models]]
+name = "default"
+
+[[models.mappings]]
+provider = "ollama"
+actual_model = "qwen2.5-coder:32b"
+priority = 1
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 2
+
+# Background - Ollama qwen2.5-coder:7b (fast, lightweight)
+[[models]]
+name = "background"
+
+[[models.mappings]]
+provider = "ollama"
+actual_model = "qwen2.5-coder:7b"
+priority = 1
+
+[[models.mappings]]
+provider = "ollama"
+actual_model = "qwen2.5-coder:32b"
+priority = 2
+
+# WebSearch - Anthropic (local models can't do web search)
+[[models]]
+name = "websearch"
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "ollama"
+actual_model = "qwen2.5-coder:32b"
+priority = 2
+
+# --- Router ---
+[router]
+default = "default"
+think = "claude-opus-thinking"
+background = "background"
+websearch = "websearch"
+auto_map_regex = "^claude-"
+background_regex = "(?i)claude.*haiku"

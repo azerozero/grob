@@ -1,0 +1,57 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["before 6am on monday"],
+  "timezone": "UTC",
+  "dependencyDashboard": true,
+  "prConcurrentLimit": 5,
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on monday"],
+    "automerge": true,
+    "automergeType": "branch"
+  },
+  "packageRules": [
+    {
+      "description": "Auto-merge patch updates silently",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["patch"],
+      "groupName": "Cargo patch updates",
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
+      "description": "Group minor updates for review",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor"],
+      "groupName": "Cargo minor updates",
+      "automerge": false
+    },
+    {
+      "description": "Major updates: separate PRs, never auto-merged",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "breaking-change"]
+    },
+    {
+      "description": "Dev-dependencies patch+minor auto-merge",
+      "matchManagers": ["cargo"],
+      "matchDepTypes": ["dev-dependencies"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
+      "description": "GitHub Actions non-major auto-merge",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch", "digest"],
+      "groupName": "GitHub Actions updates",
+      "automerge": true,
+      "automergeType": "branch"
+    }
+  ],
+  "cargo": {
+    "rangeStrategy": "update-lockfile"
+  }
+}

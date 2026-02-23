@@ -1,0 +1,15 @@
+[workspace]
+# Don't publish to crates.io — release via git tags only
+publish = false
+git_release_enable = true
+git_release_draft = false
+git_release_latest = true
+git_tag_name = "v{{ version }}"
+git_tag_enable = true
+changelog_update = true
+pr_labels = ["release"]
+
+[[package]]
+name = "grob"
+changelog_path = "CHANGELOG.md"
+git_release_name = "v{{ version }}"
