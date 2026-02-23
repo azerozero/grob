@@ -1,0 +1,295 @@
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Anthropic API request format
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AnthropicRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    pub max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ThinkingConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_sequences: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<SystemPrompt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
+}
+
+/// Message in the conversation
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Message {
+    pub role: String,
+    pub content: MessageContent,
+}
+
+/// Message content can be string or array of content blocks
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum MessageContent {
+    Text(String),
+    Blocks(Vec<ContentBlock>),
+}
+
+/// System prompt can be string or array of system blocks
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum SystemPrompt {
+    Text(String),
+    Blocks(Vec<SystemBlock>),
+}
+
+/// System message block
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SystemBlock {
+    pub r#type: String,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<serde_json::Value>,
+}
+
+/// Tool result content can be string or array of content blocks
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ToolResultContent {
+    Text(String),
+    Blocks(Vec<ToolResultBlock>),
+}
+
+impl std::fmt::Display for ToolResultContent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ToolResultContent::Text(s) => write!(f, "{}", s),
+            ToolResultContent::Blocks(blocks) => {
+                let text = blocks
+                    .iter()
+                    .map(|block| match block {
+                        ToolResultBlock::Known(KnownToolResultBlock::Text { text }) => text.clone(),
+                        ToolResultBlock::Known(KnownToolResultBlock::Image { .. }) => {
+                            "[Image]".to_string()
+                        }
+                        ToolResultBlock::Unknown(_) => "[Unknown]".to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                write!(f, "{}", text)
+            }
+        }
+    }
+}
+
+/// Content blocks allowed in tool results.
+/// Uses untagged enum to handle unknown types (like tool_reference) gracefully.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ToolResultBlock {
+    Known(KnownToolResultBlock),
+    Unknown(serde_json::Value),
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type")]
+pub enum KnownToolResultBlock {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image")]
+    Image { source: ImageSource },
+}
+
+/// Content block for multimodal messages.
+///
+/// Uses untagged deserialization with a two-level approach:
+/// 1. First tries to parse as a KnownContentBlock (text, image, tool_use, etc.)
+/// 2. If that fails, falls back to Unknown which captures the raw JSON
+///
+/// This allows the proxy to handle new content types (like "document" for PDFs,
+/// or future types Anthropic may add) without failing to parse. Unknown types
+/// are passed through unchanged to the backend provider.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ContentBlock {
+    /// Known content types with structured parsing
+    Known(KnownContentBlock),
+    /// Unknown content types - pass through as raw JSON
+    Unknown(serde_json::Value),
+}
+
+/// Known content block types that we parse specifically
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type")]
+pub enum KnownContentBlock {
+    #[serde(rename = "text")]
+    Text {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<serde_json::Value>,
+    },
+    #[serde(rename = "image")]
+    Image { source: ImageSource },
+    #[serde(rename = "tool_use")]
+    ToolUse {
+        id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    #[serde(rename = "tool_result")]
+    ToolResult {
+        tool_use_id: String,
+        content: ToolResultContent,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_error: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<serde_json::Value>,
+    },
+    /// Thinking block - stored as raw JSON to preserve exact signature.
+    #[serde(rename = "thinking")]
+    Thinking {
+        #[serde(flatten)]
+        raw: serde_json::Value,
+    },
+}
+
+// Convenience constructors for ContentBlock
+impl ContentBlock {
+    pub fn text(text: String, cache_control: Option<serde_json::Value>) -> Self {
+        ContentBlock::Known(KnownContentBlock::Text {
+            text,
+            cache_control,
+        })
+    }
+
+    pub fn image(source: ImageSource) -> Self {
+        ContentBlock::Known(KnownContentBlock::Image { source })
+    }
+
+    pub fn tool_use(id: String, name: String, input: serde_json::Value) -> Self {
+        ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input })
+    }
+
+    pub fn thinking(raw: serde_json::Value) -> Self {
+        ContentBlock::Known(KnownContentBlock::Thinking { raw })
+    }
+
+    /// Check if this is a tool result block
+    pub fn is_tool_result(&self) -> bool {
+        matches!(
+            self,
+            ContentBlock::Known(KnownContentBlock::ToolResult { .. })
+        )
+    }
+
+    /// Get text content if this is a text block
+    pub fn as_text(&self) -> Option<&str> {
+        match self {
+            ContentBlock::Known(KnownContentBlock::Text { text, .. }) => Some(text),
+            _ => None,
+        }
+    }
+
+    /// Get mutable reference to text content if this is a text block
+    pub fn as_text_mut(&mut self) -> Option<&mut String> {
+        match self {
+            ContentBlock::Known(KnownContentBlock::Text { text, .. }) => Some(text),
+            _ => None,
+        }
+    }
+}
+
+/// Image source for vision API
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ImageSource {
+    pub r#type: String, // "base64" or "url"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Tool definition for function calling
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Tool {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub r#type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_schema: Option<serde_json::Value>,
+}
+
+/// Thinking/reasoning configuration for Plan Mode
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ThinkingConfig {
+    pub r#type: String, // "enabled" or "disabled"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<u32>,
+}
+
+/// Token usage information
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Usage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+}
+
+/// Request for counting tokens
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CountTokensRequest {
+    pub model: String,
+    pub messages: Vec<Message>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system: Option<SystemPrompt>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<Tool>>,
+}
+
+/// Response for token counting
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CountTokensResponse {
+    pub input_tokens: u32,
+}
+
+/// Router decision result
+#[derive(Debug, Clone)]
+pub struct RouteDecision {
+    pub model_name: String,
+    pub route_type: RouteType,
+    pub matched_prompt: Option<String>,
+}
+
+/// Type of routing decision
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteType {
+    WebSearch,
+    PromptRule,
+    Think,
+    Background,
+    Default,
+}
+
+impl std::fmt::Display for RouteType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RouteType::WebSearch => write!(f, "web-search"),
+            RouteType::PromptRule => write!(f, "prompt-rule"),
+            RouteType::Think => write!(f, "think"),
+            RouteType::Background => write!(f, "background"),
+            RouteType::Default => write!(f, "default"),
+        }
+    }
+}

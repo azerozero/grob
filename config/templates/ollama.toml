@@ -1,0 +1,24 @@
+# Ollama Local Development Configuration
+
+[server]
+port = 3456
+host = "127.0.0.1"
+log_level = "info"
+
+[[providers]]
+name = "ollama"
+api_base_url = "http://localhost:11434/v1/chat/completions"
+api_key = "ollama"  # Ollama doesn't require real API key
+models = ["qwen2.5-coder:latest", "deepseek-r1:latest"]
+
+[providers.model_context]
+"qwen2.5-coder:latest" = 32768
+"deepseek-r1:latest" = 64000
+
+[router]
+default = "ollama.qwen2.5-coder:latest"
+think = "ollama.deepseek-r1:latest"
+
+# Optional: Enable long context routing for large files
+longContext = "ollama.deepseek-r1:latest"
+longContextThreshold = 32000                # Switch when >32K tokens

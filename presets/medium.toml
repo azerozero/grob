@@ -1,0 +1,99 @@
+# Preset: medium - Best quality/price ratio
+# Anthropic (OAuth/Max) for thinking, OpenRouter for everything else
+# Requires: OpenRouter API key (OPENROUTER_API_KEY)
+# Anthropic: uses OAuth (Max plan, included in $200/mo subscription — no per-token cost)
+
+# --- Providers ---
+
+# Anthropic direct via OAuth (Max plan — included in subscription, no per-token cost)
+[[providers]]
+name = "anthropic-max"
+provider_type = "anthropic"
+auth_type = "oauth"
+oauth_provider = "anthropic-max"
+enabled = true
+models = []
+
+# OpenRouter (modèles performants pas chers)
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+api_key = "$OPENROUTER_API_KEY"
+enabled = true
+models = []
+
+# --- Models ---
+
+# Think - claude-opus-4-6 via Anthropic Max OAuth (included in subscription)
+# Fallback: sonnet (still Max), then deepseek-v3.2 via OpenRouter if Max rate-limited
+[[models]]
+name = "claude-opus-thinking"
+
+[[models.mappings]]
+provider = "anthropic-max"
+actual_model = "claude-opus-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "anthropic-max"
+actual_model = "claude-sonnet-4-6"
+priority = 2
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v3.2"
+priority = 3
+
+# Default - kimi-k2.5 (excellent ratio)
+# ELO 1514, ~$0.30/$1.10 per M tokens
+[[models]]
+name = "default"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "moonshotai/kimi-k2.5-0127"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v3.2"
+priority = 2
+
+# Background - grok-4.1-fast (fast + cheap)
+# ELO 1495, ~$0.50/$1.00 per M
+[[models]]
+name = "background"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "x-ai/grok-4.1-fast"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "moonshotai/kimi-k2-thinking-20251106"
+priority = 2
+
+# WebSearch - glm-5 (good at search)
+# ELO 1495, ~$0.30/$2.55 per M
+[[models]]
+name = "websearch"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "z-ai/glm-5"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "anthropic/claude-sonnet-4-6"
+priority = 2
+
+# --- Router ---
+[router]
+default = "default"
+think = "claude-opus-thinking"
+background = "background"
+websearch = "websearch"
+auto_map_regex = "^claude-"
+background_regex = "(?i)claude.*haiku"

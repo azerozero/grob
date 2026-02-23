@@ -1,0 +1,79 @@
+# Preset: cheap - Budget minimum
+# OpenRouter only, cheapest models that work well
+# Requires: OPENROUTER_API_KEY
+
+# --- Providers ---
+
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+api_key = "$OPENROUTER_API_KEY"
+enabled = true
+models = []
+
+# --- Models ---
+
+# Think - deepseek-r1 (cheapest strong reasoner)
+[[models]]
+name = "claude-opus-thinking"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "deepseek/deepseek-r1"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v3.2"
+priority = 2
+
+# Default - gemini-2.5-flash (free/very cheap)
+[[models]]
+name = "default"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "google/gemini-2.5-flash"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "deepseek/deepseek-chat-v3"
+priority = 2
+
+# Background - gemini-2.5-flash (cheapest)
+[[models]]
+name = "background"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "google/gemini-2.5-flash"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v3.2"
+priority = 2
+
+# WebSearch - gemini-2.5-flash (fast) with glm-5 fallback
+[[models]]
+name = "websearch"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "google/gemini-2.5-flash"
+priority = 1
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "z-ai/glm-5"
+priority = 2
+
+# --- Router ---
+[router]
+default = "default"
+think = "claude-opus-thinking"
+background = "background"
+websearch = "websearch"
+auto_map_regex = "^claude-"
+background_regex = "(?i)claude.*haiku"
