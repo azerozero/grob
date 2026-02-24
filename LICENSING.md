@@ -18,6 +18,7 @@ A commercial license is available for organizations that cannot or do not wish t
 
 | Tier | Use Case | Price |
 |------|----------|-------|
+| **Personal** | 1 user, local workstation only (no server) | Free |
 | **Community** | Internal use, < 50 people | AGPL-3.0, free |
 | **Enterprise** | Internal use, > 50 people | 8 000 EUR/year |
 | **Integrator** | ESN / systems integrator deploying for clients | 15 000 EUR/year |
@@ -26,7 +27,15 @@ A commercial license is available for organizations that cannot or do not wish t
 
 ### What each tier includes
 
+**Personal (free)**
+- Single user running Grob on their own workstation (localhost)
+- Full functionality, no restrictions
+- No AGPL-3.0 obligations (commercial license grant for local use)
+- Community support via GitHub Issues
+- **Not permitted:** running on a server, shared instance, or any deployment accessible by multiple users
+
 **Community (AGPL-3.0, free)**
+- Internal use for organizations under 50 people
 - Full functionality, no restrictions
 - AGPL-3.0 obligations apply (source disclosure for network services)
 - Community support via GitHub Issues
@@ -34,6 +43,7 @@ A commercial license is available for organizations that cannot or do not wish t
 **Enterprise**
 - Use Grob without AGPL-3.0 source disclosure obligations
 - Keep internal modifications private
+- Unlimited users
 - Priority support via email
 
 **Integrator**
@@ -70,10 +80,13 @@ Yes. Internal deployment does not trigger AGPL-3.0 source disclosure obligations
 You do not need to publish your modifications. AGPL-3.0 source disclosure only applies when providing the software as a service to third parties.
 
 ### Do I need a commercial license to use Grob with Claude Code?
-No. Running Grob as a local proxy for your own development tools is personal/internal use, fully covered by AGPL-3.0.
+No. Running Grob locally on your own workstation is covered by the free **Personal** tier. No license key, no sign-up, no AGPL obligations.
+
+### I'm a developer — can I use Grob for free?
+Yes. As long as you run it on your own machine (localhost), it's free — even for commercial work. The license only kicks in when Grob is deployed on a server.
 
 ### We are a 30-person company. Can we use Grob for free?
-Yes. Organizations under 50 people can use Grob under the AGPL-3.0 at no cost, as long as they comply with the AGPL-3.0 terms.
+Each developer can use Grob for free on their own workstation (Personal tier). For shared/server deployments, you can use the AGPL-3.0 Community tier if you comply with its source disclosure terms.
 
 ### We are a defense contractor and need to audit the code.
 The Source Available tier gives you full source access for audit purposes without AGPL-3.0 redistribution obligations. Contact licensing@a00.fr.
