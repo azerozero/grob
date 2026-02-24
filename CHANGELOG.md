@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1](https://github.com/azerozero/grob/compare/v0.7.0...v0.7.1) - 2026-02-24
+
+### Other
+
+- update Cargo.toml dependencies
+
 ### Added
 
 - **Budget enforcement**: global, per-provider, and per-model monthly spend limits (`[budget]`, `budget_usd`)
