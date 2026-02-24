@@ -652,6 +652,7 @@ mod tests {
             models: vec![],
             presets: Default::default(),
             budget: Default::default(),
+            dlp: Default::default(),
         }
     }
 

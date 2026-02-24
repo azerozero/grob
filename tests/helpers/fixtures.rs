@@ -104,5 +104,6 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         models: vec![],
         presets: Default::default(),
         budget: Default::default(),
+        dlp: Default::default(),
     }
 }

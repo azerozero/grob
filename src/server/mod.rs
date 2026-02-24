@@ -3,6 +3,8 @@ mod openai_compat;
 
 use crate::auth::TokenStore;
 use crate::cli::AppConfig;
+use crate::features::dlp::DlpEngine;
+use std::borrow::Cow;
 use crate::features::token_pricing::spend::SpendTracker;
 use crate::features::token_pricing::{SharedPricingTable, TokenCounter};
 use crate::message_tracing::MessageTracer;
@@ -18,7 +20,9 @@ use axum::{
     routing::{get, post},
     Json, Router as AxumRouter,
 };
-use futures::stream::TryStreamExt;
+use bytes::Bytes;
+use futures::stream::{Stream, TryStreamExt};
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{debug, error, info, warn};
@@ -46,6 +50,8 @@ pub struct AppState {
     pub spend_tracker: std::sync::Mutex<SpendTracker>,
     /// Dynamic pricing table (refreshed from OpenRouter every 24h)
     pub pricing_table: SharedPricingTable,
+    /// DLP engine (None if disabled)
+    pub dlp_engine: Option<Arc<DlpEngine>>,
 }
 
 impl AppState {
@@ -194,6 +200,9 @@ pub async fn start_server(
         .install_recorder()
         .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))?;
 
+    // Initialize DLP engine (if enabled in config)
+    let dlp_engine = DlpEngine::from_config(config.dlp.clone());
+
     // Build reloadable state
     let reloadable = Arc::new(ReloadableState {
         config: config.clone(),
@@ -210,6 +219,7 @@ pub async fn start_server(
         active_requests: std::sync::atomic::AtomicU64::new(0),
         spend_tracker: std::sync::Mutex::new(spend_tracker),
         pricing_table,
+        dlp_engine,
     });
 
     // Spawn background preset sync if configured and auto_sync is enabled
@@ -807,6 +817,13 @@ async fn handle_openai_chat_completions(
         // Update model to actual model name
         anthropic_request.model = mapping.actual_model.clone();
 
+        // DLP: sanitize request (names → pseudonyms, secrets → canary)
+        if let Some(ref dlp) = state.dlp_engine {
+            if dlp.config.scan_input {
+                dlp.sanitize_request(&mut anthropic_request);
+            }
+        }
+
         // Inject continuation prompt if configured
         if mapping.inject_continuation_prompt && decision.route_type != RouteType::Background {
             if let Some(last_msg) = anthropic_request.messages.last_mut() {
@@ -829,11 +846,25 @@ async fn handle_openai_chat_completions(
                 .await
             {
                 Ok(stream_response) => {
+                    // Wrap stream with DLP if enabled for output scanning
+                    let stream: Pin<Box<dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send>> =
+                        if let Some(ref dlp) = state.dlp_engine {
+                            if dlp.config.scan_output {
+                                Box::pin(crate::features::dlp::stream::DlpStream::new(
+                                    stream_response.stream,
+                                    Arc::clone(dlp),
+                                ))
+                            } else {
+                                stream_response.stream
+                            }
+                        } else {
+                            stream_response.stream
+                        };
+
                     // Wrap Anthropic SSE → OpenAI SSE
                     let mut transformer =
                         openai_compat::AnthropicToOpenAIStream::new(model.clone());
-                    let mapped = stream_response
-                        .stream
+                    let mapped = stream
                         .map_ok(move |bytes| transformer.transform_bytes(&bytes))
                         .try_filter(|b| futures::future::ready(!b.is_empty()));
 
@@ -870,7 +901,7 @@ async fn handle_openai_chat_completions(
         } else {
             // ── Non-streaming path ──
             match provider.send_message(anthropic_request.clone()).await {
-                Ok(anthropic_response) => {
+                Ok(mut anthropic_response) => {
                     let latency_ms = start_time.elapsed().as_millis() as u64;
                     let tok_s = (anthropic_response.usage.output_tokens as f32 * 1000.0)
                         / latency_ms as f32;
@@ -911,6 +942,13 @@ async fn handle_openai_chat_completions(
                         &decision.model_name,
                         cost.estimated_cost_usd,
                     );
+
+                    // DLP: sanitize response (deanonymize names, scan secrets)
+                    if let Some(ref dlp) = state.dlp_engine {
+                        if dlp.config.scan_output {
+                            sanitize_provider_response(&mut anthropic_response, dlp);
+                        }
+                    }
 
                     let openai_response = openai_compat::transform_anthropic_to_openai(
                         anthropic_response,
@@ -992,6 +1030,21 @@ fn resolve_provider_mappings(
             "No model mapping found for model: {}",
             decision.model_name
         )))
+    }
+}
+
+/// Apply DLP sanitization to a non-streaming provider response.
+fn sanitize_provider_response(
+    response: &mut crate::providers::ProviderResponse,
+    dlp: &Arc<DlpEngine>,
+) {
+    use crate::models::{ContentBlock, KnownContentBlock};
+    for block in &mut response.content {
+        if let ContentBlock::Known(KnownContentBlock::Text { text, .. }) = block {
+            if let Cow::Owned(s) = dlp.sanitize_response_text(text) {
+                *text = s;
+            }
+        }
     }
 }
 
@@ -1179,6 +1232,13 @@ async fn handle_messages(
                 anthropic_request.system = request_for_routing.system.clone();
                 anthropic_request.messages = request_for_routing.messages.clone();
 
+                // DLP: sanitize request (names → pseudonyms, secrets → canary)
+                if let Some(ref dlp) = state.dlp_engine {
+                    if dlp.config.scan_input {
+                        dlp.sanitize_request(&mut anthropic_request);
+                    }
+                }
+
                 // Inject continuation prompt if configured (skip for background tasks)
                 if mapping.inject_continuation_prompt
                     && decision.route_type != RouteType::Background
@@ -1244,8 +1304,23 @@ async fn handle_messages(
                     // Streaming request
                     match provider.send_message_stream(anthropic_request).await {
                         Ok(stream_response) => {
+                            // Wrap stream with DLP if enabled for output scanning
+                            let stream: Pin<Box<dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send>> =
+                                if let Some(ref dlp) = state.dlp_engine {
+                                    if dlp.config.scan_output {
+                                        Box::pin(crate::features::dlp::stream::DlpStream::new(
+                                            stream_response.stream,
+                                            Arc::clone(dlp),
+                                        ))
+                                    } else {
+                                        stream_response.stream
+                                    }
+                                } else {
+                                    stream_response.stream
+                                };
+
                             // Convert provider stream to HTTP response
-                            let body_stream = stream_response.stream.map_err(|e| {
+                            let body_stream = stream.map_err(|e| {
                                 error!("Stream error: {}", e);
                                 std::io::Error::other(e.to_string())
                             });
@@ -1291,6 +1366,13 @@ async fn handle_messages(
                     // Non-streaming request (original behavior)
                     match provider.send_message(anthropic_request).await {
                         Ok(mut response) => {
+                            // DLP: sanitize response (deanonymize names, scan secrets)
+                            if let Some(ref dlp) = state.dlp_engine {
+                                if dlp.config.scan_output {
+                                    sanitize_provider_response(&mut response, dlp);
+                                }
+                            }
+
                             // Restore original model name in response
                             response.model = original_model;
                             info!(

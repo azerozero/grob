@@ -127,12 +127,20 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: x86_64-unknown-linux-musl
-          path: artifacts
+          path: artifacts/amd64
 
-      - name: Extract binary
+      - uses: actions/download-artifact@v4
+        with:
+          name: aarch64-unknown-linux-musl
+          path: artifacts/arm64
+
+      - name: Extract binaries
         run: |
-          tar xzf artifacts/${BINARY_NAME}-${{ needs.validate.outputs.version }}-x86_64-unknown-linux-musl.tar.gz ${BINARY_NAME}
-          chmod +x ${BINARY_NAME}
+          VERSION="${{ needs.validate.outputs.version }}"
+          mkdir -p bin/amd64 bin/arm64
+          tar xzf "artifacts/amd64/${BINARY_NAME}-${VERSION}-x86_64-unknown-linux-musl.tar.gz" -C bin/amd64 "${BINARY_NAME}"
+          tar xzf "artifacts/arm64/${BINARY_NAME}-${VERSION}-aarch64-unknown-linux-musl.tar.gz" -C bin/arm64 "${BINARY_NAME}"
+          chmod +x bin/amd64/${BINARY_NAME} bin/arm64/${BINARY_NAME}
 
       - name: Install crane
         run: |
@@ -143,22 +151,38 @@ jobs:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
-      - name: Build and push image
+      - name: Build and push multi-arch image
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
-          # Create a single-layer image from an empty base (no OS needed)
-          # The binary bundles CA certs via rustls-webpki-roots
-          mkdir -p image-root/usr/local/bin
-          cp ${BINARY_NAME} image-root/usr/local/bin/${BINARY_NAME}
+          # Build per-arch images (static musl binary, no OS needed)
+          for ARCH in amd64 arm64; do
+            mkdir -p "image-root-${ARCH}/usr/local/bin"
+            cp "bin/${ARCH}/${BINARY_NAME}" "image-root-${ARCH}/usr/local/bin/${BINARY_NAME}"
+            tar -cf "layer-${ARCH}.tar" -C "image-root-${ARCH}" .
 
-          # Build layer and create image (no -b flag = empty base, no Docker Hub pull)
-          tar -cf layer.tar -C image-root .
-          crane append -t "${IMAGE}:${VERSION#v}" -f layer.tar
-          crane mutate "${IMAGE}:${VERSION#v}" \
-            --entrypoint /usr/local/bin/${BINARY_NAME} \
-            --cmd run
+            crane append -t "${IMAGE}:${VERSION#v}-${ARCH}" -f "layer-${ARCH}.tar"
+
+            # Set platform metadata
+            if [[ "$ARCH" == "amd64" ]]; then
+              crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
+                --platform linux/amd64 \
+                --entrypoint /usr/local/bin/${BINARY_NAME} \
+                --cmd run
+            else
+              crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
+                --platform linux/arm64 \
+                --entrypoint /usr/local/bin/${BINARY_NAME} \
+                --cmd run
+            fi
+          done
+
+          # Create multi-arch manifest list
+          crane index append \
+            -t "${IMAGE}:${VERSION#v}" \
+            -m "${IMAGE}:${VERSION#v}-amd64" \
+            -m "${IMAGE}:${VERSION#v}-arm64"
 
           # Tag additional versions
           MAJOR_MINOR="$(echo "${VERSION#v}" | cut -d. -f1-2)"

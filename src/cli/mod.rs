@@ -1,3 +1,4 @@
+use crate::features::dlp::config::DlpConfig;
 use crate::providers::ProviderConfig;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,8 @@ pub struct AppConfig {
     pub presets: PresetConfig,
     #[serde(default)]
     pub budget: BudgetConfig,
+    #[serde(default)]
+    pub dlp: DlpConfig,
 }
 
 /// Preset configuration

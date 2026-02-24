@@ -68,6 +68,12 @@ metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 subtle = "2.6.1"
 
+# DLP (Data Loss Prevention)
+regex-automata = { version = "0.4", features = ["dfa-build", "dfa-search", "syntax", "nfa-thompson"] }
+aho-corasick = "1.1"
+memchr = "2"
+hmac = "0.12"
+
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
