@@ -22,10 +22,23 @@ pub struct NameAnonymizer {
 impl NameAnonymizer {
     pub fn new(rules: &[NameRule]) -> Self {
         let secret_key = Self::derive_key();
+        Self::build(rules, &secret_key)
+    }
 
+    /// Build with a session-specific seed mixed into the HMAC key.
+    /// Different seeds produce different pseudonyms for the same names.
+    pub fn new_with_session(rules: &[NameRule], session_seed: &[u8]) -> Self {
+        let base_key = Self::derive_key();
+        let mut mac = HmacSha256::new_from_slice(&base_key).expect("HMAC key valid");
+        mac.update(session_seed);
+        let session_key: [u8; 32] = mac.finalize().into_bytes().into();
+        Self::build(rules, &session_key)
+    }
+
+    fn build(rules: &[NameRule], secret_key: &[u8; 32]) -> Self {
         let pseudonyms: Vec<String> = rules
             .iter()
-            .map(|r| Self::compute_pseudonym(&r.term, &secret_key))
+            .map(|r| Self::compute_pseudonym(&r.term, secret_key))
             .collect();
 
         let forward_patterns: Vec<&str> = rules.iter().map(|r| r.term.as_str()).collect();
@@ -57,7 +70,7 @@ impl NameAnonymizer {
             forward_ac,
             reverse_ac,
             rules: rules.to_vec(),
-            secret_key,
+            secret_key: *secret_key,
             pseudonyms,
         }
     }

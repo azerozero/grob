@@ -21,6 +21,11 @@ pub struct DlpConfig {
     pub names: Vec<NameRule>,
     #[serde(default)]
     pub entropy: EntropyConfig,
+    /// Enable per-API-key DLP session isolation.
+    /// When true, each API key gets its own NameAnonymizer (unique pseudonyms)
+    /// and CanaryGenerator (independent counter). Default: false.
+    #[serde(default)]
+    pub enable_sessions: bool,
 }
 
 fn default_true() -> bool {

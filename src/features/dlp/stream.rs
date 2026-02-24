@@ -388,6 +388,7 @@ mod tests {
             custom_prefixes: vec![],
             names: vec![],
             entropy: EntropyConfig::default(),
+            enable_sessions: false,
         };
         DlpEngine::from_config(config).unwrap()
     }
@@ -536,6 +537,7 @@ mod tests {
             custom_prefixes: vec![],
             names: vec![],
             entropy: EntropyConfig::default(),
+            enable_sessions: false,
         };
         let engine = DlpEngine::from_config(config).unwrap();
         let mut canary_count: usize = 0;
@@ -611,6 +613,7 @@ mod tests {
             custom_prefixes: vec![],
             names: vec![],
             entropy: EntropyConfig::default(),
+            enable_sessions: false,
         };
         let engine = DlpEngine::from_config(config).unwrap();
 

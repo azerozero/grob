@@ -2,6 +2,7 @@ pub mod canary;
 pub mod config;
 pub mod dfa;
 pub mod names;
+pub mod session;
 pub mod sprt;
 pub mod stream;
 
@@ -285,6 +286,7 @@ mod tests {
                 action: NameAction::Pseudonym,
             }],
             entropy: EntropyConfig::default(),
+            enable_sessions: false,
         }
     }
 
