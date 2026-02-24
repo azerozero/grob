@@ -32,6 +32,32 @@ pub struct ReloadableState {
     pub config: AppConfig,
     pub router: Router,
     pub provider_registry: Arc<ProviderRegistry>,
+    /// Pre-computed index: lowercase model name → index into config.models (O(1) lookup)
+    pub model_index: std::collections::HashMap<String, usize>,
+}
+
+impl ReloadableState {
+    fn new(config: AppConfig, router: Router, provider_registry: Arc<ProviderRegistry>) -> Self {
+        let model_index = config
+            .models
+            .iter()
+            .enumerate()
+            .map(|(i, m)| (m.name.to_lowercase(), i))
+            .collect();
+        Self {
+            config,
+            router,
+            provider_registry,
+            model_index,
+        }
+    }
+
+    /// O(1) model config lookup by name (case-insensitive)
+    pub fn find_model(&self, name: &str) -> Option<&crate::cli::ModelConfig> {
+        self.model_index
+            .get(&name.to_lowercase())
+            .map(|&idx| &self.config.models[idx])
+    }
 }
 
 /// Application state shared across handlers
@@ -204,11 +230,7 @@ pub async fn start_server(
     let dlp_engine = DlpEngine::from_config(config.dlp.clone());
 
     // Build reloadable state
-    let reloadable = Arc::new(ReloadableState {
-        config: config.clone(),
-        router,
-        provider_registry,
-    });
+    let reloadable = Arc::new(ReloadableState::new(config.clone(), router, provider_registry));
 
     let state = Arc::new(AppState {
         inner: std::sync::RwLock::new(reloadable),
@@ -586,11 +608,7 @@ async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
     };
 
     // 4. Create new reloadable state
-    let new_inner = Arc::new(ReloadableState {
-        config: new_config,
-        router: new_router,
-        provider_registry: new_registry,
-    });
+    let new_inner = Arc::new(ReloadableState::new(new_config, new_router, new_registry));
 
     // 5. Atomic swap (write lock held for microseconds)
     let active = state
@@ -635,23 +653,24 @@ fn record_request_metrics(
     output_tokens: u32,
     cost_usd: f64,
 ) {
-    let labels = [
-        ("model", model.to_string()),
-        ("provider", provider.to_string()),
-        ("route_type", route_type.to_string()),
-        ("status", status.to_string()),
-    ];
-    metrics::counter!("grob_requests_total", &labels).increment(1);
+    // Allocate label strings once and reuse across all metric calls
+    let m = model.to_string();
+    let p = provider.to_string();
+    let rt = route_type.to_string();
+    let s = status.to_string();
+    metrics::counter!("grob_requests_total",
+        "model" => m.clone(), "provider" => p.clone(), "route_type" => rt, "status" => s
+    ).increment(1);
     metrics::histogram!("grob_request_duration_seconds",
-        "model" => model.to_string(), "provider" => provider.to_string()
+        "model" => m.clone(), "provider" => p.clone()
     )
     .record(latency_ms as f64 / 1000.0);
     metrics::counter!("grob_input_tokens_total",
-        "model" => model.to_string(), "provider" => provider.to_string()
+        "model" => m.clone(), "provider" => p.clone()
     )
     .increment(input_tokens as u64);
     metrics::counter!("grob_output_tokens_total",
-        "model" => model.to_string(), "provider" => provider.to_string()
+        "model" => m.clone(), "provider" => p.clone()
     )
     .increment(output_tokens as u64);
     if cost_usd > 0.0 {
@@ -659,7 +678,7 @@ fn record_request_metrics(
         // but cost is fractional USD). Supports rate() in PromQL.
         // Month-to-date persistent total is in grob_spend_usd (set in /metrics).
         metrics::gauge!("grob_request_cost_usd",
-            "model" => model.to_string(), "provider" => provider.to_string()
+            "model" => m, "provider" => p
         )
         .increment(cost_usd);
     }
@@ -683,12 +702,7 @@ fn check_budget(
         .find(|p| p.name == provider_name)
         .and_then(|p| p.budget_usd);
 
-    let model_limit = inner
-        .config
-        .models
-        .iter()
-        .find(|m| m.name.eq_ignore_ascii_case(model_name))
-        .and_then(|m| m.budget_usd);
+    let model_limit = inner.find_model(model_name).and_then(|m| m.budget_usd);
 
     let tracker = state.spend_tracker.lock().unwrap();
 
@@ -993,12 +1007,7 @@ fn resolve_provider_mappings(
     headers: &HeaderMap,
     decision: &crate::models::RouteDecision,
 ) -> Result<Vec<crate::cli::ModelMapping>, AppError> {
-    if let Some(model_config) = inner
-        .config
-        .models
-        .iter()
-        .find(|m| m.name.eq_ignore_ascii_case(&decision.model_name))
-    {
+    if let Some(model_config) = inner.find_model(&decision.model_name) {
         let forced_provider = headers
             .get("x-provider")
             .and_then(|v| v.to_str().ok())
@@ -1172,12 +1181,7 @@ async fn handle_messages(
         .map_err(|e| AppError::RoutingError(e.to_string()))?;
 
     // 3. Try model mappings with fallback (1:N mapping)
-    if let Some(model_config) = inner
-        .config
-        .models
-        .iter()
-        .find(|m| m.name.eq_ignore_ascii_case(&decision.model_name))
-    {
+    if let Some(model_config) = inner.find_model(&decision.model_name) {
         // Check for X-Provider header to override priority
         let forced_provider = headers
             .get("x-provider")
@@ -1216,21 +1220,14 @@ async fn handle_messages(
                 // Budget check before sending request
                 check_budget(&state, &inner, &mapping.provider, &decision.model_name)?;
 
-                // Parse request as Anthropic format
-                let mut anthropic_request: AnthropicRequest =
-                    serde_json::from_value(request_json.clone()).map_err(|e| {
-                        AppError::ParseError(format!("Invalid request format: {}", e))
-                    })?;
+                // Clone the already-parsed request (struct clone, not JSON re-parse)
+                let mut anthropic_request = request_for_routing.clone();
 
                 // Save original model name for response
                 let original_model = anthropic_request.model.clone();
 
                 // Update model to actual model name
                 anthropic_request.model = mapping.actual_model.clone();
-
-                // Apply routing modifications (system prompt, messages)
-                anthropic_request.system = request_for_routing.system.clone();
-                anthropic_request.messages = request_for_routing.messages.clone();
 
                 // DLP: sanitize request (names → pseudonyms, secrets → canary)
                 if let Some(ref dlp) = state.dlp_engine {
@@ -1481,20 +1478,14 @@ async fn handle_messages(
                 decision.model_name
             );
 
-            // Parse request as Anthropic format
-            let mut anthropic_request: AnthropicRequest =
-                serde_json::from_value(request_json.clone())
-                    .map_err(|e| AppError::ParseError(format!("Invalid request format: {}", e)))?;
+            // Clone the already-parsed request (struct clone, not JSON re-parse)
+            let mut anthropic_request = request_for_routing.clone();
 
             // Save original model name for response
             let original_model = anthropic_request.model.clone();
 
             // Update model to routed model
             anthropic_request.model = decision.model_name.clone();
-
-            // Apply routing modifications (system prompt, messages)
-            anthropic_request.system = request_for_routing.system.clone();
-            anthropic_request.messages = request_for_routing.messages.clone();
 
             // Call provider
             let mut provider_response = provider
@@ -1565,12 +1556,7 @@ async fn handle_count_tokens(
     );
 
     // 3. Try model mappings with fallback (1:N mapping)
-    if let Some(model_config) = inner
-        .config
-        .models
-        .iter()
-        .find(|m| m.name.eq_ignore_ascii_case(&decision.model_name))
-    {
+    if let Some(model_config) = inner.find_model(&decision.model_name) {
         debug!(
             "📋 Found {} provider mappings for token counting: {}",
             model_config.mappings.len(),

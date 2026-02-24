@@ -9,6 +9,10 @@ use tracing::{debug, info};
 static CAPTURE_REF_PATTERN: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\$(?:\d+|[a-zA-Z_]\w*|\{[^}]+\})").unwrap());
 
+/// Pre-compiled regex for subagent model tag extraction (avoids per-request compilation)
+static SUBAGENT_TAG_REGEX: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"<GROB-SUBAGENT-MODEL>(.*?)</GROB-SUBAGENT-MODEL>").unwrap());
+
 /// Check if a string contains capture group references
 fn contains_capture_reference(s: &str) -> bool {
     s.contains('$') && CAPTURE_REF_PATTERN.is_match(s)
@@ -595,16 +599,13 @@ impl Router {
                 return None;
             }
 
-            // Extract model name using regex
-            let re = Regex::new(r"<GROB-SUBAGENT-MODEL>(.*?)</GROB-SUBAGENT-MODEL>")
-                .expect("Invalid regex pattern");
-
-            if let Some(captures) = re.captures(&second_block.text) {
+            // Extract model name using pre-compiled regex
+            if let Some(captures) = SUBAGENT_TAG_REGEX.captures(&second_block.text) {
                 if let Some(model_match) = captures.get(1) {
                     let tag_value = model_match.as_str().to_string();
 
                     // Remove the tag from the text
-                    second_block.text = re.replace_all(&second_block.text, "").to_string();
+                    second_block.text = SUBAGENT_TAG_REGEX.replace_all(&second_block.text, "").to_string();
 
                     // First, try to find a model with this name in the models config (case-insensitive)
                     if let Some(_model) = self

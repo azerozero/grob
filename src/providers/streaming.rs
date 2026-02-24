@@ -103,8 +103,8 @@ where
                             this.event_queue.push_back(event);
                         }
 
-                        // Keep only the incomplete portion in buffer
-                        *this.buffer = this.buffer[last_event_end + 2..].to_string();
+                        // Keep only the incomplete portion in buffer (in-place, no allocation)
+                        this.buffer.drain(..last_event_end + 2);
 
                         // Return the first queued event if available
                         if let Some(event) = this.event_queue.pop_front() {
@@ -190,18 +190,14 @@ where
                 let this = self.as_mut().project();
                 this.buffer.extend_from_slice(&bytes);
 
-                // Clone data we need for event processing
-                let buffer_clone = this.buffer.clone();
-
-                // Parse events from accumulated buffer
-                if let Ok(text) = std::str::from_utf8(&buffer_clone) {
+                // Parse events from accumulated buffer (no clone — borrow in-place)
+                if let Ok(text) = std::str::from_utf8(this.buffer) {
                     if text.contains("\n\n") {
                         let events = parse_sse_events(text);
 
                         for event in events {
                             match event.event.as_deref() {
                                 Some("message_start") if !*this.logged_message_start => {
-                                    // Extract cache stats
                                     if let Ok(json) = serde_json::from_str::<Value>(&event.data) {
                                         if let Some(message) = json.get("message") {
                                             if let Some(usage) = message.get("usage") {
@@ -223,20 +219,17 @@ where
                                     *this.logged_message_start = true;
                                 }
                                 Some("content_block_delta") => {
-                                    // Mark first token arrival
                                     if this.first_token_time.is_none() {
                                         *this.first_token_time = Some(std::time::Instant::now());
                                     }
                                 }
                                 Some("message_delta") => {
-                                    // Track tokens (output_tokens always, input_tokens for OpenAI providers)
                                     if let Ok(json) = serde_json::from_str::<Value>(&event.data) {
                                         if let Some(usage) = json.get("usage") {
                                             *this.output_tokens += usage
                                                 .get("output_tokens")
                                                 .and_then(|v| v.as_u64())
                                                 .unwrap_or(0);
-                                            // OpenAI providers include input_tokens in message_delta instead of message_start
                                             if let Some(input) =
                                                 usage.get("input_tokens").and_then(|v| v.as_u64())
                                             {
@@ -254,12 +247,10 @@ where
                 }
 
                 // Keep buffer from growing unbounded
-                let this = self.as_mut().project();
                 if this.buffer.len() > 1024 * 10 {
                     this.buffer.clear();
                 }
 
-                // Pass through original bytes unchanged
                 Poll::Ready(Some(Ok(bytes)))
             }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
@@ -322,26 +313,24 @@ where
                     cost_info
                 );
 
-                // Record Prometheus metrics
-                let labels = [
-                    ("model", this.model_name.to_string()),
-                    ("provider", this.provider_name.to_string()),
-                    ("route_type", "stream".to_string()),
-                    ("status", "ok".to_string()),
-                ];
-                metrics::counter!("grob_requests_total", &labels).increment(1);
+                // Record Prometheus metrics (allocate label strings once, reuse)
+                let m = this.model_name.to_string();
+                let p = this.provider_name.to_string();
+                metrics::counter!("grob_requests_total",
+                    "model" => m.clone(), "provider" => p.clone(), "route_type" => "stream", "status" => "ok"
+                ).increment(1);
                 metrics::histogram!("grob_request_duration_seconds",
-                    "model" => this.model_name.to_string(), "provider" => this.provider_name.to_string()
+                    "model" => m.clone(), "provider" => p.clone()
                 ).record(total_time.as_secs_f64());
                 metrics::counter!("grob_tokens_input_total",
-                    "model" => this.model_name.to_string(), "provider" => this.provider_name.to_string()
+                    "model" => m.clone(), "provider" => p.clone()
                 ).increment(total_input);
                 metrics::counter!("grob_tokens_output_total",
-                    "model" => this.model_name.to_string(), "provider" => this.provider_name.to_string()
+                    "model" => m.clone(), "provider" => p.clone()
                 ).increment(*this.output_tokens);
                 if cost > 0.0 {
                     metrics::gauge!("grob_estimated_cost_usd",
-                        "model" => this.model_name.to_string(), "provider" => this.provider_name.to_string()
+                        "model" => m, "provider" => p
                     ).increment(cost);
                 }
 
