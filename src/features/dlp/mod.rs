@@ -225,8 +225,7 @@ impl DlpEngine {
             }
         }
         // Name check: pseudonyms that weren't deanonymized per-delta (cross-chunk)
-        if !self.anonymizer.is_empty()
-            && self.anonymizer.deanonymize_if_match(full_text).is_some()
+        if !self.anonymizer.is_empty() && self.anonymizer.deanonymize_if_match(full_text).is_some()
         {
             tracing::warn!("DLP cross-chunk pseudonym detected in final buffer");
             metrics::counter!("grob_dlp_cross_chunk_total", "rule" => "pseudonym").increment(1);
@@ -311,8 +310,7 @@ mod tests {
     fn test_sanitize_text_secrets() {
         let config = test_config();
         let engine = DlpEngine::from_config(config).unwrap();
-        let result =
-            engine.sanitize_text("token: ghp_abcdefghijklmnopqrstuvwxyz1234567890");
+        let result = engine.sanitize_text("token: ghp_abcdefghijklmnopqrstuvwxyz1234567890");
         assert!(!result.contains("ghp_abcdefghijklmnopqrstuvwxyz1234567890"));
         assert!(result.contains("ghp_~CANARY"));
     }

@@ -144,10 +144,7 @@ impl DlpConfig {
         self.custom_prefixes.extend(rules.custom_prefixes);
         self.names.extend(rules.names);
 
-        tracing::info!(
-            "Loaded external DLP rules from {}",
-            path.display()
-        );
+        tracing::info!("Loaded external DLP rules from {}", path.display());
 
         Ok(())
     }

@@ -605,7 +605,9 @@ impl Router {
                     let tag_value = model_match.as_str().to_string();
 
                     // Remove the tag from the text
-                    second_block.text = SUBAGENT_TAG_REGEX.replace_all(&second_block.text, "").to_string();
+                    second_block.text = SUBAGENT_TAG_REGEX
+                        .replace_all(&second_block.text, "")
+                        .to_string();
 
                     // First, try to find a model with this name in the models config (case-insensitive)
                     if let Some(_model) = self

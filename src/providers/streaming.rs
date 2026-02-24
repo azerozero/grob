@@ -321,17 +321,21 @@ where
                 ).increment(1);
                 metrics::histogram!("grob_request_duration_seconds",
                     "model" => m.clone(), "provider" => p.clone()
-                ).record(total_time.as_secs_f64());
+                )
+                .record(total_time.as_secs_f64());
                 metrics::counter!("grob_tokens_input_total",
                     "model" => m.clone(), "provider" => p.clone()
-                ).increment(total_input);
+                )
+                .increment(total_input);
                 metrics::counter!("grob_tokens_output_total",
                     "model" => m.clone(), "provider" => p.clone()
-                ).increment(*this.output_tokens);
+                )
+                .increment(*this.output_tokens);
                 if cost > 0.0 {
                     metrics::gauge!("grob_estimated_cost_usd",
                         "model" => m, "provider" => p
-                    ).increment(cost);
+                    )
+                    .increment(cost);
                 }
 
                 // Clear buffer

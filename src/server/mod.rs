@@ -4,7 +4,6 @@ mod openai_compat;
 use crate::auth::TokenStore;
 use crate::cli::AppConfig;
 use crate::features::dlp::DlpEngine;
-use std::borrow::Cow;
 use crate::features::token_pricing::spend::SpendTracker;
 use crate::features::token_pricing::{SharedPricingTable, TokenCounter};
 use crate::message_tracing::MessageTracer;
@@ -22,6 +21,7 @@ use axum::{
 };
 use bytes::Bytes;
 use futures::stream::{Stream, TryStreamExt};
+use std::borrow::Cow;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -230,7 +230,11 @@ pub async fn start_server(
     let dlp_engine = DlpEngine::from_config(config.dlp.clone());
 
     // Build reloadable state
-    let reloadable = Arc::new(ReloadableState::new(config.clone(), router, provider_registry));
+    let reloadable = Arc::new(ReloadableState::new(
+        config.clone(),
+        router,
+        provider_registry,
+    ));
 
     let state = Arc::new(AppState {
         inner: std::sync::RwLock::new(reloadable),
@@ -660,7 +664,8 @@ fn record_request_metrics(
     let s = status.to_string();
     metrics::counter!("grob_requests_total",
         "model" => m.clone(), "provider" => p.clone(), "route_type" => rt, "status" => s
-    ).increment(1);
+    )
+    .increment(1);
     metrics::histogram!("grob_request_duration_seconds",
         "model" => m.clone(), "provider" => p.clone()
     )
@@ -861,19 +866,23 @@ async fn handle_openai_chat_completions(
             {
                 Ok(stream_response) => {
                     // Wrap stream with DLP if enabled for output scanning
-                    let stream: Pin<Box<dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send>> =
-                        if let Some(ref dlp) = state.dlp_engine {
-                            if dlp.config.scan_output {
-                                Box::pin(crate::features::dlp::stream::DlpStream::new(
-                                    stream_response.stream,
-                                    Arc::clone(dlp),
-                                ))
-                            } else {
-                                stream_response.stream
-                            }
+                    let stream: Pin<
+                        Box<
+                            dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>>
+                                + Send,
+                        >,
+                    > = if let Some(ref dlp) = state.dlp_engine {
+                        if dlp.config.scan_output {
+                            Box::pin(crate::features::dlp::stream::DlpStream::new(
+                                stream_response.stream,
+                                Arc::clone(dlp),
+                            ))
                         } else {
                             stream_response.stream
-                        };
+                        }
+                    } else {
+                        stream_response.stream
+                    };
 
                     // Wrap Anthropic SSE → OpenAI SSE
                     let mut transformer =
@@ -1302,19 +1311,27 @@ async fn handle_messages(
                     match provider.send_message_stream(anthropic_request).await {
                         Ok(stream_response) => {
                             // Wrap stream with DLP if enabled for output scanning
-                            let stream: Pin<Box<dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send>> =
-                                if let Some(ref dlp) = state.dlp_engine {
-                                    if dlp.config.scan_output {
-                                        Box::pin(crate::features::dlp::stream::DlpStream::new(
-                                            stream_response.stream,
-                                            Arc::clone(dlp),
-                                        ))
-                                    } else {
-                                        stream_response.stream
-                                    }
+                            let stream: Pin<
+                                Box<
+                                    dyn Stream<
+                                            Item = Result<
+                                                Bytes,
+                                                crate::providers::error::ProviderError,
+                                            >,
+                                        > + Send,
+                                >,
+                            > = if let Some(ref dlp) = state.dlp_engine {
+                                if dlp.config.scan_output {
+                                    Box::pin(crate::features::dlp::stream::DlpStream::new(
+                                        stream_response.stream,
+                                        Arc::clone(dlp),
+                                    ))
                                 } else {
                                     stream_response.stream
-                                };
+                                }
+                            } else {
+                                stream_response.stream
+                            };
 
                             // Convert provider stream to HTTP response
                             let body_stream = stream.map_err(|e| {

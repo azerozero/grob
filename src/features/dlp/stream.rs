@@ -123,8 +123,7 @@ where
                     // Phase 2: cross-chunk DFA + name deanonymization scan
                     this.engine.scan_end_of_stream(this.buffer);
                     // Async SPRT entropy scan on accumulated text
-                    this.engine
-                        .scan_entropy_async(std::mem::take(this.buffer));
+                    this.engine.scan_entropy_async(std::mem::take(this.buffer));
                 }
                 Poll::Ready(None)
             }
@@ -212,8 +211,7 @@ fn transform_delta_data(data: &str, ctx: &mut StreamContext<'_>) -> Option<Strin
             return None;
         }
 
-        let sanitized =
-            sanitize_with_circuit_breaker(text_value, ctx.engine, ctx.canary_count);
+        let sanitized = sanitize_with_circuit_breaker(text_value, ctx.engine, ctx.canary_count);
         if let Cow::Owned(ref new_text) = sanitized {
             // Buffer the sanitized text so end-of-stream scan doesn't re-detect
             accumulate_text(new_text, ctx);
@@ -546,8 +544,7 @@ mod tests {
 
         // First MAX_CANARIES_PER_STREAM should produce canaries
         for _ in 0..MAX_CANARIES_PER_STREAM {
-            let result =
-                sanitize_with_circuit_breaker(secret, &engine, &mut canary_count);
+            let result = sanitize_with_circuit_breaker(secret, &engine, &mut canary_count);
             assert!(
                 result.contains("~CANARY"),
                 "Should produce canary before limit"
@@ -557,8 +554,7 @@ mod tests {
         assert_eq!(canary_count, MAX_CANARIES_PER_STREAM);
 
         // 21st should get [REDACTED] instead
-        let result =
-            sanitize_with_circuit_breaker(secret, &engine, &mut canary_count);
+        let result = sanitize_with_circuit_breaker(secret, &engine, &mut canary_count);
         assert!(
             result.contains("[REDACTED]"),
             "Should get [REDACTED] after circuit breaker"

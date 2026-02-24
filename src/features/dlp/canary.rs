@@ -124,7 +124,10 @@ mod tests {
             .decode(parts[0])
             .unwrap();
         let header = String::from_utf8(header_bytes).unwrap();
-        assert!(header.contains("canary"), "JWT header should contain canary kid");
+        assert!(
+            header.contains("canary"),
+            "JWT header should contain canary kid"
+        );
     }
 
     #[test]

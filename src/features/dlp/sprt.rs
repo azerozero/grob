@@ -165,7 +165,8 @@ mod tests {
     fn test_high_entropy_detection() {
         let detector = SprtDetector::new();
         // A truly random-looking token with high entropy (mixed case, digits, special)
-        let text = "Here is a token: Kj7mP2xQ9vR4nL8wB3yD6fH1sT5gA0cE7iU2oN4pM9qW3rZ6kX8jV1bY5hC and done";
+        let text =
+            "Here is a token: Kj7mP2xQ9vR4nL8wB3yD6fH1sT5gA0cE7iU2oN4pM9qW3rZ6kX8jV1bY5hC and done";
         let alerts = detector.scan(text);
         // The high-entropy token should trigger
         assert!(
