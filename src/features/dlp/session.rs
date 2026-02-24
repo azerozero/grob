@@ -93,6 +93,7 @@ impl DlpSessionManager {
         } else {
             None
         };
+        let pii_scanner = super::pii::PiiScanner::from_config(&self.config.pii);
 
         tracing::debug!(
             "DLP: created session engine for key hash {}",
@@ -105,6 +106,7 @@ impl DlpSessionManager {
             anonymizer,
             canary_gen,
             sprt,
+            pii_scanner,
         })
     }
 }
@@ -120,6 +122,7 @@ mod tests {
             scan_input: true,
             scan_output: true,
             rules_file: String::new(),
+            no_builtins: true,
             secrets: vec![SecretRule {
                 name: "github_token".into(),
                 prefix: "ghp_".into(),
@@ -132,6 +135,7 @@ mod tests {
                 action: NameAction::Pseudonym,
             }],
             entropy: EntropyConfig::default(),
+            pii: Default::default(),
             enable_sessions,
         }
     }

@@ -221,12 +221,33 @@ impl SecretScanner {
 
 /// Guess the token family from its prefix for canary generation.
 fn guess_family(prefix: &str) -> &'static str {
-    if prefix.starts_with("ghp_") || prefix.starts_with("gho_") || prefix.starts_with("ghs_") {
+    if prefix.starts_with("ghp_")
+        || prefix.starts_with("gho_")
+        || prefix.starts_with("ghs_")
+        || prefix.starts_with("github_pat_")
+    {
         "github"
     } else if prefix.starts_with("AKIA") {
         "aws"
     } else if prefix.starts_with("eyJ") {
         "jwt"
+    } else if prefix.starts_with("sk-proj-")
+        || prefix.starts_with("sk-ant-api03-")
+        || prefix.starts_with("hf_")
+        || prefix.starts_with("pplx-")
+    {
+        "llm"
+    } else if prefix.starts_with("sk_live_")
+        || prefix.starts_with("rk_live_")
+        || prefix.starts_with("SG.")
+    {
+        "stripe"
+    } else if prefix.starts_with("glpat-") {
+        "gitlab"
+    } else if prefix.starts_with("-----BEGIN") {
+        "pem"
+    } else if prefix.starts_with("postgres://") || prefix.starts_with("mongodb") {
+        "database"
     } else {
         "generic"
     }

@@ -388,6 +388,8 @@ mod tests {
             custom_prefixes: vec![],
             names: vec![],
             entropy: EntropyConfig::default(),
+            pii: Default::default(),
+            no_builtins: true,
             enable_sessions: false,
         };
         DlpEngine::from_config(config).unwrap()
@@ -528,6 +530,7 @@ mod tests {
             scan_input: true,
             scan_output: true,
             rules_file: String::new(),
+            no_builtins: true,
             secrets: vec![SecretRule {
                 name: "github_token".into(),
                 prefix: "ghp_".into(),
@@ -537,6 +540,7 @@ mod tests {
             custom_prefixes: vec![],
             names: vec![],
             entropy: EntropyConfig::default(),
+            pii: Default::default(),
             enable_sessions: false,
         };
         let engine = DlpEngine::from_config(config).unwrap();
@@ -604,6 +608,7 @@ mod tests {
             scan_input: true,
             scan_output: true,
             rules_file: String::new(),
+            no_builtins: true,
             secrets: vec![SecretRule {
                 name: "github_token".into(),
                 prefix: "ghp_".into(),
@@ -613,6 +618,7 @@ mod tests {
             custom_prefixes: vec![],
             names: vec![],
             entropy: EntropyConfig::default(),
+            pii: Default::default(),
             enable_sessions: false,
         };
         let engine = DlpEngine::from_config(config).unwrap();

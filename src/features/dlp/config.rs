@@ -13,6 +13,9 @@ pub struct DlpConfig {
     /// If non-empty, load and merge additional rules from this TOML file.
     #[serde(default)]
     pub rules_file: String,
+    /// Disable all built-in secret detection rules (only use user-defined rules).
+    #[serde(default)]
+    pub no_builtins: bool,
     #[serde(default)]
     pub secrets: Vec<SecretRule>,
     #[serde(default)]
@@ -21,6 +24,9 @@ pub struct DlpConfig {
     pub names: Vec<NameRule>,
     #[serde(default)]
     pub entropy: EntropyConfig,
+    /// PII detection configuration (credit cards, IBAN, BIC).
+    #[serde(default)]
+    pub pii: PiiConfig,
     /// Enable per-API-key DLP session isolation.
     /// When true, each API key gets its own NameAnonymizer (unique pseudonyms)
     /// and CanaryGenerator (independent counter). Default: false.
@@ -76,6 +82,45 @@ impl Default for EntropyConfig {
             action: EntropyAction::Log,
         }
     }
+}
+
+/// PII detection configuration for financial data.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PiiConfig {
+    /// Detect credit card numbers (Luhn-validated). Default: true.
+    #[serde(default = "default_true")]
+    pub credit_cards: bool,
+    /// Detect IBAN numbers (mod97-validated). Default: true.
+    #[serde(default = "default_true")]
+    pub iban: bool,
+    /// Detect BIC/SWIFT codes. Default: false (risk of false positives).
+    #[serde(default)]
+    pub bic: bool,
+    /// Action to take on PII detection. Default: redact.
+    #[serde(default = "default_pii_action")]
+    pub action: PiiAction,
+}
+
+impl Default for PiiConfig {
+    fn default() -> Self {
+        Self {
+            credit_cards: true,
+            iban: true,
+            bic: false,
+            action: PiiAction::Redact,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PiiAction {
+    Redact,
+    Log,
+}
+
+fn default_pii_action() -> PiiAction {
+    PiiAction::Redact
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -153,6 +198,16 @@ impl DlpConfig {
 
         Ok(())
     }
+
+    /// Resolve all secret rules: prepend builtins (unless `no_builtins`),
+    /// then append user-defined rules. Called once before engine construction.
+    pub fn resolve_all_rules(&mut self) {
+        if !self.no_builtins {
+            let mut all = super::builtins::builtin_rules();
+            all.append(&mut self.secrets);
+            self.secrets = all;
+        }
+    }
 }
 
 impl std::fmt::Display for SecretAction {
@@ -218,5 +273,66 @@ action = "log"
         assert!(config.secrets.is_empty());
         assert!(config.names.is_empty());
         assert!(!config.entropy.enabled);
+        assert!(!config.no_builtins);
+        // PII defaults
+        assert!(config.pii.credit_cards);
+        assert!(config.pii.iban);
+        assert!(!config.pii.bic);
+    }
+
+    #[test]
+    fn test_resolve_all_rules_prepends_builtins() {
+        let mut config = DlpConfig {
+            enabled: true,
+            secrets: vec![SecretRule {
+                name: "user_rule".into(),
+                prefix: "custom_".into(),
+                pattern: "custom_[a-z]+".into(),
+                action: SecretAction::Canary,
+            }],
+            ..Default::default()
+        };
+        config.resolve_all_rules();
+        // Builtins come first
+        assert!(config.secrets.len() > 1);
+        assert_ne!(config.secrets[0].name, "user_rule");
+        // User rule is last
+        assert_eq!(config.secrets.last().unwrap().name, "user_rule");
+    }
+
+    #[test]
+    fn test_no_builtins_opt_out() {
+        let mut config = DlpConfig {
+            enabled: true,
+            no_builtins: true,
+            secrets: vec![SecretRule {
+                name: "only_rule".into(),
+                prefix: "x_".into(),
+                pattern: "x_[a-z]+".into(),
+                action: SecretAction::Redact,
+            }],
+            ..Default::default()
+        };
+        config.resolve_all_rules();
+        assert_eq!(config.secrets.len(), 1);
+        assert_eq!(config.secrets[0].name, "only_rule");
+    }
+
+    #[test]
+    fn test_parse_pii_config() {
+        let toml_str = r#"
+enabled = true
+
+[pii]
+credit_cards = true
+iban = false
+bic = true
+action = "log"
+        "#;
+        let config: DlpConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.pii.credit_cards);
+        assert!(!config.pii.iban);
+        assert!(config.pii.bic);
+        assert_eq!(config.pii.action, PiiAction::Log);
     }
 }

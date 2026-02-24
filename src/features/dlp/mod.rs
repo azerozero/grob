@@ -1,7 +1,9 @@
+pub mod builtins;
 pub mod canary;
 pub mod config;
 pub mod dfa;
 pub mod names;
+pub mod pii;
 pub mod session;
 pub mod sprt;
 pub mod stream;
@@ -20,6 +22,7 @@ pub struct DlpEngine {
     pub anonymizer: names::NameAnonymizer,
     pub canary_gen: Arc<canary::CanaryGenerator>,
     pub sprt: Option<sprt::SprtDetector>,
+    pub pii_scanner: Option<pii::PiiScanner>,
 }
 
 impl DlpEngine {
@@ -34,6 +37,9 @@ impl DlpEngine {
             tracing::warn!("Failed to load external DLP rules: {}", e);
         }
 
+        // Resolve builtins + user rules
+        config.resolve_all_rules();
+
         let scanner = dfa::SecretScanner::new(&config.secrets, &config.custom_prefixes);
         let anonymizer = names::NameAnonymizer::new(&config.names);
         let canary_gen = Arc::new(canary::CanaryGenerator::new());
@@ -42,14 +48,17 @@ impl DlpEngine {
         } else {
             None
         };
+        let pii_scanner = pii::PiiScanner::from_config(&config.pii);
 
         let secret_count = config.secrets.len() + config.custom_prefixes.len();
         let name_count = config.names.len();
+        let pii_active = pii_scanner.is_some();
         tracing::info!(
-            "DLP engine initialized: {} secret rules, {} name rules, entropy={}",
+            "DLP engine initialized: {} secret rules, {} name rules, entropy={}, pii={}",
             secret_count,
             name_count,
-            config.entropy.enabled
+            config.entropy.enabled,
+            pii_active,
         );
 
         metrics::gauge!("grob_dlp_rules_loaded", "type" => "secret").set(secret_count as f64);
@@ -61,6 +70,7 @@ impl DlpEngine {
             anonymizer,
             canary_gen,
             sprt,
+            pii_scanner,
         }))
     }
 
@@ -155,6 +165,26 @@ impl DlpEngine {
             }
         }
 
+        // 3. Scan for PII (credit cards, IBAN, BIC) with mathematical validation
+        if let Some(ref pii) = self.pii_scanner {
+            let current = modified.as_deref().unwrap_or(text);
+            if pii.might_contain_pii(current) {
+                if let Some((redacted, detections)) = pii.redact(current) {
+                    for det in &detections {
+                        tracing::debug!("DLP PII detected: type='{}'", det.pii_type);
+                        metrics::counter!(
+                            "grob_dlp_detections_total",
+                            "type" => "pii",
+                            "rule" => det.pii_type.to_string(),
+                            "action" => "redact"
+                        )
+                        .increment(1);
+                    }
+                    modified = Some(redacted);
+                }
+            }
+        }
+
         match modified {
             Some(s) => Cow::Owned(s),
             None => Cow::Borrowed(text),
@@ -192,6 +222,26 @@ impl DlpEngine {
                             "type" => "secret",
                             "rule" => event.rule_name.clone(),
                             "action" => event.action.clone()
+                        )
+                        .increment(1);
+                    }
+                    modified = Some(redacted);
+                }
+            }
+        }
+
+        // 3. Scan response for PII
+        if let Some(ref pii) = self.pii_scanner {
+            let current = modified.as_deref().unwrap_or(text);
+            if pii.might_contain_pii(current) {
+                if let Some((redacted, detections)) = pii.redact(current) {
+                    for det in &detections {
+                        tracing::warn!("DLP PII in response: type='{}'", det.pii_type);
+                        metrics::counter!(
+                            "grob_dlp_detections_total",
+                            "type" => "pii",
+                            "rule" => det.pii_type.to_string(),
+                            "action" => "redact"
                         )
                         .increment(1);
                     }
@@ -274,6 +324,7 @@ mod tests {
             scan_input: true,
             scan_output: true,
             rules_file: String::new(),
+            no_builtins: true, // disable builtins for focused unit tests
             secrets: vec![SecretRule {
                 name: "github_token".into(),
                 prefix: "ghp_".into(),
@@ -286,6 +337,7 @@ mod tests {
                 action: NameAction::Pseudonym,
             }],
             entropy: EntropyConfig::default(),
+            pii: Default::default(),
             enable_sessions: false,
         }
     }
@@ -336,5 +388,64 @@ mod tests {
             ..Default::default()
         };
         assert!(DlpEngine::from_config(config).is_none());
+    }
+
+    #[test]
+    fn test_builtins_loaded_by_default() {
+        let config = DlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let engine = DlpEngine::from_config(config).unwrap();
+        // Should have loaded builtin rules (at least 20)
+        assert!(
+            engine.scanner.rules.len() >= 20,
+            "Expected >= 20 builtin rules, got {}",
+            engine.scanner.rules.len()
+        );
+    }
+
+    #[test]
+    fn test_builtins_opt_out() {
+        let config = DlpConfig {
+            enabled: true,
+            no_builtins: true,
+            ..Default::default()
+        };
+        let engine = DlpEngine::from_config(config).unwrap();
+        assert_eq!(engine.scanner.rules.len(), 0);
+    }
+
+    #[test]
+    fn test_builtin_detects_openai_key() {
+        let config = DlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let engine = DlpEngine::from_config(config).unwrap();
+        let text = "my key is sk-proj-abcdefghijklmnopqrstuvwxyz1234567890ABCD";
+        let result = engine.sanitize_text(text);
+        assert!(
+            result.contains("[REDACTED]"),
+            "OpenAI key should be redacted, got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_builtin_detects_pem_header() {
+        let config = DlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let engine = DlpEngine::from_config(config).unwrap();
+        let text =
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJBALRiMLAHudeSA/x3hB2f-----END RSA PRIVATE KEY-----";
+        let result = engine.sanitize_text(text);
+        assert!(
+            result.contains("[REDACTED]"),
+            "PEM key should be redacted, got: {}",
+            result
+        );
     }
 }

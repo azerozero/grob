@@ -24,6 +24,33 @@ mod router;
 mod server;
 
 const PROCESS_TRANSITION_GRACE_MS: u64 = 500;
+const HEALTH_POLL_INTERVAL_MS: u64 = 100;
+const HEALTH_POLL_MAX_ATTEMPTS: u32 = 50; // 50 * 100ms = 5s max
+
+/// Check if Grob is healthy at the given base URL.
+async fn is_grob_healthy(base_url: &str) -> bool {
+    let url = format!("{}/health", base_url);
+    match reqwest::Client::new()
+        .get(&url)
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await
+    {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+/// Poll the health endpoint until it returns 200 or max attempts reached.
+async fn poll_health(base_url: &str, max_attempts: u32, interval_ms: u64) -> bool {
+    for _ in 0..max_attempts {
+        if is_grob_healthy(base_url).await {
+            return true;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
+    }
+    false
+}
 
 async fn stop_service(pid: u32) -> anyhow::Result<()> {
     use nix::sys::signal::{kill, Signal};
@@ -164,6 +191,18 @@ enum Commands {
         /// Use JSON-formatted logs (for structured logging in containers)
         #[arg(long, env = "GROB_JSON_LOGS")]
         json_logs: bool,
+    },
+    /// Launch a command behind the Grob proxy (auto-starts/stops service)
+    Exec {
+        /// Port to use for the proxy
+        #[arg(short, long)]
+        port: Option<u16>,
+        /// Don't stop Grob after the child exits
+        #[arg(long)]
+        no_stop: bool,
+        /// Command and arguments to run
+        #[arg(last = true, required = true)]
+        cmd: Vec<String>,
     },
 }
 
@@ -681,6 +720,72 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         },
+        Commands::Exec { port, no_stop, cmd } => {
+            let effective_port = port.unwrap_or(config.server.port);
+            let base_url = format!("http://127.0.0.1:{}", effective_port);
+            let mut we_started = false;
+
+            // 1. Check if Grob is already running
+            let already_running = if let Ok(existing_pid) = pid::read_pid() {
+                if pid::is_process_running(existing_pid) {
+                    // PID file exists and process is alive, verify health
+                    is_grob_healthy(&base_url).await
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if !already_running {
+                // 2. Start Grob in background
+                eprintln!("Starting Grob on port {}...", effective_port);
+                spawn_background_service(Some(effective_port), cli.config.clone())?;
+
+                // 3. Poll /health until ready (max 5s)
+                if !poll_health(&base_url, HEALTH_POLL_MAX_ATTEMPTS, HEALTH_POLL_INTERVAL_MS).await
+                {
+                    eprintln!("❌ Grob failed to start within 5 seconds");
+                    std::process::exit(1);
+                }
+                we_started = true;
+                eprintln!("✅ Grob ready on port {}", effective_port);
+            }
+
+            // 4. Spawn child process with proxy env vars
+            let child_status = {
+                let program = &cmd[0];
+                let args = &cmd[1..];
+                let status = tokio::process::Command::new(program)
+                    .args(args)
+                    .env("ANTHROPIC_BASE_URL", &base_url)
+                    .env("OPENAI_BASE_URL", format!("{}/v1", base_url))
+                    .status()
+                    .await;
+
+                match status {
+                    Ok(s) => s.code().unwrap_or(1),
+                    Err(e) => {
+                        eprintln!("❌ Failed to run '{}': {}", cmd.join(" "), e);
+                        127
+                    }
+                }
+            };
+
+            // 5. Stop Grob if we started it and --no-stop not set
+            if we_started && !no_stop {
+                if let Ok(grob_pid) = pid::read_pid() {
+                    if pid::is_process_running(grob_pid) {
+                        eprintln!("Stopping Grob...");
+                        let _ = stop_service(grob_pid).await;
+                        let _ = pid::cleanup_pid();
+                    }
+                }
+            }
+
+            // 6. Exit with child's exit code
+            std::process::exit(child_status);
+        }
     }
 
     Ok(())
