@@ -222,7 +222,7 @@ fn transform_delta_data(data: &str, ctx: &mut StreamContext<'_>) -> Option<Strin
             if let Some(text_val) = delta.get_mut("text") {
                 *text_val = serde_json::Value::String(new_text.clone());
             }
-            return Some(serde_json::to_string(&json).ok()?);
+            return serde_json::to_string(&json).ok();
         }
         // No modification — buffer original text
         accumulate_text(text_value, ctx);
@@ -245,7 +245,7 @@ fn transform_delta_data(data: &str, ctx: &mut StreamContext<'_>) -> Option<Strin
                     if let Cow::Owned(ref new_text) = sanitized {
                         accumulate_text(new_text, ctx);
                         *text_val = serde_json::Value::String(new_text.clone());
-                        return Some(serde_json::to_string(&json).ok()?);
+                        return serde_json::to_string(&json).ok();
                     }
                     accumulate_text(text, ctx);
                 }

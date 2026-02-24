@@ -20,6 +20,12 @@ pub struct SprtDetector {
     lower_bound: f32, // ln(beta/(1-alpha))
 }
 
+impl Default for SprtDetector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SprtDetector {
     pub fn new() -> Self {
         let alpha = 0.01_f32; // false positive rate

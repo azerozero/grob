@@ -225,12 +225,11 @@ impl DlpEngine {
             }
         }
         // Name check: pseudonyms that weren't deanonymized per-delta (cross-chunk)
-        if !self.anonymizer.is_empty() {
-            if self.anonymizer.deanonymize_if_match(full_text).is_some() {
-                tracing::warn!("DLP cross-chunk pseudonym detected in final buffer");
-                metrics::counter!("grob_dlp_cross_chunk_total", "rule" => "pseudonym")
-                    .increment(1);
-            }
+        if !self.anonymizer.is_empty()
+            && self.anonymizer.deanonymize_if_match(full_text).is_some()
+        {
+            tracing::warn!("DLP cross-chunk pseudonym detected in final buffer");
+            metrics::counter!("grob_dlp_cross_chunk_total", "rule" => "pseudonym").increment(1);
         }
     }
 

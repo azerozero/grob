@@ -16,6 +16,12 @@ pub struct CanaryGenerator {
     counter: AtomicU64,
 }
 
+impl Default for CanaryGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CanaryGenerator {
     pub fn new() -> Self {
         Self {

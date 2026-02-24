@@ -74,10 +74,7 @@ impl NameAnonymizer {
         }
 
         // Fast check: does any pattern match at all?
-        let first_match = self.forward_ac.find(text);
-        if first_match.is_none() {
-            return None;
-        }
+        self.forward_ac.find(text)?;
 
         let mut result = String::with_capacity(text.len());
         let mut replacements = Vec::new();
@@ -119,9 +116,7 @@ impl NameAnonymizer {
         }
 
         // Fast check: does any pseudonym appear?
-        if self.reverse_ac.find(text).is_none() {
-            return None;
-        }
+        self.reverse_ac.find(text)?;
 
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
