@@ -1,10 +1,39 @@
 # Preset: perf - Performance max
-# Anthropic (OAuth/Max) for all primary models, OpenRouter fallbacks
-# Requires: Anthropic OAuth (Max plan) + OPENROUTER_API_KEY
+# Anthropic OAuth for all primary models, OpenRouter fallbacks
+# Requires: Anthropic OAuth + OPENROUTER_API_KEY
+#
+# ── Cout estime (8h/jour, 22j/mois) ──────────────────────
+#
+#   Ce preset (Pro $20/mois, Sonnet partout + Sonnet thinking):
+#     Sans agent : ~€20/mois  (tout inclus dans Pro)
+#     Avec agent : ~€20/mois + €10-30 fallback OpenRouter
+#
+#   Avec Max $200/mois (Opus thinking au lieu de Sonnet):
+#     Sans agent : ~€200/mois (tout inclus dans Max)
+#     Avec agent : ~€200/mois + €10-30 fallback OpenRouter
+#
+#   Sans abonnement (API key Anthropic directe):
+#     Sans agent : ~€200-300/mois (Sonnet $3/$15 par M tokens)
+#     Avec agent : ~€2000-3000/mois
+#
+#   Via OpenRouter (credit initial €20):
+#     Sans agent : ~€220-350/mois  (markup 10-15%)
+#     Avec agent : ~€2200-3500/mois
+#
+#   Comparaison OpenAI seul (GPT-4o $2.50/$10 par M tokens):
+#     Sans agent : ~€90/mois
+#     Avec agent : ~€900/mois
+#
+#   Alternative locale:
+#     Mac Mini M4 Pro 48GB  : €1800 → €52/mois sur 3 ans + elec
+#     Mac Studio M4 Max 128GB: €5000 → €144/mois sur 3 ans + elec
+#     Electricite (FR €0.25/kWh): €2-5/mois
+#     Apres amortissement : €2-5/mois (elec seule)
+#     Limitation : modeles locaux 32B ≈ GPT-4o, pas Opus
 
 # --- Providers ---
 
-# Anthropic direct via OAuth (Max plan — included in subscription, no per-token cost)
+# Anthropic via OAuth (Pro $20/mois = Sonnet, Max $200/mois = Opus + Sonnet)
 [[providers]]
 name = "anthropic"
 provider_type = "anthropic"

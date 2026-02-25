@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 const BUILTIN_PERF: &str = include_str!("../presets/perf.toml");
 const BUILTIN_MEDIUM: &str = include_str!("../presets/medium.toml");
-const BUILTIN_CHEAP: &str = include_str!("../presets/cheap.toml");
 const BUILTIN_LOCAL: &str = include_str!("../presets/local.toml");
+const BUILTIN_CHEAP: &str = include_str!("../presets/cheap.toml");
+const BUILTIN_FAST: &str = include_str!("../presets/fast.toml");
 
 #[derive(Debug)]
 pub struct PresetInfo {
@@ -42,14 +43,21 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
             is_builtin: true,
         },
         PresetInfo {
-            name: "cheap".to_string(),
-            description: "Budget minimum — OpenRouter only, cheapest models".to_string(),
+            name: "local".to_string(),
+            description: "Ollama local + Anthropic thinking — private, zero API cost for defaults"
+                .to_string(),
             path: None,
             is_builtin: true,
         },
         PresetInfo {
-            name: "local".to_string(),
-            description: "Ollama local + Anthropic thinking — private, zero API cost for defaults"
+            name: "cheap".to_string(),
+            description: "Budget max — GLM-5 + DeepSeek + Gemini Flash, $0-5/month".to_string(),
+            path: None,
+            is_builtin: true,
+        },
+        PresetInfo {
+            name: "fast".to_string(),
+            description: "Premium rapide — Opus + GPT-5.2 + Gemini Pro, qualite max sans limite"
                 .to_string(),
             path: None,
             is_builtin: true,
@@ -93,8 +101,9 @@ fn get_preset_content(name: &str) -> Result<String> {
     match name {
         "perf" => return Ok(BUILTIN_PERF.to_string()),
         "medium" => return Ok(BUILTIN_MEDIUM.to_string()),
-        "cheap" => return Ok(BUILTIN_CHEAP.to_string()),
         "local" => return Ok(BUILTIN_LOCAL.to_string()),
+        "cheap" => return Ok(BUILTIN_CHEAP.to_string()),
+        "fast" => return Ok(BUILTIN_FAST.to_string()),
         _ => {}
     }
 
@@ -1381,8 +1390,9 @@ mod tests {
         let names: Vec<&str> = presets.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"perf"));
         assert!(names.contains(&"medium"));
-        assert!(names.contains(&"cheap"));
         assert!(names.contains(&"local"));
+        assert!(names.contains(&"cheap"));
+        assert!(names.contains(&"fast"));
     }
 
     #[test]
@@ -1395,7 +1405,10 @@ mod tests {
         assert!(content.contains("[router]"));
 
         let content = get_preset_content("cheap").unwrap();
-        assert!(content.contains("openrouter"));
+        assert!(content.contains("deepseek"));
+
+        let content = get_preset_content("fast").unwrap();
+        assert!(content.contains("anthropic"));
     }
 
     #[test]
@@ -1408,8 +1421,9 @@ mod tests {
         for (name, content) in [
             ("perf", BUILTIN_PERF),
             ("medium", BUILTIN_MEDIUM),
-            ("cheap", BUILTIN_CHEAP),
             ("local", BUILTIN_LOCAL),
+            ("cheap", BUILTIN_CHEAP),
+            ("fast", BUILTIN_FAST),
         ] {
             let parsed: Result<toml::Value, _> = toml::from_str(content);
             assert!(
@@ -1458,7 +1472,7 @@ default = "old-model"
         )
         .unwrap();
 
-        // Apply cheap preset
+        // Apply radin preset
         apply_preset("cheap", &config_path).unwrap();
 
         // Verify backup was created
@@ -1472,7 +1486,7 @@ default = "old-model"
 
         // Router should come from preset
         assert!(
-            content.contains("claude-opus-thinking"),
+            content.contains("think-model"),
             "Think model should come from preset"
         );
 

@@ -2,10 +2,47 @@
 # Runs most tasks on local Ollama, uses Anthropic OAuth for complex reasoning
 # Requires: Ollama running (http://localhost:11434) + Anthropic OAuth
 # Recommended Ollama models: ollama pull qwen2.5-coder:32b && ollama pull qwen2.5-coder:7b
+#
+# ── Cout estime (8h/jour, 22j/mois) ──────────────────────
+#
+#   Ce preset (local + Pro $20/mois Sonnet thinking):
+#     Sans agent : ~€72/mois  (€20 Pro + €50 amort Mac Mini + €2 elec)
+#     Avec agent : ~€72/mois  (idem, tokens locaux = gratuits)
+#
+#   Avec Max $200/mois (Opus thinking):
+#     Sans agent : ~€252/mois  (€200 Max + €50 amort + €2 elec)
+#     Avec agent : ~€252/mois
+#
+#   100% local (sans abonnement, thinking sur Ollama aussi):
+#     Sans agent : ~€52/mois  (amort + elec, zero API)
+#     Avec agent : ~€52/mois  (idem)
+#     Apres amortissement : ~€2-5/mois (electricite seule)
+#
+#   Hardware necessaire:
+#     Mac Mini M4 Pro 48GB  : €1800 → €50/mois sur 3 ans
+#       qwen2.5-coder:32b tourne bien, 7b pour le background
+#       Elec: 40W × 8h × 22j = 7 kWh → ~€2/mois
+#     Mac Studio M4 Max 128GB: €5000 → €139/mois sur 3 ans
+#       Peut faire tourner des 70B (llama3, qwen72b)
+#       Elec: 120W × 8h × 22j = 21 kWh → ~€5/mois
+#     Mac Studio M4 Ultra 192GB: €7000 → €194/mois sur 3 ans
+#       Modeles 100B+, qualite proche GPT-4o
+#       Elec: 150W × 8h × 22j = 26 kWh → ~€7/mois
+#
+#   Seuil de rentabilite vs API:
+#     Mac Mini vs cheap  : jamais (cheap = €5-10/mois)
+#     Mac Mini vs medium : ~3 mois  (€52 vs €30/mois avec Pro... jamais!)
+#     Mac Mini + Pro vs perf+Pro: jamais (€72 vs €20/mois)
+#     Mac Studio vs fast : ~2 mois  (€144 vs €300-500/mois)
+#     → Le local ne se rentabilise que vs les presets sans abonnement OAuth
+#
+#   Comparaison OpenAI seul (GPT-4o $2.50/$10 par M tokens):
+#     Sans agent : ~€90/mois
+#     Avec agent : ~€900/mois
 
 # --- Providers ---
 
-# Anthropic via OAuth (Max plan — included in subscription) — for complex thinking only
+# Anthropic via OAuth (Pro $20/mois = Sonnet, Max $200/mois = Opus + Sonnet)
 [[providers]]
 name = "anthropic"
 provider_type = "anthropic"

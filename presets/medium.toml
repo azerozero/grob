@@ -1,11 +1,37 @@
 # Preset: medium - Best quality/price ratio
-# Anthropic (OAuth/Max) for thinking, OpenRouter for everything else
-# Requires: OpenRouter API key (OPENROUTER_API_KEY)
-# Anthropic: uses OAuth (Max plan, included in $200/mo subscription — no per-token cost)
+# Anthropic OAuth for thinking, OpenRouter for everything else
+# Requires: OpenRouter API key (OPENROUTER_API_KEY) + Anthropic OAuth
+#
+# ── Cout estime (8h/jour, 22j/mois) ──────────────────────
+#
+#   Ce preset (Pro $20/mois Sonnet thinking + OpenRouter):
+#     Sans agent : ~€30/mois  ($20 Pro + ~€10 OpenRouter)
+#     Avec agent : ~€120/mois ($20 Pro + ~€100 OpenRouter)
+#
+#   Avec Max $200/mois (Opus thinking au lieu de Sonnet):
+#     Sans agent : ~€210/mois ($200 Max + ~€10 OpenRouter)
+#     Avec agent : ~€300/mois ($200 Max + ~€100 OpenRouter)
+#
+#   Sans abonnement (tout via OpenRouter):
+#     Sans agent : ~€50-80/mois  (Kimi/Grok $0.30-0.50/M in)
+#     Avec agent : ~€300-600/mois
+#
+#   Via OpenRouter seul (credit initial €20):
+#     €20 = ~1-2 semaines sans agent, ~2-3 jours avec agent
+#
+#   Comparaison OpenAI seul (GPT-4o $2.50/$10 par M tokens):
+#     Sans agent : ~€90/mois
+#     Avec agent : ~€900/mois
+#
+#   Alternative locale:
+#     Mac Mini M4 Pro 48GB  : €1800 → €52/mois sur 3 ans + elec
+#     Mac Studio M4 Max 128GB: €5000 → €144/mois sur 3 ans + elec
+#     Electricite (FR €0.25/kWh): €2-5/mois
+#     Apres amortissement : €2-5/mois (elec seule)
 
 # --- Providers ---
 
-# Anthropic direct via OAuth (Max plan — included in subscription, no per-token cost)
+# Anthropic via OAuth (Pro $20/mois = Sonnet, Max $200/mois = Opus + Sonnet)
 [[providers]]
 name = "anthropic-max"
 provider_type = "anthropic"
@@ -14,7 +40,7 @@ oauth_provider = "anthropic-max"
 enabled = true
 models = []
 
-# OpenRouter (modèles performants pas chers)
+# OpenRouter (modeles performants pas chers)
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"

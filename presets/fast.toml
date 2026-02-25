@@ -1,8 +1,8 @@
 # ═══════════════════════════════════════════════════════════
-# Grob Config: RICHE (Premium)
+# Grob Preset: FAST (Premium)
 # ═══════════════════════════════════════════════════════════
-# Best models everywhere, no budget concerns.
-# Maximum reasoning power with fastest fallbacks.
+# Meilleurs modeles partout, zero compromis.
+# Maximum de puissance de raisonnement + fallbacks rapides.
 #
 # Leaderboard scores (Chatbot Arena, Feb 2026):
 #   claude-opus-4-6-thinking  1553  (Rank #2, best reasoning)
@@ -11,21 +11,28 @@
 #   gpt-5.2-high              1471  (Rank #5, strong alternative)
 #   gemini-3-pro              1444  (Rank #9, 1M context)
 #
-# Monthly cost estimate: $100-500+ depending on volume
+# ── Cout estime (8h/jour, 22j/mois) ──────────────────────
+#
+#   Ce preset (API directes Anthropic + OpenAI + Gemini):
+#     Sans agent : ~€300-500/mois
+#     Avec agent : ~€3000-5000/mois
+#
+#   Via OpenRouter (credit initial €20):
+#     Sans agent : ~€350-550/mois  (markup ~10-15%)
+#     Avec agent : ~€3500-5500/mois
+#
+#   Comparaison OpenAI seul (GPT-4o $2.50/$10 par M tokens):
+#     Sans agent : ~€90/mois
+#     Avec agent : ~€900/mois
+#
+#   Alternative locale (Ollama, qualite inferieure):
+#     Mac Mini M4 Pro 48GB  : €1800 → €52/mois sur 3 ans + elec
+#     Mac Studio M4 Max 128GB: €5000 → €144/mois sur 3 ans + elec
+#     Electricite (FR €0.25/kWh): €2-5/mois
+#     Apres amortissement : €2-5/mois (elec seule)
+#     Limitation : modeles locaux 32B ≈ GPT-4o, pas Opus
+#
 # ═══════════════════════════════════════════════════════════
-
-[server]
-port = 13456
-host = "::1"
-log_level = "info"
-
-[server.timeouts]
-api_timeout_ms = 600000
-connect_timeout_ms = 10000
-
-# No budget limit — money is not a concern
-[budget]
-monthly_limit_usd = 0.0
 
 # ── Providers ────────────────────────────────────────────
 

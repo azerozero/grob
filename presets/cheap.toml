@@ -1,9 +1,75 @@
-# Preset: cheap - Budget minimum
-# OpenRouter only, cheapest models that work well
-# Requires: OPENROUTER_API_KEY
+# ═══════════════════════════════════════════════════════════
+# Grob Preset: CHEAP (Budget)
+# ═══════════════════════════════════════════════════════════
+# Meilleur ratio prix/performance. Modeles open-source gratuits
+# ou tres bon marche pour le quotidien, thinking DeepSeek R1.
+#
+# Leaderboard scores (Chatbot Arena, Feb 2026):
+#   glm-5           1452  (MIT, free tier)
+#   kimi-k2.5-think 1436  (Modified MIT)
+#   deepseek-v3.2   1318  (MIT, very cheap)
+#   gemini-3-flash  1440  (free tier, 1M ctx)
+#
+# ── Cout estime (8h/jour, 22j/mois) ──────────────────────
+#
+#   Ce preset (GLM free + DeepSeek + Gemini free):
+#     Sans agent : ~€5-10/mois
+#     Avec agent : ~€50-100/mois
+#
+#   Via OpenRouter (credit initial €20):
+#     €20 = ~3-4 mois sans agent, ~1-2 semaines avec agent
+#
+#   Comparaison OpenAI seul (GPT-4o $2.50/$10 par M tokens):
+#     Sans agent : ~€90/mois
+#     Avec agent : ~€900/mois
+#
+#   Alternative locale (Ollama, qualite similaire aux modeles radin):
+#     Mac Mini M4 Pro 48GB  : €1800 → €52/mois sur 3 ans + elec
+#     Mac Studio M4 Max 128GB: €5000 → €144/mois sur 3 ans + elec
+#     Electricite (FR €0.25/kWh): €2-5/mois
+#     Apres amortissement : €2-5/mois (elec seule)
+#     Avantage : modeles 32B locaux ≈ DeepSeek V3, zero cout API
+#     Seuil de rentabilite vs radin : ~3 ans (Mac Mini) si usage agent
+#
+# ═══════════════════════════════════════════════════════════
 
-# --- Providers ---
+# ── Providers ────────────────────────────────────────────
 
+# DeepSeek API — MIT models, cheapest inference (< $0.14/M input, $0.28/M output)
+[[providers]]
+name = "deepseek"
+provider_type = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key = "$OPENROUTER_API_KEY"
+enabled = true
+models = []
+
+# Z.ai — GLM models, free tier available
+[[providers]]
+name = "zai"
+provider_type = "z.ai"
+api_key = "$ZAI_API_KEY"
+enabled = true
+models = []
+
+# Google Gemini — generous free tier (1500 req/day)
+[[providers]]
+name = "gemini"
+provider_type = "gemini"
+api_key = "$GEMINI_API_KEY"
+enabled = true
+models = []
+
+# Kimi Coding — Claude-compatible API, competitive pricing
+[[providers]]
+name = "kimi"
+provider_type = "anthropic"
+base_url = "https://api.kimi.com/coding/"
+api_key = "$KIMI_API_KEY"
+enabled = true
+models = []
+
+# OpenRouter — universal fallback, pay-per-use
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"
@@ -11,69 +77,78 @@ api_key = "$OPENROUTER_API_KEY"
 enabled = true
 models = []
 
-# --- Models ---
+# ── Models ───────────────────────────────────────────────
 
-# Think - deepseek-r1 (cheapest strong reasoner)
+# Default model: GLM-5 (score 1452, MIT, free)
 [[models]]
-name = "claude-opus-thinking"
+name = "default-model"
 
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "deepseek/deepseek-r1"
-priority = 1
+  [[models.mappings]]
+  priority = 1
+  provider = "zai"
+  actual_model = "glm-5"
 
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "deepseek/deepseek-v3.2"
-priority = 2
+  [[models.mappings]]
+  priority = 2
+  provider = "openrouter"
+  actual_model = "z-ai/glm-5"
 
-# Default - gemini-2.5-flash (free/very cheap)
+# Thinking model: DeepSeek R1 (score 1370, MIT, cheap)
 [[models]]
-name = "default"
+name = "think-model"
 
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "google/gemini-2.5-flash"
-priority = 1
+  [[models.mappings]]
+  priority = 1
+  provider = "openrouter"
+  actual_model = "deepseek/deepseek-r1"
 
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "deepseek/deepseek-chat-v3"
-priority = 2
+  [[models.mappings]]
+  priority = 2
+  provider = "kimi"
+  actual_model = "claude-sonnet-4-6-20250514"
 
-# Background - gemini-2.5-flash (cheapest)
+# Background model: DeepSeek v3.2 (score 1318, MIT, cheapest)
 [[models]]
-name = "background"
+name = "background-model"
 
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "google/gemini-2.5-flash"
-priority = 1
+  [[models.mappings]]
+  priority = 1
+  provider = "openrouter"
+  actual_model = "deepseek/deepseek-chat"
 
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "deepseek/deepseek-v3.2"
-priority = 2
+  [[models.mappings]]
+  priority = 2
+  provider = "zai"
+  actual_model = "glm-4.5-air"
 
-# WebSearch - gemini-2.5-flash (fast) with glm-5 fallback
+# Web search model: Gemini 3 Flash (score 1440, free tier)
 [[models]]
-name = "websearch"
+name = "search-model"
 
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "google/gemini-2.5-flash"
-priority = 1
+  [[models.mappings]]
+  priority = 1
+  provider = "gemini"
+  actual_model = "gemini-3-flash"
 
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "z-ai/glm-5"
-priority = 2
+  [[models.mappings]]
+  priority = 2
+  provider = "openrouter"
+  actual_model = "google/gemini-3-flash"
 
-# --- Router ---
+# ── Router ───────────────────────────────────────────────
+
 [router]
-default = "default"
-think = "claude-opus-thinking"
-background = "background"
-websearch = "websearch"
-auto_map_regex = "^claude-"
-background_regex = "(?i)claude.*haiku"
+default = "default-model"
+think = "think-model"
+background = "background-model"
+websearch = "search-model"
+
+# Route heavy coding tasks to thinking model
+[[router.prompt_rules]]
+pattern = "(?i)(refactor|architect|design|implement.*complex|debug.*hard)"
+model = "think-model"
+
+# Route simple tasks to cheapest model
+[[router.prompt_rules]]
+pattern = "(?i)(format|lint|rename|typo|simple.*fix)"
+model = "background-model"
