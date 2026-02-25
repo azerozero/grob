@@ -22,6 +22,7 @@ mod tests {
             models: vec![],
             enabled: None,
             budget_usd: None,
+            region: None,
         };
 
         assert!(config.is_enabled());
@@ -43,6 +44,7 @@ mod tests {
             models: vec![],
             enabled: Some(false),
             budget_usd: None,
+            region: None,
         };
 
         assert!(!config.is_enabled());

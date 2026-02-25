@@ -7,6 +7,7 @@ const BUILTIN_MEDIUM: &str = include_str!("../presets/medium.toml");
 const BUILTIN_LOCAL: &str = include_str!("../presets/local.toml");
 const BUILTIN_CHEAP: &str = include_str!("../presets/cheap.toml");
 const BUILTIN_FAST: &str = include_str!("../presets/fast.toml");
+const BUILTIN_GDPR: &str = include_str!("../presets/gdpr.toml");
 
 #[derive(Debug)]
 pub struct PresetInfo {
@@ -62,6 +63,12 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
             path: None,
             is_builtin: true,
         },
+        PresetInfo {
+            name: "gdpr".to_string(),
+            description: "EU-only GDPR compliant — Mistral, Scaleway, OVH (region=eu)".to_string(),
+            path: None,
+            is_builtin: true,
+        },
     ];
 
     // Scan installed presets directory
@@ -96,7 +103,7 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
 }
 
 /// Get preset content by name (builtin or installed file)
-fn get_preset_content(name: &str) -> Result<String> {
+pub fn get_preset_content(name: &str) -> Result<String> {
     // Check builtins first
     match name {
         "perf" => return Ok(BUILTIN_PERF.to_string()),
@@ -104,6 +111,7 @@ fn get_preset_content(name: &str) -> Result<String> {
         "local" => return Ok(BUILTIN_LOCAL.to_string()),
         "cheap" => return Ok(BUILTIN_CHEAP.to_string()),
         "fast" => return Ok(BUILTIN_FAST.to_string()),
+        "gdpr" => return Ok(BUILTIN_GDPR.to_string()),
         _ => {}
     }
 
@@ -325,6 +333,9 @@ pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
 
     let preset_table = preset.as_table().context("Preset is not a TOML table")?;
 
+    // Preserve [user] section from existing config
+    let user_section = config_table.get("user").cloned();
+
     // Replace router, providers, models from preset
     if let Some(router) = preset_table.get("router") {
         config_table.insert("router".to_string(), router.clone());
@@ -334,6 +345,11 @@ pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
     }
     if let Some(models) = preset_table.get("models") {
         config_table.insert("models".to_string(), models.clone());
+    }
+
+    // Restore [user] section
+    if let Some(user) = user_section {
+        config_table.insert("user".to_string(), user);
     }
 
     // Ensure [server] exists with defaults
@@ -581,6 +597,11 @@ fn detect_auth_type(provider: &toml::Value) -> ProviderAuth {
     }
 }
 
+/// Public accessor for OAuth provider list (used by status command)
+pub fn load_oauth_provider_list_pub() -> Vec<String> {
+    load_oauth_provider_list()
+}
+
 /// Load the list of OAuth provider IDs that have tokens stored.
 fn load_oauth_provider_list() -> Vec<String> {
     let home = match dirs::home_dir() {
@@ -609,7 +630,16 @@ fn load_oauth_provider_list() -> Vec<String> {
 /// Interactive credential setup wizard.
 /// For each provider missing credentials, prompts the user to enter an API key
 /// or skip. Writes entered keys directly into the config file.
+/// If `filter_provider` is Some, only process that specific provider.
 pub fn setup_credentials_interactive(config_path: &Path) -> Result<()> {
+    setup_credentials_interactive_filtered(config_path, None)
+}
+
+/// Interactive credential setup wizard with optional provider filter.
+pub fn setup_credentials_interactive_filtered(
+    config_path: &Path,
+    filter_provider: Option<&str>,
+) -> Result<()> {
     let statuses = check_credentials(config_path)?;
 
     println!();
@@ -620,6 +650,13 @@ pub fn setup_credentials_interactive(config_path: &Path) -> Result<()> {
     let mut missing: Vec<&CredentialStatus> = Vec::new();
 
     for s in &statuses {
+        // Skip providers not matching filter
+        if let Some(filter) = filter_provider {
+            if s.provider_name != filter {
+                continue;
+            }
+        }
+
         if s.ok {
             println!(
                 "  {} ({}): ✅ {}",
@@ -1272,6 +1309,7 @@ fn make_test_request(model: &str) -> AnthropicRequest {
         metadata: None,
         system: None,
         tools: None,
+        tool_choice: None,
     }
 }
 

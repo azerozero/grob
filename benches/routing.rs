@@ -21,6 +21,8 @@ fn make_router() -> Router {
             auto_map_regex: Some("^claude-".to_string()),
             background_regex: Some("(?i)claude.*haiku".to_string()),
             prompt_rules: vec![],
+            gdpr: false,
+            region: None,
         },
         providers: vec![],
         models: vec![],
@@ -29,6 +31,7 @@ fn make_router() -> Router {
         dlp: Default::default(),
         auth: Default::default(),
         tap: Default::default(),
+        user: Default::default(),
     })
 }
 
@@ -49,6 +52,7 @@ fn make_request(model: &str, text: &str) -> AnthropicRequest {
         metadata: None,
         system: None,
         tools: None,
+        tool_choice: None,
     }
 }
 

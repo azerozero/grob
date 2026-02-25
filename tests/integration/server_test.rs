@@ -161,6 +161,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            tool_choice: None,
         };
 
         engine.sanitize_request(&mut request);
@@ -208,6 +209,7 @@ mod tests {
                 "You work on InternalProject".to_string(),
             )),
             tools: None,
+            tool_choice: None,
         };
 
         engine.sanitize_request(&mut request);
@@ -398,6 +400,8 @@ mod tests {
                 auto_map_regex: Some("^claude-".to_string()),
                 background_regex: Some("(?i)claude.*haiku".to_string()),
                 prompt_rules: vec![],
+                gdpr: false,
+                region: None,
             },
             providers: vec![],
             models: vec![],
@@ -406,6 +410,7 @@ mod tests {
             dlp: Default::default(),
             auth: Default::default(),
             tap: Default::default(),
+            user: Default::default(),
         })
     }
 
@@ -431,6 +436,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            tool_choice: None,
         };
         let decision = router.route(&mut req).unwrap();
         assert_eq!(decision.route_type, RouteType::Think);
@@ -464,6 +470,7 @@ mod tests {
                 description: None,
                 input_schema: None,
             }]),
+            tool_choice: None,
         };
         let decision = router.route(&mut req).unwrap();
         assert_eq!(decision.route_type, RouteType::WebSearch);
@@ -488,6 +495,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            tool_choice: None,
         };
         let decision = router.route(&mut req).unwrap();
         assert_eq!(decision.route_type, RouteType::Background);

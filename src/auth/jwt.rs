@@ -3,6 +3,8 @@ use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
+use crate::security::cache::{jwt_validation_cache, JwtCacheEntry, JwtValidationCache};
+
 /// JWT claims expected by Grob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GrobClaims {
@@ -44,12 +46,17 @@ pub enum AuthError {
 ///
 /// Uses separate Validation objects for HMAC and RSA because jsonwebtoken
 /// requires ALL algorithms in the list to be compatible with the key family.
+///
+/// Includes an in-memory cache for validated tokens to avoid repeated
+/// signature verification overhead (5 min TTL).
 pub struct JwtValidator {
     hmac_key: Option<DecodingKey>,
     jwks_keys: RwLock<Vec<DecodingKey>>,
     jwks_url: Option<String>,
     hmac_validation: Validation,
     rsa_validation: Validation,
+    /// Cache for validated tokens (avoids repeated signature verification)
+    validation_cache: JwtValidationCache,
 }
 
 impl JwtValidator {
@@ -92,6 +99,7 @@ impl JwtValidator {
             jwks_url,
             hmac_validation: make_validation(Algorithm::HS256),
             rsa_validation: make_validation(Algorithm::RS256),
+            validation_cache: jwt_validation_cache(10_000),
         })
     }
 

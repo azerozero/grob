@@ -20,6 +20,7 @@ pub fn create_test_request(model: &str, text: &str) -> AnthropicRequest {
         metadata: None,
         system: None,
         tools: None,
+        tool_choice: None,
     }
 }
 
@@ -44,6 +45,7 @@ pub fn create_thinking_request(model: &str, text: &str) -> AnthropicRequest {
         metadata: None,
         system: None,
         tools: None,
+        tool_choice: None,
     }
 }
 
@@ -75,6 +77,7 @@ pub fn create_websearch_request(model: &str, text: &str) -> AnthropicRequest {
                 "properties": {}
             })),
         }]),
+        tool_choice: None,
     }
 }
 
@@ -90,6 +93,8 @@ pub fn test_router_config() -> grob::cli::RouterConfig {
         auto_map_regex: Some("^claude-".to_string()),
         background_regex: Some("(?i)claude.*haiku".to_string()),
         prompt_rules: vec![],
+        gdpr: false,
+        region: None,
     }
 }
 
@@ -107,5 +112,6 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         dlp: Default::default(),
         auth: Default::default(),
         tap: Default::default(),
+        user: Default::default(),
     }
 }

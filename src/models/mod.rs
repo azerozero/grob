@@ -25,6 +25,8 @@ pub struct AnthropicRequest {
     pub system: Option<SystemPrompt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<serde_json::Value>,
 }
 
 /// Message in the conversation

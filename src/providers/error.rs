@@ -20,4 +20,10 @@ pub enum ProviderError {
 
     #[error("Authentication error: {0}")]
     AuthError(String),
+
+    #[error("No provider available for this request")]
+    NoProviderAvailable,
+
+    #[error("All providers failed: {0}")]
+    AllProvidersFailed(String),
 }

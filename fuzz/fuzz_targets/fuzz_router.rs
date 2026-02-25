@@ -16,6 +16,8 @@ fn make_config() -> AppConfig {
         websearch: Some("websearch-model".to_string()),
         auto_map_regex: None,
         background_regex: None,
+        gdpr: false,
+        region: None,
         prompt_rules: vec![
             PromptRule {
                 pattern: r"(?i)\bcommit\b".to_string(),
@@ -55,6 +57,7 @@ fn make_config() -> AppConfig {
         dlp: Default::default(),
         auth: Default::default(),
         tap: Default::default(),
+        user: Default::default(),
     }
 }
 
@@ -85,6 +88,7 @@ fuzz_target!(|data: &[u8]| {
         metadata: None,
         system: None,
         tools: None,
+        tool_choice: None,
     };
 
     // Route the request - should never panic

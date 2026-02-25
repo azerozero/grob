@@ -187,6 +187,18 @@ impl GeminiProvider {
             }
         });
 
+        // Build a lookup map: tool_use_id → tool name (for tool_result → FunctionResponse)
+        let mut tool_id_to_name: HashMap<String, String> = HashMap::new();
+        for msg in &request.messages {
+            if let MessageContent::Blocks(blocks) = &msg.content {
+                for block in blocks {
+                    if let ContentBlock::Known(KnownContentBlock::ToolUse { id, name, .. }) = block {
+                        tool_id_to_name.insert(id.clone(), name.clone());
+                    }
+                }
+            }
+        }
+
         // Transform messages
         let mut contents = Vec::new();
         for msg in &request.messages {
@@ -229,14 +241,45 @@ impl GeminiProvider {
                                     });
                                 }
                             }
+                            ContentBlock::Known(KnownContentBlock::ToolUse { id: _, name, input }) => {
+                                parts.push(GeminiPart::FunctionCall {
+                                    function_call: GeminiFunctionCall {
+                                        name: name.clone(),
+                                        args: input.clone(),
+                                    },
+                                });
+                            }
+                            ContentBlock::Known(KnownContentBlock::ToolResult {
+                                tool_use_id,
+                                content,
+                                ..
+                            }) => {
+                                let fn_name = tool_id_to_name
+                                    .get(tool_use_id)
+                                    .cloned()
+                                    .unwrap_or_else(|| tool_use_id.clone());
+                                parts.push(GeminiPart::FunctionResponse {
+                                    function_response: GeminiFunctionResponse {
+                                        name: fn_name,
+                                        response: serde_json::json!({
+                                            "content": content.to_string()
+                                        }),
+                                    },
+                                });
+                            }
                             _ => {
-                                // Skip tool use/result and unknown for now
+                                // Skip unknown block types
                             }
                         }
                     }
                     parts
                 }
             };
+
+            // Skip empty parts (can happen if all blocks were filtered)
+            if parts.is_empty() {
+                continue;
+            }
 
             contents.push(GeminiContent {
                 role: role.to_string(),
@@ -304,11 +347,41 @@ impl GeminiProvider {
             None // lite/flash-lite models don't support tools
         };
 
+        // Map tool_choice → tool_config
+        let tool_config = request.tool_choice.as_ref().and_then(|tc| {
+            let tc_type = tc.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            match tc_type {
+                "auto" => Some(GeminiToolConfig {
+                    function_calling_config: GeminiFunctionCallingConfig {
+                        mode: "AUTO".to_string(),
+                        allowed_function_names: None,
+                    },
+                }),
+                "any" => Some(GeminiToolConfig {
+                    function_calling_config: GeminiFunctionCallingConfig {
+                        mode: "ANY".to_string(),
+                        allowed_function_names: None,
+                    },
+                }),
+                "tool" => {
+                    let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    Some(GeminiToolConfig {
+                        function_calling_config: GeminiFunctionCallingConfig {
+                            mode: "ANY".to_string(),
+                            allowed_function_names: Some(vec![name.to_string()]),
+                        },
+                    })
+                }
+                _ => None,
+            }
+        });
+
         Ok(GeminiRequest {
             contents,
             system_instruction,
             generation_config: Some(generation_config),
             tools,
+            tool_config,
         })
     }
 
@@ -326,20 +399,36 @@ impl GeminiProvider {
                 message: "No candidates in response".to_string(),
             })?;
 
-        let content = candidate
+        let mut has_function_call = false;
+        let mut tool_call_counter = 0u32;
+        let content: Vec<ContentBlock> = candidate
             .content
             .parts
             .iter()
-            .map(|part| match part {
-                GeminiPart::Text { text } => ContentBlock::text(text.clone(), None),
-                _ => ContentBlock::text(String::new(), None),
+            .filter_map(|part| match part {
+                GeminiPart::Text { text } => Some(ContentBlock::text(text.clone(), None)),
+                GeminiPart::FunctionCall { function_call } => {
+                    has_function_call = true;
+                    tool_call_counter += 1;
+                    let id = format!("toolu_{:012x}", tool_call_counter);
+                    Some(ContentBlock::tool_use(
+                        id,
+                        function_call.name.clone(),
+                        function_call.args.clone(),
+                    ))
+                }
+                _ => None, // Skip InlineData, FunctionResponse in model output
             })
             .collect();
 
-        let stop_reason = match candidate.finish_reason.as_deref() {
-            Some("STOP") => Some("end_turn".to_string()),
-            Some("MAX_TOKENS") => Some("max_tokens".to_string()),
-            _ => None,
+        let stop_reason = if has_function_call {
+            Some("tool_use".to_string())
+        } else {
+            match candidate.finish_reason.as_deref() {
+                Some("STOP") => Some("end_turn".to_string()),
+                Some("MAX_TOKENS") => Some("max_tokens".to_string()),
+                _ => None,
+            }
         };
 
         let usage = Usage {
@@ -473,6 +562,7 @@ impl AnthropicProvider for GeminiProvider {
                     system_instruction: gemini_request.system_instruction,
                     generation_config: gemini_request.generation_config,
                     tools: gemini_request.tools,
+                    tool_config: gemini_request.tool_config,
                     session_id: None, // Optional
                 },
             };
@@ -677,6 +767,7 @@ impl AnthropicProvider for GeminiProvider {
                     system_instruction: gemini_request.system_instruction,
                     generation_config: gemini_request.generation_config,
                     tools: gemini_request.tools,
+                    tool_config: gemini_request.tool_config,
                     session_id: None, // Optional
                 },
             };
@@ -820,6 +911,8 @@ struct GeminiRequest {
     generation_config: Option<GeminiGenerationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<GeminiTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_config: Option<GeminiToolConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -833,6 +926,26 @@ struct GeminiContent {
 enum GeminiPart {
     Text { text: String },
     InlineData { inline_data: GeminiInlineData },
+    FunctionCall {
+        #[serde(rename = "functionCall")]
+        function_call: GeminiFunctionCall,
+    },
+    FunctionResponse {
+        #[serde(rename = "functionResponse")]
+        function_response: GeminiFunctionResponse,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GeminiFunctionCall {
+    name: String,
+    args: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GeminiFunctionResponse {
+    name: String,
+    response: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -881,6 +994,19 @@ enum GeminiTool {
         #[serde(rename = "urlContext")]
         url_context: UrlContextTool,
     },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GeminiToolConfig {
+    function_calling_config: GeminiFunctionCallingConfig,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct GeminiFunctionCallingConfig {
+    mode: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    allowed_function_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -943,6 +1069,8 @@ struct CodeAssistInnerRequest {
     generation_config: Option<GeminiGenerationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Vec<GeminiTool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_config: Option<GeminiToolConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<String>,
 }

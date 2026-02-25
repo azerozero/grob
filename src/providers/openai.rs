@@ -789,7 +789,21 @@ impl OpenAIProvider {
             stream: request.stream,
             stream_options,
             tools,
-            tool_choice: None, // TODO: Add tool_choice support if needed
+            tool_choice: request.tool_choice.as_ref().and_then(|tc| {
+                let tc_type = tc.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                match tc_type {
+                    "auto" => Some(serde_json::json!("auto")),
+                    "any" => Some(serde_json::json!("required")),
+                    "tool" => {
+                        let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                        Some(serde_json::json!({
+                            "type": "function",
+                            "function": { "name": name }
+                        }))
+                    }
+                    _ => None,
+                }
+            }),
         })
     }
 

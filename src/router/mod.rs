@@ -650,6 +650,8 @@ mod tests {
                 auto_map_regex: None,   // Use default Claude pattern
                 background_regex: None, // Use default claude-haiku pattern
                 prompt_rules: vec![],   // No prompt rules by default
+                gdpr: false,
+                region: None,
             },
             providers: vec![],
             models: vec![],
@@ -658,6 +660,7 @@ mod tests {
             dlp: Default::default(),
             auth: Default::default(),
             tap: Default::default(),
+            user: Default::default(),
         }
     }
 
@@ -678,6 +681,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            tool_choice: None,
         }
     }
 
@@ -1041,6 +1045,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            tool_choice: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1095,6 +1100,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            tool_choice: None,
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -1160,6 +1166,7 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            tool_choice: None,
         };
 
         let decision = router.route(&mut request).unwrap();

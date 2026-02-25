@@ -7,7 +7,8 @@
 #[global_allocator]
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use std::path::PathBuf;
 use std::process::Command;
 use tracing_subscriber::EnvFilter;
@@ -21,6 +22,7 @@ mod pid;
 mod preset;
 mod providers;
 mod router;
+mod security;
 mod instance;
 mod server;
 mod storage;
@@ -135,16 +137,20 @@ fn spawn_background_service(port: Option<u16>, config: Option<String>) -> anyhow
 
 #[derive(Parser)]
 #[command(name = "grob")]
-#[command(about = "Grob - High-performance LLM routing proxy", long_about = None)]
+#[command(about = "Grob - High-performance LLM routing proxy\n\nQuick start:\n  grob exec -- claude     Launch Claude Code through Grob\n  grob exec -- aider      Launch Aider through Grob\n  grob start -d           Start Grob in background\n  grob status             Show service status and models", long_about = None)]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 
     /// Path or URL to configuration file (defaults to ~/.grob/config.toml)
     /// Also settable via GROB_CONFIG env var
     #[arg(short, long, env = "GROB_CONFIG")]
     config: Option<String>,
+
+    /// Shorthand: grob -- <cmd> is equivalent to grob exec -- <cmd>
+    #[arg(last = true)]
+    trailing_cmd: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -195,6 +201,13 @@ enum Commands {
         json_logs: bool,
     },
     /// Launch a command behind the Grob proxy (auto-starts/stops service)
+    ///
+    /// Examples:
+    ///   grob exec -- claude
+    ///   grob exec -- opencode
+    ///   grob launch -- aider
+    ///   grob exec --port 9000 -- my-tool --flag
+    #[command(alias = "launch", long_about = "Launch a command behind the Grob proxy.\n\nAutomatically starts Grob if not running, sets ANTHROPIC_BASE_URL and\nOPENAI_BASE_URL environment variables, runs your command, and stops\nGrob when the command exits (unless --no-stop is set).\n\nExamples:\n  grob exec -- claude           # Run Claude Code through Grob\n  grob exec -- opencode          # Run OpenCode through Grob\n  grob launch -- aider           # 'launch' is an alias for 'exec'\n  grob exec --no-stop -- my-tool # Keep Grob running after exit")]
     Exec {
         /// Port to use for the proxy
         #[arg(short, long)]
@@ -205,6 +218,32 @@ enum Commands {
         /// Command and arguments to run
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
+    },
+    /// Generate shell completions
+    ///
+    /// Output completions for the given shell to stdout.
+    /// Example: grob completions zsh > ~/.zfunc/_grob
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+    /// Check environment variables required by configured providers
+    Env,
+    /// Set up credentials for providers (interactive)
+    ///
+    /// Without arguments, checks all providers. With a provider name,
+    /// sets up credentials for that specific provider only.
+    Connect {
+        /// Provider name to configure (optional, configures all if omitted)
+        provider: Option<String>,
+    },
+    /// Initialize a per-project .grob.toml in the current directory
+    Init,
+    /// Compare local config against a preset or remote config
+    ConfigDiff {
+        /// Preset name or URL to compare against
+        target: Option<String>,
     },
 }
 
@@ -240,6 +279,22 @@ enum PresetAction {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    // Handle shorthand: `grob -- cmd` → exec with trailing args
+    let command = if let Some(cmd) = cli.command {
+        cmd
+    } else if !cli.trailing_cmd.is_empty() {
+        // Treat trailing args as exec command
+        Commands::Exec {
+            port: None,
+            no_stop: false,
+            cmd: cli.trailing_cmd,
+        }
+    } else {
+        // No command and no trailing args: show help
+        Cli::command().print_help()?;
+        return Ok(());
+    };
+
     // Resolve config source: --config / GROB_CONFIG (path or URL) or default
     let config_source = match &cli.config {
         Some(val) if val.starts_with("http://") || val.starts_with("https://") => {
@@ -252,10 +307,13 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Load configuration
-    let config = cli::AppConfig::from_source(&config_source).await?;
+    let mut config = cli::AppConfig::from_source(&config_source).await?;
+
+    // Merge per-project .grob.toml overlay (if found)
+    config = cli::merge_project_config(config);
 
     // Determine if we need JSON logs (only for `run --json-logs`)
-    let (use_json_logs, log_level_override) = match &cli.command {
+    let (use_json_logs, log_level_override) = match &command {
         Commands::Run {
             json_logs,
             log_level,
@@ -280,7 +338,7 @@ async fn main() -> anyhow::Result<()> {
         tracing_subscriber::fmt().with_env_filter(filter).init();
     }
 
-    match cli.command {
+    match command {
         Commands::Start { port, detach } => {
             let effective_port = port.unwrap_or(config.server.port);
 
@@ -434,34 +492,123 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Status => {
-            println!("Checking service status...");
-            if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
-                println!("✅ Service is running (PID: {})", pid);
+            // Service status
+            let (running, pid_info) = if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+                (true, format!(" (PID: {})", pid))
             } else if instance::is_instance_running(&config.server.host, config.server.port).await {
-                println!("✅ Service is running");
+                (true, String::new())
             } else if let Some(pid) = instance::legacy_pid() {
                 if instance::is_process_running(pid) {
-                    println!("✅ Service is running (PID: {}, legacy)", pid);
+                    (true, format!(" (PID: {}, legacy)", pid))
                 } else {
-                    println!("❌ Service is not running (stale PID file)");
                     instance::cleanup_legacy_pid();
+                    (false, String::new())
                 }
             } else {
-                println!("❌ Service is not running");
+                (false, String::new())
+            };
+
+            if running {
+                println!("  Service:   ✅ running{}", pid_info);
+            } else {
+                println!("  Service:   ❌ stopped");
             }
 
-            // Show spend summary
+            // Address
+            println!("  Address:   {}", cli::format_bind_addr(&config.server.host, config.server.port));
+
+            // Active preset
+            if let Some(ref active) = config.presets.active {
+                println!("  Preset:    {}", active);
+            }
+
+            // Per-project config
+            if let Some(project_path) = cli::find_project_config() {
+                println!("  Project:   {}", project_path.display());
+            }
+
+            println!();
+
+            // Router
+            println!("  Router:");
+            println!("    Default:    {}", config.router.default);
+            if let Some(ref m) = config.router.think {
+                println!("    Think:      {}", m);
+            }
+            if let Some(ref m) = config.router.background {
+                println!("    Background: {}", m);
+            }
+            if let Some(ref m) = config.router.websearch {
+                println!("    WebSearch:  {}", m);
+            }
+
+            // GDPR
+            if config.router.gdpr {
+                let region_info = config.router.region.as_deref().unwrap_or("eu");
+                println!("    GDPR:       on (region: {})", region_info);
+            }
+
+            println!();
+
+            // Providers
+            println!("  Providers:");
+            for provider in &config.providers {
+                let status = if !provider.is_enabled() {
+                    "disabled".to_string()
+                } else {
+                    let auth_status = match provider.auth_type {
+                        providers::AuthType::OAuth => {
+                            if let Some(ref oauth_id) = provider.oauth_provider {
+                                let oauth_providers = preset::load_oauth_provider_list_pub();
+                                if oauth_providers.contains(oauth_id) {
+                                    "oauth ok"
+                                } else {
+                                    "needs auth"
+                                }
+                            } else {
+                                "needs auth"
+                            }
+                        }
+                        providers::AuthType::ApiKey => {
+                            if provider.api_key.is_some() {
+                                "key set"
+                            } else {
+                                "no key"
+                            }
+                        }
+                    };
+                    let region_tag = provider.region.as_deref().map(|r| format!(" [{}]", r)).unwrap_or_default();
+                    format!("{}{}", auth_status, region_tag)
+                };
+                println!("    {:<20} ({}) {}", provider.name, provider.provider_type, status);
+            }
+
+            println!();
+
+            // Models
+            println!("  Models ({}):", config.models.len());
+            for model in &config.models {
+                let providers: Vec<String> = model.mappings.iter()
+                    .map(|m| format!("{}/{}", m.provider, m.actual_model))
+                    .collect();
+                let strategy = model.strategy.label();
+                let strategy_tag = if strategy != "fallback" { format!(" [{}]", strategy) } else { String::new() };
+                println!("    {:<25} → {}{}", model.name, providers.join(", "), strategy_tag);
+            }
+
+            // Spend
             let spend = features::token_pricing::spend::load_spend_data();
-            if spend.total > 0.0 {
+            if spend.total > 0.0 || config.budget.monthly_limit_usd > 0.0 {
+                println!();
                 let budget_limit = config.budget.monthly_limit_usd;
                 if budget_limit > 0.0 {
                     let pct = (spend.total / budget_limit) * 100.0;
                     println!(
-                        "💰 Spend: ${:.2} / ${:.2} ({:.0}%)",
+                        "  Spend:     ${:.2} / ${:.2} ({:.0}%)",
                         spend.total, budget_limit, pct
                     );
                 } else {
-                    println!("💰 Spend: ${:.2} (no budget limit)", spend.total);
+                    println!("  Spend:     ${:.2} (no budget limit)", spend.total);
                 }
             }
         }
@@ -811,6 +958,161 @@ async fn main() -> anyhow::Result<()> {
 
             // 6. Exit with child's exit code
             std::process::exit(child_status);
+        }
+        Commands::Completions { shell } => {
+            let mut cmd = Cli::command();
+            generate(shell, &mut cmd, "grob", &mut std::io::stdout());
+        }
+        Commands::Env => {
+            println!("🔑 Environment Variables");
+            println!();
+
+            let mut any_missing = false;
+            for provider in &config.providers {
+                if !provider.is_enabled() {
+                    continue;
+                }
+                // Check if api_key references an env var
+                let raw_key = provider.api_key.as_deref().unwrap_or("");
+                // At this point env vars are already resolved, so we need to check the original config
+                // We detect env var references from the provider_type naming convention
+                let env_var_name = format!("{}_API_KEY", provider.name.to_uppercase().replace('-', "_"));
+
+                match provider.auth_type {
+                    providers::AuthType::OAuth => {
+                        println!("  {:<25} OAuth (no env var needed)", provider.name);
+                    }
+                    providers::AuthType::ApiKey => {
+                        if raw_key.is_empty() {
+                            println!("  {:<25} ⚠️  {} MISSING", provider.name, env_var_name);
+                            any_missing = true;
+                        } else {
+                            // Key is set (either literal or resolved env var)
+                            println!("  {:<25} ✅ API key configured", provider.name);
+                        }
+                    }
+                }
+            }
+            if any_missing {
+                println!();
+                println!("  Hint: export MISSING_VAR=your-key-here");
+                println!("  Or:   grob connect <provider>");
+            }
+        }
+        Commands::Connect { provider } => {
+            let file_path = match &config_source {
+                cli::ConfigSource::File(p) => p.clone(),
+                cli::ConfigSource::Url(_) => {
+                    eprintln!("❌ Cannot manage credentials for a remote URL config");
+                    return Ok(());
+                }
+            };
+
+            if let Some(ref provider_name) = provider {
+                // Single provider mode
+                let found = config.providers.iter().any(|p| p.name == *provider_name);
+                if !found {
+                    eprintln!("❌ Provider '{}' not found in config", provider_name);
+                    eprintln!("   Available: {}", config.providers.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
+                    return Ok(());
+                }
+                println!("🔑 Setting up credentials for '{}'...", provider_name);
+                if let Err(e) = preset::setup_credentials_interactive_filtered(&file_path, Some(provider_name)) {
+                    eprintln!("❌ Credential setup failed: {}", e);
+                }
+            } else {
+                println!("🔑 Setting up credentials for all providers...");
+                if let Err(e) = preset::setup_credentials_interactive(&file_path) {
+                    eprintln!("❌ Credential setup failed: {}", e);
+                }
+            }
+        }
+        Commands::Init => {
+            let target = std::env::current_dir()?.join(".grob.toml");
+            if target.exists() {
+                eprintln!("⚠️  .grob.toml already exists in this directory");
+                return Ok(());
+            }
+
+            let template = r#"# Per-project Grob configuration overlay
+# Values here override the global ~/.grob/config.toml
+
+# Override the default router model for this project
+# [router]
+# default = "my-project-model"
+# think = "my-think-model"
+# background = "my-bg-model"
+# websearch = "my-ws-model"
+
+# Override budget for this project
+# [budget]
+# monthly_limit_usd = 50.0
+
+# Add project-specific prompt rules
+# [[router.prompt_rules]]
+# pattern = "(?i)deploy"
+# model = "fast-model"
+# strip_match = false
+
+# Override preset
+# [presets]
+# active = "cheap"
+"#;
+            std::fs::write(&target, template)?;
+            println!("✅ Created .grob.toml in {}", target.display());
+            println!("   Edit it to customize Grob for this project.");
+        }
+        Commands::ConfigDiff { target } => {
+            let target_name = target.as_deref().unwrap_or_else(|| {
+                config.presets.active.as_deref().unwrap_or("medium")
+            });
+
+            // Get preset content
+            let preset_content = match preset::get_preset_content(target_name) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("❌ Failed to load target '{}': {}", target_name, e);
+                    return Ok(());
+                }
+            };
+
+            // Parse both configs as TOML values for comparison
+            let current_toml = match &config_source {
+                cli::ConfigSource::File(p) => {
+                    std::fs::read_to_string(p).unwrap_or_default()
+                }
+                cli::ConfigSource::Url(_) => {
+                    eprintln!("❌ Cannot diff remote URL config");
+                    return Ok(());
+                }
+            };
+
+            let current: toml::Value = toml::from_str(&current_toml).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+            let preset_val: toml::Value = toml::from_str(&preset_content).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+
+            println!("📋 Config diff: local vs '{}'", target_name);
+            println!();
+
+            // Compare key sections
+            for section in &["router", "providers", "models"] {
+                let local_val = current.get(section);
+                let preset_v = preset_val.get(section);
+                match (local_val, preset_v) {
+                    (Some(l), Some(p)) if l == p => {
+                        println!("  [{}]: identical", section);
+                    }
+                    (Some(_), Some(_)) => {
+                        println!("  [{}]: differs", section);
+                    }
+                    (Some(_), None) => {
+                        println!("  [{}]: only in local", section);
+                    }
+                    (None, Some(_)) => {
+                        println!("  [{}]: only in preset", section);
+                    }
+                    (None, None) => {}
+                }
+            }
         }
     }
 

@@ -58,6 +58,20 @@ pub struct AppConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub tap: TapConfig,
+    /// User-defined section preserved across preset applies
+    #[serde(default)]
+    pub user: UserConfig,
+}
+
+/// User-defined configuration section (preserved across preset applies)
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct UserConfig {
+    /// Free-form notes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    /// Environment variable overrides
+    #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+    pub env: std::collections::HashMap<String, String>,
 }
 
 /// Preset configuration
@@ -212,6 +226,12 @@ pub struct RouterConfig {
     /// Prompt-based routing rules. Routes to specific models when patterns match user prompt.
     #[serde(default)]
     pub prompt_rules: Vec<PromptRule>,
+    /// Enable GDPR mode: only route to EU/global providers
+    #[serde(default)]
+    pub gdpr: bool,
+    /// Region filter (e.g., "eu"). Used with gdpr=true to restrict providers
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
 }
 
 /// Prompt-based routing rule
@@ -228,6 +248,56 @@ pub struct PromptRule {
     pub strip_match: bool,
 }
 
+/// Strategy for routing requests across multiple provider mappings
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelStrategy {
+    /// Try providers sequentially by priority (default)
+    #[default]
+    Fallback,
+    /// Send to multiple providers in parallel
+    FanOut,
+}
+
+impl ModelStrategy {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ModelStrategy::Fallback => "fallback",
+            ModelStrategy::FanOut => "fan_out",
+        }
+    }
+}
+
+/// Fan-out mode configuration
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum FanOutMode {
+    /// Return first successful response (fastest)
+    #[default]
+    Fastest,
+    /// Send all responses to a judge model to pick the best
+    BestQuality,
+    /// Score responses by weighted criteria (latency, cost, length)
+    Weighted,
+}
+
+/// Configuration for fan-out multi-response mode
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FanOutConfig {
+    /// Fan-out mode
+    #[serde(default)]
+    pub mode: FanOutMode,
+    /// Model to use as judge (for best_quality mode)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_model: Option<String>,
+    /// Criteria for the judge model
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judge_criteria: Option<String>,
+    /// Number of providers to fan out to (default: all mappings)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count: Option<usize>,
+}
+
 /// Model configuration with 1:N provider mappings
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModelConfig {
@@ -238,6 +308,12 @@ pub struct ModelConfig {
     /// Per-model monthly budget in USD (optional, overrides provider and global)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_usd: Option<f64>,
+    /// Strategy for using multiple mappings (default: fallback)
+    #[serde(default)]
+    pub strategy: ModelStrategy,
+    /// Fan-out configuration (only used when strategy = fan_out)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fan_out: Option<FanOutConfig>,
 }
 
 /// Model mapping to a specific provider
@@ -556,8 +632,15 @@ default = "placeholder-model"
                         provider.api_key = Some(value);
                     } else {
                         anyhow::bail!(
-                            "Environment variable {} not found for provider {}",
+                            "Environment variable ${} not set for provider '{}'\n\n\
+                             Fix with one of:\n  \
+                             export {}=your-api-key-here\n  \
+                             grob connect {}\n  \
+                             Set enabled = false for '{}' in config.toml",
                             env_var,
+                            provider.name,
+                            env_var,
+                            provider.name,
                             provider.name
                         );
                     }
@@ -567,6 +650,106 @@ default = "placeholder-model"
 
         Ok(())
     }
+}
+
+/// Per-project configuration overlay
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct ProjectConfig {
+    /// Router overrides
+    #[serde(default)]
+    pub router: Option<ProjectRouterOverlay>,
+    /// Budget override
+    #[serde(default)]
+    pub budget: Option<BudgetConfig>,
+    /// Preset name override
+    #[serde(default)]
+    pub presets: Option<PresetConfig>,
+}
+
+/// Router overlay for per-project config
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct ProjectRouterOverlay {
+    pub default: Option<String>,
+    pub think: Option<String>,
+    pub background: Option<String>,
+    pub websearch: Option<String>,
+    #[serde(default)]
+    pub prompt_rules: Vec<PromptRule>,
+}
+
+/// Search for .grob.toml by walking up from CWD to home dir.
+/// Returns the path if found.
+pub fn find_project_config() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        let candidate = dir.join(".grob.toml");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        if dir == home || !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
+/// Merge per-project .grob.toml overlay into the main config.
+/// Searches CWD up to home for .grob.toml and overlays found values.
+pub fn merge_project_config(mut config: AppConfig) -> AppConfig {
+    let project_path = match find_project_config() {
+        Some(p) => p,
+        None => return config,
+    };
+
+    let content = match std::fs::read_to_string(&project_path) {
+        Ok(c) => c,
+        Err(_) => return config,
+    };
+
+    let project: ProjectConfig = match toml::from_str(&content) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("⚠️  Failed to parse {}: {}", project_path.display(), e);
+            return config;
+        }
+    };
+
+    // Overlay router settings
+    if let Some(router_overlay) = project.router {
+        if let Some(default) = router_overlay.default {
+            config.router.default = default;
+        }
+        if let Some(think) = router_overlay.think {
+            config.router.think = Some(think);
+        }
+        if let Some(background) = router_overlay.background {
+            config.router.background = Some(background);
+        }
+        if let Some(websearch) = router_overlay.websearch {
+            config.router.websearch = Some(websearch);
+        }
+        if !router_overlay.prompt_rules.is_empty() {
+            // Prepend project rules (higher priority)
+            let mut merged = router_overlay.prompt_rules;
+            merged.extend(config.router.prompt_rules.drain(..));
+            config.router.prompt_rules = merged;
+        }
+    }
+
+    // Overlay budget
+    if let Some(budget) = project.budget {
+        config.budget = budget;
+    }
+
+    // Overlay preset name
+    if let Some(presets) = project.presets {
+        if presets.active.is_some() {
+            config.presets.active = presets.active;
+        }
+    }
+
+    config
 }
 
 /// Format a bind address with proper IPv6 bracket notation.

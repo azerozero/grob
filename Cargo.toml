@@ -36,6 +36,7 @@ pin-project = "1"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
 
 # Configuration
 toml = "0.8"
@@ -76,8 +77,24 @@ hmac = "0.12"
 # Storage (embedded key-value store)
 redb = "2"
 
+# Caching (high-performance concurrent cache with TTL)
+moka = { version = "0.12", features = ["future"] }
+
 # JWT Auth
 jsonwebtoken = "9"
+
+# Security (HDS/PCI/SecNumCloud compliance)
+p256 = { version = "0.13", features = ["ecdsa"] }  # ECDSA P-256 for audit signing
+ecdsa = "0.16"                                      # ECDSA traits
+tower = "0.5"                                       # Rate limiting middleware
+tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
+unicode-normalization = "0.1"                       # Homoglyph attack prevention
+aes-gcm = "0.10"                                    # AES-256-GCM encryption
+argon2 = "0.5"                                      # Key derivation
+hex = { version = "0.4", features = ["serde"] }      # Hex encoding/decoding
+
+# Security headers
+http = "1"
 
 # TLS (optional, for native HTTPS without reverse proxy)
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }

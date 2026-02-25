@@ -1,3 +1,4 @@
+pub mod fan_out;
 mod oauth_handlers;
 pub mod openai_compat;
 
@@ -11,6 +12,10 @@ use crate::message_tracing::MessageTracer;
 use crate::models::{AnthropicRequest, RouteType};
 use crate::providers::{AuthType, ProviderRegistry};
 use crate::router::Router;
+use crate::security::{
+    apply_security_headers, CircuitBreakerRegistry, RateLimitConfig, RateLimiter,
+    RateLimitKey, SecurityHeadersConfig, ValidationError, MAX_BODY_SIZE,
+};
 use crate::storage::GrobStore;
 use axum::{
     body::Body,
@@ -87,6 +92,10 @@ pub struct AppState {
     pub jwt_validator: Option<Arc<crate::auth::JwtValidator>>,
     /// Webhook tap sender (None if tap is disabled)
     pub tap_sender: Option<Arc<crate::features::tap::TapSender>>,
+    /// Rate limiter (None if disabled)
+    pub rate_limiter: Option<Arc<RateLimiter>>,
+    /// Circuit breaker registry (None if disabled)
+    pub circuit_breakers: Option<Arc<CircuitBreakerRegistry>>,
 }
 
 impl AppState {
@@ -353,6 +362,10 @@ pub async fn start_server(
         provider_registry,
     ));
 
+    // Initialize security layer
+    let rate_limiter = Arc::new(RateLimiter::new(RateLimitConfig::strict()));
+    let circuit_breakers = Arc::new(CircuitBreakerRegistry::new());
+
     let state = Arc::new(AppState {
         inner: std::sync::RwLock::new(reloadable),
         token_store,
@@ -366,6 +379,8 @@ pub async fn start_server(
         grob_store,
         jwt_validator,
         tap_sender,
+        rate_limiter: Some(rate_limiter.clone()),
+        circuit_breakers: Some(circuit_breakers.clone()),
     });
 
     // Spawn background preset sync if configured and auto_sync is enabled
@@ -977,7 +992,61 @@ async fn handle_openai_chat_completions(
     // Resolve provider list
     let sorted_mappings = resolve_provider_mappings(&inner, &headers, &decision)?;
 
-    // 3. Try each mapping in priority order
+    // Fan-out strategy: dispatch to multiple providers in parallel (OpenAI compat)
+    if let Some(model_config) = inner.find_model(&decision.model_name) {
+        if model_config.strategy == crate::cli::ModelStrategy::FanOut {
+            if let Some(ref fan_out_config) = model_config.fan_out {
+                let mut fan_request = anthropic_request.clone();
+                // DLP on input
+                if let Some(ref dlp_engine) = dlp {
+                    if dlp_engine.config.scan_input {
+                        dlp_engine.sanitize_request(&mut fan_request);
+                    }
+                }
+
+                match fan_out::handle_fan_out(
+                    &fan_request,
+                    &sorted_mappings,
+                    fan_out_config,
+                    &inner.provider_registry,
+                ).await {
+                    Ok((mut response, provider_info)) => {
+                        if let Some(ref dlp_engine) = dlp {
+                            if dlp_engine.config.scan_output {
+                                sanitize_provider_response(&mut response, dlp_engine);
+                            }
+                        }
+
+                        // Track cost for all providers called
+                        for (prov, actual) in &provider_info {
+                            let is_sub = is_provider_subscription(&inner, prov);
+                            let counter = calculate_cost(
+                                &state, actual,
+                                response.usage.input_tokens,
+                                response.usage.output_tokens,
+                                is_sub,
+                            ).await;
+                            let mut tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+                            tracker.record(prov, actual, counter.estimated_cost_usd);
+                        }
+
+                        // Transform back to OpenAI format
+                        response.model = model.clone();
+                        let openai_response = openai_compat::transform_anthropic_to_openai(
+                            response,
+                            model.clone(),
+                        );
+                        return Ok(Json(openai_response).into_response());
+                    }
+                    Err(e) => {
+                        return Err(AppError::ProviderError(format!("Fan-out failed: {}", e)));
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Try each mapping in priority order (fallback)
     for (idx, mapping) in sorted_mappings.iter().enumerate() {
         let Some(provider) = inner.provider_registry.get_provider(&mapping.provider) else {
             info!(
@@ -1243,6 +1312,27 @@ fn resolve_provider_mappings(
         } else {
             sorted.sort_by_key(|m| m.priority);
         }
+
+        // GDPR/region filtering: if gdpr=true or region is set, only keep matching providers
+        let gdpr = inner.config.router.gdpr;
+        let required_region = inner.config.router.region.as_deref();
+        if gdpr || required_region.is_some() {
+            let region_filter = required_region.unwrap_or("eu");
+            sorted.retain(|m| {
+                let provider_region = inner.config.providers.iter()
+                    .find(|p| p.name == m.provider)
+                    .and_then(|p| p.region.as_deref())
+                    .unwrap_or("global");
+                provider_region == region_filter || provider_region == "global"
+            });
+            if sorted.is_empty() {
+                return Err(AppError::RoutingError(format!(
+                    "No providers match region '{}' for model '{}' (GDPR filtering enabled)",
+                    region_filter, decision.model_name
+                )));
+            }
+        }
+
         Ok(sorted)
     } else {
         Err(AppError::ProviderError(format!(
@@ -1322,7 +1412,11 @@ async fn handle_openai_models(State(state): State<Arc<AppState>>) -> impl IntoRe
                 "id": m.name,
                 "object": "model",
                 "created": 0,
-                "owned_by": "grob"
+                "owned_by": "grob",
+                "capabilities": {
+                    "tool_calling": true,
+                    "streaming": true
+                }
             })
         })
         .collect();
@@ -1428,8 +1522,87 @@ async fn handle_messages(
         .route(&mut request_for_routing)
         .map_err(|e| AppError::RoutingError(e.to_string()))?;
 
-    // 3. Try model mappings with fallback (1:N mapping)
+    // 3. Try model mappings with fallback or fan-out (1:N mapping)
     if let Some(model_config) = inner.find_model(&decision.model_name) {
+        // Fan-out strategy: dispatch to multiple providers in parallel
+        if model_config.strategy == crate::cli::ModelStrategy::FanOut {
+            if let Some(ref fan_out_config) = model_config.fan_out {
+                let mut sorted_mappings = model_config.mappings.clone();
+                sorted_mappings.sort_by_key(|m| m.priority);
+
+                // Apply GDPR filtering
+                let gdpr = inner.config.router.gdpr;
+                let required_region = inner.config.router.region.as_deref();
+                if gdpr || required_region.is_some() {
+                    let region_filter = required_region.unwrap_or("eu");
+                    sorted_mappings.retain(|m| {
+                        let provider_region = inner.config.providers.iter()
+                            .find(|p| p.name == m.provider)
+                            .and_then(|p| p.region.as_deref())
+                            .unwrap_or("global");
+                        provider_region == region_filter || provider_region == "global"
+                    });
+                }
+
+                let mut fan_request = request_for_routing.clone();
+                // DLP on input
+                if let Some(ref dlp_engine) = dlp {
+                    if dlp_engine.config.scan_input {
+                        dlp_engine.sanitize_request(&mut fan_request);
+                    }
+                }
+
+                match fan_out::handle_fan_out(
+                    &fan_request,
+                    &sorted_mappings,
+                    fan_out_config,
+                    &inner.provider_registry,
+                ).await {
+                    Ok((mut response, provider_info)) => {
+                        // DLP on output
+                        if let Some(ref dlp_engine) = dlp {
+                            if dlp_engine.config.scan_output {
+                                sanitize_provider_response(&mut response, dlp_engine);
+                            }
+                        }
+
+                        // Track cost for ALL providers called
+                        let latency_ms = start_time.elapsed().as_millis() as u64;
+                        for (prov, actual) in &provider_info {
+                            let is_sub = is_provider_subscription(&inner, prov);
+                            let counter = calculate_cost(
+                                &state,
+                                actual,
+                                response.usage.input_tokens,
+                                response.usage.output_tokens,
+                                is_sub,
+                            ).await;
+                            let mut tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+                            tracker.record(prov, actual, counter.estimated_cost_usd);
+                        }
+
+                        record_request_metrics(
+                            model,
+                            "fan_out",
+                            &decision.route_type,
+                            "success",
+                            latency_ms,
+                            response.usage.input_tokens,
+                            response.usage.output_tokens,
+                            0.0,
+                        );
+
+                        // Restore original model name in response
+                        response.model = model.to_string();
+                        return Ok(Json(response).into_response());
+                    }
+                    Err(e) => {
+                        return Err(AppError::ProviderError(format!("Fan-out failed: {}", e)));
+                    }
+                }
+            }
+        }
+
         // Check for X-Provider header to override priority
         let forced_provider = headers
             .get("x-provider")
@@ -1830,6 +2003,7 @@ async fn handle_count_tokens(
         max_tokens: 1024, // Dummy value for routing
         system: count_request.system.clone(),
         tools: count_request.tools.clone(),
+        tool_choice: None,
         thinking: None,
         temperature: None,
         top_p: None,

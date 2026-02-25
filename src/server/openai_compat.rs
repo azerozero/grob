@@ -345,6 +345,29 @@ pub fn transform_openai_to_anthropic(
                 })
                 .collect()
         }),
+        tool_choice: openai_req.tool_choice.as_ref().and_then(|tc| {
+            if let Some(s) = tc.as_str() {
+                match s {
+                    "auto" => Some(serde_json::json!({"type": "auto"})),
+                    "required" => Some(serde_json::json!({"type": "any"})),
+                    "none" => Some(serde_json::json!({"type": "auto"})),
+                    _ => None,
+                }
+            } else if let Some(obj) = tc.as_object() {
+                if obj.get("type").and_then(|v| v.as_str()) == Some("function") {
+                    let name = obj
+                        .get("function")
+                        .and_then(|f| f.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("");
+                    Some(serde_json::json!({"type": "tool", "name": name}))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }),
     })
 }
 

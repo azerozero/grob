@@ -26,6 +26,8 @@ mod tests {
             auto_map_regex: Some("^claude-".to_string()),
             background_regex: Some("(?i)haiku".to_string()),
             prompt_rules: vec![],
+            gdpr: false,
+            region: None,
         };
 
         // Should serialize to TOML without panic

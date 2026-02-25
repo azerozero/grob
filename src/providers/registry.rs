@@ -289,6 +289,7 @@ mod tests {
                 location: None,
                 headers: None,
                 budget_usd: None,
+                region: None,
             },
             ProviderConfig {
                 name: "provider-b".to_string(),
@@ -303,6 +304,7 @@ mod tests {
                 location: None,
                 headers: None,
                 budget_usd: None,
+                region: None,
             },
         ];
 
@@ -316,6 +318,8 @@ mod tests {
                     inject_continuation_prompt: false,
                 }],
                 budget_usd: None,
+                strategy: Default::default(),
+                fan_out: None,
             },
             crate::cli::ModelConfig {
                 name: "model-2".to_string(),
@@ -326,6 +330,8 @@ mod tests {
                     inject_continuation_prompt: false,
                 }],
                 budget_usd: None,
+                strategy: Default::default(),
+                fan_out: None,
             },
         ];
 

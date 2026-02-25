@@ -8,5 +8,6 @@ pub mod pid;
 pub mod preset;
 pub mod providers;
 pub mod router;
+pub mod security;
 pub mod server;
 pub mod storage;

@@ -127,6 +127,11 @@ pub struct ProviderConfig {
     /// Per-provider monthly budget in USD (optional, overrides global)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_usd: Option<f64>,
+
+    /// Provider region for GDPR filtering (e.g., "eu", "us", "global")
+    /// None defaults to "global" (no restriction)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
 }
 
 impl ProviderConfig {
