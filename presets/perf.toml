@@ -4,12 +4,12 @@
 #
 # ── Cout estime (8h/jour, 22j/mois) ──────────────────────
 #
-#   Ce preset (Pro $20/mois, Sonnet partout + Sonnet thinking):
-#     Sans agent : ~€20/mois  (tout inclus dans Pro)
+#   Ce preset (Pro $20/mois, Opus + Sonnet inclus):
+#     Sans agent : ~€20/mois  (tout inclus, Opus rate-limite → Sonnet fallback)
 #     Avec agent : ~€20/mois + €10-30 fallback OpenRouter
 #
-#   Avec Max $200/mois (Opus thinking au lieu de Sonnet):
-#     Sans agent : ~€200/mois (tout inclus dans Max)
+#   Avec Max $200/mois (rate limits Opus plus eleves):
+#     Sans agent : ~€200/mois
 #     Avec agent : ~€200/mois + €10-30 fallback OpenRouter
 #
 #   Sans abonnement (API key Anthropic directe):
@@ -33,7 +33,7 @@
 
 # --- Providers ---
 
-# Anthropic via OAuth (Pro $20/mois = Sonnet, Max $200/mois = Opus + Sonnet)
+# Anthropic via OAuth (Pro $20/mois = Opus + Sonnet, Max $200/mois = limites plus hautes)
 [[providers]]
 name = "anthropic"
 provider_type = "anthropic"

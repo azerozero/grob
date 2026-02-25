@@ -5,11 +5,12 @@
 #
 # ── Cout estime (8h/jour, 22j/mois) ──────────────────────
 #
-#   Ce preset (local + Pro $20/mois Sonnet thinking):
+#   Ce preset (local + Pro $20/mois, Opus thinking inclus):
 #     Sans agent : ~€72/mois  (€20 Pro + €50 amort Mac Mini + €2 elec)
 #     Avec agent : ~€72/mois  (idem, tokens locaux = gratuits)
+#     Opus rate-limite sur Pro → fallback Sonnet
 #
-#   Avec Max $200/mois (Opus thinking):
+#   Avec Max $200/mois (rate limits Opus plus eleves):
 #     Sans agent : ~€252/mois  (€200 Max + €50 amort + €2 elec)
 #     Avec agent : ~€252/mois
 #
@@ -42,7 +43,7 @@
 
 # --- Providers ---
 
-# Anthropic via OAuth (Pro $20/mois = Sonnet, Max $200/mois = Opus + Sonnet)
+# Anthropic via OAuth (Pro $20/mois = Opus + Sonnet, Max $200/mois = limites plus hautes)
 [[providers]]
 name = "anthropic"
 provider_type = "anthropic"

@@ -4,11 +4,12 @@
 #
 # ── Cout estime (8h/jour, 22j/mois) ──────────────────────
 #
-#   Ce preset (Pro $20/mois Sonnet thinking + OpenRouter):
+#   Ce preset (Pro $20/mois, Opus thinking + OpenRouter):
 #     Sans agent : ~€30/mois  ($20 Pro + ~€10 OpenRouter)
 #     Avec agent : ~€120/mois ($20 Pro + ~€100 OpenRouter)
+#     Opus rate-limite sur Pro → fallback Sonnet puis DeepSeek
 #
-#   Avec Max $200/mois (Opus thinking au lieu de Sonnet):
+#   Avec Max $200/mois (rate limits Opus plus eleves):
 #     Sans agent : ~€210/mois ($200 Max + ~€10 OpenRouter)
 #     Avec agent : ~€300/mois ($200 Max + ~€100 OpenRouter)
 #
@@ -31,7 +32,7 @@
 
 # --- Providers ---
 
-# Anthropic via OAuth (Pro $20/mois = Sonnet, Max $200/mois = Opus + Sonnet)
+# Anthropic via OAuth (Pro $20/mois = Opus + Sonnet, Max $200/mois = limites plus hautes)
 [[providers]]
 name = "anthropic-max"
 provider_type = "anthropic"
