@@ -1,5 +1,5 @@
 mod oauth_handlers;
-mod openai_compat;
+pub mod openai_compat;
 
 use crate::auth::TokenStore;
 use crate::cli::AppConfig;
@@ -11,6 +11,7 @@ use crate::message_tracing::MessageTracer;
 use crate::models::{AnthropicRequest, RouteType};
 use crate::providers::{AuthType, ProviderRegistry};
 use crate::router::Router;
+use crate::storage::GrobStore;
 use axum::{
     body::Body,
     extract::State,
@@ -79,18 +80,23 @@ pub struct AppState {
     pub pricing_table: SharedPricingTable,
     /// DLP session manager (None if disabled)
     pub dlp_sessions: Option<Arc<DlpSessionManager>>,
+    /// Shared storage backend (redb)
+    #[allow(dead_code)]
+    pub grob_store: Arc<GrobStore>,
+    /// JWT validator (None if auth mode != "jwt")
+    pub jwt_validator: Option<Arc<crate::auth::JwtValidator>>,
+    /// Webhook tap sender (None if tap is disabled)
+    pub tap_sender: Option<Arc<crate::features::tap::TapSender>>,
 }
 
 impl AppState {
     /// Get a snapshot of current reloadable state
     pub fn snapshot(&self) -> Arc<ReloadableState> {
-        self.inner.read().unwrap().clone()
+        self.inner.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 }
 
-/// Auth middleware: checks Bearer token or x-api-key against server.api_key config.
-/// Skips auth for health/metrics/oauth paths. If api_key is not configured, all requests pass.
-/// Constant-time string comparison to prevent timing side-channel attacks
+/// Constant-time string comparison to prevent timing side-channel attacks.
 fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle::ConstantTimeEq;
     if a.len() != b.len() {
@@ -99,9 +105,15 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
+/// Auth middleware: supports three modes:
+/// - "none" (default): all requests pass
+/// - "api_key": checks Bearer token or x-api-key against configured key
+/// - "jwt": validates JWT, extracts tenant_id, injects GrobClaims into request extensions
+///
+/// Skips auth for health/metrics/oauth paths.
 async fn auth_middleware(
     State(state): State<Arc<AppState>>,
-    request: Request<Body>,
+    mut request: Request<Body>,
     next: Next,
 ) -> Response {
     // Skip auth for operational/oauth paths
@@ -114,13 +126,77 @@ async fn auth_middleware(
     }
 
     let inner = state.snapshot();
-    let api_key = inner.config.server.api_key.as_deref().unwrap_or("");
-    if api_key.is_empty() {
-        return next.run(request).await;
-    }
+    let auth_mode = inner.config.auth.mode.as_str();
 
-    // Check Authorization: Bearer <token> or x-api-key: <token>
-    let token = request
+    // Determine effective auth mode:
+    // If [auth] section is not configured (mode == "none"), fall back to legacy server.api_key
+    let effective_mode = if auth_mode == "none" {
+        let legacy_key = inner.config.server.api_key.as_deref().unwrap_or("");
+        if legacy_key.is_empty() {
+            "none"
+        } else {
+            "api_key"
+        }
+    } else {
+        auth_mode
+    };
+
+    match effective_mode {
+        "none" => next.run(request).await,
+        "api_key" => {
+            // Use [auth].api_key or fall back to server.api_key
+            let api_key = inner.config.auth.api_key.as_deref()
+                .filter(|k| !k.is_empty())
+                .or_else(|| inner.config.server.api_key.as_deref())
+                .unwrap_or("");
+
+            if api_key.is_empty() {
+                return next.run(request).await;
+            }
+
+            let token = extract_bearer_or_api_key(&request);
+            match token {
+                Some(t) if constant_time_eq(t, api_key) => next.run(request).await,
+                _ => auth_error_response("Invalid or missing API key. Provide via Authorization: Bearer <key> or x-api-key header."),
+            }
+        }
+        "jwt" => {
+            let validator = match &state.jwt_validator {
+                Some(v) => v,
+                None => {
+                    error!("JWT auth mode configured but no validator initialized");
+                    return auth_error_response("Server misconfiguration: JWT validator not initialized");
+                }
+            };
+
+            let token = request
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "));
+
+            match token {
+                Some(t) => match validator.validate(t) {
+                    Ok(claims) => {
+                        debug!("JWT auth: tenant_id={}", claims.tenant_id());
+                        request.extensions_mut().insert(claims);
+                        next.run(request).await
+                    }
+                    Err(e) => auth_error_response(&format!("JWT validation failed: {}", e)),
+                },
+                None => auth_error_response("Missing Authorization: Bearer <jwt> header"),
+            }
+        }
+        other => {
+            error!("Unknown auth mode: {}", other);
+            auth_error_response(&format!("Unknown auth mode: {}", other))
+        }
+    }
+}
+
+/// Extract Bearer token or x-api-key from request headers.
+fn extract_bearer_or_api_key(request: &Request<Body>) -> Option<&str> {
+    request
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok())
@@ -130,20 +206,17 @@ async fn auth_middleware(
                 .headers()
                 .get("x-api-key")
                 .and_then(|v| v.to_str().ok())
-        });
+        })
+}
 
-    match token {
-        Some(t) if constant_time_eq(t, api_key) => next.run(request).await,
-        _ => {
-            let body = Json(serde_json::json!({
-                "error": {
-                    "type": "authentication_error",
-                    "message": "Invalid or missing API key. Provide via Authorization: Bearer <key> or x-api-key header."
-                }
-            }));
-            (StatusCode::UNAUTHORIZED, body).into_response()
+fn auth_error_response(message: &str) -> Response {
+    let body = Json(serde_json::json!({
+        "error": {
+            "type": "authentication_error",
+            "message": message
         }
-    }
+    }));
+    (StatusCode::UNAUTHORIZED, body).into_response()
 }
 
 /// Start the HTTP server
@@ -153,8 +226,15 @@ pub async fn start_server(
 ) -> anyhow::Result<()> {
     let router = Router::new(config.clone());
 
-    // Initialize OAuth token store FIRST (needed by provider registry)
-    let token_store = TokenStore::at_default_path()
+    // Initialize shared storage (redb)
+    let grob_store = Arc::new(
+        GrobStore::open(&GrobStore::default_path())
+            .map_err(|e| anyhow::anyhow!("Failed to initialize storage: {}", e))?,
+    );
+    info!("💾 Storage initialized at {}", grob_store.path().display());
+
+    // Initialize OAuth token store backed by GrobStore
+    let token_store = TokenStore::with_store(grob_store.clone())
         .map_err(|e| anyhow::anyhow!("Failed to initialize token store: {}", e))?;
 
     let existing_tokens = token_store.list_providers();
@@ -209,8 +289,8 @@ pub async fn start_server(
     // Initialize message tracer
     let message_tracer = Arc::new(MessageTracer::new(config.server.tracing.clone()));
 
-    // Initialize spend tracker
-    let spend_tracker = SpendTracker::load(SpendTracker::default_path());
+    // Initialize spend tracker backed by GrobStore
+    let spend_tracker = SpendTracker::with_store(grob_store.clone());
     if spend_tracker.total() > 0.0 {
         info!(
             "💰 Loaded spend tracker: ${:.2} spent this month",
@@ -230,6 +310,42 @@ pub async fn start_server(
     // Initialize DLP session manager (if DLP enabled in config)
     let dlp_sessions = DlpSessionManager::from_config(config.dlp.clone());
 
+    // Initialize JWT validator (if auth mode == "jwt")
+    let jwt_validator = if config.auth.mode == "jwt" {
+        let validator = Arc::new(
+            crate::auth::JwtValidator::from_config(&config.auth.jwt)
+                .map_err(|e| anyhow::anyhow!("Failed to initialize JWT validator: {}", e))?,
+        );
+        // Initial JWKS fetch if configured
+        if validator.jwks_url().is_some() {
+            let v = validator.clone();
+            if let Err(e) = v.refresh_jwks().await {
+                warn!("Initial JWKS fetch failed (will retry): {}", e);
+            }
+            // Spawn background JWKS refresh
+            let refresh_interval = config.auth.jwt.jwks_refresh_interval;
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(
+                    std::time::Duration::from_secs(refresh_interval),
+                );
+                interval.tick().await; // Skip first immediate tick
+                loop {
+                    interval.tick().await;
+                    if let Err(e) = v.refresh_jwks().await {
+                        warn!("JWKS refresh failed: {}", e);
+                    }
+                }
+            });
+        }
+        info!("🔐 JWT auth enabled");
+        Some(validator)
+    } else {
+        None
+    };
+
+    // Initialize webhook tap (if enabled in config)
+    let tap_sender = crate::features::tap::init_tap(&config.tap);
+
     // Build reloadable state
     let reloadable = Arc::new(ReloadableState::new(
         config.clone(),
@@ -247,6 +363,9 @@ pub async fn start_server(
         spend_tracker: std::sync::Mutex::new(spend_tracker),
         pricing_table,
         dlp_sessions,
+        grob_store,
+        jwt_validator,
+        tap_sender,
     });
 
     // Spawn background preset sync if configured and auto_sync is enabled
@@ -308,14 +427,60 @@ pub async fn start_server(
     let oauth_state = state.clone();
     let app = app.with_state(state);
 
-    // Bind to main address
-    let addr = format!("{}:{}", config.server.host, config.server.port);
-    let listener = TcpListener::bind(&addr).await?;
+    // Bind to main address (IPv6 addresses need bracket notation)
+    let addr = crate::cli::format_bind_addr(&config.server.host, config.server.port);
 
-    info!("🚀 Server listening on {}", addr);
+    // TLS support (requires `tls` cargo feature)
+    #[cfg(feature = "tls")]
+    let tls_enabled = config.server.tls.enabled
+        && !config.server.tls.cert_path.is_empty()
+        && !config.server.tls.key_path.is_empty();
+    #[cfg(not(feature = "tls"))]
+    let tls_enabled = false;
 
-    // Start OAuth callback server on port 1455 (required for OpenAI Codex)
-    // This is necessary because OpenAI's OAuth app only allows localhost:1455/auth/callback
+    #[cfg(not(feature = "tls"))]
+    if config.server.tls.enabled {
+        anyhow::bail!("TLS is enabled in config but grob was built without the `tls` feature. Rebuild with: cargo build --features tls");
+    }
+
+    if !tls_enabled {
+        let listener = TcpListener::bind(&addr).await?;
+        info!("🚀 Server listening on {}", addr);
+
+        // Start OAuth callback (must be before main server await)
+        spawn_oauth_callback(oauth_state);
+
+        // Start main server (plain HTTP)
+        axum::serve(listener, app).await?;
+    } else {
+        #[cfg(feature = "tls")]
+        {
+            use axum_server::tls_rustls::RustlsConfig;
+            let rustls_config = RustlsConfig::from_pem_file(
+                &config.server.tls.cert_path,
+                &config.server.tls.key_path,
+            )
+            .await?;
+
+            info!("🔒 Server listening on {} (TLS)", addr);
+
+            // Start OAuth callback (must be before main server await)
+            spawn_oauth_callback(oauth_state);
+
+            // Start main server (HTTPS)
+            let socket_addr: std::net::SocketAddr = addr.parse()
+                .map_err(|e| anyhow::anyhow!("Invalid bind address '{}': {}", addr, e))?;
+            axum_server::bind_rustls(socket_addr, rustls_config)
+                .serve(app.into_make_service())
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Spawn the OAuth callback server on localhost:1455 (required for OpenAI Codex OAuth)
+fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
     tokio::spawn(async move {
         let oauth_callback_app = AxumRouter::new()
             .route("/auth/callback", get(oauth_handlers::oauth_callback))
@@ -330,7 +495,6 @@ pub async fn start_server(
                 }
             }
             Err(e) => {
-                // Don't fail if port 1455 is already in use - just warn
                 error!(
                     "⚠️  Failed to bind OAuth callback server on {}: {}",
                     oauth_addr, e
@@ -339,11 +503,6 @@ pub async fn start_server(
             }
         }
     });
-
-    // Start main server
-    axum::serve(listener, app).await?;
-
-    Ok(())
 }
 
 /// Health check endpoint
@@ -352,7 +511,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         .active_requests
         .load(std::sync::atomic::Ordering::Relaxed);
     let spend_total = {
-        let tracker = state.spend_tracker.lock().unwrap();
+        let tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
         tracker.total()
     };
     let inner = state.snapshot();
@@ -360,6 +519,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
         "service": "grob",
+        "pid": std::process::id(),
         "active_requests": active,
         "spend": {
             "total_usd": spend_total,
@@ -377,7 +537,7 @@ async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> impl IntoRespon
 
     // Publish spend/budget gauges (point-in-time snapshots → gauges are correct)
     let inner = state.snapshot();
-    let tracker = state.spend_tracker.lock().unwrap();
+    let tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
     metrics::gauge!("grob_spend_usd").set(tracker.total());
     let budget_limit = inner.config.budget.monthly_limit_usd;
     if budget_limit > 0.0 {
@@ -390,7 +550,7 @@ async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> impl IntoRespon
     Response::builder()
         .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
         .body(Body::from(body))
-        .unwrap()
+        .expect("metrics response builder")
 }
 
 /// Drop guard that decrements the active request counter
@@ -619,7 +779,7 @@ async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
     let active = state
         .active_requests
         .load(std::sync::atomic::Ordering::Relaxed);
-    *state.inner.write().unwrap() = new_inner.clone();
+    *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner.clone();
 
     if active > 0 {
         info!(
@@ -710,7 +870,7 @@ fn check_budget(
 
     let model_limit = inner.find_model(model_name).and_then(|m| m.budget_usd);
 
-    let tracker = state.spend_tracker.lock().unwrap();
+    let tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
 
     // Check budget
     if let Err(e) = tracker.check_budget(
@@ -738,11 +898,15 @@ fn check_budget(
     Ok(())
 }
 
-/// Record spend after a successful request
-fn record_spend(state: &Arc<AppState>, provider_name: &str, model_name: &str, cost: f64) {
+/// Record spend after a successful request (global + per-tenant if applicable)
+fn record_spend(state: &Arc<AppState>, provider_name: &str, model_name: &str, cost: f64, tenant_id: Option<&str>) {
     if cost > 0.0 {
-        let mut tracker = state.spend_tracker.lock().unwrap();
-        tracker.record(provider_name, model_name, cost);
+        let mut tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(tenant) = tenant_id {
+            tracker.record_tenant(tenant, provider_name, model_name, cost);
+        } else {
+            tracker.record(provider_name, model_name, cost);
+        }
     }
 }
 
@@ -779,6 +943,7 @@ async fn calculate_cost(
 /// Supports both streaming (SSE) and non-streaming responses, plus tool calling.
 async fn handle_openai_chat_completions(
     State(state): State<Arc<AppState>>,
+    claims: Option<axum::Extension<crate::auth::GrobClaims>>,
     headers: HeaderMap,
     Json(openai_request): Json<openai_compat::OpenAIRequest>,
 ) -> Result<Response, AppError> {
@@ -786,15 +951,18 @@ async fn handle_openai_chat_completions(
     let model = openai_request.model.clone();
     let is_streaming = openai_request.stream == Some(true);
     let start_time = std::time::Instant::now();
+    let tenant_id = claims.as_ref().map(|c| c.tenant_id().to_string());
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
 
-    // Resolve DLP engine for this request (session-aware)
+    // Resolve DLP engine for this request (session-aware: tenant_id > api_key)
+    let session_key = tenant_id.as_deref()
+        .or_else(|| extract_api_key(&headers));
     let dlp = state
         .dlp_sessions
         .as_ref()
-        .map(|mgr| mgr.engine_for(extract_api_key(&headers)));
+        .map(|mgr| mgr.engine_for(session_key));
 
     // 1. Transform OpenAI request to Anthropic format
     let mut anthropic_request = openai_compat::transform_openai_to_anthropic(openai_request)
@@ -891,6 +1059,31 @@ async fn handle_openai_chat_completions(
                         stream_response.stream
                     };
 
+                    // Wrap stream with Tap if enabled (after DLP)
+                    let stream: Pin<
+                        Box<
+                            dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>>
+                                + Send,
+                        >,
+                    > = if let Some(ref tap) = state.tap_sender {
+                        let req_id = uuid::Uuid::new_v4().to_string();
+                        if let Ok(body_json) = serde_json::to_string(&anthropic_request) {
+                            tap.try_send(crate::features::tap::TapEvent::Request {
+                                request_id: req_id.clone(),
+                                tenant_id: tenant_id.clone(),
+                                model: model.clone(),
+                                body: body_json,
+                            });
+                        }
+                        Box::pin(crate::features::tap::stream::TapStream::new(
+                            stream,
+                            Arc::clone(tap),
+                            req_id,
+                        ))
+                    } else {
+                        stream
+                    };
+
                     // Wrap Anthropic SSE → OpenAI SSE
                     let mut transformer =
                         openai_compat::AnthropicToOpenAIStream::new(model.clone());
@@ -907,7 +1100,7 @@ async fn handle_openai_chat_completions(
                         .header("Cache-Control", "no-cache")
                         .header("Connection", "keep-alive")
                         .body(body)
-                        .unwrap();
+                        .expect("streaming response builder");
 
                     return Ok(response);
                 }
@@ -971,6 +1164,7 @@ async fn handle_openai_chat_completions(
                         &mapping.provider,
                         &decision.model_name,
                         cost.estimated_cost_usd,
+                        tenant_id.as_deref(),
                     );
 
                     // DLP: sanitize response (deanonymize names, scan secrets)
@@ -1082,6 +1276,25 @@ fn extract_api_key(headers: &HeaderMap) -> Option<&str> {
         .or_else(|| headers.get("x-api-key").and_then(|v| v.to_str().ok()))
 }
 
+/// Extract the DLP session key from request extensions (JWT tenant_id) or headers (API key).
+/// Prefers JWT tenant_id when available.
+#[allow(dead_code)]
+fn extract_session_key(extensions: &axum::http::Extensions, headers: &HeaderMap) -> Option<String> {
+    if let Some(claims) = extensions.get::<crate::auth::GrobClaims>() {
+        Some(claims.tenant_id().to_string())
+    } else {
+        extract_api_key(headers).map(|k| k.to_string())
+    }
+}
+
+/// Extract optional tenant_id from request extensions (JWT claims).
+#[allow(dead_code)]
+fn extract_tenant_id(extensions: &axum::http::Extensions) -> Option<String> {
+    extensions
+        .get::<crate::auth::GrobClaims>()
+        .map(|c| c.tenant_id().to_string())
+}
+
 /// Format route type for logging
 fn format_route_type(decision: &crate::models::RouteDecision) -> String {
     match &decision.matched_prompt {
@@ -1162,6 +1375,7 @@ fn inject_continuation_text(msg: &mut crate::models::Message) {
 /// Handle /v1/messages requests (both streaming and non-streaming)
 async fn handle_messages(
     State(state): State<Arc<AppState>>,
+    claims: Option<axum::Extension<crate::auth::GrobClaims>>,
     headers: HeaderMap,
     Json(request_json): Json<serde_json::Value>,
 ) -> Result<Response, AppError> {
@@ -1171,15 +1385,18 @@ async fn handle_messages(
         .and_then(|m| m.as_str())
         .unwrap_or("unknown");
     let start_time = std::time::Instant::now();
+    let tenant_id = claims.as_ref().map(|c| c.tenant_id().to_string());
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
 
-    // Resolve DLP engine for this request (session-aware)
+    // Resolve DLP engine for this request (session-aware: tenant_id > api_key)
+    let session_key = tenant_id.as_deref()
+        .or_else(|| extract_api_key(&headers));
     let dlp = state
         .dlp_sessions
         .as_ref()
-        .map(|mgr| mgr.engine_for(extract_api_key(&headers)));
+        .map(|mgr| mgr.engine_for(session_key));
 
     // Generate trace ID for correlating request/response
     let trace_id = state.message_tracer.new_trace_id();
@@ -1329,6 +1546,13 @@ async fn handle_messages(
                 );
 
                 if is_streaming {
+                    // Capture request body for tap before ownership moves
+                    let tap_request_body = if state.tap_sender.is_some() {
+                        serde_json::to_string(&anthropic_request).ok()
+                    } else {
+                        None
+                    };
+
                     // Streaming request
                     match provider.send_message_stream(anthropic_request).await {
                         Ok(stream_response) => {
@@ -1355,6 +1579,35 @@ async fn handle_messages(
                                 stream_response.stream
                             };
 
+                            // Wrap stream with Tap if enabled (after DLP)
+                            let stream: Pin<
+                                Box<
+                                    dyn Stream<
+                                            Item = Result<
+                                                Bytes,
+                                                crate::providers::error::ProviderError,
+                                            >,
+                                        > + Send,
+                                >,
+                            > = if let Some(ref tap) = state.tap_sender {
+                                let req_id = uuid::Uuid::new_v4().to_string();
+                                if let Some(body_json) = tap_request_body {
+                                    tap.try_send(crate::features::tap::TapEvent::Request {
+                                        request_id: req_id.clone(),
+                                        tenant_id: tenant_id.clone(),
+                                        model: model.to_string(),
+                                        body: body_json,
+                                    });
+                                }
+                                Box::pin(crate::features::tap::stream::TapStream::new(
+                                    stream,
+                                    Arc::clone(tap),
+                                    req_id,
+                                ))
+                            } else {
+                                stream
+                            };
+
                             // Convert provider stream to HTTP response
                             let body_stream = stream.map_err(|e| {
                                 error!("Stream error: {}", e);
@@ -1373,7 +1626,7 @@ async fn handle_messages(
                                 response_builder = response_builder.header(name, value);
                             }
 
-                            let response = response_builder.body(body).unwrap();
+                            let response = response_builder.body(body).expect("streaming response builder");
 
                             return Ok(response);
                         }
@@ -1457,6 +1710,7 @@ async fn handle_messages(
                                 &mapping.provider,
                                 &decision.model_name,
                                 cost.estimated_cost_usd,
+                                tenant_id.as_deref(),
                             );
 
                             // Trace the response

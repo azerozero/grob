@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod cli;
 pub mod features;
+pub mod instance;
 pub mod message_tracing;
 pub mod models;
 pub mod pid;
@@ -8,3 +9,4 @@ pub mod preset;
 pub mod providers;
 pub mod router;
 pub mod server;
+pub mod storage;

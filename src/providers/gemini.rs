@@ -79,7 +79,7 @@ impl GeminiProvider {
                 // Vertex AI
                 format!(
                     "https://{}-aiplatform.googleapis.com/v1",
-                    location.as_ref().unwrap()
+                    location.as_deref().unwrap_or("us-central1")
                 )
             } else {
                 // Google AI (API Key)
@@ -561,21 +561,22 @@ impl AnthropicProvider for GeminiProvider {
 
             // Build URL
             let url = if self.is_vertex_ai() {
-                // Vertex AI endpoint
+                // Vertex AI endpoint (project_id & location guaranteed by is_vertex_ai())
+                let project = self.project_id.as_deref().ok_or_else(|| {
+                    ProviderError::ConfigError("Vertex AI requires project_id".to_string())
+                })?;
+                let location = self.location.as_deref().ok_or_else(|| {
+                    ProviderError::ConfigError("Vertex AI requires location".to_string())
+                })?;
                 format!(
                     "{}/projects/{}/locations/{}/publishers/google/models/{}:generateContent",
-                    self.base_url,
-                    self.project_id.as_ref().unwrap(),
-                    self.location.as_ref().unwrap(),
-                    model
+                    self.base_url, project, location, model
                 )
-            } else if self.api_key.is_some() {
+            } else if let Some(ref key) = self.api_key {
                 // API Key endpoint (key in query parameter)
                 format!(
                     "{}/models/{}:generateContent?key={}",
-                    self.base_url,
-                    model,
-                    self.api_key.as_ref().unwrap()
+                    self.base_url, model, key
                 )
             } else {
                 return Err(ProviderError::ConfigError(
@@ -731,20 +732,21 @@ impl AnthropicProvider for GeminiProvider {
             // Build URL
             let url = if self.is_vertex_ai() {
                 // Vertex AI streaming endpoint
+                let project = self.project_id.as_deref().ok_or_else(|| {
+                    ProviderError::ConfigError("Vertex AI requires project_id".to_string())
+                })?;
+                let location = self.location.as_deref().ok_or_else(|| {
+                    ProviderError::ConfigError("Vertex AI requires location".to_string())
+                })?;
                 format!(
                     "{}/projects/{}/locations/{}/publishers/google/models/{}:streamGenerateContent?alt=sse",
-                    self.base_url,
-                    self.project_id.as_ref().unwrap(),
-                    self.location.as_ref().unwrap(),
-                    model
+                    self.base_url, project, location, model
                 )
-            } else if self.api_key.is_some() {
+            } else if let Some(ref key) = self.api_key {
                 // API Key streaming endpoint
                 format!(
                     "{}/models/{}:streamGenerateContent?key={}&alt=sse",
-                    self.base_url,
-                    model,
-                    self.api_key.as_ref().unwrap()
+                    self.base_url, model, key
                 )
             } else {
                 return Err(ProviderError::ConfigError(

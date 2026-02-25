@@ -105,5 +105,7 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         presets: Default::default(),
         budget: Default::default(),
         dlp: Default::default(),
+        auth: Default::default(),
+        tap: Default::default(),
     }
 }

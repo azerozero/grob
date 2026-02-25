@@ -29,17 +29,20 @@ impl DlpSessionManager {
         }))
     }
 
-    /// Get the DLP engine for a given API key.
+    /// Get the DLP engine for a given session identifier.
+    ///
+    /// The `session_key` can be a tenant_id (from JWT), an API key hash,
+    /// or None for the global engine.
     ///
     /// - Sessions disabled → returns global engine
-    /// - No API key → returns global engine
+    /// - No key → returns global engine
     /// - Sessions enabled + key → returns cached or newly-created session engine
-    pub fn engine_for(&self, api_key: Option<&str>) -> Arc<DlpEngine> {
+    pub fn engine_for(&self, session_key: Option<&str>) -> Arc<DlpEngine> {
         if !self.sessions_enabled {
             return Arc::clone(&self.global_engine);
         }
 
-        let key = match api_key {
+        let key = match session_key {
             Some(k) if !k.is_empty() => k,
             _ => return Arc::clone(&self.global_engine),
         };

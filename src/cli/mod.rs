@@ -1,4 +1,6 @@
+use crate::auth::jwt::AuthConfig;
 use crate::features::dlp::config::DlpConfig;
+use crate::features::tap::TapConfig;
 use crate::providers::ProviderConfig;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -52,6 +54,10 @@ pub struct AppConfig {
     pub budget: BudgetConfig,
     #[serde(default)]
     pub dlp: DlpConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
+    #[serde(default)]
+    pub tap: TapConfig,
 }
 
 /// Preset configuration
@@ -90,6 +96,22 @@ pub struct ServerConfig {
     pub timeouts: TimeoutConfig,
     #[serde(default)]
     pub tracing: TracingConfig,
+    #[serde(default)]
+    pub tls: TlsConfig,
+}
+
+/// TLS configuration for native HTTPS (requires `tls` feature)
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TlsConfig {
+    /// Enable TLS
+    #[serde(default)]
+    pub enabled: bool,
+    /// Path to PEM certificate file (e.g. fullchain.pem from Let's Encrypt)
+    #[serde(default)]
+    pub cert_path: String,
+    /// Path to PEM private key file (e.g. privkey.pem from Let's Encrypt)
+    #[serde(default)]
+    pub key_path: String,
 }
 
 /// Message tracing configuration
@@ -131,6 +153,7 @@ impl Default for ServerConfig {
             log_level: default_log_level(),
             timeouts: TimeoutConfig::default(),
             tracing: TracingConfig::default(),
+            tls: TlsConfig::default(),
         }
     }
 }
@@ -140,7 +163,7 @@ fn default_port() -> u16 {
 }
 
 fn default_host() -> String {
-    "127.0.0.1".to_string()
+    "::1".to_string()
 }
 
 fn default_log_level() -> String {
@@ -442,7 +465,7 @@ impl AppConfig {
 # See: grob preset list
 
 [server]
-host = "127.0.0.1"
+host = "::1"
 port = 13456
 log_level = "info"
 
@@ -546,6 +569,28 @@ default = "placeholder-model"
     }
 }
 
+/// Format a bind address with proper IPv6 bracket notation.
+/// IPv6 hosts (containing `:`) are wrapped in brackets: `[::1]:13456`
+/// IPv4 hosts are left as-is: `127.0.0.1:13456`
+pub fn format_bind_addr(host: &str, port: u16) -> String {
+    if host.contains(':') {
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
+    }
+}
+
+/// Format a base URL with proper IPv6 bracket notation.
+/// IPv6 hosts: `http://[::1]:13456`
+/// IPv4 hosts: `http://127.0.0.1:13456`
+pub fn format_base_url(host: &str, port: u16) -> String {
+    if host.contains(':') {
+        format!("http://[{}]:{}", host, port)
+    } else {
+        format!("http://{}:{}", host, port)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -553,11 +598,34 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
+    fn test_format_bind_addr_ipv6() {
+        assert_eq!(format_bind_addr("::1", 13456), "[::1]:13456");
+    }
+
+    #[test]
+    fn test_format_bind_addr_ipv4() {
+        assert_eq!(format_bind_addr("127.0.0.1", 13456), "127.0.0.1:13456");
+    }
+
+    #[test]
+    fn test_format_base_url_ipv6() {
+        assert_eq!(format_base_url("::", 13456), "http://[::]:13456");
+    }
+
+    #[test]
+    fn test_format_base_url_ipv4() {
+        assert_eq!(
+            format_base_url("127.0.0.1", 13456),
+            "http://127.0.0.1:13456"
+        );
+    }
+
+    #[test]
     fn test_parse_toml_config() {
         let config_content = r#"
 [server]
 port = 3456
-host = "127.0.0.1"
+host = "::1"
 log_level = "info"
 
 [server.timeouts]

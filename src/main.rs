@@ -21,7 +21,9 @@ mod pid;
 mod preset;
 mod providers;
 mod router;
+mod instance;
 mod server;
+mod storage;
 
 const PROCESS_TRANSITION_GRACE_MS: u64 = 500;
 const HEALTH_POLL_INTERVAL_MS: u64 = 100;
@@ -76,8 +78,8 @@ async fn start_foreground(
     tracing::info!("Starting Grob on port {}", config.server.port);
     println!("🚀 Grob v{}", env!("CARGO_PKG_VERSION"));
     println!(
-        "📡 Starting server on {}:{}",
-        config.server.host, config.server.port
+        "📡 Starting server on {}",
+        cli::format_bind_addr(&config.server.host, config.server.port)
     );
     println!();
 
@@ -280,20 +282,29 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::Start { port, detach } => {
+            let effective_port = port.unwrap_or(config.server.port);
+
             // If detached, spawn as background process
             if detach {
                 println!("Starting Grob in background...");
 
-                // Stop existing service if running
-                if let Ok(pid) = pid::read_pid() {
-                    if pid::is_process_running(pid) {
-                        println!("Stopping existing service...");
+                // Stop existing service if running (health-check based)
+                if instance::is_instance_running(&config.server.host, effective_port).await {
+                    println!("Stopping existing service...");
+                    if let Some(pid) = instance::find_instance_pid(&config.server.host, effective_port).await {
                         if let Err(e) = stop_service(pid).await {
                             eprintln!("Warning: Failed to stop existing service: {}", e);
                         }
                     }
+                } else {
+                    // Fallback: check legacy PID file
+                    if let Some(pid) = instance::legacy_pid() {
+                        if instance::is_process_running(pid) {
+                            let _ = stop_service(pid).await;
+                        }
+                    }
                 }
-                let _ = pid::cleanup_pid();
+                instance::cleanup_legacy_pid();
 
                 // Start in background
                 spawn_background_service(port, cli.config)?;
@@ -302,79 +313,104 @@ async fn main() -> anyhow::Result<()> {
                 ))
                 .await;
 
-                if let Ok(pid) = pid::read_pid() {
+                let base_url = cli::format_base_url(&config.server.host, effective_port);
+                if let Some(pid) = instance::find_instance_pid(&config.server.host, effective_port).await {
                     println!("✅ Grob started in background (PID: {})", pid);
                 } else {
+                    let _ = poll_health(&base_url, 10, HEALTH_POLL_INTERVAL_MS).await;
                     println!("✅ Grob started in background");
                 }
-                println!("📡 Running on port {}", port.unwrap_or(config.server.port));
+                println!("📡 Running on port {}", effective_port);
                 return Ok(());
             }
 
             // Foreground mode
             let mut config = config;
-
-            // Override port if specified
             if let Some(port) = port {
                 config.server.port = port;
             }
 
-            // Check if already running
-            if let Ok(existing_pid) = pid::read_pid() {
-                if pid::is_process_running(existing_pid) {
+            // Check if already running (health-check based)
+            if instance::is_instance_running(&config.server.host, config.server.port).await {
+                if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
                     eprintln!(
                         "❌ Error: Service is already running (PID: {})",
-                        existing_pid
+                        pid
                     );
-                    eprintln!(
-                        "Use 'grob stop' to stop it first, or use 'grob start -d' to restart it"
-                    );
-                    return Ok(());
+                } else {
+                    eprintln!("❌ Error: Service is already running on port {}", config.server.port);
                 }
-                // Stale PID file, clean it up
-                let _ = pid::cleanup_pid();
+                eprintln!(
+                    "Use 'grob stop' to stop it first, or use 'grob start -d' to restart it"
+                );
+                return Ok(());
             }
+            // Clean up stale legacy PID files
+            instance::cleanup_legacy_pid();
 
             start_foreground(config, config_source).await?;
         }
         Commands::Stop => {
             println!("Stopping Grob...");
-            match pid::read_pid() {
-                Ok(pid) if pid::is_process_running(pid) => match stop_service(pid).await {
+            // Try health-check based detection first
+            if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+                match stop_service(pid).await {
                     Ok(_) => {
-                        println!("✅ Service stopped successfully");
-                        let _ = pid::cleanup_pid();
+                        println!("✅ Service stopped successfully (PID: {})", pid);
+                        instance::cleanup_legacy_pid();
                     }
                     Err(e) => {
                         eprintln!("❌ Failed to stop service (PID: {}): {}", pid, e);
                     }
-                },
-                _ => {
-                    println!("Service is not running");
-                    let _ = pid::cleanup_pid();
                 }
+            } else if let Some(pid) = instance::legacy_pid() {
+                // Fallback to legacy PID file
+                if instance::is_process_running(pid) {
+                    match stop_service(pid).await {
+                        Ok(_) => {
+                            println!("✅ Service stopped successfully");
+                            instance::cleanup_legacy_pid();
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to stop service (PID: {}): {}", pid, e);
+                        }
+                    }
+                } else {
+                    println!("Service is not running (stale PID file removed)");
+                    instance::cleanup_legacy_pid();
+                }
+            } else {
+                println!("Service is not running");
             }
         }
         Commands::Restart { detach } => {
-            // Stop the existing service
-            let was_running = match pid::read_pid() {
-                Ok(pid) => {
-                    if pid::is_process_running(pid) {
-                        println!("Stopping existing service...");
-                        match stop_service(pid).await {
-                            Ok(_) => true,
-                            Err(e) => {
-                                eprintln!("Warning: Failed to stop existing service: {}", e);
-                                false
-                            }
-                        }
-                    } else {
+            // Stop the existing service (health-check based)
+            let was_running = if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+                println!("Stopping existing service...");
+                match stop_service(pid).await {
+                    Ok(_) => true,
+                    Err(e) => {
+                        eprintln!("Warning: Failed to stop existing service: {}", e);
                         false
                     }
                 }
-                Err(_) => false,
+            } else if let Some(pid) = instance::legacy_pid() {
+                if instance::is_process_running(pid) {
+                    println!("Stopping existing service...");
+                    match stop_service(pid).await {
+                        Ok(_) => true,
+                        Err(e) => {
+                            eprintln!("Warning: Failed to stop existing service: {}", e);
+                            false
+                        }
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
             };
-            let _ = pid::cleanup_pid();
+            instance::cleanup_legacy_pid();
 
             if detach {
                 // Background mode
@@ -387,7 +423,7 @@ async fn main() -> anyhow::Result<()> {
                 .await;
 
                 let verb = if was_running { "restarted" } else { "started" };
-                if let Ok(pid) = pid::read_pid() {
+                if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
                     println!("✅ Service {} successfully (PID: {})", verb, pid);
                 } else {
                     println!("✅ Service {} successfully", verb);
@@ -399,18 +435,19 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Status => {
             println!("Checking service status...");
-            match pid::read_pid() {
-                Ok(pid) => {
-                    if pid::is_process_running(pid) {
-                        println!("✅ Service is running (PID: {})", pid);
-                    } else {
-                        println!("❌ Service is not running (stale PID file)");
-                        let _ = pid::cleanup_pid();
-                    }
+            if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+                println!("✅ Service is running (PID: {})", pid);
+            } else if instance::is_instance_running(&config.server.host, config.server.port).await {
+                println!("✅ Service is running");
+            } else if let Some(pid) = instance::legacy_pid() {
+                if instance::is_process_running(pid) {
+                    println!("✅ Service is running (PID: {}, legacy)", pid);
+                } else {
+                    println!("❌ Service is not running (stale PID file)");
+                    instance::cleanup_legacy_pid();
                 }
-                Err(_) => {
-                    println!("❌ Service is not running");
-                }
+            } else {
+                println!("❌ Service is not running");
             }
 
             // Show spend summary
@@ -600,7 +637,7 @@ async fn main() -> anyhow::Result<()> {
             if let Some(port) = port {
                 config.server.port = port;
             }
-            config.server.host = host.unwrap_or_else(|| "0.0.0.0".to_string());
+            config.server.host = host.unwrap_or_else(|| "::".to_string());
 
             tracing::info!(
                 "🐳 Container mode: {}:{}",
@@ -722,20 +759,11 @@ async fn main() -> anyhow::Result<()> {
         },
         Commands::Exec { port, no_stop, cmd } => {
             let effective_port = port.unwrap_or(config.server.port);
-            let base_url = format!("http://127.0.0.1:{}", effective_port);
+            let base_url = cli::format_base_url(&config.server.host, effective_port);
             let mut we_started = false;
 
-            // 1. Check if Grob is already running
-            let already_running = if let Ok(existing_pid) = pid::read_pid() {
-                if pid::is_process_running(existing_pid) {
-                    // PID file exists and process is alive, verify health
-                    is_grob_healthy(&base_url).await
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
+            // 1. Check if Grob is already running (health-check based)
+            let already_running = instance::is_instance_running(&config.server.host, effective_port).await;
 
             if !already_running {
                 // 2. Start Grob in background
@@ -774,12 +802,10 @@ async fn main() -> anyhow::Result<()> {
 
             // 5. Stop Grob if we started it and --no-stop not set
             if we_started && !no_stop {
-                if let Ok(grob_pid) = pid::read_pid() {
-                    if pid::is_process_running(grob_pid) {
-                        eprintln!("Stopping Grob...");
-                        let _ = stop_service(grob_pid).await;
-                        let _ = pid::cleanup_pid();
-                    }
+                if let Some(grob_pid) = instance::find_instance_pid(&config.server.host, effective_port).await {
+                    eprintln!("Stopping Grob...");
+                    let _ = stop_service(grob_pid).await;
+                    instance::cleanup_legacy_pid();
                 }
             }
 

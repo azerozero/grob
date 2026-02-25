@@ -49,22 +49,35 @@ impl Default for SpendData {
     }
 }
 
-/// Spend tracker with periodic persistence
+/// Spend tracker with periodic persistence.
+/// Thin wrapper around `GrobStore` for backward compatibility.
 pub struct SpendTracker {
+    store: Option<std::sync::Arc<crate::storage::GrobStore>>,
+    /// Standalone data (used when no store is provided, e.g. tests or CLI)
     data: SpendData,
     path: PathBuf,
-    /// Counter for batched saves (save every N requests)
     request_count: AtomicU64,
 }
 
 impl SpendTracker {
-    /// Load spend data from disk, or create fresh if missing/corrupt/new month
+    /// Create a SpendTracker backed by a GrobStore.
+    pub fn with_store(store: std::sync::Arc<crate::storage::GrobStore>) -> Self {
+        let data = store.load_spend(None);
+        Self {
+            store: Some(store),
+            data,
+            path: PathBuf::new(),
+            request_count: AtomicU64::new(0),
+        }
+    }
+
+    /// Load spend data from disk (legacy mode, no GrobStore).
+    #[allow(dead_code)]
     pub fn load(path: PathBuf) -> Self {
         let data = if path.exists() {
             match std::fs::read_to_string(&path) {
                 Ok(content) => match serde_json::from_str::<SpendData>(&content) {
                     Ok(mut data) => {
-                        // Auto-reset if new month
                         let now = current_month();
                         if data.month != now {
                             tracing::info!(
@@ -91,6 +104,7 @@ impl SpendTracker {
         };
 
         Self {
+            store: None,
             data,
             path,
             request_count: AtomicU64::new(0),
@@ -107,21 +121,29 @@ impl SpendTracker {
 
     /// Record spend for a request
     pub fn record(&mut self, provider: &str, model: &str, cost: f64) {
-        self.reset_if_new_month();
+        if let Some(ref store) = self.store {
+            store.record_spend(None, cost, provider, model);
+            self.data = store.load_spend(None);
+        } else {
+            self.reset_if_new_month();
+            self.data.total += cost;
+            *self.data.by_provider.entry(provider.to_string()).or_default() += cost;
+            *self.data.by_model.entry(model.to_string()).or_default() += cost;
 
-        self.data.total += cost;
-        *self
-            .data
-            .by_provider
-            .entry(provider.to_string())
-            .or_default() += cost;
-        *self.data.by_model.entry(model.to_string()).or_default() += cost;
-
-        // Batch saves: persist every 10 requests
-        let count = self.request_count.fetch_add(1, Ordering::Relaxed);
-        if count.is_multiple_of(10) {
-            self.save();
+            let count = self.request_count.fetch_add(1, Ordering::Relaxed);
+            if count.is_multiple_of(10) {
+                self.save();
+            }
         }
+    }
+
+    /// Record spend for a specific tenant
+    pub fn record_tenant(&mut self, tenant: &str, provider: &str, model: &str, cost: f64) {
+        if let Some(ref store) = self.store {
+            store.record_spend(Some(tenant), cost, provider, model);
+        }
+        // Also record to global
+        self.record(provider, model, cost);
     }
 
     /// Get total spend for current month
@@ -139,13 +161,26 @@ impl SpendTracker {
         self.data.by_model.get(model).copied().unwrap_or(0.0)
     }
 
+    /// Load spend for a specific tenant
+    #[allow(dead_code)]
+    pub fn tenant_spend(&self, tenant: &str) -> SpendData {
+        if let Some(ref store) = self.store {
+            store.load_spend(Some(tenant))
+        } else {
+            SpendData::default()
+        }
+    }
+
     /// Persist spend data to disk
     pub fn save(&self) {
-        // Ensure parent directory exists
+        if let Some(ref store) = self.store {
+            store.flush_spend();
+            return;
+        }
+
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-
         match serde_json::to_string_pretty(&self.data) {
             Ok(json) => {
                 if let Err(e) = std::fs::write(&self.path, json) {
@@ -158,7 +193,6 @@ impl SpendTracker {
         }
     }
 
-    /// Reset spend data if we've entered a new month
     fn reset_if_new_month(&mut self) {
         let now = current_month();
         if self.data.month != now {
@@ -173,8 +207,6 @@ impl SpendTracker {
     }
 
     /// Check if a request should be allowed given budget limits.
-    /// Returns Ok(()) if allowed, Err(BudgetError) if any limit is exceeded.
-    /// Priority: model budget > provider budget > global budget.
     pub fn check_budget(
         &self,
         provider: &str,
@@ -183,7 +215,6 @@ impl SpendTracker {
         provider_limit: Option<f64>,
         model_limit: Option<f64>,
     ) -> Result<(), BudgetError> {
-        // Model budget (most specific)
         if let Some(limit) = model_limit {
             let spend = self.model_spend(model);
             if spend >= limit {
@@ -196,7 +227,6 @@ impl SpendTracker {
             }
         }
 
-        // Provider budget
         if let Some(limit) = provider_limit {
             let spend = self.provider_spend(provider);
             if spend >= limit {
@@ -209,7 +239,6 @@ impl SpendTracker {
             }
         }
 
-        // Global budget (0 = unlimited)
         if global_limit > 0.0 {
             let total = self.total();
             if total >= global_limit {
@@ -226,7 +255,6 @@ impl SpendTracker {
     }
 
     /// Check budget limits and log warnings when approaching limits.
-    /// Returns the warning message if a threshold is approaching.
     pub fn check_warnings(
         &self,
         provider: &str,
@@ -300,7 +328,7 @@ pub fn load_spend_data() -> SpendData {
     }
 }
 
-fn current_month() -> String {
+pub fn current_month() -> String {
     chrono::Local::now().format("%Y-%m").to_string()
 }
 

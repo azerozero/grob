@@ -65,18 +65,29 @@ impl OAuthToken {
     }
 }
 
-/// Token storage - persists to JSON file
+/// Token storage - persists to redb (via GrobStore) or JSON file (legacy).
 #[derive(Debug, Clone)]
 pub struct TokenStore {
-    /// Path to token storage file
+    /// Path to token storage file (legacy fallback)
     file_path: PathBuf,
     /// In-memory cache of tokens
     tokens: Arc<RwLock<HashMap<String, OAuthToken>>>,
+    /// Optional GrobStore backend
+    store: Option<std::sync::Arc<crate::storage::GrobStore>>,
 }
 
 impl TokenStore {
-    /// Create a new token store
-    /// Loads existing tokens from file if it exists
+    /// Create a new token store backed by GrobStore.
+    pub fn with_store(store: std::sync::Arc<crate::storage::GrobStore>) -> Result<Self> {
+        let tokens = store.all_oauth_tokens();
+        Ok(Self {
+            file_path: PathBuf::new(),
+            tokens: Arc::new(RwLock::new(tokens)),
+            store: Some(store),
+        })
+    }
+
+    /// Create a new token store (legacy JSON mode).
     pub fn new(file_path: PathBuf) -> Result<Self> {
         let tokens = if file_path.exists() {
             let content = fs::read_to_string(&file_path).context("Failed to read token file")?;
@@ -88,11 +99,11 @@ impl TokenStore {
         Ok(Self {
             file_path,
             tokens: Arc::new(RwLock::new(tokens)),
+            store: None,
         })
     }
 
     /// Get default token store path
-    /// ~/.grob/oauth_tokens.json
     pub fn default_path() -> Result<PathBuf> {
         let home = dirs::home_dir().context("Failed to get home directory")?;
         let config_dir = home.join(".grob");
@@ -100,7 +111,7 @@ impl TokenStore {
         Ok(config_dir.join("oauth_tokens.json"))
     }
 
-    /// Create a token store at the default location
+    /// Create a token store at the default location (legacy mode).
     pub fn at_default_path() -> Result<Self> {
         let path = Self::default_path()?;
         Self::new(path)
@@ -110,17 +121,21 @@ impl TokenStore {
     pub fn save(&self, token: OAuthToken) -> Result<()> {
         let provider_id = token.provider_id.clone();
 
-        // Update in-memory cache
+        if let Some(ref store) = self.store {
+            store.save_oauth_token(&token)?;
+        }
+
         {
             let mut tokens = self
                 .tokens
                 .write()
-                .expect("Token store lock poisoned during write - cannot proceed safely");
+                .expect("Token store lock poisoned during write");
             tokens.insert(provider_id, token);
         }
 
-        // Persist to file
-        self.persist()?;
+        if self.store.is_none() {
+            self.persist()?;
+        }
 
         Ok(())
     }
@@ -130,22 +145,27 @@ impl TokenStore {
         let tokens = self
             .tokens
             .read()
-            .expect("Token store lock poisoned during read - cannot proceed safely");
+            .expect("Token store lock poisoned during read");
         tokens.get(provider_id).cloned()
     }
 
     /// Remove token for a provider
     pub fn remove(&self, provider_id: &str) -> Result<()> {
+        if let Some(ref store) = self.store {
+            store.delete_oauth_token(provider_id)?;
+        }
+
         {
             let mut tokens = self
                 .tokens
                 .write()
-                .expect("Token store lock poisoned during write - cannot proceed safely");
+                .expect("Token store lock poisoned during write");
             tokens.remove(provider_id);
         }
 
-        // Persist to file
-        self.persist()?;
+        if self.store.is_none() {
+            self.persist()?;
+        }
 
         Ok(())
     }
@@ -155,7 +175,7 @@ impl TokenStore {
         let tokens = self
             .tokens
             .read()
-            .expect("Token store lock poisoned during read - cannot proceed safely");
+            .expect("Token store lock poisoned during read");
         tokens.keys().cloned().collect()
     }
 
@@ -164,21 +184,24 @@ impl TokenStore {
         let tokens = self
             .tokens
             .read()
-            .expect("Token store lock poisoned during read - cannot proceed safely");
+            .expect("Token store lock poisoned during read");
         tokens.clone()
     }
 
-    /// Persist tokens to file
+    /// Persist tokens to file (legacy mode only)
     fn persist(&self) -> Result<()> {
+        if self.store.is_some() {
+            return Ok(()); // GrobStore handles persistence
+        }
+
         let tokens = self
             .tokens
             .read()
-            .expect("Token store lock poisoned during read - cannot proceed safely");
+            .expect("Token store lock poisoned during read");
         let json = serde_json::to_string_pretty(&*tokens).context("Failed to serialize tokens")?;
 
         fs::write(&self.file_path, json).context("Failed to write token file")?;
 
-        // Set file permissions to 0600 (owner read/write only)
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

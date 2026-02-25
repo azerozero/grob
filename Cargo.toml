@@ -73,6 +73,17 @@ aho-corasick = "1.1"
 memchr = "2"
 hmac = "0.12"
 
+# Storage (embedded key-value store)
+redb = "2"
+
+# JWT Auth
+jsonwebtoken = "9"
+
+# TLS (optional, for native HTTPS without reverse proxy)
+axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
+rustls = { version = "0.23", optional = true }
+rustls-pemfile = { version = "2", optional = true }
+
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
@@ -93,6 +104,10 @@ proptest = "1"
 [[bench]]
 name = "routing"
 harness = false
+
+[features]
+default = []
+tls = ["axum-server", "rustls", "rustls-pemfile"]
 
 [profile.release]
 opt-level = 3

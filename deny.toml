@@ -1,38 +1,72 @@
+# cargo-deny configuration for Grob (AGPL-3.0-only)
+# https://embarkstudios.github.io/cargo-deny/
+
+# ── Advisories ───────────────────────────────────────────────────────────────
+# Checks crates against the RustSec advisory database for known vulnerabilities.
 [advisories]
 version = 2
+# Fail CI on any known vulnerability.
 ignore = []
 
+# ── Licenses ─────────────────────────────────────────────────────────────────
+# Grob is AGPL-3.0-only. We allow permissive licenses (always compatible),
+# copyleft licenses compatible with AGPL-3.0, and a handful of special-purpose
+# licenses commonly found in the Rust ecosystem.
 [licenses]
 version = 2
+# Deny everything not explicitly listed.
 allow = [
+    # ── Permissive ──
     "MIT",
+    "MIT-0",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
-    "Unicode-3.0",
     "Zlib",
     "BSL-1.0",
-    "MPL-2.0",
-    "CC0-1.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+
+    # ── Public-domain-equivalent ──
     "Unlicense",
-    "MIT-0",
-    "CDLA-Permissive-2.0",
+    "CC0-1.0",
+
+    # ── Copyleft (compatible with AGPL-3.0) ──
     "AGPL-3.0-only",
+    "AGPL-3.0-or-later",
+    "GPL-3.0-only",
+    "GPL-3.0-or-later",
+    "LGPL-3.0-only",
+    "LGPL-3.0-or-later",
+    "MPL-2.0",
+
+    # ── Ecosystem one-offs ──
+    "CDLA-Permissive-2.0",
 ]
+# Minimum confidence for SPDX license detection.
 confidence-threshold = 0.8
 
+# The grob crate itself is AGPL-3.0-only; list it as an explicit exception
+# so cargo-deny never flags the workspace root.
 [[licenses.exceptions]]
 allow = ["AGPL-3.0-only"]
 name = "grob"
 
+# ── Bans ─────────────────────────────────────────────────────────────────────
 [bans]
+# Warn (don't fail) when multiple versions of the same crate are pulled in.
 multiple-versions = "warn"
+# Allow wildcard dependencies — common during rapid development.
 wildcards = "allow"
+highlight = "all"
 
+# ── Sources ──────────────────────────────────────────────────────────────────
+# Only allow crates published to crates.io. Warn on anything else.
 [sources]
-unknown-registry = "warn"
-unknown-git = "warn"
+unknown-registry = "deny"
+unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = []

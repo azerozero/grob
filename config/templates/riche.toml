@@ -1,0 +1,173 @@
+# ═══════════════════════════════════════════════════════════
+# Grob Config: RICHE (Premium)
+# ═══════════════════════════════════════════════════════════
+# Best models everywhere, no budget concerns.
+# Maximum reasoning power with fastest fallbacks.
+#
+# Leaderboard scores (Chatbot Arena, Feb 2026):
+#   claude-opus-4-6-thinking  1553  (Rank #2, best reasoning)
+#   claude-opus-4-6           1560  (Rank #1, best overall)
+#   claude-sonnet-4-6         1533  (Rank #3, fast + capable)
+#   gpt-5.2-high              1471  (Rank #5, strong alternative)
+#   gemini-3-pro              1444  (Rank #9, 1M context)
+#
+# Monthly cost estimate: $100-500+ depending on volume
+# ═══════════════════════════════════════════════════════════
+
+[server]
+port = 13456
+host = "::1"
+log_level = "info"
+
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000
+
+# No budget limit — money is not a concern
+[budget]
+monthly_limit_usd = 0.0
+
+# ── Providers ────────────────────────────────────────────
+
+# Anthropic Native — lowest latency for Claude models
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+api_key = "$ANTHROPIC_API_KEY"
+enabled = true
+models = []
+
+# OpenAI — for GPT-5.2 and codex models
+[[providers]]
+name = "openai"
+provider_type = "openai"
+api_key = "$OPENAI_API_KEY"
+enabled = true
+models = []
+
+# Google Gemini — 1M context window, multimodal
+[[providers]]
+name = "gemini"
+provider_type = "gemini"
+api_key = "$GEMINI_API_KEY"
+enabled = true
+models = []
+
+# OpenRouter — universal fallback for any model
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+api_key = "$OPENROUTER_API_KEY"
+enabled = true
+models = []
+
+# ── Models ───────────────────────────────────────────────
+
+# Default: Claude Opus 4.6 (Rank #1, score 1560)
+[[models]]
+name = "default-model"
+
+  [[models.mappings]]
+  priority = 1
+  provider = "anthropic"
+  actual_model = "claude-opus-4-6"
+
+  [[models.mappings]]
+  priority = 2
+  provider = "openrouter"
+  actual_model = "anthropic/claude-opus-4-6"
+
+# Thinking: Claude Opus 4.6 Thinking (Rank #2, score 1553)
+# Extended thinking with 32k budget for deep reasoning
+[[models]]
+name = "think-model"
+
+  [[models.mappings]]
+  priority = 1
+  provider = "anthropic"
+  actual_model = "claude-opus-4-6"
+
+  [[models.mappings]]
+  priority = 2
+  provider = "openrouter"
+  actual_model = "anthropic/claude-opus-4-6"
+
+# Background: Claude Sonnet 4.6 (Rank #3, score 1533, fast)
+[[models]]
+name = "background-model"
+
+  [[models.mappings]]
+  priority = 1
+  provider = "anthropic"
+  actual_model = "claude-sonnet-4-6"
+
+  [[models.mappings]]
+  priority = 2
+  provider = "openai"
+  actual_model = "gpt-5.2"
+
+  [[models.mappings]]
+  priority = 3
+  provider = "openrouter"
+  actual_model = "anthropic/claude-sonnet-4-6"
+
+# Web search: Claude Sonnet 4.6 (fast, tool-use capable)
+[[models]]
+name = "search-model"
+
+  [[models.mappings]]
+  priority = 1
+  provider = "anthropic"
+  actual_model = "claude-sonnet-4-6"
+
+  [[models.mappings]]
+  priority = 2
+  provider = "gemini"
+  actual_model = "gemini-3-pro"
+
+# Heavy reasoning: GPT-5.2 High (Rank #5, score 1471)
+# Used as alternative when Anthropic is down
+[[models]]
+name = "gpt-5.2-high"
+
+  [[models.mappings]]
+  priority = 1
+  provider = "openai"
+  actual_model = "gpt-5.2-high"
+
+  [[models.mappings]]
+  priority = 2
+  provider = "openrouter"
+  actual_model = "openai/gpt-5.2-high"
+
+# Gemini Pro: 1M context for massive codebases
+[[models]]
+name = "gemini-3-pro"
+
+  [[models.mappings]]
+  priority = 1
+  provider = "gemini"
+  actual_model = "gemini-3-pro"
+
+  [[models.mappings]]
+  priority = 2
+  provider = "openrouter"
+  actual_model = "google/gemini-3-pro"
+
+# ── Router ───────────────────────────────────────────────
+
+[router]
+default = "default-model"
+think = "think-model"
+background = "background-model"
+websearch = "search-model"
+
+# Route architecture/design tasks to thinking model
+[[router.prompt_rules]]
+pattern = "(?i)(architect|design.*system|plan.*implement|security.*review)"
+model = "think-model"
+
+# Route quick tasks to fast Sonnet
+[[router.prompt_rules]]
+pattern = "(?i)(format|lint|rename|typo|commit|push)"
+model = "background-model"

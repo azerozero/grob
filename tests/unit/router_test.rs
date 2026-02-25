@@ -22,6 +22,8 @@ mod tests {
             presets: Default::default(),
             budget: Default::default(),
             dlp: Default::default(),
+            auth: Default::default(),
+            tap: Default::default(),
         }
     }
 

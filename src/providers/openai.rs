@@ -804,11 +804,21 @@ impl OpenAIProvider {
     /// - `message.content` → `text` content block
     /// - `message.tool_calls` → `tool_use` content blocks
     fn transform_response(&self, response: OpenAIResponse) -> ProviderResponse {
-        let choice = response
-            .choices
-            .into_iter()
-            .next()
-            .expect("OpenAI response must have at least one choice");
+        let choice = match response.choices.into_iter().next() {
+            Some(c) => c,
+            None => {
+                return ProviderResponse {
+                    id: response.id,
+                    r#type: "message".to_string(),
+                    role: "assistant".to_string(),
+                    content: vec![],
+                    model: response.model,
+                    stop_reason: Some("error".to_string()),
+                    stop_sequence: None,
+                    usage: Usage { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: None, cache_read_input_tokens: None },
+                };
+            }
+        };
 
         let mut content_blocks = Vec::new();
 
@@ -1664,7 +1674,7 @@ impl AnthropicProvider for OpenAIProvider {
                     match result {
                         Ok(sse_event) => {
                             // If stream already ended, don't process any more chunks
-                            if state.lock().unwrap().stream_ended {
+                            if state.lock().unwrap_or_else(|e| e.into_inner()).stream_ended {
                                 tracing::debug!("⏹️ Stream already ended, skipping chunk");
                                 return Ok(Bytes::new());
                             }
@@ -1717,7 +1727,7 @@ impl AnthropicProvider for OpenAIProvider {
                                     let sse_output = Self::transform_openai_chunk_to_anthropic_sse(
                                         &chunk,
                                         &message_id,
-                                        &mut state.lock().unwrap(),
+                                        &mut state.lock().unwrap_or_else(|e| e.into_inner()),
                                     );
 
                                     if !sse_output.is_empty() {
@@ -1753,7 +1763,7 @@ impl AnthropicProvider for OpenAIProvider {
         // Some providers close streams without sending finish_reason
         let finalized_stream = transformed_stream
             .chain(futures::stream::once(async move {
-                let state = state_for_cleanup.lock().unwrap();
+                let state = state_for_cleanup.lock().unwrap_or_else(|e| e.into_inner());
                 tracing::debug!(
                     "🏁 Stream finalization: message_started={}, stream_ended={}",
                     state.message_started,
