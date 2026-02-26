@@ -95,7 +95,7 @@ pub struct AppState {
     /// Circuit breaker registry (None if disabled)
     pub circuit_breakers: Option<Arc<CircuitBreakerRegistry>>,
     /// Signed audit log (None if audit_dir not configured)
-    pub _audit_log: Option<Arc<AuditLog>>,
+    pub audit_log: Option<Arc<AuditLog>>,
 }
 
 impl AppState {
@@ -112,6 +112,49 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
         return false;
     }
     a.as_bytes().ct_eq(b.as_bytes()).into()
+}
+
+/// Fire-and-forget audit log entry writer.
+/// Builds an `AuditEntry` and writes it; errors are logged but never propagate.
+fn log_audit(
+    audit_log: &AuditLog,
+    tenant_id: &str,
+    action: crate::security::audit_log::AuditEvent,
+    backend: &str,
+    dlp_rules: Vec<String>,
+    ip: &str,
+    duration_ms: u64,
+) {
+    use crate::security::audit_log::{AuditEntry, Classification};
+
+    let entry = AuditEntry {
+        timestamp: chrono::Utc::now(),
+        event_id: uuid::Uuid::new_v4().to_string(),
+        tenant_id: tenant_id.to_string(),
+        user_id: None,
+        action,
+        classification: Classification::Nc,
+        backend_routed: backend.to_string(),
+        request_hash: None,
+        dlp_rules_triggered: dlp_rules,
+        ip_source: ip.to_string(),
+        duration_ms,
+        previous_hash: String::new(), // filled by write()
+        signature: vec![],           // filled by write()
+    };
+    if let Err(e) = audit_log.write(entry) {
+        error!("Audit write failed: {}", e);
+    }
+}
+
+/// Extract client IP from headers (X-Forwarded-For or fallback to "unknown").
+fn extract_client_ip(headers: &HeaderMap) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 /// Auth middleware: supports three modes:
@@ -524,10 +567,10 @@ pub async fn start_server(
         };
         match AuditLog::new(crate::security::audit_log::AuditConfig {
             log_dir: audit_dir.clone(),
-            _rotation_size: 100 * 1024 * 1024,
-            _retention_days: 365,
+            rotation_size: 100 * 1024 * 1024,
+            retention_days: 365,
             sign_key_path: Some(audit_dir.join("audit_key.pem")),
-            _encrypt: false,
+            encrypt: false,
         }) {
             Ok(log) => {
                 info!("📝 Audit logging enabled: {}", audit_dir.display());
@@ -556,7 +599,7 @@ pub async fn start_server(
         tap_sender,
         rate_limiter,
         circuit_breakers,
-        _audit_log: audit_log,
+        audit_log,
     });
 
     // Spawn background preset sync if configured and auto_sync is enabled
@@ -1259,6 +1302,7 @@ async fn handle_openai_chat_completions(
     let is_streaming = openai_request.stream == Some(true);
     let start_time = std::time::Instant::now();
     let tenant_id = claims.as_ref().map(|c| c.tenant_id().to_string());
+    let peer_ip = extract_client_ip(&headers);
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
@@ -1279,6 +1323,11 @@ async fn handle_openai_chat_completions(
     if let Some(ref dlp_engine) = dlp {
         if dlp_engine.config.scan_input {
             if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut anthropic_request) {
+                if let Some(ref al) = state.audit_log {
+                    log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
+                        crate::security::audit_log::AuditEvent::DlpBlock, "BLOCKED",
+                        vec![block_err.to_string()], &peer_ip, start_time.elapsed().as_millis() as u64);
+                }
                 return Err(AppError::DlpBlocked(format!("{}", block_err)));
             }
         }
@@ -1579,6 +1628,13 @@ async fn handle_openai_chat_completions(
                             }
                         }
 
+                        // Audit: successful response
+                        if let Some(ref al) = state.audit_log {
+                            log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
+                                crate::security::audit_log::AuditEvent::Response,
+                                &mapping.provider, vec![], &peer_ip, latency_ms);
+                        }
+
                         let openai_response = openai_compat::transform_anthropic_to_openai(
                             anthropic_response,
                             model.clone(),
@@ -1622,6 +1678,13 @@ async fn handle_openai_chat_completions(
             }
             let _ = last_error; // consumed by fallback loop
         }
+    }
+
+    // Audit: all providers failed
+    if let Some(ref al) = state.audit_log {
+        log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
+            crate::security::audit_log::AuditEvent::Error, "NONE",
+            vec![], &peer_ip, start_time.elapsed().as_millis() as u64);
     }
 
     error!(
@@ -1820,6 +1883,7 @@ async fn handle_messages(
         .unwrap_or("unknown");
     let start_time = std::time::Instant::now();
     let tenant_id = claims.as_ref().map(|c| c.tenant_id().to_string());
+    let peer_ip = extract_client_ip(&headers);
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
@@ -1860,6 +1924,11 @@ async fn handle_messages(
     if let Some(ref dlp_engine) = dlp {
         if dlp_engine.config.scan_input {
             if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut request_for_routing) {
+                if let Some(ref al) = state.audit_log {
+                    log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
+                        crate::security::audit_log::AuditEvent::DlpBlock, "BLOCKED",
+                        vec![block_err.to_string()], &peer_ip, start_time.elapsed().as_millis() as u64);
+                }
                 return Err(AppError::DlpBlocked(format!("{}", block_err)));
             }
         }
@@ -2275,6 +2344,13 @@ async fn handle_messages(
                                     .message_tracer
                                     .trace_response(&trace_id, &response, latency_ms);
 
+                                // Audit: successful response
+                                if let Some(ref al) = state.audit_log {
+                                    log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
+                                        crate::security::audit_log::AuditEvent::Response,
+                                        &mapping.provider, vec![], &peer_ip, latency_ms);
+                                }
+
                                 return Ok(Json(response).into_response());
                             }
                             Err(e) => {
@@ -2324,6 +2400,13 @@ async fn handle_messages(
                 );
                 continue;
             }
+        }
+
+        // Audit: all providers failed
+        if let Some(ref al) = state.audit_log {
+            log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
+                crate::security::audit_log::AuditEvent::Error, "NONE",
+                vec![], &peer_ip, start_time.elapsed().as_millis() as u64);
         }
 
         error!(

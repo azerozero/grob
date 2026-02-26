@@ -9,11 +9,11 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use p256::ecdsa::{SigningKey};
+use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::fs::{OpenOptions};
-use std::io::{BufRead, BufReader};
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -86,38 +86,40 @@ pub struct AuditEntry {
 
 /// Audit log configuration
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // fields used by future rotation/retention/encryption logic
 pub struct AuditConfig {
     /// Log directory
     pub log_dir: PathBuf,
     /// Rotation size (bytes)
-    pub _rotation_size: u64,
+    pub rotation_size: u64,
     /// Retention days
-    pub _retention_days: u32,
+    pub retention_days: u32,
     /// Sign key path (if None, generates ephemeral)
     pub sign_key_path: Option<PathBuf>,
     /// Encrypt at rest
-    pub _encrypt: bool,
+    pub encrypt: bool,
 }
 
 impl Default for AuditConfig {
     fn default() -> Self {
         Self {
             log_dir: PathBuf::from("/var/lib/grob/audit"),
-            _rotation_size: 100 * 1024 * 1024, // 100MB
-            _retention_days: 365, // PCI DSS: 1 year minimum
+            rotation_size: 100 * 1024 * 1024, // 100MB
+            retention_days: 365, // PCI DSS: 1 year minimum
             sign_key_path: None,
-            _encrypt: true,
+            encrypt: true,
         }
     }
 }
 
 /// Audit log writer with integrity guarantees
 pub struct AuditLog {
-    _config: AuditConfig,
-    _signing_key: SigningKey,
-    _current_file: Mutex<std::fs::File>,
-    _current_size: Mutex<u64>,
-    _last_hash: Mutex<String>,
+    #[allow(dead_code)] // used by future rotation logic
+    config: AuditConfig,
+    signing_key: SigningKey,
+    current_file: Mutex<std::fs::File>,
+    current_size: Mutex<u64>,
+    last_hash: Mutex<String>,
 }
 
 impl AuditLog {
@@ -170,11 +172,11 @@ impl AuditLog {
         let current_size = metadata.len();
 
         Ok(Self {
-            _config: config,
-            _signing_key: signing_key,
-            _current_file: Mutex::new(file),
-            _current_size: Mutex::new(current_size),
-            _last_hash: Mutex::new(last_hash),
+            config,
+            signing_key,
+            current_file: Mutex::new(file),
+            current_size: Mutex::new(current_size),
+            last_hash: Mutex::new(last_hash),
         })
     }
 
@@ -219,6 +221,38 @@ impl AuditLog {
         );
         hex::encode(Sha256::digest(canonical.as_bytes()))
     }
+
+    /// Write an audit entry with ECDSA signature and hash chain
+    pub fn write(&self, mut entry: AuditEntry) -> Result<()> {
+        use p256::ecdsa::signature::Signer;
+
+        let mut last_hash = self.last_hash.lock().unwrap_or_else(|e| e.into_inner());
+
+        // Chain: set previous_hash from last entry
+        entry.previous_hash = last_hash.clone();
+
+        // Sign: ECDSA P-256 over the entry hash
+        let hash = Self::hash_entry(&entry);
+        let sig: p256::ecdsa::Signature = self.signing_key.sign(hash.as_bytes());
+        entry.signature = sig.to_bytes().to_vec();
+
+        // Append JSONL
+        let mut line = serde_json::to_string(&entry)
+            .context("Failed to serialize audit entry")?;
+        line.push('\n');
+
+        let mut file = self.current_file.lock().unwrap_or_else(|e| e.into_inner());
+        file.write_all(line.as_bytes())
+            .context("Failed to write audit entry")?;
+        file.flush().context("Failed to flush audit log")?;
+
+        // Update chain state
+        let mut size = self.current_size.lock().unwrap_or_else(|e| e.into_inner());
+        *size += line.len() as u64;
+        *last_hash = hash;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -237,10 +271,94 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
-            _rotation_size: 1024 * 1024,
+            rotation_size: 1024 * 1024,
             ..Default::default()
         };
 
         let _log = AuditLog::new(config).unwrap();
+    }
+
+    fn make_test_log() -> (TempDir, AuditLog) {
+        let dir = TempDir::new().unwrap();
+        let config = AuditConfig {
+            log_dir: dir.path().to_path_buf(),
+            ..Default::default()
+        };
+        let log = AuditLog::new(config).unwrap();
+        (dir, log)
+    }
+
+    fn make_entry(action: AuditEvent) -> AuditEntry {
+        AuditEntry {
+            timestamp: chrono::Utc::now(),
+            event_id: uuid::Uuid::new_v4().to_string(),
+            tenant_id: "test-tenant".to_string(),
+            user_id: None,
+            action,
+            classification: Classification::Nc,
+            backend_routed: "test-provider".to_string(),
+            request_hash: None,
+            dlp_rules_triggered: vec![],
+            ip_source: "127.0.0.1".to_string(),
+            duration_ms: 42,
+            previous_hash: String::new(),
+            signature: vec![],
+        }
+    }
+
+    #[test]
+    fn test_write_entry() {
+        let (dir, log) = make_test_log();
+        let entry = make_entry(AuditEvent::Response);
+        log.write(entry).unwrap();
+
+        // Verify file contains one JSONL line
+        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert_eq!(lines.len(), 1);
+
+        let parsed: AuditEntry = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(parsed.tenant_id, "test-tenant");
+        assert_eq!(parsed.duration_ms, 42);
+    }
+
+    #[test]
+    fn test_hash_chain() {
+        let (_dir, log) = make_test_log();
+
+        let genesis = AuditLog::genesis_hash();
+
+        let e1 = make_entry(AuditEvent::Request);
+        log.write(e1).unwrap();
+
+        let e2 = make_entry(AuditEvent::Response);
+        log.write(e2).unwrap();
+
+        // Read back entries and verify chain
+        let content = std::fs::read_to_string(_dir.path().join("current.jsonl")).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert_eq!(lines.len(), 2);
+
+        let parsed1: AuditEntry = serde_json::from_str(lines[0]).unwrap();
+        let parsed2: AuditEntry = serde_json::from_str(lines[1]).unwrap();
+
+        // First entry chains from genesis
+        assert_eq!(parsed1.previous_hash, genesis);
+        // Second entry chains from first entry's hash
+        assert_eq!(parsed2.previous_hash, AuditLog::hash_entry(&parsed1));
+    }
+
+    #[test]
+    fn test_signature_present() {
+        let (_dir, log) = make_test_log();
+        let entry = make_entry(AuditEvent::DlpBlock);
+        log.write(entry).unwrap();
+
+        let content = std::fs::read_to_string(_dir.path().join("current.jsonl")).unwrap();
+        let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
+
+        // ECDSA P-256 signature is 64 bytes
+        assert_eq!(parsed.signature.len(), 64, "ECDSA P-256 signature should be 64 bytes");
+        assert!(parsed.signature.iter().any(|&b| b != 0), "Signature should not be all zeros");
     }
 }
