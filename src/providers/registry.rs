@@ -17,7 +17,7 @@ const REPO_URL: &str = "https://github.com/azerozero/grob";
 /// Provider registry that manages all configured providers
 pub struct ProviderRegistry {
     /// Map of provider name -> provider instance
-    providers: HashMap<String, Arc<Box<dyn AnthropicProvider>>>,
+    providers: HashMap<String, Arc<dyn AnthropicProvider>>,
     /// Map of model name -> provider name for fast lookup
     model_to_provider: HashMap<String, String>,
 }
@@ -193,7 +193,7 @@ impl ProviderRegistry {
             // Add provider to registry
             registry
                 .providers
-                .insert(config.name.clone(), Arc::new(provider));
+                .insert(config.name.clone(), Arc::from(provider));
         }
 
         // Populate model_to_provider mappings from model configurations
@@ -210,7 +210,7 @@ impl ProviderRegistry {
     }
 
     /// Get a provider by name
-    pub fn get_provider(&self, name: &str) -> Option<Arc<Box<dyn AnthropicProvider>>> {
+    pub fn get_provider(&self, name: &str) -> Option<Arc<dyn AnthropicProvider>> {
         self.providers.get(name).cloned()
     }
 
@@ -218,7 +218,7 @@ impl ProviderRegistry {
     pub fn get_provider_for_model(
         &self,
         model: &str,
-    ) -> Result<Arc<Box<dyn AnthropicProvider>>, ProviderError> {
+    ) -> Result<Arc<dyn AnthropicProvider>, ProviderError> {
         // First, check if we have a direct model → provider mapping
         if let Some(provider_name) = self.model_to_provider.get(model) {
             if let Some(provider) = self.providers.get(provider_name) {
@@ -320,6 +320,7 @@ mod tests {
                 budget_usd: None,
                 strategy: Default::default(),
                 fan_out: None,
+                deprecated: None,
             },
             crate::cli::ModelConfig {
                 name: "model-2".to_string(),
@@ -332,6 +333,7 @@ mod tests {
                 budget_usd: None,
                 strategy: Default::default(),
                 fan_out: None,
+                deprecated: None,
             },
         ];
 

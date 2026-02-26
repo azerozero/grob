@@ -112,6 +112,8 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         dlp: Default::default(),
         auth: Default::default(),
         tap: Default::default(),
+        security: Default::default(),
+        version: None,
         user: Default::default(),
     }
 }

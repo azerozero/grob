@@ -121,7 +121,7 @@ async fn fan_out_best_quality(
     }
 
     if results.len() == 1 {
-        let r = results.into_iter().next().unwrap();
+        let r = results.into_iter().next().expect("results.len()==1 verified above");
         let info = vec![(r.provider, r.actual_model)];
         return Ok((r.response, info));
     }
@@ -188,12 +188,12 @@ async fn fan_out_best_quality(
                     results[chosen_idx].actual_model
                 );
 
-                let chosen = results.into_iter().nth(chosen_idx).unwrap();
+                let chosen = results.into_iter().nth(chosen_idx).expect("chosen_idx bounded by results.len()-1");
                 Ok((chosen.response, provider_info))
             }
             Err(e) => {
                 warn!("⚠️ Judge model failed: {}, returning first response", e);
-                let first = results.into_iter().next().unwrap();
+                let first = results.into_iter().next().expect("results verified non-empty");
                 Ok((first.response, provider_info))
             }
         }
@@ -202,7 +202,7 @@ async fn fan_out_best_quality(
             "⚠️ Judge model '{}' not found, returning first response",
             judge_model
         );
-        let first = results.into_iter().next().unwrap();
+        let first = results.into_iter().next().expect("results verified non-empty");
         Ok((first.response, provider_info))
     }
 }
@@ -236,7 +236,7 @@ async fn fan_out_weighted(
                 .partial_cmp(&score_b)
                 .unwrap_or(std::cmp::Ordering::Equal)
         })
-        .unwrap();
+        .expect("results verified non-empty");
 
     info!(
         "🏆 Fan-out weighted: {} ({}) scored highest",
@@ -318,4 +318,163 @@ fn extract_text_from_response(response: &ProviderResponse) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{ContentBlock, KnownContentBlock};
+    use crate::providers::{ProviderResponse, Usage};
+
+    fn mock_response(output_tokens: u32) -> ProviderResponse {
+        ProviderResponse {
+            id: "test".to_string(),
+            r#type: "message".to_string(),
+            role: "assistant".to_string(),
+            content: vec![ContentBlock::Known(KnownContentBlock::Text {
+                text: "hello".to_string(),
+                cache_control: None,
+            })],
+            model: "test-model".to_string(),
+            stop_reason: Some("end_turn".to_string()),
+            stop_sequence: None,
+            usage: Usage {
+                input_tokens: 10,
+                output_tokens,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
+        }
+    }
+
+    fn mock_result(provider: &str, output_tokens: u32, latency_ms: u64) -> FanOutResult {
+        FanOutResult {
+            provider: provider.to_string(),
+            actual_model: "test-model".to_string(),
+            response: mock_response(output_tokens),
+            latency_ms,
+        }
+    }
+
+    #[test]
+    fn test_weighted_score_prefers_faster() {
+        let fast = mock_result("fast-provider", 100, 500);
+        let slow = mock_result("slow-provider", 100, 5000);
+
+        let score_fast = weighted_score(&fast);
+        let score_slow = weighted_score(&slow);
+
+        assert!(
+            score_fast > score_slow,
+            "faster response (score={}) should outscore slower response (score={})",
+            score_fast,
+            score_slow
+        );
+    }
+
+    #[test]
+    fn test_weighted_score_prefers_more_tokens() {
+        let verbose = mock_result("verbose-provider", 500, 1000);
+        let terse = mock_result("terse-provider", 50, 1000);
+
+        let score_verbose = weighted_score(&verbose);
+        let score_terse = weighted_score(&terse);
+
+        assert!(
+            score_verbose > score_terse,
+            "more-tokens response (score={}) should outscore fewer-tokens response (score={})",
+            score_verbose,
+            score_terse
+        );
+    }
+
+    #[test]
+    fn test_extract_text_from_response() {
+        let response = ProviderResponse {
+            id: "test".to_string(),
+            r#type: "message".to_string(),
+            role: "assistant".to_string(),
+            content: vec![
+                ContentBlock::Known(KnownContentBlock::Text {
+                    text: "first block".to_string(),
+                    cache_control: None,
+                }),
+                ContentBlock::Known(KnownContentBlock::Text {
+                    text: "second block".to_string(),
+                    cache_control: None,
+                }),
+            ],
+            model: "test-model".to_string(),
+            stop_reason: Some("end_turn".to_string()),
+            stop_sequence: None,
+            usage: Usage {
+                input_tokens: 10,
+                output_tokens: 20,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
+        };
+
+        let text = extract_text_from_response(&response);
+        assert_eq!(text, "first block\nsecond block");
+    }
+
+    #[test]
+    fn test_extract_text_from_empty_response() {
+        let response = ProviderResponse {
+            id: "test".to_string(),
+            r#type: "message".to_string(),
+            role: "assistant".to_string(),
+            content: vec![],
+            model: "test-model".to_string(),
+            stop_reason: Some("end_turn".to_string()),
+            stop_sequence: None,
+            usage: Usage {
+                input_tokens: 10,
+                output_tokens: 0,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
+        };
+
+        let text = extract_text_from_response(&response);
+        assert_eq!(text, "");
+    }
+
+    #[test]
+    fn test_fan_out_result_ordering() {
+        let results = vec![
+            mock_result("slow-low", 50, 5000),    // low tokens, high latency
+            mock_result("fast-high", 200, 500),    // high tokens, low latency
+            mock_result("mid-mid", 100, 2000),     // medium both
+        ];
+
+        let best = results
+            .iter()
+            .max_by(|a, b| {
+                let score_a = weighted_score(a);
+                let score_b = weighted_score(b);
+                score_a
+                    .partial_cmp(&score_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .expect("results is non-empty");
+
+        assert_eq!(
+            best.provider, "fast-high",
+            "best result should be the one with high tokens and low latency"
+        );
+
+        // Verify the actual scores make sense
+        let scores: Vec<(String, f64)> = results
+            .iter()
+            .map(|r| (r.provider.clone(), weighted_score(r)))
+            .collect();
+        // fast-high: 200 * (1 / (1 + 0.5)) = 200 * 0.667 = 133.3
+        // mid-mid:   100 * (1 / (1 + 2.0)) = 100 * 0.333 = 33.3
+        // slow-low:   50 * (1 / (1 + 5.0)) =  50 * 0.167 = 8.3
+        for (provider, score) in &scores {
+            assert!(*score > 0.0, "score for {} should be positive: {}", provider, score);
+        }
+    }
 }

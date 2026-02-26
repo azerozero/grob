@@ -26,6 +26,8 @@ mod tests {
             dlp: Default::default(),
             auth: Default::default(),
             tap: Default::default(),
+            security: Default::default(),
+            version: None,
             user: Default::default(),
         }
     }

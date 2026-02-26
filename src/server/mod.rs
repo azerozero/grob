@@ -13,14 +13,14 @@ use crate::models::{AnthropicRequest, RouteType};
 use crate::providers::{AuthType, ProviderRegistry};
 use crate::router::Router;
 use crate::security::{
-    apply_security_headers, CircuitBreakerRegistry, RateLimitConfig, RateLimiter,
-    RateLimitKey, SecurityHeadersConfig, ValidationError, MAX_BODY_SIZE,
+    apply_security_headers, AuditLog, CircuitBreakerRegistry,
+    RateLimitConfig, RateLimiter, RateLimitKey, SecurityHeadersConfig,
 };
 use crate::storage::GrobStore;
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, Request, StatusCode},
+    http::{HeaderMap, HeaderValue, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -32,6 +32,7 @@ use std::borrow::Cow;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{debug, error, info, warn};
 
 /// Reloadable components - rebuilt on config reload
@@ -80,14 +81,11 @@ pub struct AppState {
     pub active_requests: std::sync::atomic::AtomicU64,
 
     /// Spend tracker (budget enforcement)
-    pub spend_tracker: std::sync::Mutex<SpendTracker>,
+    pub spend_tracker: tokio::sync::Mutex<SpendTracker>,
     /// Dynamic pricing table (refreshed from OpenRouter every 24h)
     pub pricing_table: SharedPricingTable,
     /// DLP session manager (None if disabled)
     pub dlp_sessions: Option<Arc<DlpSessionManager>>,
-    /// Shared storage backend (redb)
-    #[allow(dead_code)]
-    pub grob_store: Arc<GrobStore>,
     /// JWT validator (None if auth mode != "jwt")
     pub jwt_validator: Option<Arc<crate::auth::JwtValidator>>,
     /// Webhook tap sender (None if tap is disabled)
@@ -96,6 +94,8 @@ pub struct AppState {
     pub rate_limiter: Option<Arc<RateLimiter>>,
     /// Circuit breaker registry (None if disabled)
     pub circuit_breakers: Option<Arc<CircuitBreakerRegistry>>,
+    /// Signed audit log (None if audit_dir not configured)
+    pub audit_log: Option<Arc<AuditLog>>,
 }
 
 impl AppState {
@@ -129,7 +129,7 @@ async fn auth_middleware(
     let path = request.uri().path();
     if matches!(
         path,
-        "/health" | "/metrics" | "/auth/callback" | "/api/oauth/callback"
+        "/health" | "/live" | "/ready" | "/metrics" | "/auth/callback" | "/api/oauth/callback"
     ) {
         return next.run(request).await;
     }
@@ -203,6 +203,97 @@ async fn auth_middleware(
     }
 }
 
+/// Request ID middleware: reads X-Request-Id header or generates UUID v4.
+/// Stores in request extensions and echoes in response header.
+async fn request_id_middleware(mut request: Request<Body>, next: Next) -> Response {
+    let request_id = request
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    request.extensions_mut().insert(RequestId(request_id.clone()));
+
+    let mut response = next.run(request).await;
+    if let Ok(val) = HeaderValue::from_str(&request_id) {
+        response.headers_mut().insert("x-request-id", val);
+    }
+    response
+}
+
+/// Stored in request extensions for correlation
+#[derive(Clone, Debug)]
+struct RequestId(String);
+
+/// Rate limiting middleware: checks rate limiter before processing.
+/// Returns 429 with Retry-After header when rate exceeded.
+async fn rate_limit_check_middleware(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    // Skip rate limiting for health/metrics/liveness/readiness paths
+    let path = request.uri().path();
+    if matches!(path, "/health" | "/metrics" | "/live" | "/ready") {
+        return next.run(request).await;
+    }
+
+    let limiter = match &state.rate_limiter {
+        Some(l) => l,
+        None => return next.run(request).await,
+    };
+
+    // Extract key: JWT tenant_id > Bearer token > x-api-key > IP (fallback "anonymous")
+    let key = request
+        .extensions()
+        .get::<crate::auth::GrobClaims>()
+        .map(|c| RateLimitKey::Tenant(c.tenant_id().to_string()))
+        .or_else(|| {
+            request
+                .headers()
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("Bearer "))
+                .map(|k| RateLimitKey::Tenant(k.to_string()))
+        })
+        .or_else(|| {
+            request
+                .headers()
+                .get("x-api-key")
+                .and_then(|v| v.to_str().ok())
+                .map(|k| RateLimitKey::Tenant(k.to_string()))
+        })
+        .unwrap_or_else(|| RateLimitKey::Ip("anonymous".to_string()));
+
+    let (allowed, _remaining, reset_after) = limiter.check(&key).await;
+
+    if !allowed {
+        metrics::counter!("grob_ratelimit_rejected_total").increment(1);
+        let retry_after = reset_after
+            .map(|d| d.as_secs().max(1).to_string())
+            .unwrap_or_else(|| "1".to_string());
+        return Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("Retry-After", &retry_after)
+            .header("X-RateLimit-Remaining", "0")
+            .header("Content-Type", "application/json")
+            .body(Body::from(
+                r#"{"error":{"type":"rate_limit_error","message":"Rate limit exceeded. Please slow down."}}"#,
+            ))
+            .expect("rate limit response");
+    }
+
+    next.run(request).await
+}
+
+/// Security headers middleware: applies OWASP security headers to all responses.
+async fn security_headers_response_middleware(request: Request<Body>, next: Next) -> Response {
+    let response = next.run(request).await;
+    let config = SecurityHeadersConfig::api_mode();
+    apply_security_headers(response, &config)
+}
+
 /// Extract Bearer token or x-api-key from request headers.
 fn extract_bearer_or_api_key(request: &Request<Body>) -> Option<&str> {
     request
@@ -228,10 +319,13 @@ fn auth_error_response(message: &str) -> Response {
     (StatusCode::UNAUTHORIZED, body).into_response()
 }
 
-/// Start the HTTP server
+/// Start the HTTP server with graceful shutdown support.
+/// When the `shutdown_signal` future completes, the server stops accepting new
+/// connections and drains in-flight requests (up to 30 s).
 pub async fn start_server(
     config: AppConfig,
     config_source: crate::cli::ConfigSource,
+    shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
     let router = Router::new(config.clone());
 
@@ -319,6 +413,32 @@ pub async fn start_server(
     // Initialize DLP session manager (if DLP enabled in config)
     let dlp_sessions = DlpSessionManager::from_config(config.dlp.clone());
 
+    // Spawn DLP signed config hot-reload (if enabled)
+    if let Some(ref dlp_mgr) = dlp_sessions {
+        let dlp_cfg = dlp_mgr.config();
+        if dlp_cfg.signed_config.enabled {
+            let public_key = if dlp_cfg.signed_config.verify_signature {
+                match crate::features::dlp::signed_config::load_public_key(
+                    &dlp_cfg.signed_config.public_key_path,
+                ) {
+                    Ok(pk) => Some(pk),
+                    Err(e) => {
+                        warn!("Failed to load DLP signing public key: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+            crate::features::dlp::signed_config::spawn_hot_reload(
+                dlp_cfg.signed_config.clone(),
+                dlp_mgr.hot_config().clone(),
+                dlp_cfg.url_exfil.domain_match_mode.clone(),
+                public_key,
+            );
+        }
+    }
+
     // Initialize JWT validator (if auth mode == "jwt")
     let jwt_validator = if config.auth.mode == "jwt" {
         let validator = Arc::new(
@@ -331,17 +451,21 @@ pub async fn start_server(
             if let Err(e) = v.refresh_jwks().await {
                 warn!("Initial JWKS fetch failed (will retry): {}", e);
             }
-            // Spawn background JWKS refresh
-            let refresh_interval = config.auth.jwt.jwks_refresh_interval;
+            // Spawn background JWKS refresh with exponential backoff on failure
+            let base_interval = config.auth.jwt.jwks_refresh_interval;
             tokio::spawn(async move {
-                let mut interval = tokio::time::interval(
-                    std::time::Duration::from_secs(refresh_interval),
-                );
-                interval.tick().await; // Skip first immediate tick
+                let mut current_interval = base_interval;
+                let max_interval = base_interval * 8;
                 loop {
-                    interval.tick().await;
-                    if let Err(e) = v.refresh_jwks().await {
-                        warn!("JWKS refresh failed: {}", e);
+                    tokio::time::sleep(std::time::Duration::from_secs(current_interval)).await;
+                    match v.refresh_jwks().await {
+                        Ok(_) => {
+                            current_interval = base_interval; // Reset on success
+                        }
+                        Err(e) => {
+                            warn!("JWKS refresh failed (next retry in {}s): {}", current_interval.min(max_interval) * 2, e);
+                            current_interval = (current_interval * 2).min(max_interval);
+                        }
                     }
                 }
             });
@@ -362,9 +486,61 @@ pub async fn start_server(
         provider_registry,
     ));
 
-    // Initialize security layer
-    let rate_limiter = Arc::new(RateLimiter::new(RateLimitConfig::strict()));
-    let circuit_breakers = Arc::new(CircuitBreakerRegistry::new());
+    // Initialize security layer from config
+    let security_enabled = config.security.enabled;
+    let rate_limiter = if security_enabled {
+        let rl_config = RateLimitConfig {
+            requests_per_second: config.security.rate_limit_rps,
+            burst: config.security.rate_limit_burst,
+            window: std::time::Duration::from_secs(60),
+        };
+        info!(
+            "🛡️  Security: rate limit {}rps burst={}, body limit {}MB, headers={}, circuit_breaker={}",
+            config.security.rate_limit_rps,
+            config.security.rate_limit_burst,
+            config.security.max_body_size / (1024 * 1024),
+            config.security.security_headers,
+            config.security.circuit_breaker,
+        );
+        Some(Arc::new(RateLimiter::new(rl_config)))
+    } else {
+        info!("🛡️  Security middleware disabled");
+        None
+    };
+
+    let circuit_breakers = if security_enabled && config.security.circuit_breaker {
+        Some(Arc::new(CircuitBreakerRegistry::new()))
+    } else {
+        None
+    };
+
+    // Initialize audit log (if audit_dir configured)
+    let audit_log = if !config.security.audit_dir.is_empty() {
+        let audit_dir = if config.security.audit_dir.starts_with('~') {
+            let home = dirs::home_dir().unwrap_or_default();
+            home.join(&config.security.audit_dir[2..])
+        } else {
+            std::path::PathBuf::from(&config.security.audit_dir)
+        };
+        match AuditLog::new(crate::security::audit_log::AuditConfig {
+            log_dir: audit_dir.clone(),
+            rotation_size: 100 * 1024 * 1024,
+            retention_days: 365,
+            sign_key_path: Some(audit_dir.join("audit_key.pem")),
+            encrypt: false,
+        }) {
+            Ok(log) => {
+                info!("📝 Audit logging enabled: {}", audit_dir.display());
+                Some(Arc::new(log))
+            }
+            Err(e) => {
+                error!("⚠️  Failed to initialize audit log: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let state = Arc::new(AppState {
         inner: std::sync::RwLock::new(reloadable),
@@ -373,14 +549,14 @@ pub async fn start_server(
         message_tracer,
         metrics_handle,
         active_requests: std::sync::atomic::AtomicU64::new(0),
-        spend_tracker: std::sync::Mutex::new(spend_tracker),
+        spend_tracker: tokio::sync::Mutex::new(spend_tracker),
         pricing_table,
         dlp_sessions,
-        grob_store,
         jwt_validator,
         tap_sender,
-        rate_limiter: Some(rate_limiter.clone()),
-        circuit_breakers: Some(circuit_breakers.clone()),
+        rate_limiter,
+        circuit_breakers,
+        audit_log,
     });
 
     // Spawn background preset sync if configured and auto_sync is enabled
@@ -409,6 +585,8 @@ pub async fn start_server(
         .route("/v1/models", get(handle_openai_models))
         // Operational endpoints
         .route("/health", get(health_check))
+        .route("/live", get(liveness_check))
+        .route("/ready", get(readiness_check))
         .route("/metrics", get(metrics_endpoint))
         // Config management
         .route("/api/config", get(get_config_json))
@@ -432,14 +610,38 @@ pub async fn start_server(
             post(oauth_handlers::oauth_refresh_token),
         );
 
-    // Add auth middleware
+    // Middleware stack (applied bottom-to-top, so outermost layer listed last):
+    // 1. Auth middleware (innermost — runs after rate limit + request ID)
     let app = app.layer(axum::middleware::from_fn_with_state(
         state.clone(),
         auth_middleware,
     ));
 
+    // 2. Rate limiting middleware (before auth — outermost check)
+    if security_enabled {
+        // We apply rate limiting via from_fn_with_state on the already-built app
+    }
+    let app = app.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        rate_limit_check_middleware,
+    ));
+
+    // 3. Security headers middleware (wraps response)
+    let app = if config.security.security_headers {
+        app.layer(axum::middleware::from_fn(security_headers_response_middleware))
+    } else {
+        app
+    };
+
+    // 4. Request body size limit
+    let app = app.layer(RequestBodyLimitLayer::new(config.security.max_body_size));
+
+    // 5. Request ID middleware (outermost — always runs first)
+    let app = app.layer(axum::middleware::from_fn(request_id_middleware));
+
     // Clone state before moving it
     let oauth_state = state.clone();
+    let drain_state = state.clone();
     let app = app.with_state(state);
 
     // Bind to main address (IPv6 addresses need bracket notation)
@@ -458,15 +660,17 @@ pub async fn start_server(
         anyhow::bail!("TLS is enabled in config but grob was built without the `tls` feature. Rebuild with: cargo build --features tls");
     }
 
+    // Start OAuth callback (must be before main server await)
+    spawn_oauth_callback(oauth_state);
+
     if !tls_enabled {
         let listener = TcpListener::bind(&addr).await?;
         info!("🚀 Server listening on {}", addr);
 
-        // Start OAuth callback (must be before main server await)
-        spawn_oauth_callback(oauth_state);
-
-        // Start main server (plain HTTP)
-        axum::serve(listener, app).await?;
+        // Start main server (plain HTTP) with graceful shutdown
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal)
+            .await?;
     } else {
         #[cfg(feature = "tls")]
         {
@@ -479,10 +683,7 @@ pub async fn start_server(
 
             info!("🔒 Server listening on {} (TLS)", addr);
 
-            // Start OAuth callback (must be before main server await)
-            spawn_oauth_callback(oauth_state);
-
-            // Start main server (HTTPS)
+            // Start main server (HTTPS) — axum_server handles shutdown via handle
             let socket_addr: std::net::SocketAddr = addr.parse()
                 .map_err(|e| anyhow::anyhow!("Invalid bind address '{}': {}", addr, e))?;
             axum_server::bind_rustls(socket_addr, rustls_config)
@@ -491,18 +692,40 @@ pub async fn start_server(
         }
     }
 
+    // Drain in-flight requests (max 30s)
+    let drain_start = std::time::Instant::now();
+    let drain_timeout = std::time::Duration::from_secs(30);
+    loop {
+        let active = drain_state
+            .active_requests
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if active == 0 {
+            info!("✅ All in-flight requests drained");
+            break;
+        }
+        if drain_start.elapsed() >= drain_timeout {
+            warn!(
+                "⚠️ Drain timeout reached with {} requests still in-flight",
+                active
+            );
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
     Ok(())
 }
 
-/// Spawn the OAuth callback server on localhost:1455 (required for OpenAI Codex OAuth)
+/// Spawn the OAuth callback server (required for OpenAI Codex OAuth)
 fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
+    let port = oauth_state.snapshot().config.server.oauth_callback_port;
     tokio::spawn(async move {
         let oauth_callback_app = AxumRouter::new()
             .route("/auth/callback", get(oauth_handlers::oauth_callback))
             .with_state(oauth_state);
 
-        let oauth_addr = "127.0.0.1:1455";
-        match TcpListener::bind(oauth_addr).await {
+        let oauth_addr = format!("127.0.0.1:{}", port);
+        match TcpListener::bind(&oauth_addr).await {
             Ok(oauth_listener) => {
                 info!("🔐 OAuth callback server listening on {}", oauth_addr);
                 if let Err(e) = axum::serve(oauth_listener, oauth_callback_app).await {
@@ -514,7 +737,7 @@ fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
                     "⚠️  Failed to bind OAuth callback server on {}: {}",
                     oauth_addr, e
                 );
-                error!("⚠️  OpenAI Codex OAuth will not work. Port 1455 must be available.");
+                error!("⚠️  OpenAI Codex OAuth will not work. Port {} must be available.", port);
             }
         }
     });
@@ -526,7 +749,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         .active_requests
         .load(std::sync::atomic::Ordering::Relaxed);
     let spend_total = {
-        let tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+        let tracker = state.spend_tracker.lock().await;
         tracker.total()
     };
     let inner = state.snapshot();
@@ -543,6 +766,52 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     }))
 }
 
+/// Liveness probe: process is alive, returns 200 always.
+async fn liveness_check() -> impl IntoResponse {
+    Json(serde_json::json!({"status": "alive"}))
+}
+
+/// Readiness probe: check that providers are configured and circuit breakers aren't all open.
+async fn readiness_check(State(state): State<Arc<AppState>>) -> Response {
+    let inner = state.snapshot();
+    let provider_count = inner.provider_registry.list_providers().len();
+
+    if provider_count == 0 {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "not_ready",
+                "reason": "no providers configured"
+            })),
+        )
+            .into_response();
+    }
+
+    // Check if all circuit breakers are open (all providers degraded)
+    if let Some(ref cb) = state.circuit_breakers {
+        let states = cb.all_states().await;
+        if !states.is_empty() {
+            let all_open = states.values().all(|s| *s == crate::security::CircuitState::Open);
+            if all_open {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "status": "not_ready",
+                        "reason": "all circuit breakers open"
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    Json(serde_json::json!({
+        "status": "ready",
+        "providers": provider_count
+    }))
+    .into_response()
+}
+
 /// Prometheus metrics endpoint
 async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let active = state
@@ -552,7 +821,7 @@ async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> impl IntoRespon
 
     // Publish spend/budget gauges (point-in-time snapshots → gauges are correct)
     let inner = state.snapshot();
-    let tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+    let tracker = state.spend_tracker.lock().await;
     metrics::gauge!("grob_spend_usd").set(tracker.total());
     let budget_limit = inner.config.budget.monthly_limit_usd;
     if budget_limit > 0.0 {
@@ -866,7 +1135,7 @@ fn record_request_metrics(
 }
 
 /// Check budget before a request. Returns Err(AppError::BudgetExceeded) if any limit is hit.
-fn check_budget(
+async fn check_budget(
     state: &Arc<AppState>,
     inner: &Arc<ReloadableState>,
     provider_name: &str,
@@ -885,7 +1154,7 @@ fn check_budget(
 
     let model_limit = inner.find_model(model_name).and_then(|m| m.budget_usd);
 
-    let tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+    let tracker = state.spend_tracker.lock().await;
 
     // Check budget
     if let Err(e) = tracker.check_budget(
@@ -914,9 +1183,9 @@ fn check_budget(
 }
 
 /// Record spend after a successful request (global + per-tenant if applicable)
-fn record_spend(state: &Arc<AppState>, provider_name: &str, model_name: &str, cost: f64, tenant_id: Option<&str>) {
+async fn record_spend(state: &Arc<AppState>, provider_name: &str, model_name: &str, cost: f64, tenant_id: Option<&str>) {
     if cost > 0.0 {
-        let mut tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+        let mut tracker = state.spend_tracker.lock().await;
         if let Some(tenant) = tenant_id {
             tracker.record_tenant(tenant, provider_name, model_name, cost);
         } else {
@@ -954,15 +1223,38 @@ async fn calculate_cost(
     )
 }
 
+/// Maximum retries per provider before falling back to the next mapping.
+const MAX_RETRIES: u32 = 2;
+
+/// Check if a provider error is retryable (429, 500, 502, 503, network errors).
+fn is_retryable(e: &crate::providers::error::ProviderError) -> bool {
+    match e {
+        crate::providers::error::ProviderError::ApiError { status, .. } => {
+            matches!(status, 429 | 500 | 502 | 503)
+        }
+        crate::providers::error::ProviderError::HttpError(_) => true,
+        _ => false,
+    }
+}
+
+/// Calculate retry delay with exponential backoff and jitter.
+fn retry_delay(attempt: u32) -> std::time::Duration {
+    let base_ms = 200u64 * 4u64.pow(attempt);
+    let jitter = rand::random::<u64>() % (base_ms / 2 + 1);
+    std::time::Duration::from_millis(base_ms + jitter)
+}
+
 /// Handle /v1/chat/completions requests (OpenAI-compatible endpoint)
 /// Supports both streaming (SSE) and non-streaming responses, plus tool calling.
 async fn handle_openai_chat_completions(
     State(state): State<Arc<AppState>>,
     claims: Option<axum::Extension<crate::auth::GrobClaims>>,
+    axum::Extension(request_id): axum::Extension<RequestId>,
     headers: HeaderMap,
     Json(openai_request): Json<openai_compat::OpenAIRequest>,
 ) -> Result<Response, AppError> {
     let _guard = ActiveRequestGuard::new(&state);
+    let req_id = &request_id.0;
     let model = openai_request.model.clone();
     let is_streaming = openai_request.stream == Some(true);
     let start_time = std::time::Instant::now();
@@ -982,6 +1274,15 @@ async fn handle_openai_chat_completions(
     // 1. Transform OpenAI request to Anthropic format
     let mut anthropic_request = openai_compat::transform_openai_to_anthropic(openai_request)
         .map_err(|e| AppError::ParseError(format!("Failed to transform OpenAI request: {}", e)))?;
+
+    // DLP: check for prompt injection (before routing/sending)
+    if let Some(ref dlp_engine) = dlp {
+        if dlp_engine.config.scan_input {
+            if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut anthropic_request) {
+                return Err(AppError::DlpBlocked(format!("{}", block_err)));
+            }
+        }
+    }
 
     // 2. Route the request
     let decision = inner
@@ -1026,7 +1327,7 @@ async fn handle_openai_chat_completions(
                                 response.usage.output_tokens,
                                 is_sub,
                             ).await;
-                            let mut tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+                            let mut tracker = state.spend_tracker.lock().await;
                             tracker.record(prov, actual, counter.estimated_cost_usd);
                         }
 
@@ -1056,8 +1357,20 @@ async fn handle_openai_chat_completions(
             continue;
         };
 
+        // Circuit breaker check
+        if let Some(ref cb) = state.circuit_breakers {
+            if !cb.can_execute(&mapping.provider).await {
+                info!(
+                    "⚡ Circuit breaker open for {}, skipping",
+                    mapping.provider
+                );
+                metrics::counter!("grob_circuit_breaker_rejected_total", "provider" => mapping.provider.clone()).increment(1);
+                continue;
+            }
+        }
+
         // Budget check before sending request
-        check_budget(&state, &inner, &mapping.provider, &decision.model_name)?;
+        check_budget(&state, &inner, &mapping.provider, &decision.model_name).await?;
 
         let retry_info = if idx > 0 {
             format!(" [{}/{}]", idx + 1, sorted_mappings.len())
@@ -1068,6 +1381,7 @@ async fn handle_openai_chat_completions(
         let route_type_display = format_route_type(&decision);
 
         info!(
+            request_id = req_id,
             "[{:<15}:{}] {:<25} → {}/{}{}",
             route_type_display,
             stream_mode,
@@ -1109,6 +1423,10 @@ async fn handle_openai_chat_completions(
                 .await
             {
                 Ok(stream_response) => {
+                    // Record circuit breaker success
+                    if let Some(ref cb) = state.circuit_breakers {
+                        cb.record_success(&mapping.provider).await;
+                    }
                     // Wrap stream with DLP if enabled for output scanning
                     let stream: Pin<
                         Box<
@@ -1174,6 +1492,10 @@ async fn handle_openai_chat_completions(
                     return Ok(response);
                 }
                 Err(e) => {
+                    // Record circuit breaker failure
+                    if let Some(ref cb) = state.circuit_breakers {
+                        cb.record_failure(&mapping.provider).await;
+                    }
                     let is_rate_limit = matches!(
                         &e,
                         crate::providers::error::ProviderError::ApiError { status: 429, .. }
@@ -1191,85 +1513,119 @@ async fn handle_openai_chat_completions(
                 }
             }
         } else {
-            // ── Non-streaming path ──
-            match provider.send_message(anthropic_request.clone()).await {
-                Ok(mut anthropic_response) => {
-                    let latency_ms = start_time.elapsed().as_millis() as u64;
-                    let tok_s = (anthropic_response.usage.output_tokens as f32 * 1000.0)
-                        / latency_ms as f32;
-                    let cost = calculate_cost(
-                        &state,
-                        &mapping.actual_model,
-                        anthropic_response.usage.input_tokens,
-                        anthropic_response.usage.output_tokens,
-                        is_sub,
-                    )
-                    .await;
-                    info!(
-                        "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
-                        mapping.actual_model,
-                        mapping.provider,
-                        latency_ms,
-                        tok_s,
-                        anthropic_response.usage.output_tokens,
-                        cost.estimated_cost_usd,
-                        if is_sub { " (subscription)" } else { "" }
+            // ── Non-streaming path with retry ──
+            let mut last_error = None;
+            for attempt in 0..=MAX_RETRIES {
+                if attempt > 0 {
+                    let delay = retry_delay(attempt - 1);
+                    warn!(
+                        "⏳ Retrying provider {} (attempt {}/{}), backoff {}ms",
+                        mapping.provider, attempt + 1, MAX_RETRIES + 1, delay.as_millis()
                     );
-
-                    record_request_metrics(
-                        &mapping.actual_model,
-                        &mapping.provider,
-                        &decision.route_type,
-                        "ok",
-                        latency_ms,
-                        anthropic_response.usage.input_tokens,
-                        anthropic_response.usage.output_tokens,
-                        cost.estimated_cost_usd,
-                    );
-
-                    // Record spend for budget tracking
-                    record_spend(
-                        &state,
-                        &mapping.provider,
-                        &decision.model_name,
-                        cost.estimated_cost_usd,
-                        tenant_id.as_deref(),
-                    );
-
-                    // DLP: sanitize response (deanonymize names, scan secrets)
-                    if let Some(ref dlp_engine) = dlp {
-                        if dlp_engine.config.scan_output {
-                            sanitize_provider_response(&mut anthropic_response, dlp_engine);
-                        }
-                    }
-
-                    let openai_response = openai_compat::transform_anthropic_to_openai(
-                        anthropic_response,
-                        model.clone(),
-                    );
-                    return Ok(Json(openai_response).into_response());
+                    tokio::time::sleep(delay).await;
                 }
-                Err(e) => {
-                    let is_rate_limit = matches!(
-                        &e,
-                        crate::providers::error::ProviderError::ApiError { status: 429, .. }
-                    );
-                    if is_rate_limit {
-                        warn!("Provider {} rate limited, falling back", mapping.provider);
-                        metrics::counter!("grob_ratelimit_hits_total", "provider" => mapping.provider.clone()).increment(1);
+                match provider.send_message(anthropic_request.clone()).await {
+                    Ok(mut anthropic_response) => {
+                        // Record circuit breaker success
+                        if let Some(ref cb) = state.circuit_breakers {
+                            cb.record_success(&mapping.provider).await;
+                        }
+                        let latency_ms = start_time.elapsed().as_millis() as u64;
+                        let tok_s = (anthropic_response.usage.output_tokens as f32 * 1000.0)
+                            / latency_ms as f32;
+                        let cost = calculate_cost(
+                            &state,
+                            &mapping.actual_model,
+                            anthropic_response.usage.input_tokens,
+                            anthropic_response.usage.output_tokens,
+                            is_sub,
+                        )
+                        .await;
+                        info!(
+                            "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
+                            mapping.actual_model,
+                            mapping.provider,
+                            latency_ms,
+                            tok_s,
+                            anthropic_response.usage.output_tokens,
+                            cost.estimated_cost_usd,
+                            if is_sub { " (subscription)" } else { "" }
+                        );
+
+                        record_request_metrics(
+                            &mapping.actual_model,
+                            &mapping.provider,
+                            &decision.route_type,
+                            "ok",
+                            latency_ms,
+                            anthropic_response.usage.input_tokens,
+                            anthropic_response.usage.output_tokens,
+                            cost.estimated_cost_usd,
+                        );
+
+                        // Record spend for budget tracking
+                        record_spend(
+                            &state,
+                            &mapping.provider,
+                            &decision.model_name,
+                            cost.estimated_cost_usd,
+                            tenant_id.as_deref(),
+                        ).await;
+
+                        // DLP: sanitize response (deanonymize names, scan secrets)
+                        if let Some(ref dlp_engine) = dlp {
+                            if dlp_engine.config.scan_output {
+                                sanitize_provider_response(&mut anthropic_response, dlp_engine);
+                            }
+                        }
+
+                        let openai_response = openai_compat::transform_anthropic_to_openai(
+                            anthropic_response,
+                            model.clone(),
+                        );
+                        return Ok(Json(openai_response).into_response());
                     }
-                    metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
-                    info!(
-                        "⚠️ Provider {} failed: {}, trying next fallback",
-                        mapping.provider, e
-                    );
-                    continue;
+                    Err(e) => {
+                        let retryable = is_retryable(&e);
+                        let is_rate_limit = matches!(
+                            &e,
+                            crate::providers::error::ProviderError::ApiError { status: 429, .. }
+                        );
+                        if is_rate_limit {
+                            warn!("Provider {} rate limited", mapping.provider);
+                            metrics::counter!("grob_ratelimit_hits_total", "provider" => mapping.provider.clone()).increment(1);
+                        }
+                        metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
+
+                        if retryable && attempt < MAX_RETRIES {
+                            warn!(
+                                "⚠️ Provider {} failed (retryable): {}",
+                                mapping.provider, e
+                            );
+                            last_error = Some(e);
+                            continue;
+                        }
+
+                        // Non-retryable or max retries exhausted
+                        // Record circuit breaker failure
+                        if let Some(ref cb) = state.circuit_breakers {
+                            cb.record_failure(&mapping.provider).await;
+                        }
+                        info!(
+                            "⚠️ Provider {} failed: {}, trying next fallback",
+                            mapping.provider, e
+                        );
+                        last_error = Some(e);
+                        break;
+                    }
                 }
             }
+            let _ = last_error; // consumed by fallback loop
         }
     }
 
     error!(
+        request_id = req_id,
         "❌ All provider mappings failed for model: {}",
         decision.model_name
     );
@@ -1470,10 +1826,12 @@ fn inject_continuation_text(msg: &mut crate::models::Message) {
 async fn handle_messages(
     State(state): State<Arc<AppState>>,
     claims: Option<axum::Extension<crate::auth::GrobClaims>>,
+    axum::Extension(request_id): axum::Extension<RequestId>,
     headers: HeaderMap,
     Json(request_json): Json<serde_json::Value>,
 ) -> Result<Response, AppError> {
     let _guard = ActiveRequestGuard::new(&state);
+    let req_id = &request_id.0;
     let model = request_json
         .get("model")
         .and_then(|m| m.as_str())
@@ -1515,6 +1873,15 @@ async fn handle_messages(
             }
             AppError::ParseError(format!("Invalid request format: {}", e))
         })?;
+
+    // DLP: check for prompt injection (before routing/sending)
+    if let Some(ref dlp_engine) = dlp {
+        if dlp_engine.config.scan_input {
+            if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut request_for_routing) {
+                return Err(AppError::DlpBlocked(format!("{}", block_err)));
+            }
+        }
+    }
 
     // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
     let decision = inner
@@ -1577,7 +1944,7 @@ async fn handle_messages(
                                 response.usage.output_tokens,
                                 is_sub,
                             ).await;
-                            let mut tracker = state.spend_tracker.lock().unwrap_or_else(|e| e.into_inner());
+                            let mut tracker = state.spend_tracker.lock().await;
                             tracker.record(prov, actual, counter.estimated_cost_usd);
                         }
 
@@ -1638,8 +2005,20 @@ async fn handle_messages(
         for (idx, mapping) in sorted_mappings.iter().enumerate() {
             // Try to get provider from registry
             if let Some(provider) = inner.provider_registry.get_provider(&mapping.provider) {
+                // Circuit breaker check
+                if let Some(ref cb) = state.circuit_breakers {
+                    if !cb.can_execute(&mapping.provider).await {
+                        info!(
+                            "⚡ Circuit breaker open for {}, skipping",
+                            mapping.provider
+                        );
+                        metrics::counter!("grob_circuit_breaker_rejected_total", "provider" => mapping.provider.clone()).increment(1);
+                        continue;
+                    }
+                }
+
                 // Budget check before sending request
-                check_budget(&state, &inner, &mapping.provider, &decision.model_name)?;
+                check_budget(&state, &inner, &mapping.provider, &decision.model_name).await?;
 
                 // Clone the already-parsed request (struct clone, not JSON re-parse)
                 let mut anthropic_request = request_for_routing.clone();
@@ -1700,6 +2079,7 @@ async fn handle_messages(
                 };
 
                 info!(
+                    request_id = req_id,
                     "[{:<15}:{}] {:<25} → {}/{}{}",
                     route_type_display,
                     stream_mode,
@@ -1729,6 +2109,10 @@ async fn handle_messages(
                     // Streaming request
                     match provider.send_message_stream(anthropic_request).await {
                         Ok(stream_response) => {
+                            // Record circuit breaker success
+                            if let Some(ref cb) = state.circuit_breakers {
+                                cb.record_success(&mapping.provider).await;
+                            }
                             // Wrap stream with DLP if enabled for output scanning
                             let stream: Pin<
                                 Box<
@@ -1804,6 +2188,10 @@ async fn handle_messages(
                             return Ok(response);
                         }
                         Err(e) => {
+                            // Record circuit breaker failure
+                            if let Some(ref cb) = state.circuit_breakers {
+                                cb.record_failure(&mapping.provider).await;
+                            }
                             state.message_tracer.trace_error(&trace_id, &e.to_string());
                             let is_rate_limit = matches!(
                                 &e,
@@ -1825,95 +2213,127 @@ async fn handle_messages(
                         }
                     }
                 } else {
-                    // Non-streaming request (original behavior)
-                    match provider.send_message(anthropic_request).await {
-                        Ok(mut response) => {
-                            // DLP: sanitize response (deanonymize names, scan secrets)
-                            if let Some(ref dlp_engine) = dlp {
-                                if dlp_engine.config.scan_output {
-                                    sanitize_provider_response(&mut response, dlp_engine);
-                                }
-                            }
-
-                            // Restore original model name in response
-                            response.model = original_model;
-                            info!(
-                                "✅ Request succeeded with provider: {}, response model: {}",
-                                mapping.provider, response.model
+                    // Non-streaming request with retry
+                    let mut last_error = None;
+                    for attempt in 0..=MAX_RETRIES {
+                        if attempt > 0 {
+                            let delay = retry_delay(attempt - 1);
+                            warn!(
+                                "⏳ Retrying provider {} (attempt {}/{}), backoff {}ms",
+                                mapping.provider, attempt + 1, MAX_RETRIES + 1, delay.as_millis()
                             );
-
-                            // Calculate and log metrics with dynamic pricing
-                            let latency_ms = start_time.elapsed().as_millis() as u64;
-                            let tok_s =
-                                (response.usage.output_tokens as f32 * 1000.0) / latency_ms as f32;
-                            let cost = calculate_cost(
-                                &state,
-                                &mapping.actual_model,
-                                response.usage.input_tokens,
-                                response.usage.output_tokens,
-                                is_sub,
-                            )
-                            .await;
-                            info!(
-                                "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
-                                mapping.actual_model,
-                                mapping.provider,
-                                latency_ms,
-                                tok_s,
-                                response.usage.output_tokens,
-                                cost.estimated_cost_usd,
-                                if is_sub { " (subscription)" } else { "" }
-                            );
-
-                            // Record Prometheus metrics
-                            record_request_metrics(
-                                &mapping.actual_model,
-                                &mapping.provider,
-                                &decision.route_type,
-                                "ok",
-                                latency_ms,
-                                response.usage.input_tokens,
-                                response.usage.output_tokens,
-                                cost.estimated_cost_usd,
-                            );
-
-                            // Record spend for budget tracking
-                            record_spend(
-                                &state,
-                                &mapping.provider,
-                                &decision.model_name,
-                                cost.estimated_cost_usd,
-                                tenant_id.as_deref(),
-                            );
-
-                            // Trace the response
-                            state
-                                .message_tracer
-                                .trace_response(&trace_id, &response, latency_ms);
-
-                            return Ok(Json(response).into_response());
+                            tokio::time::sleep(delay).await;
                         }
-                        Err(e) => {
-                            state.message_tracer.trace_error(&trace_id, &e.to_string());
-                            let is_rate_limit = matches!(
-                                &e,
-                                crate::providers::error::ProviderError::ApiError {
-                                    status: 429,
-                                    ..
+                        match provider.send_message(anthropic_request.clone()).await {
+                            Ok(mut response) => {
+                                // Record circuit breaker success
+                                if let Some(ref cb) = state.circuit_breakers {
+                                    cb.record_success(&mapping.provider).await;
                                 }
-                            );
-                            if is_rate_limit {
-                                warn!("Provider {} rate limited, falling back", mapping.provider);
-                                metrics::counter!("grob_ratelimit_hits_total", "provider" => mapping.provider.clone()).increment(1);
+                                // DLP: sanitize response (deanonymize names, scan secrets)
+                                if let Some(ref dlp_engine) = dlp {
+                                    if dlp_engine.config.scan_output {
+                                        sanitize_provider_response(&mut response, dlp_engine);
+                                    }
+                                }
+
+                                // Restore original model name in response
+                                response.model = original_model;
+                                info!(
+                                    "✅ Request succeeded with provider: {}, response model: {}",
+                                    mapping.provider, response.model
+                                );
+
+                                // Calculate and log metrics with dynamic pricing
+                                let latency_ms = start_time.elapsed().as_millis() as u64;
+                                let tok_s =
+                                    (response.usage.output_tokens as f32 * 1000.0) / latency_ms as f32;
+                                let cost = calculate_cost(
+                                    &state,
+                                    &mapping.actual_model,
+                                    response.usage.input_tokens,
+                                    response.usage.output_tokens,
+                                    is_sub,
+                                )
+                                .await;
+                                info!(
+                                    "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
+                                    mapping.actual_model,
+                                    mapping.provider,
+                                    latency_ms,
+                                    tok_s,
+                                    response.usage.output_tokens,
+                                    cost.estimated_cost_usd,
+                                    if is_sub { " (subscription)" } else { "" }
+                                );
+
+                                // Record Prometheus metrics
+                                record_request_metrics(
+                                    &mapping.actual_model,
+                                    &mapping.provider,
+                                    &decision.route_type,
+                                    "ok",
+                                    latency_ms,
+                                    response.usage.input_tokens,
+                                    response.usage.output_tokens,
+                                    cost.estimated_cost_usd,
+                                );
+
+                                // Record spend for budget tracking
+                                record_spend(
+                                    &state,
+                                    &mapping.provider,
+                                    &decision.model_name,
+                                    cost.estimated_cost_usd,
+                                    tenant_id.as_deref(),
+                                );
+
+                                // Trace the response
+                                state
+                                    .message_tracer
+                                    .trace_response(&trace_id, &response, latency_ms);
+
+                                return Ok(Json(response).into_response());
                             }
-                            metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
-                            info!(
-                                "⚠️ Provider {} failed: {}, trying next fallback",
-                                mapping.provider, e
-                            );
-                            continue;
+                            Err(e) => {
+                                let retryable = is_retryable(&e);
+                                state.message_tracer.trace_error(&trace_id, &e.to_string());
+                                let is_rate_limit = matches!(
+                                    &e,
+                                    crate::providers::error::ProviderError::ApiError {
+                                        status: 429,
+                                        ..
+                                    }
+                                );
+                                if is_rate_limit {
+                                    warn!("Provider {} rate limited", mapping.provider);
+                                    metrics::counter!("grob_ratelimit_hits_total", "provider" => mapping.provider.clone()).increment(1);
+                                }
+                                metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
+
+                                if retryable && attempt < MAX_RETRIES {
+                                    warn!(
+                                        "⚠️ Provider {} failed (retryable): {}",
+                                        mapping.provider, e
+                                    );
+                                    last_error = Some(e);
+                                    continue;
+                                }
+
+                                // Non-retryable or max retries exhausted
+                                if let Some(ref cb) = state.circuit_breakers {
+                                    cb.record_failure(&mapping.provider).await;
+                                }
+                                info!(
+                                    "⚠️ Provider {} failed: {}, trying next fallback",
+                                    mapping.provider, e
+                                );
+                                last_error = Some(e);
+                                break;
+                            }
                         }
                     }
+                    let _ = last_error;
                 }
             } else {
                 info!(
@@ -1925,6 +2345,7 @@ async fn handle_messages(
         }
 
         error!(
+            request_id = req_id,
             "❌ All provider mappings failed for model: {}",
             decision.model_name
         );
@@ -2131,6 +2552,7 @@ pub enum AppError {
     ParseError(String),
     ProviderError(String),
     BudgetExceeded(String),
+    DlpBlocked(String),
 }
 
 impl IntoResponse for AppError {
@@ -2140,6 +2562,7 @@ impl IntoResponse for AppError {
             AppError::ParseError(msg) => (StatusCode::BAD_REQUEST, "invalid_request_error", msg),
             AppError::ProviderError(msg) => (StatusCode::BAD_GATEWAY, "error", msg),
             AppError::BudgetExceeded(msg) => (StatusCode::PAYMENT_REQUIRED, "budget_exceeded", msg),
+            AppError::DlpBlocked(msg) => (StatusCode::BAD_REQUEST, "dlp_block", msg),
         };
 
         let body = Json(serde_json::json!({
@@ -2160,6 +2583,7 @@ impl std::fmt::Display for AppError {
             AppError::ParseError(msg) => write!(f, "Parse error: {}", msg),
             AppError::ProviderError(msg) => write!(f, "Provider error: {}", msg),
             AppError::BudgetExceeded(msg) => write!(f, "Budget exceeded: {}", msg),
+            AppError::DlpBlocked(msg) => write!(f, "DLP blocked: {}", msg),
         }
     }
 }

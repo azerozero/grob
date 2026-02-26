@@ -92,7 +92,11 @@ impl GeminiProvider {
             api_key,
             base_url,
             models,
-            client: Client::new(),
+            client: Client::builder()
+                .pool_max_idle_per_host(20)
+                .pool_idle_timeout(std::time::Duration::from_secs(90))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             custom_headers,
             project_id,
             location,

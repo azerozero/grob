@@ -471,7 +471,11 @@ impl OpenAIProvider {
             name,
             api_key,
             base_url,
-            client: Client::new(),
+            client: Client::builder()
+                .pool_max_idle_per_host(20)
+                .pool_idle_timeout(std::time::Duration::from_secs(90))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             models,
             custom_headers,
             oauth_provider,

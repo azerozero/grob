@@ -266,6 +266,121 @@ pub struct CountTokensResponse {
     pub input_tokens: u32,
 }
 
+/// Returns a sensible default max_tokens for a given model when the client
+/// doesn't specify one. Based on each model's documented output token limit.
+///
+/// This is used by the OpenAI compat layer where max_tokens is optional.
+/// Anthropic-native clients must always provide max_tokens explicitly.
+pub fn default_max_tokens(model: &str) -> u32 {
+    let m = model.to_lowercase();
+
+    // --- OpenAI reasoning models (o-series) ---
+    // o3, o4-mini support up to 100k output; use conservative 32k default
+    if m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
+        return 32768;
+    }
+
+    // --- OpenAI GPT-4.1 family: 32k output ---
+    if m.contains("gpt-4.1") {
+        return 32768;
+    }
+
+    // --- OpenAI GPT-4o family: 16k output ---
+    if m.contains("gpt-4o") {
+        return 16384;
+    }
+
+    // --- OpenAI GPT-4 turbo / GPT-3.5: 4k output ---
+    if m.contains("gpt-4-turbo") || m.contains("gpt-3.5") || m.contains("gpt-4-") {
+        return 4096;
+    }
+
+    // --- Gemini 2.5 family: 65k output ---
+    if m.contains("gemini-2.5") {
+        return 65536;
+    }
+
+    // --- Gemini 2.0 / 1.5: 8k output ---
+    if m.contains("gemini-2.0") || m.contains("gemini-1.5") || m.contains("gemini-1.0") {
+        return 8192;
+    }
+
+    // --- Anthropic Claude 4.x (opus, sonnet): 16k default (up to 128k with extended output) ---
+    if m.contains("claude-opus") || m.contains("claude-sonnet-4") {
+        return 16384;
+    }
+
+    // --- Anthropic Claude 3.5 / Haiku 4.5: 8k ---
+    if m.contains("claude-3.5") || m.contains("claude-3-5") || m.contains("claude-haiku") {
+        return 8192;
+    }
+
+    // --- Anthropic Claude 3 Opus: 4k ---
+    if m.contains("claude-3-opus") || m.contains("claude-3.0") {
+        return 4096;
+    }
+
+    // --- DeepSeek: 8k ---
+    if m.contains("deepseek") {
+        return 8192;
+    }
+
+    // --- Codex: 16k ---
+    if m.contains("codex") {
+        return 16384;
+    }
+
+    // Fallback: safe default for unknown models
+    8192
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_max_tokens_anthropic() {
+        assert_eq!(default_max_tokens("claude-opus-4-6"), 16384);
+        assert_eq!(default_max_tokens("claude-sonnet-4-6"), 16384);
+        assert_eq!(default_max_tokens("claude-sonnet-4-5-20250514"), 16384);
+        assert_eq!(default_max_tokens("claude-haiku-4-5"), 8192);
+        assert_eq!(default_max_tokens("claude-3.5-sonnet-20241022"), 8192);
+        assert_eq!(default_max_tokens("claude-3-5-sonnet-20241022"), 8192);
+        assert_eq!(default_max_tokens("claude-3-opus-20240229"), 4096);
+    }
+
+    #[test]
+    fn test_default_max_tokens_openai() {
+        assert_eq!(default_max_tokens("gpt-4o"), 16384);
+        assert_eq!(default_max_tokens("gpt-4o-mini"), 16384);
+        assert_eq!(default_max_tokens("gpt-4.1"), 32768);
+        assert_eq!(default_max_tokens("gpt-4.1-mini"), 32768);
+        assert_eq!(default_max_tokens("gpt-4.1-nano"), 32768);
+        assert_eq!(default_max_tokens("gpt-4-turbo"), 4096);
+        assert_eq!(default_max_tokens("gpt-3.5-turbo"), 4096);
+        assert_eq!(default_max_tokens("o3"), 32768);
+        assert_eq!(default_max_tokens("o3-mini"), 32768);
+        assert_eq!(default_max_tokens("o4-mini"), 32768);
+    }
+
+    #[test]
+    fn test_default_max_tokens_gemini() {
+        assert_eq!(default_max_tokens("gemini-2.5-pro"), 65536);
+        assert_eq!(default_max_tokens("gemini-2.5-flash"), 65536);
+        assert_eq!(default_max_tokens("gemini-2.0-flash"), 8192);
+        assert_eq!(default_max_tokens("gemini-1.5-pro"), 8192);
+    }
+
+    #[test]
+    fn test_default_max_tokens_other() {
+        assert_eq!(default_max_tokens("deepseek-chat"), 8192);
+        assert_eq!(default_max_tokens("deepseek-reasoner"), 8192);
+        assert_eq!(default_max_tokens("codex-mini"), 16384);
+        // Unknown model gets safe fallback
+        assert_eq!(default_max_tokens("some-unknown-model"), 8192);
+    }
+}
+
 /// Router decision result
 #[derive(Debug, Clone)]
 pub struct RouteDecision {

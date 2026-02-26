@@ -2,11 +2,15 @@ pub mod builtins;
 pub mod canary;
 pub mod config;
 pub mod dfa;
+pub mod hot_config;
 pub mod names;
 pub mod pii;
+pub mod prompt_injection;
 pub mod session;
+pub mod signed_config;
 pub mod sprt;
 pub mod stream;
+pub mod url_exfil;
 
 use crate::models::{
     AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt,
@@ -14,6 +18,40 @@ use crate::models::{
 use config::DlpConfig;
 use std::borrow::Cow;
 use std::sync::Arc;
+
+/// Error returned when DLP blocks a request or response.
+#[derive(Debug)]
+pub enum DlpBlockError {
+    InjectionBlocked(Vec<prompt_injection::InjectionDetection>),
+    UrlExfilBlocked(Vec<url_exfil::UrlExfilDetection>),
+}
+
+impl std::fmt::Display for DlpBlockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DlpBlockError::InjectionBlocked(dets) => {
+                write!(f, "Prompt injection detected: ")?;
+                for (i, d) in dets.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", d)?;
+                }
+                Ok(())
+            }
+            DlpBlockError::UrlExfilBlocked(dets) => {
+                write!(f, "URL exfiltration detected: ")?;
+                for (i, d) in dets.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", d)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
 
 /// Central DLP engine combining all detection and replacement components.
 pub struct DlpEngine {
@@ -23,6 +61,9 @@ pub struct DlpEngine {
     pub canary_gen: Arc<canary::CanaryGenerator>,
     pub sprt: Option<sprt::SprtDetector>,
     pub pii_scanner: Option<pii::PiiScanner>,
+    pub url_exfil_scanner: Option<url_exfil::UrlExfilScanner>,
+    pub injection_detector: Option<prompt_injection::InjectionDetector>,
+    pub hot_config: hot_config::SharedHotConfig,
 }
 
 impl DlpEngine {
@@ -50,15 +91,45 @@ impl DlpEngine {
         };
         let pii_scanner = pii::PiiScanner::from_config(&config.pii);
 
+        // Build shared hot config from inline lists
+        let shared_hot = hot_config::build_initial_hot_config(
+            &config.url_exfil.whitelist_domains,
+            &config.url_exfil.blacklist_domains,
+            &config.url_exfil.domain_match_mode,
+            &config.prompt_injection.custom_patterns,
+        );
+
+        // Build URL exfiltration scanner
+        let url_exfil_scanner = if config.url_exfil.enabled {
+            Some(url_exfil::UrlExfilScanner::new(
+                config.url_exfil.clone(),
+                Arc::clone(&shared_hot),
+            ))
+        } else {
+            None
+        };
+
+        // Build prompt injection detector
+        let injection_detector = if config.prompt_injection.enabled {
+            Some(prompt_injection::InjectionDetector::new(
+                config.prompt_injection.clone(),
+                Arc::clone(&shared_hot),
+            ))
+        } else {
+            None
+        };
+
         let secret_count = config.secrets.len() + config.custom_prefixes.len();
         let name_count = config.names.len();
         let pii_active = pii_scanner.is_some();
         tracing::info!(
-            "DLP engine initialized: {} secret rules, {} name rules, entropy={}, pii={}",
+            "DLP engine initialized: {} secret rules, {} name rules, entropy={}, pii={}, url_exfil={}, injection={}",
             secret_count,
             name_count,
             config.entropy.enabled,
             pii_active,
+            config.url_exfil.enabled,
+            config.prompt_injection.enabled,
         );
 
         metrics::gauge!("grob_dlp_rules_loaded", "type" => "secret").set(secret_count as f64);
@@ -71,6 +142,9 @@ impl DlpEngine {
             canary_gen,
             sprt,
             pii_scanner,
+            url_exfil_scanner,
+            injection_detector,
+            hot_config: shared_hot,
         }))
     }
 
@@ -114,6 +188,58 @@ impl DlpEngine {
                 }
             }
         }
+    }
+
+    /// Sanitize an outgoing request with block support.
+    /// Returns `Err(DlpBlockError)` if prompt injection is detected with `action: block`.
+    pub fn sanitize_request_checked(
+        &self,
+        request: &mut AnthropicRequest,
+    ) -> Result<(), DlpBlockError> {
+        // Stage 0: Prompt injection detection (before name anonymization)
+        if let Some(ref detector) = self.injection_detector {
+            let all_text = Self::extract_request_text(request);
+            for text in &all_text {
+                match detector.scan(text) {
+                    prompt_injection::InjectionResult::Blocked(dets) => {
+                        return Err(DlpBlockError::InjectionBlocked(dets));
+                    }
+                    prompt_injection::InjectionResult::Logged(_) | prompt_injection::InjectionResult::Clean => {}
+                }
+            }
+        }
+
+        // Then do normal sanitization (names, secrets, PII)
+        self.sanitize_request(request);
+        Ok(())
+    }
+
+    /// Extract all text content from a request for scanning.
+    fn extract_request_text(request: &AnthropicRequest) -> Vec<&str> {
+        let mut texts = Vec::new();
+        if let Some(ref system) = request.system {
+            match system {
+                SystemPrompt::Text(text) => texts.push(text.as_str()),
+                SystemPrompt::Blocks(blocks) => {
+                    for block in blocks {
+                        texts.push(block.text.as_str());
+                    }
+                }
+            }
+        }
+        for msg in &request.messages {
+            match &msg.content {
+                MessageContent::Text(text) => texts.push(text.as_str()),
+                MessageContent::Blocks(blocks) => {
+                    for block in blocks {
+                        if let ContentBlock::Known(KnownContentBlock::Text { text, .. }) = block {
+                            texts.push(text.as_str());
+                        }
+                    }
+                }
+            }
+        }
+        texts
     }
 
     /// Sanitize a single text string: names → pseudonyms, secrets → canary/redact.
@@ -250,10 +376,28 @@ impl DlpEngine {
             }
         }
 
+        // 4. URL exfiltration scan (anti-EchoLeak)
+        if let Some(ref exfil) = self.url_exfil_scanner {
+            let current = modified.as_deref().unwrap_or(text);
+            if let Cow::Owned(sanitized) = exfil.sanitize_response(current) {
+                modified = Some(sanitized);
+            }
+        }
+
         match modified {
             Some(s) => Cow::Owned(s),
             None => Cow::Borrowed(text),
         }
+    }
+
+    /// Check response text for URL exfiltration block. Returns error if blocked.
+    pub fn check_response_url_exfil(&self, text: &str) -> Result<(), DlpBlockError> {
+        if let Some(ref exfil) = self.url_exfil_scanner {
+            if let Some(dets) = exfil.is_blocked(text) {
+                return Err(DlpBlockError::UrlExfilBlocked(dets));
+            }
+        }
+        Ok(())
     }
 
     /// End-of-stream scan: detect cross-chunk secrets and pseudonyms that
@@ -280,6 +424,17 @@ impl DlpEngine {
         {
             tracing::warn!("DLP cross-chunk pseudonym detected in final buffer");
             metrics::counter!("grob_dlp_cross_chunk_total", "rule" => "pseudonym").increment(1);
+        }
+        // URL exfil cross-chunk scan
+        if let Some(ref exfil) = self.url_exfil_scanner {
+            if exfil.might_contain_url(full_text) {
+                let result = exfil.scan(full_text);
+                if !matches!(result, url_exfil::UrlExfilResult::Clean) {
+                    tracing::warn!("DLP cross-chunk URL exfiltration detected in final buffer");
+                    metrics::counter!("grob_dlp_cross_chunk_total", "rule" => "url_exfil")
+                        .increment(1);
+                }
+            }
         }
     }
 
@@ -339,6 +494,9 @@ mod tests {
             entropy: EntropyConfig::default(),
             pii: Default::default(),
             enable_sessions: false,
+            url_exfil: Default::default(),
+            prompt_injection: Default::default(),
+            signed_config: Default::default(),
         }
     }
 

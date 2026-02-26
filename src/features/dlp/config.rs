@@ -32,6 +32,15 @@ pub struct DlpConfig {
     /// and CanaryGenerator (independent counter). Default: false.
     #[serde(default)]
     pub enable_sessions: bool,
+    /// URL exfiltration scanner (anti-EchoLeak). Default: disabled.
+    #[serde(default)]
+    pub url_exfil: UrlExfilConfig,
+    /// Prompt injection detector. Default: disabled.
+    #[serde(default)]
+    pub prompt_injection: PromptInjectionConfig,
+    /// Signed config hot-reload settings. Default: disabled.
+    #[serde(default)]
+    pub signed_config: SignedConfigSettings,
 }
 
 fn default_true() -> bool {
@@ -156,6 +165,160 @@ pub enum EntropyAction {
 
 fn default_action_log() -> EntropyAction {
     EntropyAction::Log
+}
+
+/// Action for URL exfiltration and prompt injection detections.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DlpAction {
+    Redact,
+    Log,
+    Block,
+}
+
+impl Default for DlpAction {
+    fn default() -> Self {
+        DlpAction::Log
+    }
+}
+
+impl std::fmt::Display for DlpAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DlpAction::Redact => write!(f, "redact"),
+            DlpAction::Log => write!(f, "log"),
+            DlpAction::Block => write!(f, "block"),
+        }
+    }
+}
+
+/// Domain matching mode for whitelist/blacklist.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum DomainMatchMode {
+    Exact,
+    Suffix,
+    Glob,
+}
+
+impl Default for DomainMatchMode {
+    fn default() -> Self {
+        DomainMatchMode::Suffix
+    }
+}
+
+/// URL exfiltration scanner configuration (anti-EchoLeak CVE-2025-32711).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UrlExfilConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub action: DlpAction,
+    #[serde(default = "default_true")]
+    pub scan_markdown_images: bool,
+    #[serde(default = "default_true")]
+    pub scan_markdown_links: bool,
+    #[serde(default = "default_true")]
+    pub scan_raw_urls: bool,
+    #[serde(default = "default_true")]
+    pub flag_long_query_params: bool,
+    #[serde(default = "default_true")]
+    pub flag_base64_in_path: bool,
+    #[serde(default = "default_true")]
+    pub flag_data_uris: bool,
+    #[serde(default = "default_max_query_length")]
+    pub max_query_length: usize,
+    #[serde(default)]
+    pub whitelist_domains: Vec<String>,
+    #[serde(default)]
+    pub blacklist_domains: Vec<String>,
+    #[serde(default)]
+    pub domain_match_mode: DomainMatchMode,
+}
+
+fn default_max_query_length() -> usize {
+    200
+}
+
+impl Default for UrlExfilConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            action: DlpAction::Log,
+            scan_markdown_images: true,
+            scan_markdown_links: true,
+            scan_raw_urls: true,
+            flag_long_query_params: true,
+            flag_base64_in_path: true,
+            flag_data_uris: true,
+            max_query_length: 200,
+            whitelist_domains: Vec::new(),
+            blacklist_domains: Vec::new(),
+            domain_match_mode: DomainMatchMode::Suffix,
+        }
+    }
+}
+
+/// Prompt injection detector configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PromptInjectionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub action: DlpAction,
+    /// Disable built-in injection patterns (only use custom_patterns).
+    #[serde(default)]
+    pub no_builtins: bool,
+    #[serde(default)]
+    pub custom_patterns: Vec<String>,
+    #[serde(default = "default_languages")]
+    pub languages: Vec<String>,
+}
+
+fn default_languages() -> Vec<String> {
+    vec!["en".to_string(), "fr".to_string()]
+}
+
+impl Default for PromptInjectionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            action: DlpAction::Log,
+            no_builtins: false,
+            custom_patterns: Vec::new(),
+            languages: default_languages(),
+        }
+    }
+}
+
+/// Signed config hot-reload settings for domain lists and injection patterns.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SignedConfigSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    /// File path or URL to the signed config TOML.
+    #[serde(default)]
+    pub source: String,
+    /// Poll interval (e.g. "1h", "30m", "6h"). Default: "1h".
+    #[serde(default = "default_poll_interval")]
+    pub poll_interval: String,
+    /// Require ECDSA P-256 signature verification.
+    #[serde(default)]
+    pub verify_signature: bool,
+    /// Path to PEM or raw SEC1 P-256 public key.
+    #[serde(default)]
+    pub public_key_path: String,
+    /// Suffix for detached signature files. Default: ".sig".
+    #[serde(default = "default_sig_suffix")]
+    pub detached_sig_suffix: String,
+}
+
+fn default_poll_interval() -> String {
+    "1h".to_string()
+}
+
+fn default_sig_suffix() -> String {
+    ".sig".to_string()
 }
 
 /// Standalone rules file format (same arrays, no `[dlp]` wrapper).

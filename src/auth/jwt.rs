@@ -219,7 +219,7 @@ fn default_jwks_refresh_interval() -> u64 {
 }
 
 /// Auth mode configuration
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AuthConfig {
     /// Auth mode: "none", "api_key", or "jwt"
     #[serde(default = "default_auth_mode")]
@@ -230,6 +230,16 @@ pub struct AuthConfig {
     /// JWT configuration (for mode = "jwt")
     #[serde(default)]
     pub jwt: JwtConfig,
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_auth_mode(),
+            api_key: None,
+            jwt: JwtConfig::default(),
+        }
+    }
 }
 
 fn default_auth_mode() -> String {

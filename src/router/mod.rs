@@ -661,6 +661,8 @@ mod tests {
             auth: Default::default(),
             tap: Default::default(),
             user: Default::default(),
+            version: None,
+            security: Default::default(),
         }
     }
 

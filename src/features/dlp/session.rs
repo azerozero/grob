@@ -1,4 +1,5 @@
 use super::config::DlpConfig;
+use super::hot_config::SharedHotConfig;
 use super::DlpEngine;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -15,18 +16,32 @@ pub struct DlpSessionManager {
     sessions: RwLock<HashMap<String, Arc<DlpEngine>>>,
     config: DlpConfig,
     sessions_enabled: bool,
+    /// Shared hot config (same Arc across all session engines).
+    hot_config: SharedHotConfig,
 }
 
 impl DlpSessionManager {
     /// Build a session manager from config. Returns `None` if DLP is disabled.
     pub fn from_config(config: DlpConfig) -> Option<Arc<Self>> {
         let global_engine = DlpEngine::from_config(config.clone())?;
+        let hot_config = Arc::clone(&global_engine.hot_config);
         Some(Arc::new(Self {
             global_engine,
             sessions: RwLock::new(HashMap::new()),
             sessions_enabled: config.enable_sessions,
             config,
+            hot_config,
         }))
+    }
+
+    /// Get a reference to the shared hot config (for spawning hot-reload tasks).
+    pub fn hot_config(&self) -> &SharedHotConfig {
+        &self.hot_config
+    }
+
+    /// Get a reference to the DLP config.
+    pub fn config(&self) -> &DlpConfig {
+        &self.config
     }
 
     /// Get the DLP engine for a given session identifier.
@@ -98,6 +113,27 @@ impl DlpSessionManager {
         };
         let pii_scanner = super::pii::PiiScanner::from_config(&self.config.pii);
 
+        // Share the same hot_config across all session engines
+        let hot = Arc::clone(&self.hot_config);
+
+        let url_exfil_scanner = if self.config.url_exfil.enabled {
+            Some(super::url_exfil::UrlExfilScanner::new(
+                self.config.url_exfil.clone(),
+                Arc::clone(&hot),
+            ))
+        } else {
+            None
+        };
+
+        let injection_detector = if self.config.prompt_injection.enabled {
+            Some(super::prompt_injection::InjectionDetector::new(
+                self.config.prompt_injection.clone(),
+                Arc::clone(&hot),
+            ))
+        } else {
+            None
+        };
+
         tracing::debug!(
             "DLP: created session engine for key hash {}",
             &session_id[..8]
@@ -110,6 +146,9 @@ impl DlpSessionManager {
             canary_gen,
             sprt,
             pii_scanner,
+            url_exfil_scanner,
+            injection_detector,
+            hot_config: hot,
         })
     }
 }
@@ -140,6 +179,9 @@ mod tests {
             entropy: EntropyConfig::default(),
             pii: Default::default(),
             enable_sessions,
+            url_exfil: Default::default(),
+            prompt_injection: Default::default(),
+            signed_config: Default::default(),
         }
     }
 

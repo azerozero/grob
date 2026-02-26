@@ -231,37 +231,6 @@ impl CircuitBreakerRegistry {
         }
     }
 
-    /// Get or create circuit breaker for provider
-    pub async fn get(&self, provider: &str) -> tokio::sync::RwLockWriteGuard<'_, CircuitBreaker> {
-        let mut breakers = self.breakers.write().await;
-
-        if !breakers.contains_key(provider) {
-            breakers.insert(
-                provider.to_string(),
-                CircuitBreaker::new(provider.to_string(), self.default_config.clone()),
-            );
-        }
-
-        // SAFETY: We know the key exists because we just inserted it
-        // This is a bit of a hack to return a write guard to a specific entry
-        drop(breakers);
-
-        // Re-acquire and return the entry
-        let mut breakers = self.breakers.write().await;
-        // Use unsafe to extend lifetime - this is safe because we hold the lock
-        let entry = breakers.get_mut(provider).unwrap();
-
-        // Convert to OwnedRwLockWriteGuard equivalent
-        // Actually, let's use a different approach
-        struct CircuitGuard {
-            _guard: tokio::sync::RwLockWriteGuard<'static, HashMap<String, CircuitBreaker>>,
-            // ... this is getting complex
-        }
-
-        // For simplicity, let's return a boolean check instead
-        panic!("Use execute_with_circuit instead")
-    }
-
     /// Check if provider can execute
     pub async fn can_execute(&self, provider: &str) -> bool {
         let mut breakers = self.breakers.write().await;
@@ -277,18 +246,22 @@ impl CircuitBreakerRegistry {
     pub async fn record_success(&self, provider: &str) {
         let mut breakers = self.breakers.write().await;
 
-        if let Some(breaker) = breakers.get_mut(provider) {
-            breaker.record_success();
-        }
+        let breaker = breakers
+            .entry(provider.to_string())
+            .or_insert_with(|| CircuitBreaker::new(provider.to_string(), self.default_config.clone()));
+
+        breaker.record_success();
     }
 
     /// Record failure for provider
     pub async fn record_failure(&self, provider: &str) {
         let mut breakers = self.breakers.write().await;
 
-        if let Some(breaker) = breakers.get_mut(provider) {
-            breaker.record_failure();
-        }
+        let breaker = breakers
+            .entry(provider.to_string())
+            .or_insert_with(|| CircuitBreaker::new(provider.to_string(), self.default_config.clone()));
+
+        breaker.record_failure();
     }
 
     /// Get state for provider

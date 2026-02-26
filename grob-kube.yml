@@ -1,0 +1,143 @@
+# grob-kube.yml
+# Podman play kube compatible manifest for Grob LLM Proxy
+# Usage: podman play kube grob-kube.yml
+# Rootless: podman play kube --userns=keep-id grob-kube.yml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: grob
+  labels:
+    app: grob
+    version: v0.8.0
+spec:
+  # Security context for rootless operation
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+
+  containers:
+    - name: grob
+      image: grob:latest
+      imagePullPolicy: Never  # Use locally built image
+
+      ports:
+        - containerPort: 8080
+          hostPort: 8080
+          protocol: TCP
+
+      # Security hardening
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        runAsNonRoot: true
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+
+      resources:
+        requests:
+          memory: "64Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+          cpu: "1000m"
+
+      env:
+        - name: GROB_CONFIG_PATH
+          value: "/etc/grob/config.toml"
+        - name: GROB_DATA_DIR
+          value: "/var/lib/grob"
+        - name: RUST_LOG
+          value: "info"
+        - name: RUST_BACKTRACE
+          value: "1"
+
+      volumeMounts:
+        # Config (read-only)
+        - name: config
+          mountPath: /etc/grob
+          readOnly: true
+        # Data (persistent)
+        - name: data
+          mountPath: /var/lib/grob
+        # Audit logs (persistent, append-only)
+        - name: audit
+          mountPath: /var/lib/grob/audit
+        # Tmp for locks
+        - name: tmp
+          mountPath: /tmp
+
+      # Health checks
+      livenessProbe:
+        httpGet:
+          path: /live
+          port: 8080
+        initialDelaySeconds: 5
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+
+      readinessProbe:
+        httpGet:
+          path: /ready
+          port: 8080
+        initialDelaySeconds: 2
+        periodSeconds: 5
+        timeoutSeconds: 3
+        failureThreshold: 2
+
+      startupProbe:
+        httpGet:
+          path: /health
+          port: 8080
+        initialDelaySeconds: 1
+        periodSeconds: 2
+        timeoutSeconds: 2
+        failureThreshold: 30
+
+  volumes:
+    # Config from host (SELinux :Z for private unshared)
+    - name: config
+      hostPath:
+        path: ~/.grob/config
+        type: DirectoryOrCreate
+    # Data directory
+    - name: data
+      hostPath:
+        path: ~/.grob/data
+        type: DirectoryOrCreate
+    # Audit log directory (persistent)
+    - name: audit
+      hostPath:
+        path: ~/.grob/audit
+        type: DirectoryOrCreate
+    # Ephemeral tmp
+    - name: tmp
+      emptyDir: {}
+
+  # DNS policy for isolated environments
+  dnsPolicy: Default
+
+  # Restart policy
+  restartPolicy: Always
+
+---
+# Optional: Service for cluster access
+apiVersion: v1
+kind: Service
+metadata:
+  name: grob-service
+spec:
+  selector:
+    app: grob
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP

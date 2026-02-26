@@ -38,9 +38,64 @@ fn default_warn_percent() -> u32 {
     80
 }
 
+/// Security configuration (wired into middleware stack)
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SecurityTomlConfig {
+    /// Master switch for security middleware
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Rate limit: requests per second per tenant/IP
+    #[serde(default = "default_rate_limit_rps")]
+    pub rate_limit_rps: u32,
+    /// Rate limit: burst capacity
+    #[serde(default = "default_rate_limit_burst")]
+    pub rate_limit_burst: u32,
+    /// Maximum request body size in bytes (default: 10MB)
+    #[serde(default = "default_max_body_size")]
+    pub max_body_size: usize,
+    /// Apply OWASP security headers to all responses
+    #[serde(default = "default_true")]
+    pub security_headers: bool,
+    /// Enable circuit breaker for provider calls
+    #[serde(default = "default_true")]
+    pub circuit_breaker: bool,
+    /// Directory for signed audit logs (empty = disabled)
+    #[serde(default)]
+    pub audit_dir: String,
+}
+
+impl Default for SecurityTomlConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            rate_limit_rps: default_rate_limit_rps(),
+            rate_limit_burst: default_rate_limit_burst(),
+            max_body_size: default_max_body_size(),
+            security_headers: true,
+            circuit_breaker: true,
+            audit_dir: String::new(),
+        }
+    }
+}
+
+fn default_rate_limit_rps() -> u32 {
+    100
+}
+
+fn default_rate_limit_burst() -> u32 {
+    200
+}
+
+fn default_max_body_size() -> usize {
+    10 * 1024 * 1024 // 10MB
+}
+
 /// Application configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
+    /// Config schema version (for forward compatibility)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
     #[serde(default)]
     pub server: ServerConfig,
     pub router: RouterConfig,
@@ -58,6 +113,8 @@ pub struct AppConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub tap: TapConfig,
+    #[serde(default)]
+    pub security: SecurityTomlConfig,
     /// User-defined section preserved across preset applies
     #[serde(default)]
     pub user: UserConfig,
@@ -112,6 +169,13 @@ pub struct ServerConfig {
     pub tracing: TracingConfig,
     #[serde(default)]
     pub tls: TlsConfig,
+    /// Port for the OAuth callback server (default: 1455)
+    #[serde(default = "default_oauth_callback_port")]
+    pub oauth_callback_port: u16,
+}
+
+fn default_oauth_callback_port() -> u16 {
+    1455
 }
 
 /// TLS configuration for native HTTPS (requires `tls` feature)
@@ -168,6 +232,7 @@ impl Default for ServerConfig {
             timeouts: TimeoutConfig::default(),
             tracing: TracingConfig::default(),
             tls: TlsConfig::default(),
+            oauth_callback_port: default_oauth_callback_port(),
         }
     }
 }
@@ -314,6 +379,9 @@ pub struct ModelConfig {
     /// Fan-out configuration (only used when strategy = fan_out)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fan_out: Option<FanOutConfig>,
+    /// Deprecation warning message (logged + X-Model-Deprecated header)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deprecated: Option<String>,
 }
 
 /// Model mapping to a specific provider
@@ -477,6 +545,36 @@ impl AppConfig {
         }
         if let Some(ref m) = self.router.websearch {
             check_router_model(m, "websearch");
+        }
+
+        // Validate auth mode
+        match self.auth.mode.as_str() {
+            "none" | "api_key" | "jwt" => {}
+            other => anyhow::bail!(
+                "Invalid auth.mode '{}'. Must be one of: none, api_key, jwt",
+                other
+            ),
+        }
+
+        // Validate fan_out config consistency
+        for model in &self.models {
+            if model.strategy == ModelStrategy::FanOut && model.fan_out.is_none() {
+                anyhow::bail!(
+                    "Model '{}' has strategy=fan_out but no [fan_out] config block",
+                    model.name
+                );
+            }
+            // Warn if judge_model not in [[models]]
+            if let Some(ref fo) = model.fan_out {
+                if let Some(ref judge) = fo.judge_model {
+                    if !model_names.contains(judge.as_str()) && !model_names.is_empty() {
+                        eprintln!(
+                            "⚠️  Warning: model '{}' fan_out.judge_model '{}' not found in [[models]]",
+                            model.name, judge
+                        );
+                    }
+                }
+            }
         }
 
         Ok(())

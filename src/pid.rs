@@ -43,11 +43,30 @@ pub fn cleanup_pid() -> io::Result<()> {
     Ok(())
 }
 
-/// Check if a process is running
+/// Check if a grob process is running at the given PID.
+/// On Linux, additionally verifies via /proc that the process is actually grob
+/// (guards against stale PID files after PID reuse).
 pub fn is_process_running(pid: u32) -> bool {
     use nix::sys::signal::kill;
     use nix::unistd::Pid;
 
     // Signal 0 (None) checks process existence without side effects
-    kill(Pid::from_raw(pid as i32), None).is_ok()
+    if kill(Pid::from_raw(pid as i32), None).is_err() {
+        return false;
+    }
+
+    // On Linux, verify cmdline contains "grob" to detect PID reuse
+    #[cfg(target_os = "linux")]
+    {
+        let cmdline_path = format!("/proc/{}/cmdline", pid);
+        if let Ok(cmdline) = fs::read(&cmdline_path) {
+            // /proc/*/cmdline uses NUL separators; convert to readable string
+            let cmdline_str = String::from_utf8_lossy(&cmdline);
+            if !cmdline_str.contains("grob") {
+                return false;
+            }
+        }
+    }
+
+    true
 }

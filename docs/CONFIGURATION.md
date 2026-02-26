@@ -130,6 +130,45 @@ model = "translation-model"       # Model to route to
 strip_match = false               # Remove matched text from the message (default: false)
 ```
 
+## Security
+
+Control rate limiting, security headers, body size limits, circuit breakers, and audit logging.
+
+```toml
+[security]
+enabled = true              # Master switch for all security middleware (default: true)
+rate_limit_rps = 100        # Requests per second per tenant/IP (default: 100)
+rate_limit_burst = 200      # Burst allowance (default: 200)
+max_body_size = 10485760    # Max request body in bytes (default: 10MB)
+security_headers = true     # Apply OWASP security headers (default: true)
+circuit_breaker = true      # Enable circuit breaker per provider (default: true)
+audit_dir = ""              # Audit log directory, empty = disabled (default: "")
+```
+
+When `enabled = false`, rate limiting, security headers, and circuit breaker middleware are all skipped. Individual features can also be toggled independently.
+
+The circuit breaker opens after 5 consecutive failures (30s timeout, 3 successes to close). When open, requests skip the provider and fall through to the next mapping.
+
+## Config versioning
+
+Optional schema version for tracking config compatibility:
+
+```toml
+version = "0.9.0"
+```
+
+## Model deprecation
+
+Mark models as deprecated to emit warnings:
+
+```toml
+[[models]]
+name = "old-model"
+deprecated = "Use new-model instead. Removal planned for v1.0."
+```
+
+When a deprecated model is used, Grob logs a warning and adds `X-Model-Deprecated` header to the response.
+
 ## Message tracing
 
 Log all requests and responses for debugging:

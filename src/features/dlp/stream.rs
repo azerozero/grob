@@ -68,6 +68,8 @@ pub struct DlpStream<S> {
     canary_count: usize,
     /// Token-length EMA for skipping DFA on long (prose) tokens.
     token_ema: TokenLengthEma,
+    /// Set to true when URL exfil block terminates the stream.
+    blocked: bool,
 }
 
 impl<S> DlpStream<S>
@@ -82,6 +84,7 @@ where
             sprt_buffer: String::new(),
             canary_count: 0,
             token_ema: TokenLengthEma::new(),
+            blocked: false,
         }
     }
 }
@@ -94,6 +97,11 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
+
+        // If we've already blocked, terminate the stream
+        if *this.blocked {
+            return Poll::Ready(None);
+        }
 
         match this.inner.poll_next(cx) {
             Poll::Ready(Some(Ok(bytes))) => {
@@ -111,10 +119,25 @@ where
                     canary_count: this.canary_count,
                     token_ema: this.token_ema,
                 };
-                match process_sse_chunk(&chunk, ctx) {
+                let result = match process_sse_chunk(&chunk, ctx) {
                     Cow::Borrowed(_) => Poll::Ready(Some(Ok(bytes))),
                     Cow::Owned(modified) => Poll::Ready(Some(Ok(Bytes::from(modified)))),
+                };
+
+                // Check for URL exfil block on accumulated buffer
+                if let Err(block_err) = this.engine.check_response_url_exfil(this.buffer) {
+                    *this.blocked = true;
+                    tracing::warn!("DLP stream blocked: {}", block_err);
+                    metrics::counter!("grob_dlp_stream_blocked_total").increment(1);
+                    // Emit error SSE event then terminate
+                    let error_event = format!(
+                        "event: error\ndata: {{\"type\":\"dlp_block\",\"message\":\"{}\"}}\n\n",
+                        block_err.to_string().replace('"', "\\\"")
+                    );
+                    return Poll::Ready(Some(Ok(Bytes::from(error_event))));
                 }
+
+                result
             }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
             Poll::Ready(None) => {
@@ -391,6 +414,9 @@ mod tests {
             pii: Default::default(),
             no_builtins: true,
             enable_sessions: false,
+            url_exfil: Default::default(),
+            prompt_injection: Default::default(),
+            signed_config: Default::default(),
         };
         DlpEngine::from_config(config).unwrap()
     }
@@ -542,6 +568,9 @@ mod tests {
             entropy: EntropyConfig::default(),
             pii: Default::default(),
             enable_sessions: false,
+            url_exfil: Default::default(),
+            prompt_injection: Default::default(),
+            signed_config: Default::default(),
         };
         let engine = DlpEngine::from_config(config).unwrap();
         let mut canary_count: usize = 0;
@@ -620,6 +649,9 @@ mod tests {
             entropy: EntropyConfig::default(),
             pii: Default::default(),
             enable_sessions: false,
+            url_exfil: Default::default(),
+            prompt_injection: Default::default(),
+            signed_config: Default::default(),
         };
         let engine = DlpEngine::from_config(config).unwrap();
 
