@@ -6,7 +6,9 @@
 [advisories]
 version = 2
 # Fail CI on any known vulnerability.
-ignore = []
+# rustls-pemfile: unmaintained but pulled by axum-server (optional tls feature).
+# No replacement available yet — tracked upstream.
+ignore = ["RUSTSEC-2025-0134"]
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
 # Grob is AGPL-3.0-only. We allow permissive licenses (always compatible),

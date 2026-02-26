@@ -89,8 +89,6 @@ ecdsa = "0.16"                                      # ECDSA traits
 tower = "0.5"                                       # Rate limiting middleware
 tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
 unicode-normalization = "0.1"                       # Homoglyph attack prevention
-aes-gcm = "0.10"                                    # AES-256-GCM encryption
-argon2 = "0.5"                                      # Key derivation
 hex = { version = "0.4", features = ["serde"] }      # Hex encoding/decoding
 
 # Security headers
@@ -125,6 +123,12 @@ harness = false
 [features]
 default = []
 tls = ["axum-server", "rustls", "rustls-pemfile"]
+
+[package.metadata.cargo-machete]
+# ecdsa: trait crate required for p256::ecdsa::signature::Signer bounds
+# tower: required by tower-http for Service/Layer trait impls
+# rustls/rustls-pemfile: behind optional "tls" feature flag
+ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile"]
 
 [profile.release]
 opt-level = 3
