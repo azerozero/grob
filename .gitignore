@@ -1,5 +1,7 @@
 # Rust
 /target
+/fuzz/target
+/fuzz/corpus
 # Cargo.lock is committed for reproducible builds
 *.pdb
 

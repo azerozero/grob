@@ -1,0 +1,17 @@
+# grob.volume
+# Quadlet volume unit for Grob data persistence
+# Install alongside grob.container
+
+[Volume]
+# Volume name
+VolumeName=grob-data
+
+# Driver options
+Driver=local
+
+# Labels for organization
+Label=app=grob
+Label=type=data
+
+# Do not remove volume when container exits
+Remove=false

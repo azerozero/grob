@@ -1,0 +1,805 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "description": "Prometheus data source for Grob metrics",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "10.0.0"
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "timeseries",
+      "name": "Time series",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "gauge",
+      "name": "Gauge",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "table",
+      "name": "Table",
+      "version": ""
+    },
+    {
+      "type": "panel",
+      "id": "heatmap",
+      "name": "Heatmap",
+      "version": ""
+    }
+  ],
+  "id": null,
+  "uid": "grob-overview",
+  "title": "Grob LLM Proxy",
+  "description": "Overview dashboard for the Grob LLM routing proxy",
+  "tags": ["grob", "llm", "proxy"],
+  "timezone": "browser",
+  "editable": true,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "version": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        }
+      },
+      {
+        "name": "model",
+        "type": "query",
+        "datasource": { "uid": "${datasource}" },
+        "definition": "label_values(grob_requests_total, model)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "provider",
+        "type": "query",
+        "datasource": { "uid": "${datasource}" },
+        "definition": "label_values(grob_requests_total, provider)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "row",
+      "title": "Overview",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "collapsed": false
+    },
+    {
+      "type": "stat",
+      "title": "Request Rate",
+      "description": "Total requests per second across all models and providers",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 50, "color": "yellow" },
+              { "value": 100, "color": "red" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum(rate(grob_requests_total{model=~\"$model\", provider=~\"$provider\"}[5m]))",
+          "legendFormat": "req/s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Active Requests",
+      "description": "Number of requests currently being processed",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 10, "color": "yellow" },
+              { "value": 50, "color": "red" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_active_requests",
+          "legendFormat": "active"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Error Rate",
+      "description": "Percentage of requests resulting in errors",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 0.01, "color": "yellow" },
+              { "value": 0.05, "color": "red" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "background"
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum(rate(grob_requests_total{status!=\"success\", model=~\"$model\", provider=~\"$provider\"}[5m])) / sum(rate(grob_requests_total{model=~\"$model\", provider=~\"$provider\"}[5m]))",
+          "legendFormat": "error %"
+        }
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "Budget Used",
+      "description": "Monthly spend as a percentage of the configured budget limit",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" },
+              { "value": 0.8, "color": "yellow" },
+              { "value": 0.95, "color": "red" }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_spend_usd / grob_budget_limit_usd",
+          "legendFormat": "budget"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Spend (Month)",
+      "description": "Total spend in USD for the current month",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "green" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_spend_usd",
+          "legendFormat": "spend"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Budget Remaining",
+      "description": "Remaining budget for the current month in USD",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 5, "color": "yellow" },
+              { "value": 20, "color": "green" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": ["lastNotNull"]
+        },
+        "colorMode": "value"
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_budget_remaining_usd",
+          "legendFormat": "remaining"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Request Rate & Latency",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Request Rate by Model",
+      "description": "Requests per second broken down by model",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 20,
+            "stacking": { "mode": "none" }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["mean", "max", "lastNotNull"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (model) (rate(grob_requests_total{model=~\"$model\", provider=~\"$provider\"}[5m]))",
+          "legendFormat": "{{ model }}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Request Rate by Provider",
+      "description": "Requests per second broken down by provider",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 20,
+            "stacking": { "mode": "none" }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["mean", "max", "lastNotNull"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (provider) (rate(grob_requests_total{model=~\"$model\", provider=~\"$provider\"}[5m]))",
+          "legendFormat": "{{ provider }}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency (p50 / p95 / p99)",
+      "description": "Request duration percentiles across all models and providers",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "p99" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p95" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "p50" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(grob_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(grob_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(grob_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "type": "heatmap",
+      "title": "Latency Heatmap",
+      "description": "Distribution of request durations over time",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "unit": "s"
+        },
+        "color": {
+          "scheme": "Oranges",
+          "mode": "scheme"
+        },
+        "tooltip": {
+          "show": true,
+          "yHistogram": true
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (le) (increase(grob_request_duration_seconds_bucket{model=~\"$model\", provider=~\"$provider\"}[1m]))",
+          "legendFormat": "{{ le }}",
+          "format": "heatmap"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Errors & Circuit Breakers",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Error Rate by Status",
+      "description": "Request error rate broken down by status (success vs. error types)",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 23 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 20,
+            "stacking": { "mode": "normal" }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["sum", "lastNotNull"]
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (status) (rate(grob_requests_total{status!=\"success\", model=~\"$model\", provider=~\"$provider\"}[5m]))",
+          "legendFormat": "{{ status }}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Circuit Breaker State",
+      "description": "Circuit breaker state per provider (0=Closed, 1=Open, 2=HalfOpen)",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 23 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "max": 2,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "stepAfter",
+            "fillOpacity": 30
+          },
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "Closed", "color": "green" } } },
+            { "type": "value", "options": { "1": { "text": "Open", "color": "red" } } },
+            { "type": "value", "options": { "2": { "text": "HalfOpen", "color": "yellow" } } }
+          ]
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["lastNotNull"]
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_circuit_breaker_state",
+          "legendFormat": "{{ provider }}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Circuit Breaker Rejections",
+      "description": "Requests rejected because the circuit breaker was open",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          },
+          "color": {
+            "mode": "palette-classic"
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (provider) (rate(grob_circuit_breaker_rejected_total{provider=~\"$provider\"}[5m]))",
+          "legendFormat": "{{ provider }}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Rate Limit Rejections",
+      "description": "Requests rejected by the Grob-level rate limiter",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          },
+          "color": {
+            "fixedColor": "orange",
+            "mode": "fixed"
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "rate(grob_ratelimit_rejected_total[5m])",
+          "legendFormat": "rejected"
+        },
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (provider) (rate(grob_ratelimit_hits_total{provider=~\"$provider\"}[5m]))",
+          "legendFormat": "upstream 429 {{ provider }}"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "title": "Tokens & Cost",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
+      "collapsed": false
+    },
+    {
+      "type": "timeseries",
+      "title": "Token Usage (Input / Output)",
+      "description": "Input and output tokens per second by model",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 15,
+            "stacking": { "mode": "none" }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["sum", "mean"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (model) (rate(grob_input_tokens_total{model=~\"$model\", provider=~\"$provider\"}[5m]))",
+          "legendFormat": "input {{ model }}"
+        },
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (model) (rate(grob_output_tokens_total{model=~\"$model\", provider=~\"$provider\"}[5m]))",
+          "legendFormat": "output {{ model }}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cost per Minute",
+      "description": "Running cost rate in USD per minute, broken down by model and provider",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 4,
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 20,
+            "stacking": { "mode": "normal" }
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": ["sum", "mean"]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "sum by (model, provider) (rate(grob_request_cost_usd{model=~\"$model\", provider=~\"$provider\"}[5m])) * 60",
+          "legendFormat": "{{ model }} ({{ provider }})"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Cumulative Spend",
+      "description": "Month-to-date total spend and budget limit",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "budget limit" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "fill": "dash", "dash": [10, 10] } },
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "spend" },
+            "properties": [
+              { "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } },
+              { "id": "custom.fillOpacity", "value": 20 }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_spend_usd",
+          "legendFormat": "spend"
+        },
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_budget_limit_usd",
+          "legendFormat": "budget limit"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Upstream Rate Limit Tokens Remaining",
+      "description": "Remaining rate limit tokens reported by upstream providers",
+      "datasource": { "uid": "${datasource}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "value": null, "color": "red" },
+              { "value": 100, "color": "yellow" },
+              { "value": 1000, "color": "green" }
+            ]
+          }
+        }
+      },
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          { "displayName": "Value", "desc": false }
+        ]
+      },
+      "targets": [
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_ratelimit_tokens_remaining",
+          "legendFormat": "{{ provider }} tokens",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "datasource": { "uid": "${datasource}" },
+          "expr": "grob_ratelimit_requests_remaining",
+          "legendFormat": "{{ provider }} requests",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        }
+      ]
+    }
+  ]
+}

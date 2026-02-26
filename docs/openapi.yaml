@@ -1,0 +1,921 @@
+openapi: "3.0.3"
+info:
+  title: Grob LLM Routing Proxy
+  description: |
+    Multi-provider LLM routing proxy. Routes requests to Anthropic, OpenAI,
+    Gemini, DeepSeek, Ollama, and other providers with automatic fallback,
+    format translation, streaming, tool calling, budget enforcement, and DLP.
+  version: "0.9.0"
+  license:
+    name: AGPL-3.0-only
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+  contact:
+    name: Grob
+    url: https://github.com/azerozero/grob
+
+servers:
+  - url: http://[::1]:13456
+    description: Default local proxy (IPv6 localhost)
+  - url: http://127.0.0.1:13456
+    description: Local proxy (IPv4 localhost)
+
+tags:
+  - name: LLM
+    description: LLM inference endpoints (Anthropic and OpenAI formats)
+  - name: Operations
+    description: Health, readiness, liveness, and metrics
+  - name: Config
+    description: Configuration management
+  - name: OAuth
+    description: OAuth token management for provider authentication
+
+paths:
+  /v1/messages:
+    post:
+      tags: [LLM]
+      summary: Create a message (Anthropic native format)
+      description: |
+        Send a conversation to the LLM and receive a response. Supports streaming
+        via SSE. The request is routed to the best available provider based on
+        the model, prompt rules, and task classification.
+      operationId: createMessage
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnthropicRequest"
+      responses:
+        "200":
+          description: Successful response (buffered or SSE stream)
+          headers:
+            X-Request-Id:
+              schema:
+                type: string
+            X-Model-Deprecated:
+              description: Present if the requested model is marked deprecated
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicResponse"
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream of message_start, content_block_delta, message_stop events
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          description: All providers failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/messages/count_tokens:
+    post:
+      tags: [LLM]
+      summary: Count tokens for a message
+      description: |
+        Estimate the token count for a request without sending it to a provider.
+      operationId: countTokens
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnthropicRequest"
+      responses:
+        "200":
+          description: Token count estimate
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  input_tokens:
+                    type: integer
+
+  /v1/chat/completions:
+    post:
+      tags: [LLM]
+      summary: Create chat completion (OpenAI compatible)
+      description: |
+        OpenAI-compatible endpoint. Accepts OpenAI chat completion requests,
+        translates them to Anthropic internal format, routes through the proxy,
+        and translates the response back to OpenAI format.
+
+        Supports streaming (stream: true returns SSE with OpenAI delta format).
+      operationId: createChatCompletion
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      parameters:
+        - $ref: "#/components/parameters/XRequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OpenAIRequest"
+      responses:
+        "200":
+          description: Successful response
+          headers:
+            X-Request-Id:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OpenAIResponse"
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE stream of chat.completion.chunk events
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          description: All providers failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /v1/models:
+    get:
+      tags: [LLM]
+      summary: List available models
+      description: |
+        Returns a list of models configured in the proxy, in OpenAI-compatible
+        format. Each model includes its name and the provider mappings.
+      operationId: listModels
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      responses:
+        "200":
+          description: List of available models
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  object:
+                    type: string
+                    example: list
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                          example: claude-sonnet-4-20250514
+                        object:
+                          type: string
+                          example: model
+                        created:
+                          type: integer
+                        owned_by:
+                          type: string
+                          example: anthropic
+
+  /health:
+    get:
+      tags: [Operations]
+      summary: Health check
+      description: |
+        Returns service health including PID, active request count, and
+        current spend vs. budget. Always returns 200 if the process is up.
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  service:
+                    type: string
+                    example: grob
+                  pid:
+                    type: integer
+                  active_requests:
+                    type: integer
+                  spend:
+                    type: object
+                    properties:
+                      total_usd:
+                        type: number
+                        format: double
+                      budget_usd:
+                        type: number
+                        format: double
+
+  /live:
+    get:
+      tags: [Operations]
+      summary: Liveness probe
+      description: |
+        Kubernetes liveness probe. Returns 200 if the process is alive.
+        Does not check provider connectivity.
+      operationId: livenessCheck
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: alive
+
+  /ready:
+    get:
+      tags: [Operations]
+      summary: Readiness probe
+      description: |
+        Kubernetes readiness probe. Returns 200 if providers are configured
+        and not all circuit breakers are open. Returns 503 otherwise.
+      operationId: readinessCheck
+      responses:
+        "200":
+          description: Service is ready to accept traffic
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+                  providers:
+                    type: integer
+        "503":
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: not_ready
+                  reason:
+                    type: string
+                    example: all circuit breakers open
+
+  /metrics:
+    get:
+      tags: [Operations]
+      summary: Prometheus metrics
+      description: |
+        Returns all metrics in Prometheus text exposition format.
+        Includes request counters, latency histograms, token counts,
+        spend gauges, circuit breaker states, and rate limit stats.
+      operationId: metrics
+      responses:
+        "200":
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  grob_requests_total{model="claude-sonnet-4-20250514",provider="anthropic",route_type="default",status="success"} 42
+                  grob_request_duration_seconds_bucket{model="claude-sonnet-4-20250514",provider="anthropic",le="1"} 38
+                  grob_active_requests 2
+                  grob_spend_usd 12.34
+                  grob_budget_limit_usd 50.0
+
+  /api/config:
+    get:
+      tags: [Config]
+      summary: Get current configuration
+      description: |
+        Returns the current running configuration as JSON. API keys are
+        redacted (first 4 + last 4 characters shown).
+      operationId: getConfig
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      responses:
+        "200":
+          description: Current configuration (keys redacted)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  server:
+                    type: object
+                  router:
+                    type: object
+                  providers:
+                    type: array
+                    items:
+                      type: object
+                  models:
+                    type: array
+                    items:
+                      type: object
+    post:
+      tags: [Config]
+      summary: Update configuration
+      description: |
+        Writes updated configuration to the config file. Only works when
+        config is loaded from a local file (not a remote URL). Does NOT
+        reload the running config -- call /api/config/reload after saving.
+      operationId: updateConfig
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: Partial config to merge (providers, models, router sections)
+      responses:
+        "200":
+          description: Configuration saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+        "400":
+          description: Parse error or remote config (read-only)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/config/reload:
+    post:
+      tags: [Config]
+      summary: Reload configuration
+      description: |
+        Re-reads the configuration from its source (file or URL), rebuilds
+        the router and provider registry, and atomically swaps the running
+        config. In-flight requests continue using the previous config snapshot.
+      operationId: reloadConfig
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      responses:
+        "200":
+          description: Configuration reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: success
+                  message:
+                    type: string
+                  active_requests:
+                    type: integer
+                    description: Number of requests still using the old config
+
+  /api/oauth/authorize:
+    post:
+      tags: [OAuth]
+      summary: Start OAuth authorization flow
+      description: |
+        Returns an authorization URL for the user to visit. Supports
+        Anthropic (Max/Console), OpenAI Codex, and Gemini OAuth flows.
+        Uses PKCE for security.
+      operationId: oauthAuthorize
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                oauth_type:
+                  type: string
+                  enum: [max, console, openai-codex, gemini]
+                  default: max
+                  description: Type of OAuth flow
+      responses:
+        "200":
+          description: Authorization URL and PKCE verifier
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+                  verifier:
+                    type: string
+                  instructions:
+                    type: string
+
+  /api/oauth/exchange:
+    post:
+      tags: [OAuth]
+      summary: Exchange authorization code for tokens
+      description: |
+        Exchanges the authorization code received from the OAuth callback
+        for access and refresh tokens. Stores them persistently.
+      operationId: oauthExchange
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, verifier, provider_id]
+              properties:
+                code:
+                  type: string
+                verifier:
+                  type: string
+                provider_id:
+                  type: string
+                oauth_type:
+                  type: string
+      responses:
+        "200":
+          description: Token exchange successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  provider_id:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  /api/oauth/callback:
+    get:
+      tags: [OAuth]
+      summary: OAuth callback
+      description: |
+        Handles the OAuth redirect callback. Returns an HTML page that
+        displays the authorization code for the user to copy, or
+        auto-exchanges it if configured.
+      operationId: oauthCallback
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML page with authorization code
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /auth/callback:
+    get:
+      tags: [OAuth]
+      summary: OAuth callback (alias)
+      description: |
+        Alias for /api/oauth/callback. Used by OpenAI Codex which expects
+        this exact path. Also served on a separate listener at 127.0.0.1:1455.
+      operationId: oauthCallbackAlias
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML page with authorization code
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /api/oauth/tokens:
+    get:
+      tags: [OAuth]
+      summary: List stored OAuth tokens
+      description: |
+        Returns a list of all stored OAuth tokens with their provider ID,
+        expiration time, and whether they need refresh.
+      operationId: oauthListTokens
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      responses:
+        "200":
+          description: List of tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    provider_id:
+                      type: string
+                    expires_at:
+                      type: string
+                      format: date-time
+                    is_expired:
+                      type: boolean
+                    needs_refresh:
+                      type: boolean
+
+  /api/oauth/tokens/delete:
+    post:
+      tags: [OAuth]
+      summary: Delete an OAuth token
+      description: Removes a stored OAuth token for the given provider.
+      operationId: oauthDeleteToken
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider_id]
+              properties:
+                provider_id:
+                  type: string
+      responses:
+        "200":
+          description: Token deleted
+
+  /api/oauth/tokens/refresh:
+    post:
+      tags: [OAuth]
+      summary: Refresh an OAuth token
+      description: Forces an immediate refresh of the OAuth token for the given provider.
+      operationId: oauthRefreshToken
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider_id]
+              properties:
+                provider_id:
+                  type: string
+      responses:
+        "200":
+          description: Token refreshed
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key or JWT passed as Bearer token
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: API key passed as x-api-key header
+
+  parameters:
+    XRequestId:
+      name: X-Request-Id
+      in: header
+      description: Optional request correlation ID. Generated as UUID v4 if not provided.
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    AnthropicRequest:
+      type: object
+      required: [model, messages, max_tokens]
+      properties:
+        model:
+          type: string
+          description: Model name (routed by the proxy)
+          example: claude-sonnet-4-20250514
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+        max_tokens:
+          type: integer
+          minimum: 1
+          example: 1024
+        thinking:
+          type: object
+          properties:
+            type:
+              type: string
+              enum: [enabled, disabled]
+            budget_tokens:
+              type: integer
+          description: Extended thinking configuration
+        temperature:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+        top_p:
+          type: number
+          format: float
+        top_k:
+          type: integer
+        stop_sequences:
+          type: array
+          items:
+            type: string
+        stream:
+          type: boolean
+          default: false
+        system:
+          description: System prompt (string or array of blocks)
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                  text:
+                    type: string
+                  cache_control:
+                    type: object
+        tools:
+          type: array
+          items:
+            type: object
+            description: Tool definition (Anthropic format)
+        tool_choice:
+          description: Tool choice constraint
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Message:
+      type: object
+      required: [role, content]
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          description: String or array of content blocks
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                type: object
+
+    AnthropicResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          example: message
+        role:
+          type: string
+          example: assistant
+        content:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              text:
+                type: string
+        model:
+          type: string
+        stop_reason:
+          type: string
+          enum: [end_turn, max_tokens, stop_sequence, tool_use]
+        usage:
+          type: object
+          properties:
+            input_tokens:
+              type: integer
+            output_tokens:
+              type: integer
+
+    OpenAIRequest:
+      type: object
+      required: [model, messages]
+      properties:
+        model:
+          type: string
+          example: claude-sonnet-4-20250514
+        messages:
+          type: array
+          items:
+            type: object
+            required: [role]
+            properties:
+              role:
+                type: string
+                enum: [system, user, assistant, tool]
+              content:
+                description: String or array of content parts
+                oneOf:
+                  - type: string
+                  - type: array
+                    items:
+                      type: object
+              tool_calls:
+                type: array
+                items:
+                  type: object
+              tool_call_id:
+                type: string
+        max_tokens:
+          type: integer
+        temperature:
+          type: number
+          format: float
+        top_p:
+          type: number
+          format: float
+        stop:
+          type: array
+          items:
+            type: string
+        stream:
+          type: boolean
+          default: false
+        tools:
+          type: array
+          items:
+            type: object
+        tool_choice:
+          description: Tool choice constraint (OpenAI format)
+
+    OpenAIResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          example: chat.completion
+        created:
+          type: integer
+        model:
+          type: string
+        choices:
+          type: array
+          items:
+            type: object
+            properties:
+              index:
+                type: integer
+              message:
+                type: object
+                properties:
+                  role:
+                    type: string
+                  content:
+                    type: string
+                    nullable: true
+                  tool_calls:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        type:
+                          type: string
+                        function:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            arguments:
+                              type: string
+              finish_reason:
+                type: string
+                enum: [stop, length, tool_calls]
+        usage:
+          type: object
+          properties:
+            prompt_tokens:
+              type: integer
+            completion_tokens:
+              type: integer
+            total_tokens:
+              type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            type:
+              type: string
+              example: api_error
+            message:
+              type: string
+              example: All providers failed for model claude-sonnet-4-20250514
+
+  responses:
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    example: authentication_error
+                  message:
+                    type: string
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: string
+          description: Seconds to wait before retrying
+        X-RateLimit-Remaining:
+          schema:
+            type: string
+            example: "0"
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    example: rate_limit_error
+                  message:
+                    type: string
+                    example: Rate limit exceeded. Please slow down.
