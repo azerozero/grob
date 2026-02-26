@@ -67,7 +67,29 @@ jobs:
         with:
           shared-key: test-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - run: cargo test
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --profile ci
+      - run: cargo test --doc
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: coverage
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   audit:
     name: Security Audit

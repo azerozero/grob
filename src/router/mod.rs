@@ -1,17 +1,17 @@
 use crate::cli::AppConfig;
 use crate::models::{AnthropicRequest, MessageContent, RouteDecision, RouteType, SystemPrompt};
 use anyhow::Result;
-use once_cell::sync::Lazy;
 use regex::Regex;
+use std::sync::LazyLock;
 use tracing::{debug, info};
 
 /// Regex to detect capture group references ($1, $name, ${1}, ${name})
-static CAPTURE_REF_PATTERN: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"\$(?:\d+|[a-zA-Z_]\w*|\{[^}]+\})").unwrap());
+static CAPTURE_REF_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\$(?:\d+|[a-zA-Z_]\w*|\{[^}]+\})").unwrap());
 
 /// Pre-compiled regex for subagent model tag extraction (avoids per-request compilation)
-static SUBAGENT_TAG_REGEX: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"<GROB-SUBAGENT-MODEL>(.*?)</GROB-SUBAGENT-MODEL>").unwrap());
+static SUBAGENT_TAG_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<GROB-SUBAGENT-MODEL>(.*?)</GROB-SUBAGENT-MODEL>").unwrap());
 
 /// Check if a string contains capture group references
 fn contains_capture_reference(s: &str) -> bool {

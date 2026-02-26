@@ -1,24 +1,24 @@
 # Grob - LLM Routing Proxy
 # Containerfile for Podman/Docker (rootless compatible)
-# Multi-stage build for minimal attack surface
+# Multi-stage build with cargo-chef for fast rebuilds
 
-# Stage 1: Build environment
-FROM rust:1.85-alpine AS builder
-
-# Install build dependencies
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static
-
-# Create app directory
+# Stage 1: Chef planner — compute dependency recipe
+FROM rust:1.85-alpine AS chef
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static && \
+    cargo install cargo-chef --locked
 WORKDIR /usr/src/grob
 
-# Copy manifest files first (cache dependencies)
-COPY Cargo.toml Cargo.lock deny.toml ./
+FROM chef AS planner
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-# Copy source code
-COPY src ./src
-COPY benches ./benches
+# Stage 2: Build dependencies (cached unless Cargo.toml/lock change)
+FROM chef AS builder
+COPY --from=planner /usr/src/grob/recipe.json recipe.json
+RUN cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
 
-# Build static binary with musl
+# Copy source and build final binary (only this layer invalidates on code changes)
+COPY . .
 ENV RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes"
 RUN cargo update time@0.3.47 --precise 0.3.35 && \
     cargo build --release --target x86_64-unknown-linux-musl
@@ -26,7 +26,7 @@ RUN cargo update time@0.3.47 --precise 0.3.35 && \
 # Strip symbols for smaller binary
 RUN strip target/x86_64-unknown-linux-musl/release/grob
 
-# Stage 2: Runtime (scratch - empty base)
+# Stage 3: Runtime (scratch - empty base)
 FROM scratch
 
 # Metadata
