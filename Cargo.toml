@@ -50,8 +50,7 @@ anyhow = "1"
 thiserror = "1"
 
 # Utilities
-once_cell = "1"            # Lazy statics
-async-trait = "0.1"        # Async trait support
+async-trait = "0.1"        # Async trait support (needed for dyn Provider dispatch)
 dirs = "5"                 # User directories
 regex = "1"                # Regular expressions
 uuid = { version = "1.0", features = ["v4", "serde"] }  # UUID generation for streaming
@@ -112,6 +111,8 @@ tokio-test = "0.4"
 mockito = "1"
 criterion = "0.5"          # Benchmarking
 tempfile = "3"             # Temporary directory testing
+insta = { version = "1", features = ["json", "yaml"] }  # Snapshot testing
+tracing-test = "0.2"       # Capture tracing logs in tests
 
 # Property Testing
 proptest = "1"
@@ -128,7 +129,9 @@ tls = ["axum-server", "rustls", "rustls-pemfile"]
 # ecdsa: trait crate required for p256::ecdsa::signature::Signer bounds
 # tower: required by tower-http for Service/Layer trait impls
 # rustls/rustls-pemfile: behind optional "tls" feature flag
-ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile"]
+# insta: snapshot testing — used incrementally as tests are converted
+# tracing-test: used via #[traced_test] attribute on individual tests
+ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "insta", "tracing-test"]
 
 [profile.release]
 opt-level = 3
