@@ -16,12 +16,11 @@ use unicode_normalization::UnicodeNormalization;
 
 /// A detected prompt injection attempt.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct InjectionDetection {
     pub pattern_name: String,
     pub matched_text: String,
-    pub start: usize,
-    pub end: usize,
+    pub _start: usize,
+    pub _end: usize,
 }
 
 impl std::fmt::Display for InjectionDetection {
@@ -35,10 +34,9 @@ impl std::fmt::Display for InjectionDetection {
 }
 
 /// Result of prompt injection scanning.
-#[allow(dead_code)]
 pub enum InjectionResult {
     Clean,
-    Logged(Vec<InjectionDetection>),
+    Logged,
     Blocked(Vec<InjectionDetection>),
 }
 
@@ -371,7 +369,7 @@ impl InjectionDetector {
 
         match self.config.action {
             DlpAction::Block => InjectionResult::Blocked(detections),
-            DlpAction::Log | DlpAction::Redact => InjectionResult::Logged(detections),
+            DlpAction::Log | DlpAction::Redact => InjectionResult::Logged,
         }
     }
 
@@ -384,8 +382,8 @@ impl InjectionDetector {
                 detections.push(InjectionDetection {
                     pattern_name: cp.name.clone(),
                     matched_text: m.as_str().to_string(),
-                    start: m.start(),
-                    end: m.end(),
+                    _start: m.start(),
+                    _end: m.end(),
                 });
             }
         }
@@ -398,8 +396,8 @@ impl InjectionDetector {
                     detections.push(InjectionDetection {
                         pattern_name: format!("hot_custom_{}", i),
                         matched_text: m.as_str().to_string(),
-                        start: m.start(),
-                        end: m.end(),
+                        _start: m.start(),
+                        _end: m.end(),
                     });
                 }
             }
@@ -408,11 +406,6 @@ impl InjectionDetector {
         detections
     }
 
-    /// Returns the configured action.
-    #[allow(dead_code)]
-    pub fn action(&self) -> &DlpAction {
-        &self.config.action
-    }
 }
 
 // ─── Pattern compilation helper ─────────────────────────────────────────────

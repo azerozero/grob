@@ -78,7 +78,7 @@ hmac = "0.12"
 redb = "2"
 
 # Caching (high-performance concurrent cache with TTL)
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12", features = ["future", "sync"] }
 
 # JWT Auth
 jsonwebtoken = "9"

@@ -276,7 +276,7 @@ pub struct PromptInjectionConfig {
 }
 
 fn default_languages() -> Vec<String> {
-    vec!["en".to_string(), "fr".to_string()]
+    vec!["all".to_string()]
 }
 
 impl Default for PromptInjectionConfig {
@@ -286,7 +286,7 @@ impl Default for PromptInjectionConfig {
             action: DlpAction::Log,
             no_builtins: false,
             custom_patterns: Vec::new(),
-            languages: default_languages(),
+            languages: default_languages(), // "all" = all 28 languages
         }
     }
 }

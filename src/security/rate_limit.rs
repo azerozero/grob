@@ -4,7 +4,6 @@
 //! Implements token bucket algorithm with per-tenant tracking
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
@@ -17,27 +16,7 @@ pub struct RateLimitConfig {
     /// Burst capacity
     pub burst: u32,
     /// Window for sliding window (optional)
-    pub window: Duration,
-}
-
-impl RateLimitConfig {
-    /// Default strict tier (HDS/PCI compliance)
-    pub fn strict() -> Self {
-        Self {
-            requests_per_second: 10,
-            burst: 20,
-            window: Duration::from_secs(60),
-        }
-    }
-
-    /// Default standard tier
-    pub fn standard() -> Self {
-        Self {
-            requests_per_second: 100,
-            burst: 200,
-            window: Duration::from_secs(60),
-        }
-    }
+    pub _window: Duration,
 }
 
 /// Token bucket state
@@ -86,16 +65,6 @@ impl TokenBucket {
 pub enum RateLimitKey {
     Tenant(String),
     Ip(String),
-}
-
-impl RateLimitKey {
-    pub fn from_tenant(tenant: &str) -> Self {
-        Self::Tenant(tenant.to_string())
-    }
-
-    pub fn from_addr(addr: SocketAddr) -> Self {
-        Self::Ip(addr.ip().to_string())
-    }
 }
 
 /// Rate limiter with automatic cleanup
@@ -153,12 +122,6 @@ impl RateLimiter {
         (allowed, remaining, reset_after)
     }
 
-    /// Get current state for a key (for metrics)
-    pub async fn get_state(&self, key: &RateLimitKey) -> Option<(u32, f64)> {
-        let buckets = self.buckets.read().await;
-        buckets.get(key).map(|b| (b.remaining(), b.tokens))
-    }
-
     /// Cleanup stale buckets (idle > 10 minutes)
     async fn cleanup_stale_buckets(buckets: &Arc<RwLock<HashMap<RateLimitKey, TokenBucket>>>) {
         const IDLE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -176,63 +139,6 @@ impl RateLimiter {
             tracing::debug!("Removed stale rate limit bucket for {:?}", key);
         }
     }
-
-    /// Get metrics for all active buckets
-    pub async fn metrics(&self) -> Vec<(RateLimitKey, u32, f64)> {
-        let buckets = self.buckets.read().await;
-        buckets
-            .iter()
-            .map(|(k, b)| (k.clone(), b.remaining(), b.tokens))
-            .collect()
-    }
-}
-
-impl Default for RateLimiter {
-    fn default() -> Self {
-        Self::new(RateLimitConfig::standard())
-    }
-}
-
-/// Axum middleware for rate limiting
-pub async fn rate_limit_middleware(
-    req: axum::http::Request<axum::body::Body>,
-    next: axum::middleware::Next,
-    limiter: Arc<RateLimiter>,
-) -> axum::response::Response {
-    // Extract key from request (X-API-Key or IP)
-    let key = req
-        .headers()
-        .get("x-api-key")
-        .and_then(|h| h.to_str().ok())
-        .map(|k| RateLimitKey::Tenant(k.to_string()))
-        .or_else(|| {
-            req.extensions()
-                .get::<SocketAddr>()
-                .map(|addr| RateLimitKey::from_addr(*addr))
-        });
-
-    if let Some(key) = key {
-        let (allowed, _remaining, reset_after) = limiter.check(&key).await;
-
-        if !allowed {
-            let mut resp = axum::response::Response::builder()
-                .status(axum::http::StatusCode::TOO_MANY_REQUESTS);
-
-            resp = resp.header("X-RateLimit-Limit", limiter.default_config.burst.to_string());
-            resp = resp.header("X-RateLimit-Remaining", "0");
-
-            if let Some(reset) = reset_after {
-                resp = resp.header("Retry-After", reset.as_secs().to_string());
-                resp = resp.header("X-RateLimit-Reset", reset.as_secs().to_string());
-            }
-
-            return resp
-                .body(axum::body::Body::from("Rate limit exceeded. Please slow down."))
-                .unwrap();
-        }
-    }
-
-    next.run(req).await
 }
 
 #[cfg(test)]
@@ -244,7 +150,7 @@ mod tests {
         let config = RateLimitConfig {
             requests_per_second: 10,
             burst: 5,
-            window: Duration::from_secs(60),
+            _window: Duration::from_secs(60),
         };
 
         let mut bucket = TokenBucket::new(config);
@@ -269,7 +175,7 @@ mod tests {
         let limiter = RateLimiter::new(RateLimitConfig {
             requests_per_second: 100,
             burst: 10,
-            window: Duration::from_secs(60),
+            _window: Duration::from_secs(60),
         });
 
         let key = RateLimitKey::Tenant("test-tenant".to_string());
@@ -285,33 +191,5 @@ mod tests {
         assert!(!allowed);
         assert_eq!(remaining, 0);
         assert!(reset.is_some());
-    }
-
-    #[test]
-    fn test_rate_limit_key() {
-        let tenant = RateLimitKey::from_tenant("tenant-123");
-        assert!(matches!(tenant, RateLimitKey::Tenant(s) if s == "tenant-123"));
-
-        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
-        let ip = RateLimitKey::from_addr(addr);
-        assert!(matches!(ip, RateLimitKey::Ip(s) if s == "127.0.0.1"));
-    }
-
-    #[tokio::test]
-    async fn test_cleanup() {
-        let buckets = Arc::new(RwLock::new(HashMap::new()));
-        let config = RateLimitConfig::standard();
-
-        {
-            let mut b = buckets.write().await;
-            b.insert(RateLimitKey::Tenant("old".to_string()), TokenBucket::new(config.clone()));
-            b.insert(RateLimitKey::Tenant("new".to_string()), TokenBucket::new(config));
-        }
-
-        // Manually trigger cleanup (would need to wait otherwise)
-        // In real scenario, cleanup runs every 5 minutes
-
-        let count = buckets.read().await.len();
-        assert_eq!(count, 2);
     }
 }

@@ -204,7 +204,7 @@ impl DlpEngine {
                     prompt_injection::InjectionResult::Blocked(dets) => {
                         return Err(DlpBlockError::InjectionBlocked(dets));
                     }
-                    prompt_injection::InjectionResult::Logged(_) | prompt_injection::InjectionResult::Clean => {}
+                    prompt_injection::InjectionResult::Logged | prompt_injection::InjectionResult::Clean => {}
                 }
             }
         }

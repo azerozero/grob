@@ -95,8 +95,7 @@ pub struct AppState {
     /// Circuit breaker registry (None if disabled)
     pub circuit_breakers: Option<Arc<CircuitBreakerRegistry>>,
     /// Signed audit log (None if audit_dir not configured)
-    #[allow(dead_code)]
-    pub audit_log: Option<Arc<AuditLog>>,
+    pub _audit_log: Option<Arc<AuditLog>>,
 }
 
 impl AppState {
@@ -493,7 +492,7 @@ pub async fn start_server(
         let rl_config = RateLimitConfig {
             requests_per_second: config.security.rate_limit_rps,
             burst: config.security.rate_limit_burst,
-            window: std::time::Duration::from_secs(60),
+            _window: std::time::Duration::from_secs(60),
         };
         info!(
             "🛡️  Security: rate limit {}rps burst={}, body limit {}MB, headers={}, circuit_breaker={}",
@@ -525,10 +524,10 @@ pub async fn start_server(
         };
         match AuditLog::new(crate::security::audit_log::AuditConfig {
             log_dir: audit_dir.clone(),
-            rotation_size: 100 * 1024 * 1024,
-            retention_days: 365,
+            _rotation_size: 100 * 1024 * 1024,
+            _retention_days: 365,
             sign_key_path: Some(audit_dir.join("audit_key.pem")),
-            encrypt: false,
+            _encrypt: false,
         }) {
             Ok(log) => {
                 info!("📝 Audit logging enabled: {}", audit_dir.display());
@@ -557,7 +556,7 @@ pub async fn start_server(
         tap_sender,
         rate_limiter,
         circuit_breakers,
-        audit_log,
+        _audit_log: audit_log,
     });
 
     // Spawn background preset sync if configured and auto_sync is enabled
@@ -1723,24 +1722,6 @@ fn extract_api_key(headers: &HeaderMap) -> Option<&str> {
         .or_else(|| headers.get("x-api-key").and_then(|v| v.to_str().ok()))
 }
 
-/// Extract the DLP session key from request extensions (JWT tenant_id) or headers (API key).
-/// Prefers JWT tenant_id when available.
-#[allow(dead_code)]
-fn extract_session_key(extensions: &axum::http::Extensions, headers: &HeaderMap) -> Option<String> {
-    if let Some(claims) = extensions.get::<crate::auth::GrobClaims>() {
-        Some(claims.tenant_id().to_string())
-    } else {
-        extract_api_key(headers).map(|k| k.to_string())
-    }
-}
-
-/// Extract optional tenant_id from request extensions (JWT claims).
-#[allow(dead_code)]
-fn extract_tenant_id(extensions: &axum::http::Extensions) -> Option<String> {
-    extensions
-        .get::<crate::auth::GrobClaims>()
-        .map(|c| c.tenant_id().to_string())
-}
 
 /// Format route type for logging
 fn format_route_type(decision: &crate::models::RouteDecision) -> String {

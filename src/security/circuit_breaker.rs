@@ -43,42 +43,20 @@ impl Default for CircuitBreakerConfig {
     }
 }
 
-impl CircuitBreakerConfig {
-    /// Conservative settings for critical providers (HDS/PCI)
-    pub fn critical() -> Self {
-        Self {
-            failure_threshold: 3,
-            success_threshold: 2,
-            timeout: Duration::from_secs(60),
-            half_open_max_calls: 1,
-        }
-    }
-
-    /// Relaxed settings for non-critical providers
-    pub fn relaxed() -> Self {
-        Self {
-            failure_threshold: 10,
-            success_threshold: 5,
-            timeout: Duration::from_secs(15),
-            half_open_max_calls: 5,
-        }
-    }
-}
-
 /// Circuit breaker metrics
 #[derive(Debug, Clone, Default)]
-pub struct CircuitMetrics {
-    pub failures: u32,
-    pub successes: u32,
-    pub consecutive_successes: u32,
-    pub consecutive_failures: u32,
-    pub last_failure_time: Option<Instant>,
-    pub state_changes: u32,
+struct CircuitMetrics {
+    failures: u32,
+    successes: u32,
+    consecutive_successes: u32,
+    consecutive_failures: u32,
+    last_failure_time: Option<Instant>,
+    state_changes: u32,
 }
 
 /// Individual circuit breaker for a provider
 #[derive(Debug)]
-pub struct CircuitBreaker {
+struct CircuitBreaker {
     name: String,
     state: CircuitState,
     config: CircuitBreakerConfig,
@@ -100,7 +78,7 @@ impl CircuitBreaker {
     }
 
     /// Check if request should be allowed
-    pub fn can_execute(&mut self) -> bool {
+    fn can_execute(&mut self) -> bool {
         match self.state {
             CircuitState::Closed => true,
             CircuitState::Open => {
@@ -124,7 +102,7 @@ impl CircuitBreaker {
     }
 
     /// Record successful execution
-    pub fn record_success(&mut self) {
+    fn record_success(&mut self) {
         self.metrics.successes += 1;
         self.metrics.consecutive_successes += 1;
         self.metrics.consecutive_failures = 0;
@@ -143,7 +121,7 @@ impl CircuitBreaker {
     }
 
     /// Record failed execution
-    pub fn record_failure(&mut self) {
+    fn record_failure(&mut self) {
         self.metrics.failures += 1;
         self.metrics.consecutive_failures += 1;
         self.metrics.consecutive_successes = 0;
@@ -163,13 +141,8 @@ impl CircuitBreaker {
     }
 
     /// Get current state
-    pub fn state(&self) -> CircuitState {
+    fn state(&self) -> CircuitState {
         self.state
-    }
-
-    /// Get metrics snapshot
-    pub fn metrics(&self) -> &CircuitMetrics {
-        &self.metrics
     }
 
     /// Transition to new state
@@ -201,16 +174,6 @@ impl CircuitBreaker {
             });
         }
     }
-
-    /// Force open (for manual intervention)
-    pub fn force_open(&mut self) {
-        self.transition_to(CircuitState::Open);
-    }
-
-    /// Force close (for recovery)
-    pub fn force_close(&mut self) {
-        self.transition_to(CircuitState::Closed);
-    }
 }
 
 /// Circuit breaker registry for multiple providers
@@ -224,7 +187,7 @@ impl CircuitBreakerRegistry {
         Self::with_config(CircuitBreakerConfig::default())
     }
 
-    pub fn with_config(config: CircuitBreakerConfig) -> Self {
+    fn with_config(config: CircuitBreakerConfig) -> Self {
         Self {
             breakers: Arc::new(RwLock::new(HashMap::new())),
             default_config: config,
@@ -264,36 +227,6 @@ impl CircuitBreakerRegistry {
         breaker.record_failure();
     }
 
-    /// Get state for provider
-    pub async fn get_state(&self, provider: &str) -> Option<CircuitState> {
-        let breakers = self.breakers.read().await;
-        breakers.get(provider).map(|b| b.state())
-    }
-
-    /// Get metrics for provider
-    pub async fn get_metrics(&self, provider: &str) -> Option<CircuitMetrics> {
-        let breakers = self.breakers.read().await;
-        breakers.get(provider).map(|b| b.metrics().clone())
-    }
-
-    /// Force open for provider
-    pub async fn force_open(&self, provider: &str) {
-        let mut breakers = self.breakers.write().await;
-
-        if let Some(breaker) = breakers.get_mut(provider) {
-            breaker.force_open();
-        }
-    }
-
-    /// Force close for provider
-    pub async fn force_close(&self, provider: &str) {
-        let mut breakers = self.breakers.write().await;
-
-        if let Some(breaker) = breakers.get_mut(provider) {
-            breaker.force_close();
-        }
-    }
-
     /// Get all provider states
     pub async fn all_states(&self) -> HashMap<String, CircuitState> {
         let breakers = self.breakers.read().await;
@@ -302,57 +235,11 @@ impl CircuitBreakerRegistry {
             .map(|(k, v)| (k.clone(), v.state()))
             .collect()
     }
-
-    /// Execute function with circuit breaker protection
-    pub async fn execute<F, Fut, T>(&self, provider: &str, f: F) -> Result<T, CircuitBreakerError>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<T, anyhow::Error>>,
-    {
-        if !self.can_execute(provider).await {
-            return Err(CircuitBreakerError::Open);
-        }
-
-        match f().await {
-            Ok(result) => {
-                self.record_success(provider).await;
-                Ok(result)
-            }
-            Err(e) => {
-                self.record_failure(provider).await;
-                Err(CircuitBreakerError::Underlying(e))
-            }
-        }
-    }
 }
 
 impl Default for CircuitBreakerRegistry {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[derive(Debug)]
-pub enum CircuitBreakerError {
-    Open,
-    Underlying(anyhow::Error),
-}
-
-impl std::fmt::Display for CircuitBreakerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CircuitBreakerError::Open => write!(f, "Circuit breaker is open"),
-            CircuitBreakerError::Underlying(e) => write!(f, "Underlying error: {}", e),
-        }
-    }
-}
-
-impl std::error::Error for CircuitBreakerError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            CircuitBreakerError::Underlying(e) => Some(e.root_cause()),
-            _ => None,
-        }
     }
 }
 
@@ -374,7 +261,6 @@ mod tests {
         assert!(cb.can_execute());
         cb.record_success();
         assert_eq!(cb.state(), CircuitState::Closed);
-        assert_eq!(cb.metrics().successes, 1);
     }
 
     #[test]
@@ -440,20 +326,12 @@ mod tests {
 
         // Circuit should be open
         assert!(!registry.can_execute("provider1").await);
-        assert_eq!(registry.get_state("provider1").await, Some(CircuitState::Open));
+
+        // Verify via all_states
+        let states = registry.all_states().await;
+        assert_eq!(states.get("provider1"), Some(&CircuitState::Open));
 
         // Other providers not affected
         assert!(registry.can_execute("provider2").await);
-    }
-
-    #[test]
-    fn test_config_presets() {
-        let critical = CircuitBreakerConfig::critical();
-        assert_eq!(critical.failure_threshold, 3);
-        assert_eq!(critical.timeout, Duration::from_secs(60));
-
-        let relaxed = CircuitBreakerConfig::relaxed();
-        assert_eq!(relaxed.failure_threshold, 10);
-        assert_eq!(relaxed.timeout, Duration::from_secs(15));
     }
 }

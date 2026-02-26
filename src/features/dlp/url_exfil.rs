@@ -19,14 +19,13 @@ impl std::fmt::Display for UrlExfilDetection {
 }
 
 /// Result of URL exfiltration scanning.
-#[allow(dead_code)]
 pub enum UrlExfilResult {
     /// No suspicious URLs found.
     Clean,
     /// URLs were redacted in the returned text.
     Redacted(String),
     /// URLs were logged but text unchanged.
-    Logged(Vec<UrlExfilDetection>),
+    Logged,
     /// URLs triggered a block action.
     Blocked(Vec<UrlExfilDetection>),
 }
@@ -106,7 +105,7 @@ impl UrlExfilScanner {
 
         match self.config.action {
             DlpAction::Block => UrlExfilResult::Blocked(detections),
-            DlpAction::Log => UrlExfilResult::Logged(detections),
+            DlpAction::Log => UrlExfilResult::Logged,
             DlpAction::Redact => {
                 let redacted = self.redact_urls(text, &detections);
                 UrlExfilResult::Redacted(redacted)
@@ -257,7 +256,7 @@ impl UrlExfilScanner {
     /// Apply URL exfil scanning to response text, returning modified text if needed.
     pub fn sanitize_response<'a>(&self, text: &'a str) -> Cow<'a, str> {
         match self.scan(text) {
-            UrlExfilResult::Clean | UrlExfilResult::Logged(_) => Cow::Borrowed(text),
+            UrlExfilResult::Clean | UrlExfilResult::Logged => Cow::Borrowed(text),
             UrlExfilResult::Redacted(s) => Cow::Owned(s),
             UrlExfilResult::Blocked(_) => {
                 // For non-streaming, redact on block too (streaming handles termination)
@@ -339,13 +338,7 @@ mod tests {
         let scanner = test_scanner(DlpAction::Log);
         let long_query = "a".repeat(250);
         let text = format!("Visit https://example.com/path?data={}", long_query);
-        match scanner.scan(&text) {
-            UrlExfilResult::Logged(dets) => {
-                assert!(!dets.is_empty());
-                assert!(dets[0].reason.contains("long_query"));
-            }
-            other => panic!("Expected Logged, got {:?}", std::mem::discriminant(&other)),
-        }
+        assert!(matches!(scanner.scan(&text), UrlExfilResult::Logged));
     }
 
     #[test]
