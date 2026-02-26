@@ -82,7 +82,7 @@ impl UrlExfilScanner {
     }
 
     /// Scan text for suspicious URLs. Returns the scan result with action.
-    pub fn scan<'a>(&self, text: &'a str) -> UrlExfilResult {
+    pub fn scan(&self, text: &str) -> UrlExfilResult {
         if !self.might_contain_url(text) {
             return UrlExfilResult::Clean;
         }
@@ -141,7 +141,9 @@ impl UrlExfilScanner {
                     let full = caps.get(0).unwrap();
                     let range = (full.start(), full.end());
                     if !overlaps(&seen_ranges, range) {
-                        if let Some(det) = self.check_url(url_match.as_str(), full.start(), full.end(), "md_image") {
+                        if let Some(det) =
+                            self.check_url(url_match.as_str(), full.start(), full.end(), "md_image")
+                        {
                             detections.push(det);
                             seen_ranges.push(range);
                         }
@@ -157,7 +159,9 @@ impl UrlExfilScanner {
                     let full = caps.get(0).unwrap();
                     let range = (full.start(), full.end());
                     if !overlaps(&seen_ranges, range) {
-                        if let Some(det) = self.check_url(url_match.as_str(), full.start(), full.end(), "md_link") {
+                        if let Some(det) =
+                            self.check_url(url_match.as_str(), full.start(), full.end(), "md_link")
+                        {
                             detections.push(det);
                             seen_ranges.push(range);
                         }
@@ -183,7 +187,13 @@ impl UrlExfilScanner {
     }
 
     /// Check a single URL for suspicious characteristics.
-    fn check_url(&self, url_str: &str, start: usize, end: usize, source: &str) -> Option<UrlExfilDetection> {
+    fn check_url(
+        &self,
+        url_str: &str,
+        start: usize,
+        end: usize,
+        source: &str,
+    ) -> Option<UrlExfilDetection> {
         let parsed = match url::Url::parse(url_str) {
             Ok(u) => u,
             Err(_) => return None,
@@ -319,7 +329,10 @@ mod tests {
                 assert!(s.contains("[URL REDACTED]"));
                 assert!(!s.contains("evil.com"));
             }
-            other => panic!("Expected Redacted, got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "Expected Redacted, got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 
@@ -350,7 +363,10 @@ mod tests {
             UrlExfilResult::Redacted(s) => {
                 assert!(s.contains("[URL REDACTED]"));
             }
-            other => panic!("Expected Redacted, got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "Expected Redacted, got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 
@@ -362,7 +378,10 @@ mod tests {
             UrlExfilResult::Redacted(s) => {
                 assert!(s.contains("[URL REDACTED]"));
             }
-            other => panic!("Expected Redacted, got {:?}", std::mem::discriminant(&other)),
+            other => panic!(
+                "Expected Redacted, got {:?}",
+                std::mem::discriminant(&other)
+            ),
         }
     }
 

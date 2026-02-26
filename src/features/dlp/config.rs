@@ -168,18 +168,13 @@ fn default_action_log() -> EntropyAction {
 }
 
 /// Action for URL exfiltration and prompt injection detections.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DlpAction {
     Redact,
+    #[default]
     Log,
     Block,
-}
-
-impl Default for DlpAction {
-    fn default() -> Self {
-        DlpAction::Log
-    }
 }
 
 impl std::fmt::Display for DlpAction {
@@ -193,18 +188,13 @@ impl std::fmt::Display for DlpAction {
 }
 
 /// Domain matching mode for whitelist/blacklist.
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DomainMatchMode {
     Exact,
+    #[default]
     Suffix,
     Glob,
-}
-
-impl Default for DomainMatchMode {
-    fn default() -> Self {
-        DomainMatchMode::Suffix
-    }
 }
 
 /// URL exfiltration scanner configuration (anti-EchoLeak CVE-2025-32711).

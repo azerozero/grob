@@ -36,7 +36,8 @@ struct InjectionOverrides {
 
 /// Load a public key from a PEM file or raw SEC1 bytes.
 pub fn load_public_key(path: &str) -> Result<VerifyingKey> {
-    let data = std::fs::read(path).with_context(|| format!("Failed to read public key: {}", path))?;
+    let data =
+        std::fs::read(path).with_context(|| format!("Failed to read public key: {}", path))?;
 
     // Try PEM first
     let pem_str = String::from_utf8_lossy(&data);
@@ -64,15 +65,9 @@ pub fn load_public_key(path: &str) -> Result<VerifyingKey> {
 }
 
 /// Verify an ECDSA P-256 signature over content.
-fn verify_signature(
-    public_key: &VerifyingKey,
-    content: &[u8],
-    signature_hex: &str,
-) -> Result<()> {
-    let sig_bytes =
-        hex::decode(signature_hex).context("Failed to decode signature hex")?;
-    let signature =
-        Signature::from_der(&sig_bytes).context("Invalid DER signature format")?;
+fn verify_signature(public_key: &VerifyingKey, content: &[u8], signature_hex: &str) -> Result<()> {
+    let sig_bytes = hex::decode(signature_hex).context("Failed to decode signature hex")?;
+    let signature = Signature::from_der(&sig_bytes).context("Invalid DER signature format")?;
     public_key
         .verify(content, &signature)
         .map_err(|e| anyhow::anyhow!("Signature verification failed: {}", e))
@@ -247,27 +242,23 @@ async fn reload_once(
                 table.remove("signature");
             }
             let canonical_bytes = toml::to_string(&canonical)?.into_bytes();
-            verify_signature(pk, &canonical_bytes, embedded_sig)
-                .map_err(|e| {
-                    metrics::counter!(
-                        "grob_dlp_hot_reload_total",
-                        "status" => "sig_failed"
-                    )
-                    .increment(1);
-                    e
-                })?;
+            verify_signature(pk, &canonical_bytes, embedded_sig).inspect_err(|_| {
+                metrics::counter!(
+                    "grob_dlp_hot_reload_total",
+                    "status" => "sig_failed"
+                )
+                .increment(1);
+            })?;
         } else {
             // Try detached signature
             let sig_path = format!("{}{}", settings.source, settings.detached_sig_suffix);
-            verify_detached_signature(pk, &content, &sig_path)
-                .map_err(|e| {
-                    metrics::counter!(
-                        "grob_dlp_hot_reload_total",
-                        "status" => "sig_failed"
-                    )
-                    .increment(1);
-                    e
-                })?;
+            verify_detached_signature(pk, &content, &sig_path).inspect_err(|_| {
+                metrics::counter!(
+                    "grob_dlp_hot_reload_total",
+                    "status" => "sig_failed"
+                )
+                .increment(1);
+            })?;
         }
     }
 

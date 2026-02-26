@@ -833,7 +833,12 @@ impl OpenAIProvider {
                     model: response.model,
                     stop_reason: Some("error".to_string()),
                     stop_sequence: None,
-                    usage: Usage { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: None, cache_read_input_tokens: None },
+                    usage: Usage {
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cache_creation_input_tokens: None,
+                        cache_read_input_tokens: None,
+                    },
                 };
             }
         };

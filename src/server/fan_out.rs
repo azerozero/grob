@@ -23,13 +23,15 @@ pub async fn handle_fan_out(
     fan_out_config: &FanOutConfig,
     registry: &Arc<ProviderRegistry>,
 ) -> Result<(ProviderResponse, Vec<(String, String)>), ProviderError> {
-    let count = fan_out_config.count.unwrap_or(mappings.len()).min(mappings.len());
+    let count = fan_out_config
+        .count
+        .unwrap_or(mappings.len())
+        .min(mappings.len());
     let active_mappings = &mappings[..count];
 
     info!(
         "🔀 Fan-out: dispatching to {} providers (mode: {:?})",
-        count,
-        fan_out_config.mode
+        count, fan_out_config.mode
     );
 
     match fan_out_config.mode {
@@ -121,7 +123,10 @@ async fn fan_out_best_quality(
     }
 
     if results.len() == 1 {
-        let r = results.into_iter().next().expect("results.len()==1 verified above");
+        let r = results
+            .into_iter()
+            .next()
+            .expect("results.len()==1 verified above");
         let info = vec![(r.provider, r.actual_model)];
         return Ok((r.response, info));
     }
@@ -188,12 +193,18 @@ async fn fan_out_best_quality(
                     results[chosen_idx].actual_model
                 );
 
-                let chosen = results.into_iter().nth(chosen_idx).expect("chosen_idx bounded by results.len()-1");
+                let chosen = results
+                    .into_iter()
+                    .nth(chosen_idx)
+                    .expect("chosen_idx bounded by results.len()-1");
                 Ok((chosen.response, provider_info))
             }
             Err(e) => {
                 warn!("⚠️ Judge model failed: {}, returning first response", e);
-                let first = results.into_iter().next().expect("results verified non-empty");
+                let first = results
+                    .into_iter()
+                    .next()
+                    .expect("results verified non-empty");
                 Ok((first.response, provider_info))
             }
         }
@@ -202,7 +213,10 @@ async fn fan_out_best_quality(
             "⚠️ Judge model '{}' not found, returning first response",
             judge_model
         );
-        let first = results.into_iter().next().expect("results verified non-empty");
+        let first = results
+            .into_iter()
+            .next()
+            .expect("results verified non-empty");
         Ok((first.response, provider_info))
     }
 }
@@ -288,7 +302,10 @@ async fn fan_out_all(
                         })
                     }
                     Err(e) => {
-                        warn!("⚠️ Fan-out: {} ({}) failed: {}", provider_name, actual_model, e);
+                        warn!(
+                            "⚠️ Fan-out: {} ({}) failed: {}",
+                            provider_name, actual_model, e
+                        );
                         None
                     }
                 }
@@ -296,11 +313,7 @@ async fn fan_out_all(
         })
         .collect();
 
-    join_all(futures)
-        .await
-        .into_iter()
-        .flatten()
-        .collect()
+    join_all(futures).await.into_iter().flatten().collect()
 }
 
 /// Extract text content from an Anthropic response.
@@ -443,10 +456,10 @@ mod tests {
 
     #[test]
     fn test_fan_out_result_ordering() {
-        let results = vec![
-            mock_result("slow-low", 50, 5000),    // low tokens, high latency
-            mock_result("fast-high", 200, 500),    // high tokens, low latency
-            mock_result("mid-mid", 100, 2000),     // medium both
+        let results = [
+            mock_result("slow-low", 50, 5000),  // low tokens, high latency
+            mock_result("fast-high", 200, 500), // high tokens, low latency
+            mock_result("mid-mid", 100, 2000),  // medium both
         ];
 
         let best = results
@@ -474,7 +487,12 @@ mod tests {
         // mid-mid:   100 * (1 / (1 + 2.0)) = 100 * 0.333 = 33.3
         // slow-low:   50 * (1 / (1 + 5.0)) =  50 * 0.167 = 8.3
         for (provider, score) in &scores {
-            assert!(*score > 0.0, "score for {} should be positive: {}", provider, score);
+            assert!(
+                *score > 0.0,
+                "score for {} should be positive: {}",
+                provider,
+                score
+            );
         }
     }
 }

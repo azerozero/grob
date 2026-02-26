@@ -1,5 +1,5 @@
 use anyhow::Result;
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
@@ -126,7 +126,9 @@ impl JwtValidator {
             }
         }
 
-        Err(AuthError::InvalidToken("No valid key found for token".to_string()))
+        Err(AuthError::InvalidToken(
+            "No valid key found for token".to_string(),
+        ))
     }
 
     fn has_jwks_keys(&self) -> bool {

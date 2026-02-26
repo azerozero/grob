@@ -37,8 +37,9 @@ impl GrobStore {
     pub fn open(path: &Path) -> Result<Self> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create storage directory: {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create storage directory: {}", parent.display())
+            })?;
         }
 
         let db = Database::create(path)
@@ -86,8 +87,7 @@ impl GrobStore {
         match table.get(key.as_str())? {
             Some(value) => {
                 let bytes = value.value();
-                let mut data: SpendData = serde_json::from_slice(bytes)
-                    .unwrap_or_default();
+                let mut data: SpendData = serde_json::from_slice(bytes).unwrap_or_default();
                 // Auto-reset if new month
                 let now = crate::features::token_pricing::spend::current_month();
                 if data.month != now {

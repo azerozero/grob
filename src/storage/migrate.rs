@@ -21,9 +21,7 @@ pub fn migrate_from_json(db: &Database, db_path: &Path) -> Result<()> {
         }
     }
 
-    let grob_dir = db_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let grob_dir = db_path.parent().unwrap_or_else(|| Path::new("."));
 
     let mut migrated_anything = false;
 
@@ -43,10 +41,7 @@ pub fn migrate_from_json(db: &Database, db_path: &Path) -> Result<()> {
                             table.insert("global", bytes.as_slice())?;
                         }
                         write_txn.commit()?;
-                        tracing::info!(
-                            "Migrated spend.json → redb (${:.2} total)",
-                            data.total
-                        );
+                        tracing::info!("Migrated spend.json → redb (${:.2} total)", data.total);
                         migrated_anything = true;
                     }
                     Err(e) => {
@@ -87,10 +82,7 @@ pub fn migrate_from_json(db: &Database, db_path: &Path) -> Result<()> {
                         migrated_anything = true;
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            "Failed to parse oauth_tokens.json during migration: {}",
-                            e
-                        );
+                        tracing::warn!("Failed to parse oauth_tokens.json during migration: {}", e);
                     }
                 }
             }

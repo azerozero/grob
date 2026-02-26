@@ -2,9 +2,7 @@
 //! Implements OWASP security headers recommendations
 //! Conforms to HDS/PCI DSS/SecNumCloud requirements
 
-use axum::{
-    http::{header, HeaderValue, Response},
-};
+use axum::http::{header, HeaderValue, Response};
 
 /// Security headers configuration
 #[derive(Debug, Clone)]
@@ -157,7 +155,10 @@ mod tests {
     use axum::http::StatusCode;
 
     fn create_test_response() -> Response<Body> {
-        Response::builder().status(StatusCode::OK).body(Body::empty()).unwrap()
+        Response::builder()
+            .status(StatusCode::OK)
+            .body(Body::empty())
+            .unwrap()
     }
 
     #[test]
@@ -190,12 +191,17 @@ mod tests {
     fn test_referrer_policies() {
         let policies = vec![
             (ReferrerPolicy::NoReferrer, "no-referrer"),
-            (ReferrerPolicy::StrictOriginWhenCrossOrigin, "strict-origin-when-cross-origin"),
+            (
+                ReferrerPolicy::StrictOriginWhenCrossOrigin,
+                "strict-origin-when-cross-origin",
+            ),
         ];
 
         for (policy, expected) in policies {
-            let mut config = SecurityHeadersConfig::default();
-            config.referrer_policy = policy;
+            let config = SecurityHeadersConfig {
+                referrer_policy: policy,
+                ..Default::default()
+            };
 
             let response = create_test_response();
             let response = apply_security_headers(response, &config);

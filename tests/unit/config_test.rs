@@ -219,14 +219,21 @@ mode = "kerberos"
         };
 
         let result = config.validate();
-        assert!(result.is_ok(), "Expected valid config, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Expected valid config, got: {:?}",
+            result.err()
+        );
     }
 
     /// Test: validate passes a fully valid config
     #[test]
     fn test_validate_passes_valid_config() {
         let config = AppConfig {
-            server: ServerConfig { port: 8080, ..Default::default() },
+            server: ServerConfig {
+                port: 8080,
+                ..Default::default()
+            },
             router: RouterConfig {
                 default: "my-model".to_string(),
                 background: None,
@@ -265,6 +272,10 @@ mode = "kerberos"
         };
 
         let result = config.validate();
-        assert!(result.is_ok(), "Expected valid config, got: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Expected valid config, got: {:?}",
+            result.err()
+        );
     }
 }

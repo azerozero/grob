@@ -48,14 +48,9 @@ pub enum TapEvent {
         body: String,
     },
     /// A chunk of streaming data
-    StreamChunk {
-        request_id: String,
-        data: Bytes,
-    },
+    StreamChunk { request_id: String, data: Bytes },
     /// The stream has ended
-    StreamEnd {
-        request_id: String,
-    },
+    StreamEnd { request_id: String },
 }
 
 /// Non-blocking sender for tap events.
@@ -95,10 +90,7 @@ pub fn init_tap(config: &TapConfig) -> Option<Arc<TapSender>> {
 
     tokio::spawn(tap_worker(rx, config.clone()));
 
-    tracing::info!(
-        "📡 Webhook tap enabled → {}",
-        config.webhook_url
-    );
+    tracing::info!("📡 Webhook tap enabled → {}", config.webhook_url);
 
     Some(sender)
 }
@@ -179,11 +171,7 @@ async fn tap_worker(mut rx: mpsc::Receiver<TapEvent>, config: TapConfig) {
 
                         match result {
                             Ok(resp) if !resp.status().is_success() => {
-                                tracing::warn!(
-                                    "Tap webhook returned {}: {}",
-                                    resp.status(),
-                                    url
-                                );
+                                tracing::warn!("Tap webhook returned {}: {}", resp.status(), url);
                             }
                             Err(e) => {
                                 tracing::warn!("Tap webhook failed: {}", e);

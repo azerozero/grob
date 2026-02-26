@@ -198,9 +198,9 @@ impl CircuitBreakerRegistry {
     pub async fn can_execute(&self, provider: &str) -> bool {
         let mut breakers = self.breakers.write().await;
 
-        let breaker = breakers
-            .entry(provider.to_string())
-            .or_insert_with(|| CircuitBreaker::new(provider.to_string(), self.default_config.clone()));
+        let breaker = breakers.entry(provider.to_string()).or_insert_with(|| {
+            CircuitBreaker::new(provider.to_string(), self.default_config.clone())
+        });
 
         breaker.can_execute()
     }
@@ -209,9 +209,9 @@ impl CircuitBreakerRegistry {
     pub async fn record_success(&self, provider: &str) {
         let mut breakers = self.breakers.write().await;
 
-        let breaker = breakers
-            .entry(provider.to_string())
-            .or_insert_with(|| CircuitBreaker::new(provider.to_string(), self.default_config.clone()));
+        let breaker = breakers.entry(provider.to_string()).or_insert_with(|| {
+            CircuitBreaker::new(provider.to_string(), self.default_config.clone())
+        });
 
         breaker.record_success();
     }
@@ -220,9 +220,9 @@ impl CircuitBreakerRegistry {
     pub async fn record_failure(&self, provider: &str) {
         let mut breakers = self.breakers.write().await;
 
-        let breaker = breakers
-            .entry(provider.to_string())
-            .or_insert_with(|| CircuitBreaker::new(provider.to_string(), self.default_config.clone()));
+        let breaker = breakers.entry(provider.to_string()).or_insert_with(|| {
+            CircuitBreaker::new(provider.to_string(), self.default_config.clone())
+        });
 
         breaker.record_failure();
     }

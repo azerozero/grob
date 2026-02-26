@@ -88,10 +88,7 @@ fn test_model_deprecated_field() {
     // Need providers for validation to pass, so parse directly
     let config: AppConfig = toml::from_str(toml_str).unwrap();
     let model = &config.models[0];
-    assert_eq!(
-        model.deprecated.as_deref(),
-        Some("Use new-model instead")
-    );
+    assert_eq!(model.deprecated.as_deref(), Some("Use new-model instead"));
 }
 
 #[test]

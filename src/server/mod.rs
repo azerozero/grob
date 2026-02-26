@@ -13,8 +13,8 @@ use crate::models::{AnthropicRequest, RouteType};
 use crate::providers::{AuthType, ProviderRegistry};
 use crate::router::Router;
 use crate::security::{
-    apply_security_headers, AuditLog, CircuitBreakerRegistry,
-    RateLimitConfig, RateLimiter, RateLimitKey, SecurityHeadersConfig,
+    apply_security_headers, AuditLog, CircuitBreakerRegistry, RateLimitConfig, RateLimitKey,
+    RateLimiter, SecurityHeadersConfig,
 };
 use crate::storage::GrobStore;
 use axum::{
@@ -140,7 +140,7 @@ fn log_audit(
         ip_source: ip.to_string(),
         duration_ms,
         previous_hash: String::new(), // filled by write()
-        signature: vec![],           // filled by write()
+        signature: vec![],            // filled by write()
     };
     if let Err(e) = audit_log.write(entry) {
         error!("Audit write failed: {}", e);
@@ -197,7 +197,11 @@ async fn auth_middleware(
         "none" => next.run(request).await,
         "api_key" => {
             // Use [auth].api_key or fall back to server.api_key
-            let api_key = inner.config.auth.api_key.as_deref()
+            let api_key = inner
+                .config
+                .auth
+                .api_key
+                .as_deref()
                 .filter(|k| !k.is_empty())
                 .or_else(|| inner.config.server.api_key.as_deref())
                 .unwrap_or("");
@@ -217,7 +221,9 @@ async fn auth_middleware(
                 Some(v) => v,
                 None => {
                     error!("JWT auth mode configured but no validator initialized");
-                    return auth_error_response("Server misconfiguration: JWT validator not initialized");
+                    return auth_error_response(
+                        "Server misconfiguration: JWT validator not initialized",
+                    );
                 }
             };
 
@@ -256,7 +262,9 @@ async fn request_id_middleware(mut request: Request<Body>, next: Next) -> Respon
         .map(|s| s.to_string())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    request.extensions_mut().insert(RequestId(request_id.clone()));
+    request
+        .extensions_mut()
+        .insert(RequestId(request_id.clone()));
 
     let mut response = next.run(request).await;
     if let Ok(val) = HeaderValue::from_str(&request_id) {
@@ -506,7 +514,11 @@ pub async fn start_server(
                             current_interval = base_interval; // Reset on success
                         }
                         Err(e) => {
-                            warn!("JWKS refresh failed (next retry in {}s): {}", current_interval.min(max_interval) * 2, e);
+                            warn!(
+                                "JWKS refresh failed (next retry in {}s): {}",
+                                current_interval.min(max_interval) * 2,
+                                e
+                            );
                             current_interval = (current_interval * 2).min(max_interval);
                         }
                     }
@@ -671,7 +683,9 @@ pub async fn start_server(
 
     // 3. Security headers middleware (wraps response)
     let app = if config.security.security_headers {
-        app.layer(axum::middleware::from_fn(security_headers_response_middleware))
+        app.layer(axum::middleware::from_fn(
+            security_headers_response_middleware,
+        ))
     } else {
         app
     };
@@ -727,7 +741,8 @@ pub async fn start_server(
             info!("🔒 Server listening on {} (TLS)", addr);
 
             // Start main server (HTTPS) — axum_server handles shutdown via handle
-            let socket_addr: std::net::SocketAddr = addr.parse()
+            let socket_addr: std::net::SocketAddr = addr
+                .parse()
                 .map_err(|e| anyhow::anyhow!("Invalid bind address '{}': {}", addr, e))?;
             axum_server::bind_rustls(socket_addr, rustls_config)
                 .serve(app.into_make_service())
@@ -780,7 +795,10 @@ fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
                     "⚠️  Failed to bind OAuth callback server on {}: {}",
                     oauth_addr, e
                 );
-                error!("⚠️  OpenAI Codex OAuth will not work. Port {} must be available.", port);
+                error!(
+                    "⚠️  OpenAI Codex OAuth will not work. Port {} must be available.",
+                    port
+                );
             }
         }
     });
@@ -834,7 +852,9 @@ async fn readiness_check(State(state): State<Arc<AppState>>) -> Response {
     if let Some(ref cb) = state.circuit_breakers {
         let states = cb.all_states().await;
         if !states.is_empty() {
-            let all_open = states.values().all(|s| *s == crate::security::CircuitState::Open);
+            let all_open = states
+                .values()
+                .all(|s| *s == crate::security::CircuitState::Open);
             if all_open {
                 return (
                     StatusCode::SERVICE_UNAVAILABLE,
@@ -1226,7 +1246,13 @@ async fn check_budget(
 }
 
 /// Record spend after a successful request (global + per-tenant if applicable)
-async fn record_spend(state: &Arc<AppState>, provider_name: &str, model_name: &str, cost: f64, tenant_id: Option<&str>) {
+async fn record_spend(
+    state: &Arc<AppState>,
+    provider_name: &str,
+    model_name: &str,
+    cost: f64,
+    tenant_id: Option<&str>,
+) {
     if cost > 0.0 {
         let mut tracker = state.spend_tracker.lock().await;
         if let Some(tenant) = tenant_id {
@@ -1308,8 +1334,7 @@ async fn handle_openai_chat_completions(
     let inner = state.snapshot();
 
     // Resolve DLP engine for this request (session-aware: tenant_id > api_key)
-    let session_key = tenant_id.as_deref()
-        .or_else(|| extract_api_key(&headers));
+    let session_key = tenant_id.as_deref().or_else(|| extract_api_key(&headers));
     let dlp = state
         .dlp_sessions
         .as_ref()
@@ -1324,9 +1349,15 @@ async fn handle_openai_chat_completions(
         if dlp_engine.config.scan_input {
             if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut anthropic_request) {
                 if let Some(ref al) = state.audit_log {
-                    log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
-                        crate::security::audit_log::AuditEvent::DlpBlock, "BLOCKED",
-                        vec![block_err.to_string()], &peer_ip, start_time.elapsed().as_millis() as u64);
+                    log_audit(
+                        al,
+                        tenant_id.as_deref().unwrap_or("anon"),
+                        crate::security::audit_log::AuditEvent::DlpBlock,
+                        "BLOCKED",
+                        vec![block_err.to_string()],
+                        &peer_ip,
+                        start_time.elapsed().as_millis() as u64,
+                    );
                 }
                 return Err(AppError::DlpBlocked(format!("{}", block_err)));
             }
@@ -1359,7 +1390,9 @@ async fn handle_openai_chat_completions(
                     &sorted_mappings,
                     fan_out_config,
                     &inner.provider_registry,
-                ).await {
+                )
+                .await
+                {
                     Ok((mut response, provider_info)) => {
                         if let Some(ref dlp_engine) = dlp {
                             if dlp_engine.config.scan_output {
@@ -1371,21 +1404,21 @@ async fn handle_openai_chat_completions(
                         for (prov, actual) in &provider_info {
                             let is_sub = is_provider_subscription(&inner, prov);
                             let counter = calculate_cost(
-                                &state, actual,
+                                &state,
+                                actual,
                                 response.usage.input_tokens,
                                 response.usage.output_tokens,
                                 is_sub,
-                            ).await;
+                            )
+                            .await;
                             let mut tracker = state.spend_tracker.lock().await;
                             tracker.record(prov, actual, counter.estimated_cost_usd);
                         }
 
                         // Transform back to OpenAI format
                         response.model = model.clone();
-                        let openai_response = openai_compat::transform_anthropic_to_openai(
-                            response,
-                            model.clone(),
-                        );
+                        let openai_response =
+                            openai_compat::transform_anthropic_to_openai(response, model.clone());
                         return Ok(Json(openai_response).into_response());
                     }
                     Err(e) => {
@@ -1409,10 +1442,7 @@ async fn handle_openai_chat_completions(
         // Circuit breaker check
         if let Some(ref cb) = state.circuit_breakers {
             if !cb.can_execute(&mapping.provider).await {
-                info!(
-                    "⚡ Circuit breaker open for {}, skipping",
-                    mapping.provider
-                );
+                info!("⚡ Circuit breaker open for {}, skipping", mapping.provider);
                 metrics::counter!("grob_circuit_breaker_rejected_total", "provider" => mapping.provider.clone()).increment(1);
                 continue;
             }
@@ -1569,7 +1599,10 @@ async fn handle_openai_chat_completions(
                     let delay = retry_delay(attempt - 1);
                     warn!(
                         "⏳ Retrying provider {} (attempt {}/{}), backoff {}ms",
-                        mapping.provider, attempt + 1, MAX_RETRIES + 1, delay.as_millis()
+                        mapping.provider,
+                        attempt + 1,
+                        MAX_RETRIES + 1,
+                        delay.as_millis()
                     );
                     tokio::time::sleep(delay).await;
                 }
@@ -1619,7 +1652,8 @@ async fn handle_openai_chat_completions(
                             &decision.model_name,
                             cost.estimated_cost_usd,
                             tenant_id.as_deref(),
-                        ).await;
+                        )
+                        .await;
 
                         // DLP: sanitize response (deanonymize names, scan secrets)
                         if let Some(ref dlp_engine) = dlp {
@@ -1630,9 +1664,15 @@ async fn handle_openai_chat_completions(
 
                         // Audit: successful response
                         if let Some(ref al) = state.audit_log {
-                            log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
+                            log_audit(
+                                al,
+                                tenant_id.as_deref().unwrap_or("anon"),
                                 crate::security::audit_log::AuditEvent::Response,
-                                &mapping.provider, vec![], &peer_ip, latency_ms);
+                                &mapping.provider,
+                                vec![],
+                                &peer_ip,
+                                latency_ms,
+                            );
                         }
 
                         let openai_response = openai_compat::transform_anthropic_to_openai(
@@ -1654,10 +1694,7 @@ async fn handle_openai_chat_completions(
                         metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
 
                         if retryable && attempt < MAX_RETRIES {
-                            warn!(
-                                "⚠️ Provider {} failed (retryable): {}",
-                                mapping.provider, e
-                            );
+                            warn!("⚠️ Provider {} failed (retryable): {}", mapping.provider, e);
                             last_error = Some(e);
                             continue;
                         }
@@ -1682,15 +1719,20 @@ async fn handle_openai_chat_completions(
 
     // Audit: all providers failed
     if let Some(ref al) = state.audit_log {
-        log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
-            crate::security::audit_log::AuditEvent::Error, "NONE",
-            vec![], &peer_ip, start_time.elapsed().as_millis() as u64);
+        log_audit(
+            al,
+            tenant_id.as_deref().unwrap_or("anon"),
+            crate::security::audit_log::AuditEvent::Error,
+            "NONE",
+            vec![],
+            &peer_ip,
+            start_time.elapsed().as_millis() as u64,
+        );
     }
 
     error!(
         request_id = req_id,
-        "❌ All provider mappings failed for model: {}",
-        decision.model_name
+        "❌ All provider mappings failed for model: {}", decision.model_name
     );
     Err(AppError::ProviderError(format!(
         "All {} provider mappings failed for model: {}",
@@ -1738,7 +1780,10 @@ fn resolve_provider_mappings(
         if gdpr || required_region.is_some() {
             let region_filter = required_region.unwrap_or("eu");
             sorted.retain(|m| {
-                let provider_region = inner.config.providers.iter()
+                let provider_region = inner
+                    .config
+                    .providers
+                    .iter()
                     .find(|p| p.name == m.provider)
                     .and_then(|p| p.region.as_deref())
                     .unwrap_or("global");
@@ -1784,7 +1829,6 @@ fn extract_api_key(headers: &HeaderMap) -> Option<&str> {
         .and_then(|v| v.strip_prefix("Bearer "))
         .or_else(|| headers.get("x-api-key").and_then(|v| v.to_str().ok()))
 }
-
 
 /// Format route type for logging
 fn format_route_type(decision: &crate::models::RouteDecision) -> String {
@@ -1889,8 +1933,7 @@ async fn handle_messages(
     let inner = state.snapshot();
 
     // Resolve DLP engine for this request (session-aware: tenant_id > api_key)
-    let session_key = tenant_id.as_deref()
-        .or_else(|| extract_api_key(&headers));
+    let session_key = tenant_id.as_deref().or_else(|| extract_api_key(&headers));
     let dlp = state
         .dlp_sessions
         .as_ref()
@@ -1925,9 +1968,15 @@ async fn handle_messages(
         if dlp_engine.config.scan_input {
             if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut request_for_routing) {
                 if let Some(ref al) = state.audit_log {
-                    log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
-                        crate::security::audit_log::AuditEvent::DlpBlock, "BLOCKED",
-                        vec![block_err.to_string()], &peer_ip, start_time.elapsed().as_millis() as u64);
+                    log_audit(
+                        al,
+                        tenant_id.as_deref().unwrap_or("anon"),
+                        crate::security::audit_log::AuditEvent::DlpBlock,
+                        "BLOCKED",
+                        vec![block_err.to_string()],
+                        &peer_ip,
+                        start_time.elapsed().as_millis() as u64,
+                    );
                 }
                 return Err(AppError::DlpBlocked(format!("{}", block_err)));
             }
@@ -1954,7 +2003,10 @@ async fn handle_messages(
                 if gdpr || required_region.is_some() {
                     let region_filter = required_region.unwrap_or("eu");
                     sorted_mappings.retain(|m| {
-                        let provider_region = inner.config.providers.iter()
+                        let provider_region = inner
+                            .config
+                            .providers
+                            .iter()
                             .find(|p| p.name == m.provider)
                             .and_then(|p| p.region.as_deref())
                             .unwrap_or("global");
@@ -1975,7 +2027,9 @@ async fn handle_messages(
                     &sorted_mappings,
                     fan_out_config,
                     &inner.provider_registry,
-                ).await {
+                )
+                .await
+                {
                     Ok((mut response, provider_info)) => {
                         // DLP on output
                         if let Some(ref dlp_engine) = dlp {
@@ -1994,7 +2048,8 @@ async fn handle_messages(
                                 response.usage.input_tokens,
                                 response.usage.output_tokens,
                                 is_sub,
-                            ).await;
+                            )
+                            .await;
                             let mut tracker = state.spend_tracker.lock().await;
                             tracker.record(prov, actual, counter.estimated_cost_usd);
                         }
@@ -2059,10 +2114,7 @@ async fn handle_messages(
                 // Circuit breaker check
                 if let Some(ref cb) = state.circuit_breakers {
                     if !cb.can_execute(&mapping.provider).await {
-                        info!(
-                            "⚡ Circuit breaker open for {}, skipping",
-                            mapping.provider
-                        );
+                        info!("⚡ Circuit breaker open for {}, skipping", mapping.provider);
                         metrics::counter!("grob_circuit_breaker_rejected_total", "provider" => mapping.provider.clone()).increment(1);
                         continue;
                     }
@@ -2234,7 +2286,9 @@ async fn handle_messages(
                                 response_builder = response_builder.header(name, value);
                             }
 
-                            let response = response_builder.body(body).expect("streaming response builder");
+                            let response = response_builder
+                                .body(body)
+                                .expect("streaming response builder");
 
                             return Ok(response);
                         }
@@ -2271,7 +2325,10 @@ async fn handle_messages(
                             let delay = retry_delay(attempt - 1);
                             warn!(
                                 "⏳ Retrying provider {} (attempt {}/{}), backoff {}ms",
-                                mapping.provider, attempt + 1, MAX_RETRIES + 1, delay.as_millis()
+                                mapping.provider,
+                                attempt + 1,
+                                MAX_RETRIES + 1,
+                                delay.as_millis()
                             );
                             tokio::time::sleep(delay).await;
                         }
@@ -2297,8 +2354,8 @@ async fn handle_messages(
 
                                 // Calculate and log metrics with dynamic pricing
                                 let latency_ms = start_time.elapsed().as_millis() as u64;
-                                let tok_s =
-                                    (response.usage.output_tokens as f32 * 1000.0) / latency_ms as f32;
+                                let tok_s = (response.usage.output_tokens as f32 * 1000.0)
+                                    / latency_ms as f32;
                                 let cost = calculate_cost(
                                     &state,
                                     &mapping.actual_model,
@@ -2337,7 +2394,8 @@ async fn handle_messages(
                                     &decision.model_name,
                                     cost.estimated_cost_usd,
                                     tenant_id.as_deref(),
-                                ).await;
+                                )
+                                .await;
 
                                 // Trace the response
                                 state
@@ -2346,9 +2404,15 @@ async fn handle_messages(
 
                                 // Audit: successful response
                                 if let Some(ref al) = state.audit_log {
-                                    log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
+                                    log_audit(
+                                        al,
+                                        tenant_id.as_deref().unwrap_or("anon"),
                                         crate::security::audit_log::AuditEvent::Response,
-                                        &mapping.provider, vec![], &peer_ip, latency_ms);
+                                        &mapping.provider,
+                                        vec![],
+                                        &peer_ip,
+                                        latency_ms,
+                                    );
                                 }
 
                                 return Ok(Json(response).into_response());
@@ -2404,15 +2468,20 @@ async fn handle_messages(
 
         // Audit: all providers failed
         if let Some(ref al) = state.audit_log {
-            log_audit(al, tenant_id.as_deref().unwrap_or("anon"),
-                crate::security::audit_log::AuditEvent::Error, "NONE",
-                vec![], &peer_ip, start_time.elapsed().as_millis() as u64);
+            log_audit(
+                al,
+                tenant_id.as_deref().unwrap_or("anon"),
+                crate::security::audit_log::AuditEvent::Error,
+                "NONE",
+                vec![],
+                &peer_ip,
+                start_time.elapsed().as_millis() as u64,
+            );
         }
 
         error!(
             request_id = req_id,
-            "❌ All provider mappings failed for model: {}",
-            decision.model_name
+            "❌ All provider mappings failed for model: {}", decision.model_name
         );
         Err(AppError::ProviderError(format!(
             "All {} provider mappings failed for model: {}",

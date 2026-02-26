@@ -830,7 +830,7 @@ pub fn merge_project_config(mut config: AppConfig) -> AppConfig {
         if !router_overlay.prompt_rules.is_empty() {
             // Prepend project rules (higher priority)
             let mut merged = router_overlay.prompt_rules;
-            merged.extend(config.router.prompt_rules.drain(..));
+            merged.append(&mut config.router.prompt_rules);
             config.router.prompt_rules = merged;
         }
     }

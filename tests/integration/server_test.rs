@@ -113,7 +113,10 @@ mod tests {
         // Sanitize input
         let text = "Acme Corp token: tok_abcdefghijklmnopqrst";
         let sanitized = engine.sanitize_text(text);
-        assert!(!sanitized.contains("Acme Corp"), "Name should be anonymized");
+        assert!(
+            !sanitized.contains("Acme Corp"),
+            "Name should be anonymized"
+        );
         assert!(
             !sanitized.contains("tok_abcdefghijklmnopqrst"),
             "Token should be canary-replaced"
@@ -147,9 +150,7 @@ mod tests {
             model: "claude-opus-4".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
-                content: MessageContent::Text(
-                    "My key is sk-test-abcdefghijklmnopqrst".to_string(),
-                ),
+                content: MessageContent::Text("My key is sk-test-abcdefghijklmnopqrst".to_string()),
             }],
             max_tokens: 1024,
             thinking: None,
@@ -273,10 +274,7 @@ mod tests {
             ("AWS", "AKIAIOSFODNN7EXAMPLE"),
             ("GitHub PAT", "ghp_abcdefghijklmnopqrstuvwxyz1234567890"),
             ("Stripe", concat!("sk_te", "st_abcdefghijklmnopqrstuvwx")),
-            (
-                "GCP",
-                "AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe",
-            ),
+            ("GCP", "AIzaSyDaGmWKa4JsXZ-HjGw7ISLn_3namBGewQe"),
             ("GitLab", "glpat-abcdefghijklmnopq_rst"),
             (
                 "Postgres",
@@ -334,11 +332,7 @@ mod tests {
         .unwrap();
 
         // Sequential digits that look like card numbers but fail Luhn
-        let false_positives = vec![
-            "1234567890123456",
-            "1111111111111111",
-            "9999999999999999",
-        ];
+        let false_positives = vec!["1234567890123456", "1111111111111111", "9999999999999999"];
 
         for fp in false_positives {
             let text = format!("number: {} end", fp);

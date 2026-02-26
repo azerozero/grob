@@ -30,9 +30,7 @@ pub async fn find_instance_pid(host: &str, port: u16) -> Option<u32> {
     }
 
     let body: serde_json::Value = resp.json().await.ok()?;
-    body.get("pid")
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u32)
+    body.get("pid").and_then(|v| v.as_u64()).map(|v| v as u32)
 }
 
 /// Stop a running instance by finding its PID and sending SIGTERM.

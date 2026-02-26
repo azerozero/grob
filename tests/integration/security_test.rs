@@ -2,8 +2,8 @@
 // Tests for rate limiting, security headers, body size limits, request ID, circuit breaker
 
 use grob::security::{
-    CircuitBreakerRegistry, CircuitState, RateLimitConfig, RateLimitKey,
-    RateLimiter, SecurityHeadersConfig, apply_security_headers,
+    apply_security_headers, CircuitBreakerRegistry, CircuitState, RateLimitConfig, RateLimitKey,
+    RateLimiter, SecurityHeadersConfig,
 };
 use std::time::Duration;
 

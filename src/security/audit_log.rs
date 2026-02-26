@@ -105,7 +105,7 @@ impl Default for AuditConfig {
         Self {
             log_dir: PathBuf::from("/var/lib/grob/audit"),
             rotation_size: 100 * 1024 * 1024, // 100MB
-            retention_days: 365, // PCI DSS: 1 year minimum
+            retention_days: 365,              // PCI DSS: 1 year minimum
             sign_key_path: None,
             encrypt: true,
         }
@@ -132,8 +132,8 @@ impl AuditLog {
         // Load or generate signing key
         let signing_key = if let Some(key_path) = &config.sign_key_path {
             if key_path.exists() {
-                let key_bytes = std::fs::read(key_path)
-                    .with_context(|| "Failed to read signing key")?;
+                let key_bytes =
+                    std::fs::read(key_path).with_context(|| "Failed to read signing key")?;
                 SigningKey::from_slice(&key_bytes)
                     .map_err(|e| anyhow::anyhow!("Invalid signing key: {}", e))?
             } else {
@@ -152,7 +152,9 @@ impl AuditLog {
             }
         } else {
             // Ephemeral key (not recommended for production)
-            tracing::warn!("Using ephemeral signing key. Logs won't be verifiable across restarts.");
+            tracing::warn!(
+                "Using ephemeral signing key. Logs won't be verifiable across restarts."
+            );
             SigningKey::random(&mut rand::thread_rng())
         };
 
@@ -237,8 +239,7 @@ impl AuditLog {
         entry.signature = sig.to_bytes().to_vec();
 
         // Append JSONL
-        let mut line = serde_json::to_string(&entry)
-            .context("Failed to serialize audit entry")?;
+        let mut line = serde_json::to_string(&entry).context("Failed to serialize audit entry")?;
         line.push('\n');
 
         let mut file = self.current_file.lock().unwrap_or_else(|e| e.into_inner());
@@ -358,7 +359,14 @@ mod tests {
         let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
 
         // ECDSA P-256 signature is 64 bytes
-        assert_eq!(parsed.signature.len(), 64, "ECDSA P-256 signature should be 64 bytes");
-        assert!(parsed.signature.iter().any(|&b| b != 0), "Signature should not be all zeros");
+        assert_eq!(
+            parsed.signature.len(),
+            64,
+            "ECDSA P-256 signature should be 64 bytes"
+        );
+        assert!(
+            parsed.signature.iter().any(|&b| b != 0),
+            "Signature should not be all zeros"
+        );
     }
 }

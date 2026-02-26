@@ -127,7 +127,11 @@ impl SpendTracker {
         } else {
             self.reset_if_new_month();
             self.data.total += cost;
-            *self.data.by_provider.entry(provider.to_string()).or_default() += cost;
+            *self
+                .data
+                .by_provider
+                .entry(provider.to_string())
+                .or_default() += cost;
             *self.data.by_model.entry(model.to_string()).or_default() += cost;
 
             let count = self.request_count.fetch_add(1, Ordering::Relaxed);

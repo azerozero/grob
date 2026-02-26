@@ -31,6 +31,8 @@ fn make_router() -> Router {
         dlp: Default::default(),
         auth: Default::default(),
         tap: Default::default(),
+        security: Default::default(),
+        version: None,
         user: Default::default(),
     })
 }
@@ -135,9 +137,8 @@ fn bench_dlp_scanner(c: &mut Criterion) {
     });
 
     // Large text (typical LLM response ~4KB)
-    let large_text = "Normal text. ".repeat(300)
-        + "AKIAIOSFODNN7EXAMPLE"
-        + &" more text.".repeat(50);
+    let large_text =
+        "Normal text. ".repeat(300) + "AKIAIOSFODNN7EXAMPLE" + &" more text.".repeat(50);
 
     c.bench_function("dlp_scan_4kb_1_secret", |b| {
         b.iter(|| {

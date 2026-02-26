@@ -16,6 +16,7 @@ use tracing_subscriber::EnvFilter;
 mod auth;
 mod cli;
 mod features;
+mod instance;
 mod message_tracing;
 mod models;
 mod pid;
@@ -23,7 +24,6 @@ mod preset;
 mod providers;
 mod router;
 mod security;
-mod instance;
 mod server;
 mod storage;
 
@@ -227,7 +227,10 @@ enum Commands {
     ///   grob exec -- opencode
     ///   grob launch -- aider
     ///   grob exec --port 9000 -- my-tool --flag
-    #[command(alias = "launch", long_about = "Launch a command behind the Grob proxy.\n\nAutomatically starts Grob if not running, sets ANTHROPIC_BASE_URL and\nOPENAI_BASE_URL environment variables, runs your command, and stops\nGrob when the command exits (unless --no-stop is set).\n\nExamples:\n  grob exec -- claude           # Run Claude Code through Grob\n  grob exec -- opencode          # Run OpenCode through Grob\n  grob launch -- aider           # 'launch' is an alias for 'exec'\n  grob exec --no-stop -- my-tool # Keep Grob running after exit")]
+    #[command(
+        alias = "launch",
+        long_about = "Launch a command behind the Grob proxy.\n\nAutomatically starts Grob if not running, sets ANTHROPIC_BASE_URL and\nOPENAI_BASE_URL environment variables, runs your command, and stops\nGrob when the command exits (unless --no-stop is set).\n\nExamples:\n  grob exec -- claude           # Run Claude Code through Grob\n  grob exec -- opencode          # Run OpenCode through Grob\n  grob launch -- aider           # 'launch' is an alias for 'exec'\n  grob exec --no-stop -- my-tool # Keep Grob running after exit"
+    )]
     Exec {
         /// Port to use for the proxy
         #[arg(short, long)]
@@ -371,7 +374,9 @@ async fn main() -> anyhow::Result<()> {
                 // Stop existing service if running (health-check based)
                 if instance::is_instance_running(&config.server.host, effective_port).await {
                     println!("Stopping existing service...");
-                    if let Some(pid) = instance::find_instance_pid(&config.server.host, effective_port).await {
+                    if let Some(pid) =
+                        instance::find_instance_pid(&config.server.host, effective_port).await
+                    {
                         if let Err(e) = stop_service(pid).await {
                             eprintln!("Warning: Failed to stop existing service: {}", e);
                         }
@@ -394,7 +399,9 @@ async fn main() -> anyhow::Result<()> {
                 .await;
 
                 let base_url = cli::format_base_url(&config.server.host, effective_port);
-                if let Some(pid) = instance::find_instance_pid(&config.server.host, effective_port).await {
+                if let Some(pid) =
+                    instance::find_instance_pid(&config.server.host, effective_port).await
+                {
                     println!("✅ Grob started in background (PID: {})", pid);
                 } else {
                     let _ = poll_health(&base_url, 10, HEALTH_POLL_INTERVAL_MS).await;
@@ -412,17 +419,17 @@ async fn main() -> anyhow::Result<()> {
 
             // Check if already running (health-check based)
             if instance::is_instance_running(&config.server.host, config.server.port).await {
-                if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
-                    eprintln!(
-                        "❌ Error: Service is already running (PID: {})",
-                        pid
-                    );
+                if let Some(pid) =
+                    instance::find_instance_pid(&config.server.host, config.server.port).await
+                {
+                    eprintln!("❌ Error: Service is already running (PID: {})", pid);
                 } else {
-                    eprintln!("❌ Error: Service is already running on port {}", config.server.port);
+                    eprintln!(
+                        "❌ Error: Service is already running on port {}",
+                        config.server.port
+                    );
                 }
-                eprintln!(
-                    "Use 'grob stop' to stop it first, or use 'grob start -d' to restart it"
-                );
+                eprintln!("Use 'grob stop' to stop it first, or use 'grob start -d' to restart it");
                 return Ok(());
             }
             // Clean up stale legacy PID files
@@ -433,7 +440,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Stop => {
             println!("Stopping Grob...");
             // Try health-check based detection first
-            if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+            if let Some(pid) =
+                instance::find_instance_pid(&config.server.host, config.server.port).await
+            {
                 match stop_service(pid).await {
                     Ok(_) => {
                         println!("✅ Service stopped successfully (PID: {})", pid);
@@ -465,7 +474,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Restart { detach } => {
             // Stop the existing service (health-check based)
-            let was_running = if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+            let was_running = if let Some(pid) =
+                instance::find_instance_pid(&config.server.host, config.server.port).await
+            {
                 println!("Stopping existing service...");
                 match stop_service(pid).await {
                     Ok(_) => true,
@@ -503,7 +514,9 @@ async fn main() -> anyhow::Result<()> {
                 .await;
 
                 let verb = if was_running { "restarted" } else { "started" };
-                if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+                if let Some(pid) =
+                    instance::find_instance_pid(&config.server.host, config.server.port).await
+                {
                     println!("✅ Service {} successfully (PID: {})", verb, pid);
                 } else {
                     println!("✅ Service {} successfully", verb);
@@ -515,7 +528,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Status => {
             // Service status
-            let (running, pid_info) = if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+            let (running, pid_info) = if let Some(pid) =
+                instance::find_instance_pid(&config.server.host, config.server.port).await
+            {
                 (true, format!(" (PID: {})", pid))
             } else if instance::is_instance_running(&config.server.host, config.server.port).await {
                 (true, String::new())
@@ -537,7 +552,10 @@ async fn main() -> anyhow::Result<()> {
             }
 
             // Address
-            println!("  Address:   {}", cli::format_bind_addr(&config.server.host, config.server.port));
+            println!(
+                "  Address:   {}",
+                cli::format_bind_addr(&config.server.host, config.server.port)
+            );
 
             // Active preset
             if let Some(ref active) = config.presets.active {
@@ -599,10 +617,17 @@ async fn main() -> anyhow::Result<()> {
                             }
                         }
                     };
-                    let region_tag = provider.region.as_deref().map(|r| format!(" [{}]", r)).unwrap_or_default();
+                    let region_tag = provider
+                        .region
+                        .as_deref()
+                        .map(|r| format!(" [{}]", r))
+                        .unwrap_or_default();
                     format!("{}{}", auth_status, region_tag)
                 };
-                println!("    {:<20} ({}) {}", provider.name, provider.provider_type, status);
+                println!(
+                    "    {:<20} ({}) {}",
+                    provider.name, provider.provider_type, status
+                );
             }
 
             println!();
@@ -610,12 +635,23 @@ async fn main() -> anyhow::Result<()> {
             // Models
             println!("  Models ({}):", config.models.len());
             for model in &config.models {
-                let providers: Vec<String> = model.mappings.iter()
+                let providers: Vec<String> = model
+                    .mappings
+                    .iter()
                     .map(|m| format!("{}/{}", m.provider, m.actual_model))
                     .collect();
                 let strategy = model.strategy.label();
-                let strategy_tag = if strategy != "fallback" { format!(" [{}]", strategy) } else { String::new() };
-                println!("    {:<25} → {}{}", model.name, providers.join(", "), strategy_tag);
+                let strategy_tag = if strategy != "fallback" {
+                    format!(" [{}]", strategy)
+                } else {
+                    String::new()
+                };
+                println!(
+                    "    {:<25} → {}{}",
+                    model.name,
+                    providers.join(", "),
+                    strategy_tag
+                );
             }
 
             // Spend
@@ -925,7 +961,8 @@ async fn main() -> anyhow::Result<()> {
             let mut we_started = false;
 
             // 1. Check if Grob is already running (health-check based)
-            let already_running = instance::is_instance_running(&config.server.host, effective_port).await;
+            let already_running =
+                instance::is_instance_running(&config.server.host, effective_port).await;
 
             if !already_running {
                 // 2. Start Grob in background
@@ -964,7 +1001,9 @@ async fn main() -> anyhow::Result<()> {
 
             // 5. Stop Grob if we started it and --no-stop not set
             if we_started && !no_stop {
-                if let Some(grob_pid) = instance::find_instance_pid(&config.server.host, effective_port).await {
+                if let Some(grob_pid) =
+                    instance::find_instance_pid(&config.server.host, effective_port).await
+                {
                     eprintln!("Stopping Grob...");
                     let _ = stop_service(grob_pid).await;
                     instance::cleanup_legacy_pid();
@@ -991,7 +1030,8 @@ async fn main() -> anyhow::Result<()> {
                 let raw_key = provider.api_key.as_deref().unwrap_or("");
                 // At this point env vars are already resolved, so we need to check the original config
                 // We detect env var references from the provider_type naming convention
-                let env_var_name = format!("{}_API_KEY", provider.name.to_uppercase().replace('-', "_"));
+                let env_var_name =
+                    format!("{}_API_KEY", provider.name.to_uppercase().replace('-', "_"));
 
                 match provider.auth_type {
                     providers::AuthType::OAuth => {
@@ -1028,11 +1068,21 @@ async fn main() -> anyhow::Result<()> {
                 let found = config.providers.iter().any(|p| p.name == *provider_name);
                 if !found {
                     eprintln!("❌ Provider '{}' not found in config", provider_name);
-                    eprintln!("   Available: {}", config.providers.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
+                    eprintln!(
+                        "   Available: {}",
+                        config
+                            .providers
+                            .iter()
+                            .map(|p| p.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
                     return Ok(());
                 }
                 println!("🔑 Setting up credentials for '{}'...", provider_name);
-                if let Err(e) = preset::setup_credentials_interactive_filtered(&file_path, Some(provider_name)) {
+                if let Err(e) =
+                    preset::setup_credentials_interactive_filtered(&file_path, Some(provider_name))
+                {
                     eprintln!("❌ Credential setup failed: {}", e);
                 }
             } else {
@@ -1078,9 +1128,9 @@ async fn main() -> anyhow::Result<()> {
             println!("   Edit it to customize Grob for this project.");
         }
         Commands::ConfigDiff { target } => {
-            let target_name = target.as_deref().unwrap_or_else(|| {
-                config.presets.active.as_deref().unwrap_or("medium")
-            });
+            let target_name = target
+                .as_deref()
+                .unwrap_or_else(|| config.presets.active.as_deref().unwrap_or("medium"));
 
             // Get preset content
             let preset_content = match preset::get_preset_content(target_name) {
@@ -1093,17 +1143,17 @@ async fn main() -> anyhow::Result<()> {
 
             // Parse both configs as TOML values for comparison
             let current_toml = match &config_source {
-                cli::ConfigSource::File(p) => {
-                    std::fs::read_to_string(p).unwrap_or_default()
-                }
+                cli::ConfigSource::File(p) => std::fs::read_to_string(p).unwrap_or_default(),
                 cli::ConfigSource::Url(_) => {
                     eprintln!("❌ Cannot diff remote URL config");
                     return Ok(());
                 }
             };
 
-            let current: toml::Value = toml::from_str(&current_toml).unwrap_or(toml::Value::Table(toml::map::Map::new()));
-            let preset_val: toml::Value = toml::from_str(&preset_content).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+            let current: toml::Value =
+                toml::from_str(&current_toml).unwrap_or(toml::Value::Table(toml::map::Map::new()));
+            let preset_val: toml::Value = toml::from_str(&preset_content)
+                .unwrap_or(toml::Value::Table(toml::map::Map::new()));
 
             println!("📋 Config diff: local vs '{}'", target_name);
             println!();
@@ -1159,9 +1209,13 @@ async fn main() -> anyhow::Result<()> {
             }
 
             // 3. Providers with credentials
-            let enabled_providers: Vec<_> = config.providers.iter().filter(|p| p.is_enabled()).collect();
+            let enabled_providers: Vec<_> =
+                config.providers.iter().filter(|p| p.is_enabled()).collect();
             let total = enabled_providers.len();
-            let with_keys = enabled_providers.iter().filter(|p| p.api_key.is_some() || p.oauth_provider.is_some()).count();
+            let with_keys = enabled_providers
+                .iter()
+                .filter(|p| p.api_key.is_some() || p.oauth_provider.is_some())
+                .count();
             if total == 0 {
                 println!("  ❌ No providers configured");
                 issues += 1;
@@ -1169,7 +1223,10 @@ async fn main() -> anyhow::Result<()> {
                 println!("  ⚠️  Providers: {}/{} have credentials", with_keys, total);
                 issues += 1;
             } else {
-                println!("  ✅ Providers: {}/{} configured with credentials", with_keys, total);
+                println!(
+                    "  ✅ Providers: {}/{} configured with credentials",
+                    with_keys, total
+                );
             }
 
             // 4. Models configured
@@ -1195,7 +1252,10 @@ async fn main() -> anyhow::Result<()> {
                 match std::net::TcpListener::bind(&addr) {
                     Ok(_) => println!("  ✅ Port {}: available", config.server.port),
                     Err(_) => {
-                        println!("  ❌ Port {}: in use by another process", config.server.port);
+                        println!(
+                            "  ❌ Port {}: in use by another process",
+                            config.server.port
+                        );
                         issues += 1;
                     }
                 }
@@ -1210,9 +1270,10 @@ async fn main() -> anyhow::Result<()> {
 
             // 8. Security config
             if config.security.enabled {
-                println!("  ✅ Security: enabled (rate_limit={}rps, circuit_breaker={})",
-                    config.security.rate_limit_rps,
-                    config.security.circuit_breaker);
+                println!(
+                    "  ✅ Security: enabled (rate_limit={}rps, circuit_breaker={})",
+                    config.security.rate_limit_rps, config.security.circuit_breaker
+                );
             } else {
                 println!("  ℹ️  Security: disabled");
             }
@@ -1229,7 +1290,9 @@ async fn main() -> anyhow::Result<()> {
             // 10. Missing environment variables
             let mut missing_env = Vec::new();
             for provider in &config.providers {
-                if !provider.is_enabled() { continue; }
+                if !provider.is_enabled() {
+                    continue;
+                }
                 if let Some(ref key) = provider.api_key {
                     if let Some(var) = key.strip_prefix('$') {
                         if std::env::var(var).is_err() {
@@ -1246,7 +1309,10 @@ async fn main() -> anyhow::Result<()> {
             }
 
             // 11. Podman availability
-            match std::process::Command::new("podman").arg("--version").output() {
+            match std::process::Command::new("podman")
+                .arg("--version")
+                .output()
+            {
                 Ok(output) if output.status.success() => {
                     let version = String::from_utf8_lossy(&output.stdout);
                     println!("  ✅ Podman: {}", version.trim());

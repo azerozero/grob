@@ -313,7 +313,9 @@ pub fn transform_openai_to_anthropic(
         }
     }
 
-    let max_tokens = openai_req.max_tokens.unwrap_or_else(|| models::default_max_tokens(&openai_req.model));
+    let max_tokens = openai_req
+        .max_tokens
+        .unwrap_or_else(|| models::default_max_tokens(&openai_req.model));
 
     Ok(AnthropicRequest {
         model: openai_req.model,
@@ -750,7 +752,9 @@ mod tests {
         let req = simple_openai_request(vec![
             OpenAIMessage {
                 role: "system".to_string(),
-                content: Some(OpenAIContent::String("You are a helpful assistant.".to_string())),
+                content: Some(OpenAIContent::String(
+                    "You are a helpful assistant.".to_string(),
+                )),
                 name: None,
                 tool_calls: None,
                 tool_call_id: None,
@@ -856,10 +860,17 @@ mod tests {
         let choice = &openai_resp.choices[0];
 
         // Text content should be present
-        assert_eq!(choice.message.content.as_deref(), Some("Here's the result."));
+        assert_eq!(
+            choice.message.content.as_deref(),
+            Some("Here's the result.")
+        );
 
         // Tool calls should be present
-        let tool_calls = choice.message.tool_calls.as_ref().expect("Expected tool_calls");
+        let tool_calls = choice
+            .message
+            .tool_calls
+            .as_ref()
+            .expect("Expected tool_calls");
         assert_eq!(tool_calls.len(), 1);
         assert_eq!(tool_calls[0].id, "toolu_abc");
         assert_eq!(tool_calls[0].r#type, "function");

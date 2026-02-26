@@ -59,15 +59,13 @@ impl DomainMatcher {
         match self.mode {
             DomainMatchMode::Exact => hostname == pattern,
             DomainMatchMode::Suffix => {
-                hostname == pattern
-                    || hostname.ends_with(&format!(".{}", pattern))
+                hostname == pattern || hostname.ends_with(&format!(".{}", pattern))
             }
-            DomainMatchMode::Glob => {
-                self.glob_re
-                    .as_ref()
-                    .map(|re| re.is_match(&hostname))
-                    .unwrap_or(false)
-            }
+            DomainMatchMode::Glob => self
+                .glob_re
+                .as_ref()
+                .map(|re| re.is_match(&hostname))
+                .unwrap_or(false),
         }
     }
 }

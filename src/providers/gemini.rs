@@ -196,7 +196,8 @@ impl GeminiProvider {
         for msg in &request.messages {
             if let MessageContent::Blocks(blocks) = &msg.content {
                 for block in blocks {
-                    if let ContentBlock::Known(KnownContentBlock::ToolUse { id, name, .. }) = block {
+                    if let ContentBlock::Known(KnownContentBlock::ToolUse { id, name, .. }) = block
+                    {
                         tool_id_to_name.insert(id.clone(), name.clone());
                     }
                 }
@@ -245,7 +246,11 @@ impl GeminiProvider {
                                     });
                                 }
                             }
-                            ContentBlock::Known(KnownContentBlock::ToolUse { id: _, name, input }) => {
+                            ContentBlock::Known(KnownContentBlock::ToolUse {
+                                id: _,
+                                name,
+                                input,
+                            }) => {
                                 parts.push(GeminiPart::FunctionCall {
                                     function_call: GeminiFunctionCall {
                                         name: name.clone(),
@@ -928,8 +933,12 @@ struct GeminiContent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum GeminiPart {
-    Text { text: String },
-    InlineData { inline_data: GeminiInlineData },
+    Text {
+        text: String,
+    },
+    InlineData {
+        inline_data: GeminiInlineData,
+    },
     FunctionCall {
         #[serde(rename = "functionCall")]
         function_call: GeminiFunctionCall,
