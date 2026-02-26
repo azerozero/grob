@@ -316,7 +316,7 @@ pub fn transform_openai_to_anthropic(
     Ok(AnthropicRequest {
         model: openai_req.model,
         messages,
-        max_tokens: openai_req.max_tokens.unwrap_or(4096),
+        max_tokens: openai_req.max_tokens.unwrap_or(16384),
         thinking: None,
         temperature: openai_req.temperature,
         top_p: openai_req.top_p,
