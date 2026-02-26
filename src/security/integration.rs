@@ -11,7 +11,6 @@ use axum::{
     Router,
 };
 use std::sync::Arc;
-use tower::ServiceBuilder;
 use tower_http::limit::RequestBodyLimitLayer;
 
 /// Complete security configuration
@@ -130,7 +129,7 @@ impl SecurityLayer {
         let headers_config = self.config.headers.clone();
 
         // 4. CORS handling
-        let cors_config = self.config.cors.clone();
+        let _cors_config = self.config.cors.clone();
 
         router
             .layer(middleware::from_fn(

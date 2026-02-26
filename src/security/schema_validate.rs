@@ -12,14 +12,12 @@
 use axum::{
     body::Body,
     extract::Request,
-    http::{HeaderMap, HeaderName, HeaderValue, StatusCode},
+    http::{HeaderMap, HeaderName, StatusCode},
     middleware::Next,
     response::Response,
 };
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
-use std::sync::Arc;
 use unicode_normalization::UnicodeNormalization;
 
 /// Maximum request body size (10MB default)
@@ -99,7 +97,7 @@ pub struct StrictValidator {
     /// Normalize Unicode (NFC)
     normalize_unicode: bool,
     /// ReDoS protection
-    regex_timeout_ms: u64,
+    _regex_timeout_ms: u64,
 }
 
 impl StrictValidator {
@@ -378,7 +376,7 @@ impl Default for StrictValidator {
             max_body_size: MAX_BODY_SIZE,
             reject_unknown_fields: true,
             normalize_unicode: true,
-            regex_timeout_ms: 1000,
+            _regex_timeout_ms: 1000,
         }
     }
 }
@@ -523,6 +521,7 @@ pub fn validation_layer() -> tower::ServiceBuilder<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::HeaderValue;
 
     #[test]
     fn test_header_validation() {

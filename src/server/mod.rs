@@ -95,6 +95,7 @@ pub struct AppState {
     /// Circuit breaker registry (None if disabled)
     pub circuit_breakers: Option<Arc<CircuitBreakerRegistry>>,
     /// Signed audit log (None if audit_dir not configured)
+    #[allow(dead_code)]
     pub audit_log: Option<Arc<AuditLog>>,
 }
 
@@ -2286,7 +2287,7 @@ async fn handle_messages(
                                     &decision.model_name,
                                     cost.estimated_cost_usd,
                                     tenant_id.as_deref(),
-                                );
+                                ).await;
 
                                 // Trace the response
                                 state

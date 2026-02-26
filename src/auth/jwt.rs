@@ -3,7 +3,7 @@ use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
-use crate::security::cache::{jwt_validation_cache, JwtCacheEntry, JwtValidationCache};
+use crate::security::cache::{jwt_validation_cache, JwtValidationCache};
 
 /// JWT claims expected by Grob.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,7 +56,7 @@ pub struct JwtValidator {
     hmac_validation: Validation,
     rsa_validation: Validation,
     /// Cache for validated tokens (avoids repeated signature verification)
-    validation_cache: JwtValidationCache,
+    _validation_cache: JwtValidationCache,
 }
 
 impl JwtValidator {
@@ -99,7 +99,7 @@ impl JwtValidator {
             jwks_url,
             hmac_validation: make_validation(Algorithm::HS256),
             rsa_validation: make_validation(Algorithm::RS256),
-            validation_cache: jwt_validation_cache(10_000),
+            _validation_cache: jwt_validation_cache(10_000),
         })
     }
 

@@ -4,10 +4,9 @@
 
 use axum::{
     body::Body,
-    http::{header, HeaderValue, Request, Response, StatusCode},
+    http::{header, HeaderValue, Request, Response},
     middleware::Next,
 };
-use std::time::Duration;
 
 /// Security headers configuration
 #[derive(Debug, Clone)]
@@ -291,6 +290,7 @@ pub fn build_cors_headers(origin: &str, config: &CorsConfig) -> Vec<(String, Str
 mod tests {
     use super::*;
     use axum::body::Body;
+    use axum::http::StatusCode;
 
     fn create_test_response() -> Response<Body> {
         Response::builder().status(StatusCode::OK).body(Body::empty()).unwrap()

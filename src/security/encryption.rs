@@ -19,9 +19,7 @@ use argon2::{Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

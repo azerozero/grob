@@ -105,7 +105,7 @@ pub struct RateLimiter {
     /// Default config
     default_config: RateLimitConfig,
     /// Cleanup interval
-    cleanup_interval: Duration,
+    _cleanup_interval: Duration,
 }
 
 impl RateLimiter {
@@ -126,7 +126,7 @@ impl RateLimiter {
         Self {
             buckets,
             default_config: config,
-            cleanup_interval,
+            _cleanup_interval: cleanup_interval,
         }
     }
 
@@ -212,7 +212,7 @@ pub async fn rate_limit_middleware(
         });
 
     if let Some(key) = key {
-        let (allowed, remaining, reset_after) = limiter.check(&key).await;
+        let (allowed, _remaining, reset_after) = limiter.check(&key).await;
 
         if !allowed {
             let mut resp = axum::response::Response::builder()

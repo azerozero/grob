@@ -71,7 +71,7 @@ mode = "kerberos"
         use grob::cli::{ModelConfig, ModelMapping, ModelStrategy};
 
         // Build config programmatically to avoid TOML parsing issues with nested arrays
-        let mut config = AppConfig {
+        let config = AppConfig {
             server: ServerConfig::default(),
             router: RouterConfig {
                 default: "my-model".to_string(),
@@ -137,7 +137,7 @@ mode = "kerberos"
     fn test_validate_passes_valid_fan_out_config() {
         use grob::cli::{FanOutConfig, FanOutMode, ModelConfig, ModelMapping, ModelStrategy};
 
-        let mut config = AppConfig {
+        let config = AppConfig {
             server: ServerConfig::default(),
             router: RouterConfig {
                 default: "my-model".to_string(),
@@ -225,7 +225,7 @@ mode = "kerberos"
     /// Test: validate passes a fully valid config
     #[test]
     fn test_validate_passes_valid_config() {
-        let mut config = AppConfig {
+        let config = AppConfig {
             server: ServerConfig { port: 8080, ..Default::default() },
             router: RouterConfig {
                 default: "my-model".to_string(),

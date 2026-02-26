@@ -1,5 +1,6 @@
 //! Security module for Grob
 //! Implements HDS/PCI DSS/SecNumCloud compliance features
+#![allow(dead_code, unused_imports)]
 
 pub mod audit_log;
 pub mod cache;
