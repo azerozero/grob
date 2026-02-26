@@ -8,8 +8,8 @@ git_tag_name = "v{{ version }}"
 git_tag_enable = true
 changelog_update = true
 pr_labels = ["release"]
-# Auto-merge release PRs once CI passes
-pr_auto_merge = "squash"
+# Release PRs target main from develop
+release_branch = "main"
 
 [[package]]
 name = "grob"

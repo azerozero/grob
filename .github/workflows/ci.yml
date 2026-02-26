@@ -2,12 +2,13 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [develop]
     paths-ignore:
       - "docs/**"
       - "**.md"
       - "LICENSE*"
   pull_request:
+    branches: [main, develop]
     paths-ignore:
       - "docs/**"
       - "**.md"
@@ -49,7 +50,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy-${{ matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
       - run: cargo clippy --all-targets -- -D warnings
 
   test:
@@ -65,7 +66,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test-${{ matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
       - run: cargo test
 
   audit:
@@ -93,5 +94,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: machete
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
       - uses: bnjbvr/cargo-machete@main
