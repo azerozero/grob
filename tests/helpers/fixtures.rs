@@ -113,6 +113,8 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         auth: Default::default(),
         tap: Default::default(),
         security: Default::default(),
+        cache: Default::default(),
+        compliance: Default::default(),
         version: None,
         user: Default::default(),
     }

@@ -109,6 +109,8 @@ api_key = "my-secret-key"
             auth: Default::default(),
             tap: Default::default(),
             security: Default::default(),
+            cache: Default::default(),
+            compliance: Default::default(),
             version: None,
             user: Default::default(),
         };
@@ -160,6 +162,8 @@ api_key = "my-secret-key"
             auth: Default::default(),
             tap: Default::default(),
             security: Default::default(),
+            cache: Default::default(),
+            compliance: Default::default(),
             version: None,
             user: Default::default(),
         };

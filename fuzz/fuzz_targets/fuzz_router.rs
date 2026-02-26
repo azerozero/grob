@@ -57,6 +57,10 @@ fn make_config() -> AppConfig {
         dlp: Default::default(),
         auth: Default::default(),
         tap: Default::default(),
+        security: Default::default(),
+        cache: Default::default(),
+        compliance: Default::default(),
+        version: None,
         user: Default::default(),
     }
 }

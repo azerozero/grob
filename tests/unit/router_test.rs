@@ -27,6 +27,8 @@ mod tests {
             auth: Default::default(),
             tap: Default::default(),
             security: Default::default(),
+            cache: Default::default(),
+            compliance: Default::default(),
             version: None,
             user: Default::default(),
         }

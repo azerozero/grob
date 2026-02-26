@@ -32,6 +32,8 @@ fn make_router() -> Router {
         auth: Default::default(),
         tap: Default::default(),
         security: Default::default(),
+        cache: Default::default(),
+        compliance: Default::default(),
         version: None,
         user: Default::default(),
     })

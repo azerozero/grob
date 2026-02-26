@@ -1,11 +1,12 @@
 //! Security module for Grob
-//! Implements HDS/PCI DSS/SecNumCloud compliance features
+//! Implements HDS/PCI DSS/SecNumCloud/EU AI Act compliance features
 
 pub mod audit_log;
 pub mod cache;
 pub mod circuit_breaker;
 pub mod headers;
 pub mod rate_limit;
+pub mod risk;
 
 // Re-exports used by server/mod.rs and other modules
 pub use audit_log::AuditLog;

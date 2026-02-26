@@ -1,6 +1,10 @@
+#[cfg(feature = "acme")]
+pub mod acme;
 pub mod auth;
+pub mod cache;
 pub mod cli;
 pub mod features;
+pub mod net;
 pub mod instance;
 pub mod message_tracing;
 pub mod models;

@@ -23,6 +23,24 @@ pub fn write_pid() -> io::Result<()> {
     Ok(())
 }
 
+/// Atomically write PID file (write to .tmp then rename).
+/// Prevents partial reads during hot restarts.
+#[allow(dead_code)] // available for callers that need atomic PID writes
+pub fn write_pid_atomic() -> io::Result<()> {
+    let pid_file = get_pid_file();
+
+    if let Some(parent) = pid_file.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let tmp_file = pid_file.with_extension("pid.tmp");
+    let pid = std::process::id();
+    fs::write(&tmp_file, pid.to_string())?;
+    fs::rename(&tmp_file, &pid_file)?;
+    tracing::info!("PID {} written atomically to {:?}", pid, pid_file);
+    Ok(())
+}
+
 /// Read the PID from the PID file
 pub fn read_pid() -> io::Result<u32> {
     let pid_file = get_pid_file();

@@ -13,9 +13,13 @@ use std::path::PathBuf;
 use std::process::Command;
 use tracing_subscriber::EnvFilter;
 
+#[cfg(feature = "acme")]
+mod acme;
 mod auth;
+mod cache;
 mod cli;
 mod features;
+mod net;
 mod instance;
 mod message_tracing;
 mod models;
@@ -100,7 +104,7 @@ async fn start_foreground(
     println!();
     println!("Press Ctrl+C to stop");
 
-    // Graceful shutdown via SIGTERM/SIGINT
+    // Graceful shutdown via SIGTERM/SIGINT/SIGUSR1
     let shutdown = async {
         let ctrl_c = tokio::signal::ctrl_c();
         #[cfg(unix)]
@@ -108,9 +112,13 @@ async fn start_foreground(
             let mut sigterm =
                 tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                     .expect("failed to register SIGTERM handler");
+            let mut sigusr1 =
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
+                    .expect("failed to register SIGUSR1 handler");
             tokio::select! {
                 _ = ctrl_c => { tracing::info!("Received SIGINT, shutting down..."); }
                 _ = sigterm.recv() => { tracing::info!("Received SIGTERM, shutting down..."); }
+                _ = sigusr1.recv() => { tracing::info!("Received SIGUSR1 (hot restart), draining..."); }
             }
         }
         #[cfg(not(unix))]
@@ -270,6 +278,11 @@ enum Commands {
     },
     /// Run diagnostic checks on your Grob installation
     Doctor,
+    /// Zero-downtime upgrade: spawn new process, wait for health, signal old to drain
+    ///
+    /// Uses SO_REUSEPORT to run both old and new processes on the same port.
+    /// The new process binds → passes health check → old process receives SIGUSR1 → drains.
+    Upgrade,
 }
 
 #[derive(Subcommand)]
@@ -850,7 +863,7 @@ async fn main() -> anyhow::Result<()> {
                 config.server.port
             );
 
-            // Graceful shutdown via SIGTERM/SIGINT — passed to start_server
+            // Graceful shutdown via SIGTERM/SIGINT/SIGUSR1 — passed to start_server
             let shutdown = async {
                 let ctrl_c = tokio::signal::ctrl_c();
                 #[cfg(unix)]
@@ -858,9 +871,13 @@ async fn main() -> anyhow::Result<()> {
                     let mut sigterm =
                         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                             .expect("failed to register SIGTERM handler");
+                    let mut sigusr1 =
+                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
+                            .expect("failed to register SIGUSR1 handler");
                     tokio::select! {
                         _ = ctrl_c => { tracing::info!("Received SIGINT, shutting down..."); }
                         _ = sigterm.recv() => { tracing::info!("Received SIGTERM, shutting down..."); }
+                        _ = sigusr1.recv() => { tracing::info!("Received SIGUSR1 (hot restart), draining..."); }
                     }
                 }
                 #[cfg(not(unix))]
@@ -1328,6 +1345,83 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 println!("  ⚠️  {} issue(s) found", issues);
             }
+        }
+        Commands::Upgrade => {
+            let base_url = cli::format_base_url(&config.server.host, config.server.port);
+
+            // 1. Find old PID via /health
+            let old_pid = match instance::find_instance_pid(&config.server.host, config.server.port)
+                .await
+            {
+                Some(pid) => pid,
+                None => {
+                    eprintln!("❌ No running Grob instance found on port {}", config.server.port);
+                    eprintln!("   Start one first with: grob start -d");
+                    return Ok(());
+                }
+            };
+            println!("🔄 Upgrading Grob (old PID: {})...", old_pid);
+
+            // 2. Spawn new process (SO_REUSEPORT allows binding same port)
+            spawn_background_service(Some(config.server.port), cli.config)?;
+            println!("   Spawned new process, waiting for health...");
+
+            // 3. Poll /health until PID changes (new process is ready)
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
+            let new_pid = loop {
+                if std::time::Instant::now() > deadline {
+                    eprintln!("❌ Timeout waiting for new process to become healthy");
+                    return Ok(());
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(HEALTH_POLL_INTERVAL_MS))
+                    .await;
+
+                // Check health and look for a different PID
+                let url = format!("{}/health", base_url);
+                if let Ok(resp) = reqwest::Client::new()
+                    .get(&url)
+                    .timeout(std::time::Duration::from_secs(2))
+                    .send()
+                    .await
+                {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
+                        if let Some(pid) = json.get("pid").and_then(|v| v.as_u64()) {
+                            let pid = pid as u32;
+                            if pid != old_pid {
+                                break pid;
+                            }
+                        }
+                    }
+                }
+            };
+            println!("   New process healthy (PID: {})", new_pid);
+
+            // 4. Send SIGUSR1 to old process to trigger graceful drain
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+                println!("   Sending SIGUSR1 to old process (PID: {})...", old_pid);
+                if let Err(e) = kill(Pid::from_raw(old_pid as i32), Signal::SIGUSR1) {
+                    eprintln!("   Warning: Failed to signal old process: {}", e);
+                }
+            }
+
+            // 5. Wait for old process to exit (max 35s)
+            let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
+            loop {
+                if !pid::is_process_running(old_pid) {
+                    println!("   Old process (PID: {}) exited", old_pid);
+                    break;
+                }
+                if std::time::Instant::now() > drain_deadline {
+                    eprintln!("   Warning: Old process still running after 35s drain timeout");
+                    break;
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+            }
+
+            println!("✅ Upgrade complete! New PID: {}", new_pid);
         }
     }
 

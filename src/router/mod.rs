@@ -663,6 +663,8 @@ mod tests {
             user: Default::default(),
             version: None,
             security: Default::default(),
+            cache: Default::default(),
+            compliance: Default::default(),
         }
     }
 

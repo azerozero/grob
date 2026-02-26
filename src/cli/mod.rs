@@ -62,6 +62,12 @@ pub struct SecurityTomlConfig {
     /// Directory for signed audit logs (empty = disabled)
     #[serde(default)]
     pub audit_dir: String,
+    /// Audit log signing algorithm: "ecdsa-p256" (default) or "hmac-sha256"
+    #[serde(default)]
+    pub audit_signing_algorithm: String,
+    /// Path to HMAC key file (only for hmac-sha256 algorithm; default: <audit_dir>/audit_hmac.key)
+    #[serde(default)]
+    pub audit_hmac_key_path: String,
 }
 
 impl Default for SecurityTomlConfig {
@@ -74,6 +80,8 @@ impl Default for SecurityTomlConfig {
             security_headers: true,
             circuit_breaker: true,
             audit_dir: String::new(),
+            audit_signing_algorithm: String::new(),
+            audit_hmac_key_path: String::new(),
         }
     }
 }
@@ -88,6 +96,76 @@ fn default_rate_limit_burst() -> u32 {
 
 fn default_max_body_size() -> usize {
     10 * 1024 * 1024 // 10MB
+}
+
+/// LLM response cache configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CacheConfig {
+    /// Enable response caching (only for temperature=0 requests)
+    #[serde(default)]
+    pub enabled: bool,
+    /// Maximum number of cached responses
+    #[serde(default = "default_cache_max_capacity")]
+    pub max_capacity: u64,
+    /// TTL in seconds for cached entries
+    #[serde(default = "default_cache_ttl")]
+    pub ttl_secs: u64,
+    /// Maximum single entry size in bytes (skip caching responses larger than this)
+    #[serde(default = "default_cache_max_entry_bytes")]
+    pub max_entry_bytes: usize,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_capacity: default_cache_max_capacity(),
+            ttl_secs: default_cache_ttl(),
+            max_entry_bytes: default_cache_max_entry_bytes(),
+        }
+    }
+}
+
+fn default_cache_max_capacity() -> u64 {
+    2000
+}
+
+fn default_cache_ttl() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_cache_max_entry_bytes() -> usize {
+    2 * 1024 * 1024 // 2 MiB
+}
+
+/// EU AI Act compliance configuration
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct ComplianceConfig {
+    /// Enable EU AI Act compliance features
+    #[serde(default)]
+    pub enabled: bool,
+    /// Add transparency headers (X-AI-Provider, X-AI-Model, X-AI-Generated, X-Grob-Audit-Id)
+    #[serde(default)]
+    pub transparency_headers: bool,
+    /// Record model name in audit entries (Article 12)
+    #[serde(default)]
+    pub audit_model_name: bool,
+    /// Record token counts in audit entries (Article 12)
+    #[serde(default)]
+    pub audit_token_counts: bool,
+    /// Enable risk classification (Article 14)
+    #[serde(default)]
+    pub risk_classification: bool,
+    /// Minimum risk level to trigger escalation (low, medium, high, critical)
+    #[serde(default = "default_escalation_threshold")]
+    pub escalation_threshold: String,
+    /// Optional webhook URL for risk escalation notifications
+    #[serde(default)]
+    pub escalation_webhook: Option<String>,
+}
+
+fn default_escalation_threshold() -> String {
+    "high".to_string()
 }
 
 /// Application configuration
@@ -115,6 +193,12 @@ pub struct AppConfig {
     pub tap: TapConfig,
     #[serde(default)]
     pub security: SecurityTomlConfig,
+    /// LLM response cache configuration
+    #[serde(default)]
+    pub cache: CacheConfig,
+    /// EU AI Act compliance configuration
+    #[serde(default)]
+    pub compliance: ComplianceConfig,
     /// User-defined section preserved across preset applies
     #[serde(default)]
     pub user: UserConfig,
@@ -190,6 +274,29 @@ pub struct TlsConfig {
     /// Path to PEM private key file (e.g. privkey.pem from Let's Encrypt)
     #[serde(default)]
     pub key_path: String,
+    /// ACME (Let's Encrypt) auto-certificate configuration
+    #[serde(default)]
+    pub acme: AcmeConfig,
+}
+
+/// ACME (Let's Encrypt) auto-certificate configuration
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct AcmeConfig {
+    /// Enable ACME automatic certificate provisioning
+    #[serde(default)]
+    pub enabled: bool,
+    /// Domain names to obtain certificates for
+    #[serde(default)]
+    pub domains: Vec<String>,
+    /// Contact email addresses for Let's Encrypt (e.g. ["admin@example.com"])
+    #[serde(default)]
+    pub contacts: Vec<String>,
+    /// Cache directory for certificates (default: ~/.grob/certs/)
+    #[serde(default)]
+    pub cache_dir: String,
+    /// Use Let's Encrypt staging environment (for testing)
+    #[serde(default)]
+    pub staging: bool,
 }
 
 /// Message tracing configuration
@@ -545,6 +652,20 @@ impl AppConfig {
         }
         if let Some(ref m) = self.router.websearch {
             check_router_model(m, "websearch");
+        }
+
+        // Validate ACME config (require domains + contacts when enabled)
+        if self.server.tls.acme.enabled {
+            if self.server.tls.acme.domains.is_empty() {
+                anyhow::bail!(
+                    "ACME is enabled but no domains configured. Set [server.tls.acme] domains = [\"example.com\"]"
+                );
+            }
+            if self.server.tls.acme.contacts.is_empty() {
+                anyhow::bail!(
+                    "ACME is enabled but no contacts configured. Set [server.tls.acme] contacts = [\"admin@example.com\"]"
+                );
+            }
         }
 
         // Validate auth mode

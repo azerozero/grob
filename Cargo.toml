@@ -93,10 +93,16 @@ hex = { version = "0.4", features = ["serde"] }      # Hex encoding/decoding
 # Security headers
 http = "1"
 
+# Socket options (SO_REUSEPORT for zero-downtime restarts)
+socket2 = { version = "0.5", features = ["all"] }
+
 # TLS (optional, for native HTTPS without reverse proxy)
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
 rustls = { version = "0.23", optional = true }
 rustls-pemfile = { version = "2", optional = true }
+
+# ACME / Let's Encrypt auto-certificates (optional, requires tls feature)
+rustls-acme = { version = "0.12", features = ["axum"], optional = true }
 
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
@@ -124,6 +130,7 @@ harness = false
 [features]
 default = []
 tls = ["axum-server", "rustls", "rustls-pemfile"]
+acme = ["tls", "rustls-acme"]
 
 [package.metadata.cargo-machete]
 # ecdsa: trait crate required for p256::ecdsa::signature::Signer bounds
@@ -131,7 +138,7 @@ tls = ["axum-server", "rustls", "rustls-pemfile"]
 # rustls/rustls-pemfile: behind optional "tls" feature flag
 # insta: snapshot testing — used incrementally as tests are converted
 # tracing-test: used via #[traced_test] attribute on individual tests
-ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "insta", "tracing-test"]
+ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "rustls-acme", "insta", "tracing-test"]
 
 [profile.release]
 opt-level = 3

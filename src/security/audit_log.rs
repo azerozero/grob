@@ -2,13 +2,14 @@
 //! Conforms to HDS/PCI DSS/SecNumCloud requirements
 //!
 //! Features:
-//! - ECDSA P-256 signatures per log entry
+//! - ECDSA P-256 or HMAC-SHA256 signatures per log entry
 //! - Hash chain for integrity verification
 //! - Append-only storage
 //! - AES-256 encryption at rest
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use hmac::{Hmac, Mac};
 use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -16,6 +17,40 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+
+/// Signing algorithm for audit log entries
+#[derive(Debug, Clone, Default)]
+pub enum SigningAlgorithm {
+    /// ECDSA P-256 (default, 64-byte signatures)
+    #[default]
+    EcdsaP256,
+    /// HMAC-SHA256 (32-byte signatures, symmetric key)
+    HmacSha256,
+}
+
+impl SigningAlgorithm {
+    /// Parse from config string (case-insensitive)
+    pub fn from_str_config(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "hmac-sha256" | "hmac_sha256" | "hmac" => Self::HmacSha256,
+            _ => Self::EcdsaP256,
+        }
+    }
+
+    /// Label for display/logging
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::EcdsaP256 => "ecdsa-p256",
+            Self::HmacSha256 => "hmac-sha256",
+        }
+    }
+}
+
+/// Signing material: holds the key for the configured algorithm
+pub enum SigningMaterial {
+    Ecdsa(SigningKey),
+    Hmac([u8; 32]),
+}
 
 /// Classification levels for audit entries
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,9 +114,48 @@ pub struct AuditEntry {
     pub duration_ms: u64,
     /// Previous entry hash (for chain)
     pub previous_hash: String,
-    /// ECDSA signature of this entry
+    /// Signature of this entry (ECDSA P-256 = 64 bytes, HMAC-SHA256 = 32 bytes)
     #[serde(with = "hex")]
     pub signature: Vec<u8>,
+    /// Signing algorithm used (backward-compatible: defaults to "ecdsa-p256")
+    #[serde(default)]
+    pub signature_algorithm: String,
+    /// Model name used (EU AI Act Article 12)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
+    /// Input tokens counted (EU AI Act Article 12)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u32>,
+    /// Output tokens counted (EU AI Act Article 12)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u32>,
+    /// Risk level classification (EU AI Act Article 14)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_level: Option<RiskLevel>,
+}
+
+/// Risk classification levels per EU AI Act Article 14
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RiskLevel {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl RiskLevel {
+    /// Parse a risk level from a config string (case-insensitive).
+    /// Returns `High` for unrecognized values.
+    pub fn from_str_threshold(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "low" => Self::Low,
+            "medium" => Self::Medium,
+            "high" => Self::High,
+            "critical" => Self::Critical,
+            _ => Self::High,
+        }
+    }
 }
 
 /// Audit log configuration
@@ -94,10 +168,14 @@ pub struct AuditConfig {
     pub rotation_size: u64,
     /// Retention days
     pub retention_days: u32,
-    /// Sign key path (if None, generates ephemeral)
+    /// Sign key path (if None, generates ephemeral) — used for ECDSA
     pub sign_key_path: Option<PathBuf>,
     /// Encrypt at rest
     pub encrypt: bool,
+    /// Signing algorithm (default: ECDSA P-256)
+    pub signing_algorithm: SigningAlgorithm,
+    /// HMAC key path (only for HMAC-SHA256 algorithm)
+    pub hmac_key_path: Option<PathBuf>,
 }
 
 impl Default for AuditConfig {
@@ -108,6 +186,8 @@ impl Default for AuditConfig {
             retention_days: 365,              // PCI DSS: 1 year minimum
             sign_key_path: None,
             encrypt: true,
+            signing_algorithm: SigningAlgorithm::default(),
+            hmac_key_path: None,
         }
     }
 }
@@ -116,7 +196,8 @@ impl Default for AuditConfig {
 pub struct AuditLog {
     #[allow(dead_code)] // used by future rotation logic
     config: AuditConfig,
-    signing_key: SigningKey,
+    signing_material: SigningMaterial,
+    algorithm: SigningAlgorithm,
     current_file: Mutex<std::fs::File>,
     current_size: Mutex<u64>,
     last_hash: Mutex<String>,
@@ -129,34 +210,20 @@ impl AuditLog {
         std::fs::create_dir_all(&config.log_dir)
             .with_context(|| format!("Failed to create audit directory: {:?}", config.log_dir))?;
 
-        // Load or generate signing key
-        let signing_key = if let Some(key_path) = &config.sign_key_path {
-            if key_path.exists() {
-                let key_bytes =
-                    std::fs::read(key_path).with_context(|| "Failed to read signing key")?;
-                SigningKey::from_slice(&key_bytes)
-                    .map_err(|e| anyhow::anyhow!("Invalid signing key: {}", e))?
-            } else {
-                let key = SigningKey::random(&mut rand::thread_rng());
-                let key_bytes = key.to_bytes();
-                std::fs::write(key_path, key_bytes)
-                    .with_context(|| "Failed to save signing key")?;
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mut perms = std::fs::metadata(key_path)?.permissions();
-                    perms.set_mode(0o600);
-                    std::fs::set_permissions(key_path, perms)?;
-                }
-                key
+        // Load or generate signing material based on algorithm
+        let algorithm = config.signing_algorithm.clone();
+        let signing_material = match &algorithm {
+            SigningAlgorithm::EcdsaP256 => {
+                let key = Self::load_or_generate_ecdsa_key(&config)?;
+                SigningMaterial::Ecdsa(key)
             }
-        } else {
-            // Ephemeral key (not recommended for production)
-            tracing::warn!(
-                "Using ephemeral signing key. Logs won't be verifiable across restarts."
-            );
-            SigningKey::random(&mut rand::thread_rng())
+            SigningAlgorithm::HmacSha256 => {
+                let key = Self::load_or_generate_hmac_key(&config)?;
+                SigningMaterial::Hmac(key)
+            }
         };
+
+        tracing::info!("Audit log signing algorithm: {}", algorithm.label());
 
         // Open or create current log file
         let current_path = config.log_dir.join("current.jsonl");
@@ -175,11 +242,77 @@ impl AuditLog {
 
         Ok(Self {
             config,
-            signing_key,
+            signing_material,
+            algorithm,
             current_file: Mutex::new(file),
             current_size: Mutex::new(current_size),
             last_hash: Mutex::new(last_hash),
         })
+    }
+
+    /// Load or generate ECDSA P-256 signing key
+    fn load_or_generate_ecdsa_key(config: &AuditConfig) -> Result<SigningKey> {
+        if let Some(key_path) = &config.sign_key_path {
+            if key_path.exists() {
+                let key_bytes =
+                    std::fs::read(key_path).with_context(|| "Failed to read signing key")?;
+                SigningKey::from_slice(&key_bytes)
+                    .map_err(|e| anyhow::anyhow!("Invalid signing key: {}", e))
+            } else {
+                let key = SigningKey::random(&mut rand::thread_rng());
+                let key_bytes = key.to_bytes();
+                std::fs::write(key_path, key_bytes)
+                    .with_context(|| "Failed to save signing key")?;
+                Self::set_key_permissions(key_path)?;
+                Ok(key)
+            }
+        } else {
+            tracing::warn!(
+                "Using ephemeral ECDSA signing key. Logs won't be verifiable across restarts."
+            );
+            Ok(SigningKey::random(&mut rand::thread_rng()))
+        }
+    }
+
+    /// Load or generate HMAC-SHA256 key (32 bytes)
+    fn load_or_generate_hmac_key(config: &AuditConfig) -> Result<[u8; 32]> {
+        let key_path = config
+            .hmac_key_path
+            .clone()
+            .unwrap_or_else(|| config.log_dir.join("audit_hmac.key"));
+
+        if key_path.exists() {
+            let key_bytes =
+                std::fs::read(&key_path).with_context(|| "Failed to read HMAC key")?;
+            if key_bytes.len() != 32 {
+                anyhow::bail!(
+                    "HMAC key must be exactly 32 bytes, got {}",
+                    key_bytes.len()
+                );
+            }
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&key_bytes);
+            Ok(key)
+        } else {
+            let mut key = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut key);
+            std::fs::write(&key_path, key).with_context(|| "Failed to save HMAC key")?;
+            Self::set_key_permissions(&key_path)?;
+            tracing::info!("Generated new HMAC-SHA256 key at {:?}", key_path);
+            Ok(key)
+        }
+    }
+
+    /// Set 0o600 permissions on a key file (Unix only)
+    fn set_key_permissions(_path: &Path) -> Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(_path)?.permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(_path, perms)?;
+        }
+        Ok(())
     }
 
     /// Read last hash from existing log for chain continuity
@@ -205,9 +338,9 @@ impl AuditLog {
 
     /// Hash an entry for chaining
     fn hash_entry(entry: &AuditEntry) -> String {
-        // Hash of all fields except signature
+        // Hash of all fields except signature and signature_algorithm
         let canonical = format!(
-            "{}|{}|{}|{}|{:?}|{:?}|{}|{:?}|{:?}|{}|{}|{}",
+            "{}|{}|{}|{}|{:?}|{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{:?}",
             entry.timestamp.to_rfc3339(),
             entry.event_id,
             entry.tenant_id,
@@ -219,24 +352,40 @@ impl AuditLog {
             entry.dlp_rules_triggered.join(","),
             entry.ip_source,
             entry.duration_ms,
-            entry.previous_hash
+            entry.previous_hash,
+            entry.model_name.as_deref().unwrap_or(""),
+            entry.input_tokens.unwrap_or(0),
+            entry.output_tokens.unwrap_or(0),
+            entry.risk_level
         );
         hex::encode(Sha256::digest(canonical.as_bytes()))
     }
 
-    /// Write an audit entry with ECDSA signature and hash chain
+    /// Write an audit entry with signature and hash chain
     pub fn write(&self, mut entry: AuditEntry) -> Result<()> {
-        use p256::ecdsa::signature::Signer;
-
         let mut last_hash = self.last_hash.lock().unwrap_or_else(|e| e.into_inner());
 
         // Chain: set previous_hash from last entry
         entry.previous_hash = last_hash.clone();
 
-        // Sign: ECDSA P-256 over the entry hash
+        // Set signature algorithm label
+        entry.signature_algorithm = self.algorithm.label().to_string();
+
+        // Sign based on configured algorithm
         let hash = Self::hash_entry(&entry);
-        let sig: p256::ecdsa::Signature = self.signing_key.sign(hash.as_bytes());
-        entry.signature = sig.to_bytes().to_vec();
+        entry.signature = match &self.signing_material {
+            SigningMaterial::Ecdsa(key) => {
+                use p256::ecdsa::signature::Signer;
+                let sig: p256::ecdsa::Signature = key.sign(hash.as_bytes());
+                sig.to_bytes().to_vec()
+            }
+            SigningMaterial::Hmac(key) => {
+                let mut mac =
+                    Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts any key size");
+                mac.update(hash.as_bytes());
+                mac.finalize().into_bytes().to_vec()
+            }
+        };
 
         // Append JSONL
         let mut line = serde_json::to_string(&entry).context("Failed to serialize audit entry")?;
@@ -304,6 +453,11 @@ mod tests {
             duration_ms: 42,
             previous_hash: String::new(),
             signature: vec![],
+            signature_algorithm: String::new(),
+            model_name: None,
+            input_tokens: None,
+            output_tokens: None,
+            risk_level: None,
         }
     }
 
@@ -368,5 +522,46 @@ mod tests {
             parsed.signature.iter().any(|&b| b != 0),
             "Signature should not be all zeros"
         );
+    }
+
+    #[test]
+    fn test_hmac_signature_present() {
+        let dir = TempDir::new().unwrap();
+        let config = AuditConfig {
+            log_dir: dir.path().to_path_buf(),
+            signing_algorithm: SigningAlgorithm::HmacSha256,
+            ..Default::default()
+        };
+        let log = AuditLog::new(config).unwrap();
+
+        let entry = make_entry(AuditEvent::Request);
+        log.write(entry).unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
+
+        // HMAC-SHA256 signature is 32 bytes
+        assert_eq!(
+            parsed.signature.len(),
+            32,
+            "HMAC-SHA256 signature should be 32 bytes"
+        );
+        assert_eq!(parsed.signature_algorithm, "hmac-sha256");
+        assert!(
+            parsed.signature.iter().any(|&b| b != 0),
+            "Signature should not be all zeros"
+        );
+    }
+
+    #[test]
+    fn test_backward_compat_deserialization() {
+        // Old entries without signature_algorithm, model_name, etc. should deserialize
+        let json = r#"{"timestamp":"2026-01-01T00:00:00Z","event_id":"test","tenant_id":"t","user_id":null,"action":"REQUEST","classification":"NC","backend_routed":"p","request_hash":null,"dlp_rules_triggered":[],"ip_source":"127.0.0.1","duration_ms":0,"previous_hash":"abc","signature":"deadbeef"}"#;
+        let entry: AuditEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.signature_algorithm, "");
+        assert!(entry.model_name.is_none());
+        assert!(entry.input_tokens.is_none());
+        assert!(entry.output_tokens.is_none());
+        assert!(entry.risk_level.is_none());
     }
 }

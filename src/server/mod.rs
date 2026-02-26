@@ -96,6 +96,10 @@ pub struct AppState {
     pub circuit_breakers: Option<Arc<CircuitBreakerRegistry>>,
     /// Signed audit log (None if audit_dir not configured)
     pub audit_log: Option<Arc<AuditLog>>,
+    /// LLM response cache (None if cache disabled)
+    pub response_cache: Option<Arc<crate::cache::ResponseCache>>,
+    /// Server start time (for health/upgrade coordination)
+    pub started_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl AppState {
@@ -114,8 +118,101 @@ fn constant_time_eq(a: &str, b: &str) -> bool {
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
+/// Builder for constructing AuditEntry with optional EU AI Act fields.
+pub struct AuditEntryBuilder {
+    tenant_id: String,
+    action: crate::security::audit_log::AuditEvent,
+    backend: String,
+    dlp_rules: Vec<String>,
+    ip: String,
+    duration_ms: u64,
+    model_name: Option<String>,
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
+    risk_level: Option<crate::security::audit_log::RiskLevel>,
+}
+
+impl AuditEntryBuilder {
+    pub fn new(
+        tenant_id: &str,
+        action: crate::security::audit_log::AuditEvent,
+        backend: &str,
+        ip: &str,
+        duration_ms: u64,
+    ) -> Self {
+        Self {
+            tenant_id: tenant_id.to_string(),
+            action,
+            backend: backend.to_string(),
+            dlp_rules: vec![],
+            ip: ip.to_string(),
+            duration_ms,
+            model_name: None,
+            input_tokens: None,
+            output_tokens: None,
+            risk_level: None,
+        }
+    }
+
+    pub fn dlp_rules(mut self, rules: Vec<String>) -> Self {
+        self.dlp_rules = rules;
+        self
+    }
+
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model_name = Some(model.into());
+        self
+    }
+
+    pub fn tokens(mut self, input: u32, output: u32) -> Self {
+        self.input_tokens = Some(input);
+        self.output_tokens = Some(output);
+        self
+    }
+
+    pub fn risk(mut self, level: crate::security::audit_log::RiskLevel) -> Self {
+        self.risk_level = Some(level);
+        self
+    }
+
+    pub fn build(self) -> crate::security::audit_log::AuditEntry {
+        use crate::security::audit_log::{AuditEntry, Classification};
+        AuditEntry {
+            timestamp: chrono::Utc::now(),
+            event_id: uuid::Uuid::new_v4().to_string(),
+            tenant_id: self.tenant_id,
+            user_id: None,
+            action: self.action,
+            classification: Classification::Nc,
+            backend_routed: self.backend,
+            request_hash: None,
+            dlp_rules_triggered: self.dlp_rules,
+            ip_source: self.ip,
+            duration_ms: self.duration_ms,
+            previous_hash: String::new(), // filled by write()
+            signature: vec![],            // filled by write()
+            signature_algorithm: String::new(), // filled by write()
+            model_name: self.model_name,
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+            risk_level: self.risk_level,
+        }
+    }
+}
+
+/// EU AI Act compliance fields for audit log entries.
+struct AuditCompliance<'a> {
+    config: &'a crate::cli::ComplianceConfig,
+    model_name: Option<&'a str>,
+    token_counts: Option<(u32, u32)>,
+    risk_level: Option<crate::security::audit_log::RiskLevel>,
+}
+
 /// Fire-and-forget audit log entry writer.
 /// Builds an `AuditEntry` and writes it; errors are logged but never propagate.
+/// When EU AI Act compliance is enabled, conditionally records model name, token counts,
+/// and risk level per Articles 12 and 14.
+#[allow(clippy::too_many_arguments)]
 fn log_audit(
     audit_log: &AuditLog,
     tenant_id: &str,
@@ -124,25 +221,26 @@ fn log_audit(
     dlp_rules: Vec<String>,
     ip: &str,
     duration_ms: u64,
+    eu: AuditCompliance<'_>,
 ) {
-    use crate::security::audit_log::{AuditEntry, Classification};
-
-    let entry = AuditEntry {
-        timestamp: chrono::Utc::now(),
-        event_id: uuid::Uuid::new_v4().to_string(),
-        tenant_id: tenant_id.to_string(),
-        user_id: None,
-        action,
-        classification: Classification::Nc,
-        backend_routed: backend.to_string(),
-        request_hash: None,
-        dlp_rules_triggered: dlp_rules,
-        ip_source: ip.to_string(),
-        duration_ms,
-        previous_hash: String::new(), // filled by write()
-        signature: vec![],            // filled by write()
-    };
-    if let Err(e) = audit_log.write(entry) {
+    let mut builder = AuditEntryBuilder::new(tenant_id, action, backend, ip, duration_ms)
+        .dlp_rules(dlp_rules);
+    if eu.config.enabled && eu.config.audit_model_name {
+        if let Some(m) = eu.model_name {
+            builder = builder.model(m);
+        }
+    }
+    if eu.config.enabled && eu.config.audit_token_counts {
+        if let Some((i, o)) = eu.token_counts {
+            builder = builder.tokens(i, o);
+        }
+    }
+    if eu.config.enabled && eu.config.risk_classification {
+        if let Some(r) = eu.risk_level {
+            builder = builder.risk(r);
+        }
+    }
+    if let Err(e) = audit_log.write(builder.build()) {
         error!("Audit write failed: {}", e);
     }
 }
@@ -155,6 +253,28 @@ fn extract_client_ip(headers: &HeaderMap) -> String {
         .and_then(|s| s.split(',').next())
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Apply EU AI Act transparency headers to a response.
+fn apply_transparency_headers(
+    headers: &mut HeaderMap,
+    provider: &str,
+    model: &str,
+    audit_id: &str,
+) {
+    if let Ok(v) = HeaderValue::from_str(provider) {
+        headers.insert("x-ai-provider", v);
+    }
+    if let Ok(v) = HeaderValue::from_str(model) {
+        headers.insert("x-ai-model", v);
+    }
+    if let Ok(v) = HeaderValue::from_str(audit_id) {
+        headers.insert("x-grob-audit-id", v);
+    }
+    headers.insert(
+        "x-ai-generated",
+        HeaderValue::from_static("true"),
+    );
 }
 
 /// Auth middleware: supports three modes:
@@ -577,12 +697,28 @@ pub async fn start_server(
         } else {
             std::path::PathBuf::from(&config.security.audit_dir)
         };
+        let signing_algorithm = if config.security.audit_signing_algorithm.is_empty() {
+            crate::security::audit_log::SigningAlgorithm::default()
+        } else {
+            crate::security::audit_log::SigningAlgorithm::from_str_config(
+                &config.security.audit_signing_algorithm,
+            )
+        };
+        let hmac_key_path = if config.security.audit_hmac_key_path.is_empty() {
+            None
+        } else {
+            Some(std::path::PathBuf::from(
+                &config.security.audit_hmac_key_path,
+            ))
+        };
         match AuditLog::new(crate::security::audit_log::AuditConfig {
             log_dir: audit_dir.clone(),
             rotation_size: 100 * 1024 * 1024,
             retention_days: 365,
             sign_key_path: Some(audit_dir.join("audit_key.pem")),
             encrypt: false,
+            signing_algorithm,
+            hmac_key_path,
         }) {
             Ok(log) => {
                 info!("📝 Audit logging enabled: {}", audit_dir.display());
@@ -593,6 +729,22 @@ pub async fn start_server(
                 None
             }
         }
+    } else {
+        None
+    };
+
+    // Initialize response cache (if enabled)
+    let response_cache = if config.cache.enabled {
+        let cache = crate::cache::ResponseCache::new(
+            config.cache.max_capacity,
+            config.cache.ttl_secs,
+            config.cache.max_entry_bytes,
+        );
+        info!(
+            "💾 Response cache enabled: max_capacity={}, ttl={}s, max_entry={}B",
+            config.cache.max_capacity, config.cache.ttl_secs, config.cache.max_entry_bytes
+        );
+        Some(Arc::new(cache))
     } else {
         None
     };
@@ -612,6 +764,8 @@ pub async fn start_server(
         rate_limiter,
         circuit_breakers,
         audit_log,
+        response_cache,
+        started_at: chrono::Utc::now(),
     });
 
     // Spawn background preset sync if configured and auto_sync is enabled
@@ -706,29 +860,59 @@ pub async fn start_server(
 
     // TLS support (requires `tls` cargo feature)
     #[cfg(feature = "tls")]
-    let tls_enabled = config.server.tls.enabled
+    let tls_manual = config.server.tls.enabled
         && !config.server.tls.cert_path.is_empty()
         && !config.server.tls.key_path.is_empty();
     #[cfg(not(feature = "tls"))]
-    let tls_enabled = false;
+    let tls_manual = false;
+
+    #[cfg(feature = "acme")]
+    let tls_acme = config.server.tls.acme.enabled;
+    #[cfg(not(feature = "acme"))]
+    let tls_acme = false;
+
+    let tls_enabled = tls_manual || tls_acme;
 
     #[cfg(not(feature = "tls"))]
     if config.server.tls.enabled {
         anyhow::bail!("TLS is enabled in config but grob was built without the `tls` feature. Rebuild with: cargo build --features tls");
     }
 
+    #[cfg(not(feature = "acme"))]
+    if config.server.tls.acme.enabled {
+        anyhow::bail!("ACME is enabled in config but grob was built without the `acme` feature. Rebuild with: cargo build --features acme");
+    }
+
     // Start OAuth callback (must be before main server await)
     spawn_oauth_callback(oauth_state);
 
     if !tls_enabled {
-        let listener = TcpListener::bind(&addr).await?;
-        info!("🚀 Server listening on {}", addr);
+        // Use SO_REUSEPORT for zero-downtime restart support
+        let listener = crate::net::bind_reuseport(&addr).await?;
+        info!("🚀 Server listening on {} (SO_REUSEPORT)", addr);
 
         // Start main server (plain HTTP) with graceful shutdown
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal)
             .await?;
+    } else if tls_acme {
+        // ACME auto-certificate mode
+        #[cfg(feature = "acme")]
+        {
+            let acceptor = crate::acme::build_acme_acceptor(&config.server.tls.acme)?;
+
+            info!("🔒 Server listening on {} (ACME TLS, SO_REUSEPORT)", addr);
+
+            let listener = crate::net::bind_reuseport(&addr).await?;
+            axum_server::Server::bind(addr.parse()?)
+                .acceptor(acceptor)
+                .serve(app.into_make_service())
+                .await?;
+            // Keep listener alive for SO_REUSEPORT
+            drop(listener);
+        }
     } else {
+        // Manual TLS certificate mode
         #[cfg(feature = "tls")]
         {
             use axum_server::tls_rustls::RustlsConfig;
@@ -738,13 +922,11 @@ pub async fn start_server(
             )
             .await?;
 
-            info!("🔒 Server listening on {} (TLS)", addr);
+            info!("🔒 Server listening on {} (TLS, SO_REUSEPORT)", addr);
 
-            // Start main server (HTTPS) — axum_server handles shutdown via handle
-            let socket_addr: std::net::SocketAddr = addr
-                .parse()
-                .map_err(|e| anyhow::anyhow!("Invalid bind address '{}': {}", addr, e))?;
-            axum_server::bind_rustls(socket_addr, rustls_config)
+            // Use SO_REUSEPORT std listener for zero-downtime restart support
+            let std_listener = crate::net::bind_reuseport_std(&addr)?;
+            axum_server::from_tcp_rustls(std_listener, rustls_config)
                 .serve(app.into_make_service())
                 .await?;
         }
@@ -819,6 +1001,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         "status": "ok",
         "service": "grob",
         "pid": std::process::id(),
+        "started_at": state.started_at.to_rfc3339(),
         "active_requests": active,
         "spend": {
             "total_usd": spend_total,
@@ -1348,6 +1531,17 @@ async fn handle_openai_chat_completions(
     if let Some(ref dlp_engine) = dlp {
         if dlp_engine.config.scan_input {
             if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut anthropic_request) {
+                let had_injection = matches!(&block_err, crate::features::dlp::DlpBlockError::InjectionBlocked(_));
+                let risk = crate::security::risk::assess_risk(1, true, had_injection, false);
+                if inner.config.compliance.enabled && inner.config.compliance.risk_classification {
+                    let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
+                        &inner.config.compliance.escalation_threshold,
+                    );
+                    crate::security::risk::maybe_escalate(
+                        risk, threshold, &inner.config.compliance.escalation_webhook,
+                        req_id, tenant_id.as_deref().unwrap_or("anon"), &model,
+                    );
+                }
                 if let Some(ref al) = state.audit_log {
                     log_audit(
                         al,
@@ -1357,12 +1551,34 @@ async fn handle_openai_chat_completions(
                         vec![block_err.to_string()],
                         &peer_ip,
                         start_time.elapsed().as_millis() as u64,
+                        AuditCompliance {
+                            config: &inner.config.compliance,
+                            model_name: Some(&model),
+                            token_counts: None,
+                            risk_level: Some(risk),
+                        },
                     );
                 }
                 return Err(AppError::DlpBlocked(format!("{}", block_err)));
             }
         }
     }
+
+    // Compute cache key (before routing, after DLP)
+    let cache_key = state.response_cache.as_ref().and_then(|_cache| {
+        let messages_json = serde_json::to_value(&anthropic_request.messages).ok()?;
+        let system_json = anthropic_request.system.as_ref().and_then(|s| serde_json::to_value(s).ok());
+        let tools_json = anthropic_request.tools.as_ref().and_then(|t| serde_json::to_value(t).ok());
+        crate::cache::ResponseCache::compute_key(
+            tenant_id.as_deref().unwrap_or("anon"),
+            &anthropic_request.model,
+            &messages_json,
+            system_json.as_ref(),
+            tools_json.as_ref(),
+            Some(anthropic_request.max_tokens as u64),
+            anthropic_request.temperature.map(|t| t as f64),
+        )
+    });
 
     // 2. Route the request
     let decision = inner
@@ -1372,6 +1588,24 @@ async fn handle_openai_chat_completions(
 
     // Resolve provider list
     let sorted_mappings = resolve_provider_mappings(&inner, &headers, &decision)?;
+
+    // Cache hit check (non-streaming only, before provider loop)
+    if !is_streaming {
+        if let (Some(ref cache), Some(ref key)) = (&state.response_cache, &cache_key) {
+            if let Some(cached) = cache.get(key).await {
+                let mut resp = Response::builder()
+                    .status(200)
+                    .header("content-type", &cached.content_type)
+                    .header("x-grob-cache", "hit")
+                    .body(Body::from(cached.body.clone()))
+                    .expect("cached response");
+                if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                    apply_transparency_headers(resp.headers_mut(), &cached.provider, &cached.model, req_id);
+                }
+                return Ok(resp);
+            }
+        }
+    }
 
     // Fan-out strategy: dispatch to multiple providers in parallel (OpenAI compat)
     if let Some(model_config) = inner.find_model(&decision.model_name) {
@@ -1413,6 +1647,26 @@ async fn handle_openai_chat_completions(
                             .await;
                             let mut tracker = state.spend_tracker.lock().await;
                             tracker.record(prov, actual, counter.estimated_cost_usd);
+                        }
+
+                        // Audit: fan-out success
+                        if let Some(ref al) = state.audit_log {
+                            let fan_out_model = provider_info.first().map(|(_, m)| m.as_str()).unwrap_or("fan_out");
+                            log_audit(
+                                al,
+                                tenant_id.as_deref().unwrap_or("anon"),
+                                crate::security::audit_log::AuditEvent::Response,
+                                "fan_out",
+                                vec![],
+                                &peer_ip,
+                                start_time.elapsed().as_millis() as u64,
+                                AuditCompliance {
+                                    config: &inner.config.compliance,
+                                    model_name: Some(fan_out_model),
+                                    token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
+                                    risk_level: Some(crate::security::audit_log::RiskLevel::Low),
+                                },
+                            );
                         }
 
                         // Transform back to OpenAI format
@@ -1560,13 +1814,17 @@ async fn handle_openai_chat_completions(
                     let body =
                         Body::from_stream(mapped.map_err(|e| std::io::Error::other(e.to_string())));
 
-                    let response = Response::builder()
+                    let mut response = Response::builder()
                         .status(200)
                         .header("Content-Type", "text/event-stream")
                         .header("Cache-Control", "no-cache")
                         .header("Connection", "keep-alive")
                         .body(body)
                         .expect("streaming response builder");
+
+                    if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                        apply_transparency_headers(response.headers_mut(), &mapping.provider, &mapping.actual_model, req_id);
+                    }
 
                     return Ok(response);
                 }
@@ -1672,13 +1930,41 @@ async fn handle_openai_chat_completions(
                                 vec![],
                                 &peer_ip,
                                 latency_ms,
+                                AuditCompliance {
+                                    config: &inner.config.compliance,
+                                    model_name: Some(&mapping.actual_model),
+                                    token_counts: Some((anthropic_response.usage.input_tokens, anthropic_response.usage.output_tokens)),
+                                    risk_level: Some(crate::security::audit_log::RiskLevel::Low),
+                                },
                             );
+                        }
+
+                        // Cache store (non-streaming success)
+                        if let (Some(ref cache), Some(ref key)) = (&state.response_cache, &cache_key) {
+                            if let Ok(body) = serde_json::to_vec(&anthropic_response) {
+                                cache.put(key.clone(), crate::cache::CachedResponse {
+                                    body,
+                                    content_type: "application/json".to_string(),
+                                    provider: mapping.provider.clone(),
+                                    model: mapping.actual_model.clone(),
+                                }).await;
+                            }
                         }
 
                         let openai_response = openai_compat::transform_anthropic_to_openai(
                             anthropic_response,
                             model.clone(),
                         );
+                        if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                            let body = serde_json::to_vec(&openai_response).unwrap_or_default();
+                            let mut resp = Response::builder()
+                                .status(200)
+                                .header("content-type", "application/json")
+                                .body(Body::from(body))
+                                .expect("response builder");
+                            apply_transparency_headers(resp.headers_mut(), &mapping.provider, &mapping.actual_model, req_id);
+                            return Ok(resp);
+                        }
                         return Ok(Json(openai_response).into_response());
                     }
                     Err(e) => {
@@ -1727,6 +2013,12 @@ async fn handle_openai_chat_completions(
             vec![],
             &peer_ip,
             start_time.elapsed().as_millis() as u64,
+            AuditCompliance {
+                config: &inner.config.compliance,
+                model_name: None,
+                token_counts: None,
+                risk_level: None,
+            },
         );
     }
 
@@ -1967,6 +2259,17 @@ async fn handle_messages(
     if let Some(ref dlp_engine) = dlp {
         if dlp_engine.config.scan_input {
             if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut request_for_routing) {
+                let had_injection = matches!(&block_err, crate::features::dlp::DlpBlockError::InjectionBlocked(_));
+                let risk = crate::security::risk::assess_risk(1, true, had_injection, false);
+                if inner.config.compliance.enabled && inner.config.compliance.risk_classification {
+                    let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
+                        &inner.config.compliance.escalation_threshold,
+                    );
+                    crate::security::risk::maybe_escalate(
+                        risk, threshold, &inner.config.compliance.escalation_webhook,
+                        req_id, tenant_id.as_deref().unwrap_or("anon"), model,
+                    );
+                }
                 if let Some(ref al) = state.audit_log {
                     log_audit(
                         al,
@@ -1976,6 +2279,12 @@ async fn handle_messages(
                         vec![block_err.to_string()],
                         &peer_ip,
                         start_time.elapsed().as_millis() as u64,
+                        AuditCompliance {
+                            config: &inner.config.compliance,
+                            model_name: Some(model),
+                            token_counts: None,
+                            risk_level: Some(risk),
+                        },
                     );
                 }
                 return Err(AppError::DlpBlocked(format!("{}", block_err)));
@@ -1983,11 +2292,46 @@ async fn handle_messages(
         }
     }
 
+    // Compute cache key (before routing, after DLP)
+    let cache_key = state.response_cache.as_ref().and_then(|_cache| {
+        let messages_json = serde_json::to_value(&request_for_routing.messages).ok()?;
+        let system_json = request_for_routing.system.as_ref().and_then(|s| serde_json::to_value(s).ok());
+        let tools_json = request_for_routing.tools.as_ref().and_then(|t| serde_json::to_value(t).ok());
+        crate::cache::ResponseCache::compute_key(
+            tenant_id.as_deref().unwrap_or("anon"),
+            &request_for_routing.model,
+            &messages_json,
+            system_json.as_ref(),
+            tools_json.as_ref(),
+            Some(request_for_routing.max_tokens as u64),
+            request_for_routing.temperature.map(|t| t as f64),
+        )
+    });
+
     // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
     let decision = inner
         .router
         .route(&mut request_for_routing)
         .map_err(|e| AppError::RoutingError(e.to_string()))?;
+
+    // Cache hit check (non-streaming only, before provider loop)
+    let is_streaming = request_for_routing.stream == Some(true);
+    if !is_streaming {
+        if let (Some(ref cache), Some(ref key)) = (&state.response_cache, &cache_key) {
+            if let Some(cached) = cache.get(key).await {
+                let mut resp = Response::builder()
+                    .status(200)
+                    .header("content-type", &cached.content_type)
+                    .header("x-grob-cache", "hit")
+                    .body(Body::from(cached.body.clone()))
+                    .expect("cached response");
+                if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                    apply_transparency_headers(resp.headers_mut(), &cached.provider, &cached.model, req_id);
+                }
+                return Ok(resp);
+            }
+        }
+    }
 
     // 3. Try model mappings with fallback or fan-out (1:N mapping)
     if let Some(model_config) = inner.find_model(&decision.model_name) {
@@ -2064,6 +2408,26 @@ async fn handle_messages(
                             response.usage.output_tokens,
                             0.0,
                         );
+
+                        // Audit: fan-out success
+                        if let Some(ref al) = state.audit_log {
+                            let fan_out_model = provider_info.first().map(|(_, m)| m.as_str()).unwrap_or("fan_out");
+                            log_audit(
+                                al,
+                                tenant_id.as_deref().unwrap_or("anon"),
+                                crate::security::audit_log::AuditEvent::Response,
+                                "fan_out",
+                                vec![],
+                                &peer_ip,
+                                latency_ms,
+                                AuditCompliance {
+                                    config: &inner.config.compliance,
+                                    model_name: Some(fan_out_model),
+                                    token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
+                                    risk_level: Some(crate::security::audit_log::RiskLevel::Low),
+                                },
+                            );
+                        }
 
                         // Restore original model name in response
                         response.model = model.to_string();
@@ -2286,6 +2650,17 @@ async fn handle_messages(
                                 response_builder = response_builder.header(name, value);
                             }
 
+                            // EU AI Act transparency headers on streaming responses
+                            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                                let mut hdrs = HeaderMap::new();
+                                apply_transparency_headers(&mut hdrs, &mapping.provider, &mapping.actual_model, req_id);
+                                for (k, v) in hdrs {
+                                    if let Some(k) = k {
+                                        response_builder = response_builder.header(k, v);
+                                    }
+                                }
+                            }
+
                             let response = response_builder
                                 .body(body)
                                 .expect("streaming response builder");
@@ -2412,9 +2787,37 @@ async fn handle_messages(
                                         vec![],
                                         &peer_ip,
                                         latency_ms,
+                                        AuditCompliance {
+                                            config: &inner.config.compliance,
+                                            model_name: Some(&mapping.actual_model),
+                                            token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
+                                            risk_level: Some(crate::security::audit_log::RiskLevel::Low),
+                                        },
                                     );
                                 }
 
+                                // Cache store (non-streaming success)
+                                if let (Some(ref cache), Some(ref key)) = (&state.response_cache, &cache_key) {
+                                    if let Ok(body) = serde_json::to_vec(&response) {
+                                        cache.put(key.clone(), crate::cache::CachedResponse {
+                                            body,
+                                            content_type: "application/json".to_string(),
+                                            provider: mapping.provider.clone(),
+                                            model: mapping.actual_model.clone(),
+                                        }).await;
+                                    }
+                                }
+
+                                if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                                    let body = serde_json::to_vec(&response).unwrap_or_default();
+                                    let mut resp = Response::builder()
+                                        .status(200)
+                                        .header("content-type", "application/json")
+                                        .body(Body::from(body))
+                                        .expect("response builder");
+                                    apply_transparency_headers(resp.headers_mut(), &mapping.provider, &mapping.actual_model, req_id);
+                                    return Ok(resp);
+                                }
                                 return Ok(Json(response).into_response());
                             }
                             Err(e) => {
@@ -2476,6 +2879,12 @@ async fn handle_messages(
                 vec![],
                 &peer_ip,
                 start_time.elapsed().as_millis() as u64,
+                AuditCompliance {
+                    config: &inner.config.compliance,
+                    model_name: None,
+                    token_counts: None,
+                    risk_level: None,
+                },
             );
         }
 

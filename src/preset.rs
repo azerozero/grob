@@ -8,6 +8,7 @@ const BUILTIN_LOCAL: &str = include_str!("../presets/local.toml");
 const BUILTIN_CHEAP: &str = include_str!("../presets/cheap.toml");
 const BUILTIN_FAST: &str = include_str!("../presets/fast.toml");
 const BUILTIN_GDPR: &str = include_str!("../presets/gdpr.toml");
+const BUILTIN_EU_AI_ACT: &str = include_str!("../presets/eu-ai-act.toml");
 
 #[derive(Debug)]
 pub struct PresetInfo {
@@ -69,6 +70,12 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
             path: None,
             is_builtin: true,
         },
+        PresetInfo {
+            name: "eu-ai-act".to_string(),
+            description: "EU AI Act compliant — EU providers + transparency headers + risk classification".to_string(),
+            path: None,
+            is_builtin: true,
+        },
     ];
 
     // Scan installed presets directory
@@ -112,6 +119,7 @@ pub fn get_preset_content(name: &str) -> Result<String> {
         "cheap" => return Ok(BUILTIN_CHEAP.to_string()),
         "fast" => return Ok(BUILTIN_FAST.to_string()),
         "gdpr" => return Ok(BUILTIN_GDPR.to_string()),
+        "eu-ai-act" => return Ok(BUILTIN_EU_AI_ACT.to_string()),
         _ => {}
     }
 

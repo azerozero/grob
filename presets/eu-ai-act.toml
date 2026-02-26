@@ -1,0 +1,88 @@
+# Preset: eu-ai-act - EU AI Act compliant
+# EU-only providers with full compliance features enabled
+# Requires: MISTRAL_API_KEY (+ optionally SCALEWAY_API_KEY)
+#
+# Enables transparency headers, model/token audit logging,
+# risk classification, and DLP for full EU AI Act compliance.
+
+[router]
+default = "eu-default"
+think = "eu-think"
+background = "eu-background"
+gdpr = true
+region = "eu"
+
+[security]
+enabled = true
+audit_dir = "~/.grob/audit"
+
+[compliance]
+enabled = true
+transparency_headers = true
+audit_model_name = true
+audit_token_counts = true
+risk_classification = true
+escalation_threshold = "high"
+
+[dlp]
+enabled = true
+
+[[providers]]
+name = "mistral"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "$MISTRAL_API_KEY"
+base_url = "https://api.mistral.ai/v1"
+region = "eu"
+models = ["mistral-large-latest", "mistral-medium-latest", "mistral-small-latest", "codestral-latest"]
+enabled = true
+
+[[providers]]
+name = "scaleway"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "$SCALEWAY_API_KEY"
+base_url = "https://api.scaleway.ai/v1"
+region = "eu"
+models = ["llama-3.3-70b-instruct", "qwen2.5-coder-32b-instruct"]
+enabled = true
+
+# EU Default: Mistral Large
+[[models]]
+name = "eu-default"
+  [[models.mappings]]
+  provider = "mistral"
+  actual_model = "mistral-large-latest"
+  priority = 1
+  [[models.mappings]]
+  provider = "scaleway"
+  actual_model = "llama-3.3-70b-instruct"
+  priority = 2
+
+# EU Think: Mistral Large (reasoning tasks)
+[[models]]
+name = "eu-think"
+  [[models.mappings]]
+  provider = "mistral"
+  actual_model = "mistral-large-latest"
+  priority = 1
+
+# EU Background: Mistral Small (cheap, fast)
+[[models]]
+name = "eu-background"
+  [[models.mappings]]
+  provider = "mistral"
+  actual_model = "mistral-small-latest"
+  priority = 1
+  [[models.mappings]]
+  provider = "scaleway"
+  actual_model = "qwen2.5-coder-32b-instruct"
+  priority = 2
+
+# EU Code: Codestral
+[[models]]
+name = "eu-code"
+  [[models.mappings]]
+  provider = "mistral"
+  actual_model = "codestral-latest"
+  priority = 1
