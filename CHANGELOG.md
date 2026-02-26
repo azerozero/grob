@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0](https://github.com/azerozero/grob/compare/v0.1.3...v0.9.0) - 2026-02-26
+
+### Added
+
+- wire dead code into handlers and remove #[allow(dead_code)]
+- *(dx)* add nextest, insta, tracing-test, coverage, cargo-chef
+
+### Fixed
+
+- remove invalid release_branch field from release-plz.toml
+
+### Other
+
+- add develop branch workflow and auto-merge release PRs
+- enable auto-merge for release-plz PRs
+
 ### Added
 
 - **Budget enforcement**: global, per-provider, and per-model monthly spend limits (`[budget]`, `budget_usd`)
