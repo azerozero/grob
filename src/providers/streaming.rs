@@ -15,7 +15,7 @@ pub struct SseEvent {
 
 /// Parse SSE events from a byte stream
 pub fn parse_sse_events(input: &str) -> Vec<SseEvent> {
-    let mut events = Vec::new();
+    let mut events = Vec::with_capacity(4);
     let mut current_event: Option<String> = None;
     let mut current_data = String::new();
 
@@ -25,9 +25,8 @@ pub fn parse_sse_events(input: &str) -> Vec<SseEvent> {
             if !current_data.is_empty() {
                 events.push(SseEvent {
                     event: current_event.take(),
-                    data: current_data.clone(),
+                    data: std::mem::take(&mut current_data),
                 });
-                current_data.clear();
             }
         } else if let Some(data) = line.strip_prefix("data: ") {
             if !current_data.is_empty() {

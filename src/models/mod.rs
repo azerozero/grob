@@ -241,14 +241,6 @@ pub struct ThinkingConfig {
     pub budget_tokens: Option<u32>,
 }
 
-/// Token usage information
-#[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct Usage {
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-}
-
 /// Request for counting tokens
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CountTokensRequest {

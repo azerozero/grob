@@ -27,9 +27,9 @@ pub struct ModelPricing {
 impl ModelPricing {
     /// Calculate cost for a given number of tokens
     pub fn calculate(&self, input_tokens: u32, output_tokens: u32) -> f64 {
-        let input_cost = (input_tokens as f64 / 1_000_000.0) * self.input_per_million;
-        let output_cost = (output_tokens as f64 / 1_000_000.0) * self.output_per_million;
-        input_cost + output_cost
+        (input_tokens as f64 * self.input_per_million
+            + output_tokens as f64 * self.output_per_million)
+            / 1_000_000.0
     }
 }
 
@@ -263,20 +263,21 @@ impl PricingTable {
 
     /// Get price per million tokens for a model (case-insensitive, fuzzy match)
     pub fn get(&self, model: &str) -> Option<(f64, f64)> {
+        // Try exact (case-sensitive) first - zero allocation
+        if let Some(prices) = self.prices.get(model) {
+            return Some(*prices);
+        }
+        // Then lowercase exact match
         let model_lower = model.to_lowercase();
-
-        // Exact match first
         if let Some(prices) = self.prices.get(&model_lower) {
             return Some(*prices);
         }
-
         // Fuzzy match: check if any key contains the model or vice versa
         for (key, prices) in &self.prices {
             if model_lower.contains(key) || key.contains(&model_lower) {
                 return Some(*prices);
             }
         }
-
         None
     }
 
@@ -311,23 +312,26 @@ pub async fn init_pricing_table() -> SharedPricingTable {
     shared
 }
 
+/// Static pricing lookup map for O(1) exact match.
+static PRICING_MAP: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static ModelPricing>> =
+    std::sync::LazyLock::new(|| {
+        KNOWN_PRICING.iter().map(|p| (p.model, p)).collect()
+    });
+
 /// Get pricing for a model from the static fallback table (case-insensitive)
 pub fn get_pricing(model: &str) -> Option<&'static ModelPricing> {
-    let model_lower = model.to_lowercase();
-    KNOWN_PRICING
-        .iter()
-        .find(|p| model_lower.contains(&p.model.to_ascii_lowercase()))
+    // Try exact match first (O(1), no allocation)
+    PRICING_MAP.get(model).copied().or_else(|| {
+        let lower = model.to_lowercase();
+        KNOWN_PRICING
+            .iter()
+            .find(|p| lower.contains(p.model))
+    })
 }
 
 /// Token cost calculator
 pub struct TokenCounter {
-    #[allow(dead_code)]
-    pub input_tokens: u32,
-    #[allow(dead_code)]
-    pub output_tokens: u32,
     pub estimated_cost_usd: f64,
-    #[allow(dead_code)]
-    pub model: String,
 }
 
 impl TokenCounter {
@@ -339,10 +343,7 @@ impl TokenCounter {
             .unwrap_or(0.0);
 
         Self {
-            input_tokens,
-            output_tokens,
             estimated_cost_usd: cost,
-            model: model.to_string(),
         }
     }
 
@@ -376,10 +377,7 @@ impl TokenCounter {
         };
 
         Self {
-            input_tokens,
-            output_tokens,
             estimated_cost_usd: cost,
-            model: model.to_string(),
         }
     }
 }
@@ -400,8 +398,7 @@ mod tests {
     #[test]
     fn test_token_counter() {
         let counter = TokenCounter::new("claude-sonnet-4-6", 1000, 500);
-        assert_eq!(counter.input_tokens, 1000);
-        assert_eq!(counter.output_tokens, 500);
+        assert!(counter.estimated_cost_usd > 0.0);
     }
 
     #[test]

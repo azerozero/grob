@@ -115,22 +115,36 @@ nix = { version = "0.29", features = ["signal"] }  # Unix signals
 # Testing
 tokio-test = "0.4"
 mockito = "1"
-criterion = "0.5"          # Benchmarking
+criterion = { version = "0.5", features = ["async_tokio"] }  # Benchmarking
 tempfile = "3"             # Temporary directory testing
 insta = { version = "1", features = ["json", "yaml"] }  # Snapshot testing
 tracing-test = "0.2"       # Capture tracing logs in tests
 
 # Property Testing
 proptest = "1"
+rcgen = "0.13"             # Self-signed certs for TLS benchmarks
 
 [[bench]]
 name = "routing"
 harness = false
 
+[[bench]]
+name = "hotpath"
+harness = false
+
+[[bench]]
+name = "http_overhead"
+harness = false
+required-features = ["tls"]
+
 [features]
-default = []
+default = ["dlp", "oauth", "tap", "compliance"]
 tls = ["axum-server", "rustls", "rustls-pemfile"]
 acme = ["tls", "rustls-acme"]
+dlp = []
+oauth = []
+tap = []
+compliance = []
 
 [package.metadata.cargo-machete]
 # ecdsa: trait crate required for p256::ecdsa::signature::Signer bounds

@@ -34,7 +34,6 @@ impl GrobClaims {
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     #[error("Missing or invalid Authorization header")]
-    #[allow(dead_code)]
     MissingToken,
     #[error("Invalid JWT: {0}")]
     InvalidToken(String),
@@ -56,7 +55,7 @@ pub struct JwtValidator {
     hmac_validation: Validation,
     rsa_validation: Validation,
     /// Cache for validated tokens (avoids repeated signature verification)
-    _validation_cache: JwtValidationCache,
+    validation_cache: JwtValidationCache,
 }
 
 impl JwtValidator {
@@ -99,12 +98,41 @@ impl JwtValidator {
             jwks_url,
             hmac_validation: make_validation(Algorithm::HS256),
             rsa_validation: make_validation(Algorithm::RS256),
-            _validation_cache: jwt_validation_cache(10_000),
+            validation_cache: jwt_validation_cache(10_000),
         })
     }
 
     /// Validate a JWT token string and extract claims.
+    ///
+    /// Uses an in-memory cache keyed by SHA-256(token) to avoid repeated
+    /// cryptographic signature verification (5 min TTL).
     pub fn validate(&self, token: &str) -> Result<GrobClaims, AuthError> {
+        use sha2::{Digest, Sha256};
+
+        // Hash token for cache key (never store raw JWT in cache)
+        let token_hash = format!("{:x}", Sha256::digest(token.as_bytes()));
+
+        // Cache hit → return cached claims
+        if let Some(entry) = self.validation_cache.get(&token_hash) {
+            return Ok(entry.claims.clone());
+        }
+
+        // Cache miss → full cryptographic validation
+        let claims = self.validate_signature(token)?;
+
+        // Cache on success
+        self.validation_cache.insert(
+            token_hash,
+            crate::security::cache::JwtCacheEntry {
+                claims: claims.clone(),
+            },
+        );
+
+        Ok(claims)
+    }
+
+    /// Perform full cryptographic JWT validation (HMAC → JWKS fallback).
+    fn validate_signature(&self, token: &str) -> Result<GrobClaims, AuthError> {
         // Try HMAC first (most common for self-hosted)
         if let Some(ref key) = self.hmac_key {
             match decode::<GrobClaims>(token, key, &self.hmac_validation) {

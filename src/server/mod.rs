@@ -1,3 +1,4 @@
+pub(crate) mod dispatch;
 pub mod fan_out;
 mod oauth_handlers;
 pub mod openai_compat;
@@ -26,10 +27,8 @@ use axum::{
     routing::{get, post},
     Json, Router as AxumRouter,
 };
-use bytes::Bytes;
-use futures::stream::{Stream, TryStreamExt};
+use futures::stream::TryStreamExt;
 use std::borrow::Cow;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -362,7 +361,9 @@ async fn auth_middleware(
                     }
                     Err(e) => auth_error_response(&format!("JWT validation failed: {}", e)),
                 },
-                None => auth_error_response("Missing Authorization: Bearer <jwt> header"),
+                None => auth_error_response(
+                    &crate::auth::jwt::AuthError::MissingToken.to_string(),
+                ),
             }
         }
         other => {
@@ -508,16 +509,21 @@ pub async fn start_server(
     info!("💾 Storage initialized at {}", grob_store.path().display());
 
     // Initialize OAuth token store backed by GrobStore
-    let token_store = TokenStore::with_store(grob_store.clone())
-        .map_err(|e| anyhow::anyhow!("Failed to initialize token store: {}", e))?;
-
-    let existing_tokens = token_store.list_providers();
-    if !existing_tokens.is_empty() {
-        info!(
-            "🔐 Loaded {} OAuth tokens from storage",
-            existing_tokens.len()
-        );
-    }
+    #[cfg(feature = "oauth")]
+    let token_store = {
+        let ts = TokenStore::with_store(grob_store.clone())
+            .map_err(|e| anyhow::anyhow!("Failed to initialize token store: {}", e))?;
+        let existing_tokens = ts.list_providers();
+        if !existing_tokens.is_empty() {
+            info!(
+                "🔐 Loaded {} OAuth tokens from storage",
+                existing_tokens.len()
+            );
+        }
+        ts
+    };
+    #[cfg(not(feature = "oauth"))]
+    let token_store = TokenStore::new_empty();
 
     // Initialize provider registry from config (with token store and model mappings)
     let provider_registry = Arc::new(
@@ -582,33 +588,38 @@ pub async fn start_server(
         .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))?;
 
     // Initialize DLP session manager (if DLP enabled in config)
-    let dlp_sessions = DlpSessionManager::from_config(config.dlp.clone());
-
-    // Spawn DLP signed config hot-reload (if enabled)
-    if let Some(ref dlp_mgr) = dlp_sessions {
-        let dlp_cfg = dlp_mgr.config();
-        if dlp_cfg.signed_config.enabled {
-            let public_key = if dlp_cfg.signed_config.verify_signature {
-                match crate::features::dlp::signed_config::load_public_key(
-                    &dlp_cfg.signed_config.public_key_path,
-                ) {
-                    Ok(pk) => Some(pk),
-                    Err(e) => {
-                        warn!("Failed to load DLP signing public key: {}", e);
-                        None
+    #[cfg(feature = "dlp")]
+    let dlp_sessions = {
+        let sessions = DlpSessionManager::from_config(config.dlp.clone());
+        // Spawn DLP signed config hot-reload (if enabled)
+        if let Some(ref dlp_mgr) = sessions {
+            let dlp_cfg = dlp_mgr.config();
+            if dlp_cfg.signed_config.enabled {
+                let public_key = if dlp_cfg.signed_config.verify_signature {
+                    match crate::features::dlp::signed_config::load_public_key(
+                        &dlp_cfg.signed_config.public_key_path,
+                    ) {
+                        Ok(pk) => Some(pk),
+                        Err(e) => {
+                            warn!("Failed to load DLP signing public key: {}", e);
+                            None
+                        }
                     }
-                }
-            } else {
-                None
-            };
-            crate::features::dlp::signed_config::spawn_hot_reload(
-                dlp_cfg.signed_config.clone(),
-                dlp_mgr.hot_config().clone(),
-                dlp_cfg.url_exfil.domain_match_mode.clone(),
-                public_key,
-            );
+                } else {
+                    None
+                };
+                crate::features::dlp::signed_config::spawn_hot_reload(
+                    dlp_cfg.signed_config.clone(),
+                    dlp_mgr.hot_config().clone(),
+                    dlp_cfg.url_exfil.domain_match_mode.clone(),
+                    public_key,
+                );
+            }
         }
-    }
+        sessions
+    };
+    #[cfg(not(feature = "dlp"))]
+    let dlp_sessions: Option<Arc<DlpSessionManager>> = None;
 
     // Initialize JWT validator (if auth mode == "jwt")
     let jwt_validator = if config.auth.mode == "jwt" {
@@ -652,7 +663,10 @@ pub async fn start_server(
     };
 
     // Initialize webhook tap (if enabled in config)
+    #[cfg(feature = "tap")]
     let tap_sender = crate::features::tap::init_tap(&config.tap);
+    #[cfg(not(feature = "tap"))]
+    let tap_sender: Option<Arc<crate::features::tap::TapSender>> = None;
 
     // Build reloadable state
     let reloadable = Arc::new(ReloadableState::new(
@@ -690,6 +704,9 @@ pub async fn start_server(
     };
 
     // Initialize audit log (if audit_dir configured)
+    #[cfg(not(feature = "compliance"))]
+    let audit_log: Option<Arc<AuditLog>> = None;
+    #[cfg(feature = "compliance")]
     let audit_log = if !config.security.audit_dir.is_empty() {
         let audit_dir = if config.security.audit_dir.starts_with('~') {
             let home = dirs::home_dir().unwrap_or_default();
@@ -713,10 +730,7 @@ pub async fn start_server(
         };
         match AuditLog::new(crate::security::audit_log::AuditConfig {
             log_dir: audit_dir.clone(),
-            rotation_size: 100 * 1024 * 1024,
-            retention_days: 365,
             sign_key_path: Some(audit_dir.join("audit_key.pem")),
-            encrypt: false,
             signing_algorithm,
             hmac_key_path,
         }) {
@@ -1506,531 +1520,76 @@ async fn handle_openai_chat_completions(
     Json(openai_request): Json<openai_compat::OpenAIRequest>,
 ) -> Result<Response, AppError> {
     let _guard = ActiveRequestGuard::new(&state);
-    let req_id = &request_id.0;
     let model = openai_request.model.clone();
     let is_streaming = openai_request.stream == Some(true);
-    let start_time = std::time::Instant::now();
     let tenant_id = claims.as_ref().map(|c| c.tenant_id().to_string());
     let peer_ip = extract_client_ip(&headers);
 
-    // Get snapshot of reloadable state
     let inner = state.snapshot();
-
-    // Resolve DLP engine for this request (session-aware: tenant_id > api_key)
     let session_key = tenant_id.as_deref().or_else(|| extract_api_key(&headers));
-    let dlp = state
-        .dlp_sessions
-        .as_ref()
-        .map(|mgr| mgr.engine_for(session_key));
+    let dlp = state.dlp_sessions.as_ref().map(|mgr| mgr.engine_for(session_key));
 
-    // 1. Transform OpenAI request to Anthropic format
+    // Transform OpenAI → Anthropic format
     let mut anthropic_request = openai_compat::transform_openai_to_anthropic(openai_request)
         .map_err(|e| AppError::ParseError(format!("Failed to transform OpenAI request: {}", e)))?;
 
-    // DLP: check for prompt injection (before routing/sending)
-    if let Some(ref dlp_engine) = dlp {
-        if dlp_engine.config.scan_input {
-            if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut anthropic_request) {
-                let had_injection = matches!(&block_err, crate::features::dlp::DlpBlockError::InjectionBlocked(_));
-                let risk = crate::security::risk::assess_risk(1, true, had_injection, false);
-                if inner.config.compliance.enabled && inner.config.compliance.risk_classification {
-                    let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
-                        &inner.config.compliance.escalation_threshold,
-                    );
-                    crate::security::risk::maybe_escalate(
-                        risk, threshold, &inner.config.compliance.escalation_webhook,
-                        req_id, tenant_id.as_deref().unwrap_or("anon"), &model,
-                    );
-                }
-                if let Some(ref al) = state.audit_log {
-                    log_audit(
-                        al,
-                        tenant_id.as_deref().unwrap_or("anon"),
-                        crate::security::audit_log::AuditEvent::DlpBlock,
-                        "BLOCKED",
-                        vec![block_err.to_string()],
-                        &peer_ip,
-                        start_time.elapsed().as_millis() as u64,
-                        AuditCompliance {
-                            config: &inner.config.compliance,
-                            model_name: Some(&model),
-                            token_counts: None,
-                            risk_level: Some(risk),
-                        },
-                    );
-                }
-                return Err(AppError::DlpBlocked(format!("{}", block_err)));
+    let ctx = dispatch::DispatchContext {
+        state: &state,
+        inner: &inner,
+        dlp: &dlp,
+        model: model.clone(),
+        is_streaming,
+        tenant_id,
+        peer_ip,
+        req_id: &request_id.0,
+        start_time: std::time::Instant::now(),
+        headers: &headers,
+        trace_id: None,
+    };
+
+    match dispatch::dispatch(&ctx, &mut anthropic_request).await? {
+        dispatch::DispatchResult::CacheHit(resp) => Ok(resp),
+
+        dispatch::DispatchResult::Streaming { stream, provider, actual_model, .. } => {
+            let mut transformer = openai_compat::AnthropicToOpenAIStream::new(model.clone());
+            let mapped = stream
+                .map_ok(move |bytes| transformer.transform_bytes(&bytes))
+                .try_filter(|b| futures::future::ready(!b.is_empty()));
+            let body = Body::from_stream(mapped.map_err(|e| std::io::Error::other(e.to_string())));
+            let mut response = Response::builder()
+                .status(200)
+                .header("Content-Type", "text/event-stream")
+                .header("Cache-Control", "no-cache")
+                .header("Connection", "keep-alive")
+                .body(body)
+                .expect("streaming response builder");
+            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                apply_transparency_headers(response.headers_mut(), &provider, &actual_model, &request_id.0);
             }
+            Ok(response)
         }
-    }
 
-    // Compute cache key (before routing, after DLP)
-    let cache_key = state.response_cache.as_ref().and_then(|_cache| {
-        let messages_json = serde_json::to_value(&anthropic_request.messages).ok()?;
-        let system_json = anthropic_request.system.as_ref().and_then(|s| serde_json::to_value(s).ok());
-        let tools_json = anthropic_request.tools.as_ref().and_then(|t| serde_json::to_value(t).ok());
-        crate::cache::ResponseCache::compute_key(
-            tenant_id.as_deref().unwrap_or("anon"),
-            &anthropic_request.model,
-            &messages_json,
-            system_json.as_ref(),
-            tools_json.as_ref(),
-            Some(anthropic_request.max_tokens as u64),
-            anthropic_request.temperature.map(|t| t as f64),
-        )
-    });
-
-    // 2. Route the request
-    let decision = inner
-        .router
-        .route(&mut anthropic_request)
-        .map_err(|e| AppError::RoutingError(e.to_string()))?;
-
-    // Resolve provider list
-    let sorted_mappings = resolve_provider_mappings(&inner, &headers, &decision)?;
-
-    // Cache hit check (non-streaming only, before provider loop)
-    if !is_streaming {
-        if let (Some(ref cache), Some(ref key)) = (&state.response_cache, &cache_key) {
-            if let Some(cached) = cache.get(key).await {
+        dispatch::DispatchResult::Complete { response: anthropic_response, provider, actual_model, .. } => {
+            let openai_response = openai_compat::transform_anthropic_to_openai(anthropic_response, model.clone());
+            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                let body = serde_json::to_vec(&openai_response).unwrap_or_default();
                 let mut resp = Response::builder()
                     .status(200)
-                    .header("content-type", &cached.content_type)
-                    .header("x-grob-cache", "hit")
-                    .body(Body::from(cached.body.clone()))
-                    .expect("cached response");
-                if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
-                    apply_transparency_headers(resp.headers_mut(), &cached.provider, &cached.model, req_id);
-                }
-                return Ok(resp);
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("response builder");
+                apply_transparency_headers(resp.headers_mut(), &provider, &actual_model, &request_id.0);
+                Ok(resp)
+            } else {
+                Ok(Json(openai_response).into_response())
             }
+        }
+
+        dispatch::DispatchResult::FanOut { response } => {
+            let openai_response = openai_compat::transform_anthropic_to_openai(response, model.clone());
+            Ok(Json(openai_response).into_response())
         }
     }
-
-    // Fan-out strategy: dispatch to multiple providers in parallel (OpenAI compat)
-    if let Some(model_config) = inner.find_model(&decision.model_name) {
-        if model_config.strategy == crate::cli::ModelStrategy::FanOut {
-            if let Some(ref fan_out_config) = model_config.fan_out {
-                let mut fan_request = anthropic_request.clone();
-                // DLP on input
-                if let Some(ref dlp_engine) = dlp {
-                    if dlp_engine.config.scan_input {
-                        dlp_engine.sanitize_request(&mut fan_request);
-                    }
-                }
-
-                match fan_out::handle_fan_out(
-                    &fan_request,
-                    &sorted_mappings,
-                    fan_out_config,
-                    &inner.provider_registry,
-                )
-                .await
-                {
-                    Ok((mut response, provider_info)) => {
-                        if let Some(ref dlp_engine) = dlp {
-                            if dlp_engine.config.scan_output {
-                                sanitize_provider_response(&mut response, dlp_engine);
-                            }
-                        }
-
-                        // Track cost for all providers called
-                        for (prov, actual) in &provider_info {
-                            let is_sub = is_provider_subscription(&inner, prov);
-                            let counter = calculate_cost(
-                                &state,
-                                actual,
-                                response.usage.input_tokens,
-                                response.usage.output_tokens,
-                                is_sub,
-                            )
-                            .await;
-                            let mut tracker = state.spend_tracker.lock().await;
-                            tracker.record(prov, actual, counter.estimated_cost_usd);
-                        }
-
-                        // Audit: fan-out success
-                        if let Some(ref al) = state.audit_log {
-                            let fan_out_model = provider_info.first().map(|(_, m)| m.as_str()).unwrap_or("fan_out");
-                            log_audit(
-                                al,
-                                tenant_id.as_deref().unwrap_or("anon"),
-                                crate::security::audit_log::AuditEvent::Response,
-                                "fan_out",
-                                vec![],
-                                &peer_ip,
-                                start_time.elapsed().as_millis() as u64,
-                                AuditCompliance {
-                                    config: &inner.config.compliance,
-                                    model_name: Some(fan_out_model),
-                                    token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
-                                    risk_level: Some(crate::security::audit_log::RiskLevel::Low),
-                                },
-                            );
-                        }
-
-                        // Transform back to OpenAI format
-                        response.model = model.clone();
-                        let openai_response =
-                            openai_compat::transform_anthropic_to_openai(response, model.clone());
-                        return Ok(Json(openai_response).into_response());
-                    }
-                    Err(e) => {
-                        return Err(AppError::ProviderError(format!("Fan-out failed: {}", e)));
-                    }
-                }
-            }
-        }
-    }
-
-    // 3. Try each mapping in priority order (fallback)
-    for (idx, mapping) in sorted_mappings.iter().enumerate() {
-        let Some(provider) = inner.provider_registry.get_provider(&mapping.provider) else {
-            info!(
-                "⚠️ Provider {} not found in registry, trying next fallback",
-                mapping.provider
-            );
-            continue;
-        };
-
-        // Circuit breaker check
-        if let Some(ref cb) = state.circuit_breakers {
-            if !cb.can_execute(&mapping.provider).await {
-                info!("⚡ Circuit breaker open for {}, skipping", mapping.provider);
-                metrics::counter!("grob_circuit_breaker_rejected_total", "provider" => mapping.provider.clone()).increment(1);
-                continue;
-            }
-        }
-
-        // Budget check before sending request
-        check_budget(&state, &inner, &mapping.provider, &decision.model_name).await?;
-
-        let retry_info = if idx > 0 {
-            format!(" [{}/{}]", idx + 1, sorted_mappings.len())
-        } else {
-            String::new()
-        };
-        let stream_mode = if is_streaming { "stream" } else { "sync" };
-        let route_type_display = format_route_type(&decision);
-
-        info!(
-            request_id = req_id,
-            "[{:<15}:{}] {:<25} → {}/{}{}",
-            route_type_display,
-            stream_mode,
-            model,
-            mapping.provider,
-            mapping.actual_model,
-            retry_info
-        );
-
-        // Update model to actual model name
-        anthropic_request.model = mapping.actual_model.clone();
-
-        // DLP: sanitize request (names → pseudonyms, secrets → canary)
-        if let Some(ref dlp_engine) = dlp {
-            if dlp_engine.config.scan_input {
-                dlp_engine.sanitize_request(&mut anthropic_request);
-            }
-        }
-
-        // Inject continuation prompt if configured
-        if mapping.inject_continuation_prompt && decision.route_type != RouteType::Background {
-            if let Some(last_msg) = anthropic_request.messages.last_mut() {
-                if should_inject_continuation(last_msg) {
-                    info!(
-                        "💉 Injecting continuation prompt for model: {}",
-                        mapping.actual_model
-                    );
-                    inject_continuation_text(last_msg);
-                }
-            }
-        }
-
-        let is_sub = is_provider_subscription(&inner, &mapping.provider);
-
-        if is_streaming {
-            // ── Streaming path ──
-            match provider
-                .send_message_stream(anthropic_request.clone())
-                .await
-            {
-                Ok(stream_response) => {
-                    // Record circuit breaker success
-                    if let Some(ref cb) = state.circuit_breakers {
-                        cb.record_success(&mapping.provider).await;
-                    }
-                    // Wrap stream with DLP if enabled for output scanning
-                    let stream: Pin<
-                        Box<
-                            dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>>
-                                + Send,
-                        >,
-                    > = if let Some(ref dlp_engine) = dlp {
-                        if dlp_engine.config.scan_output {
-                            Box::pin(crate::features::dlp::stream::DlpStream::new(
-                                stream_response.stream,
-                                Arc::clone(dlp_engine),
-                            ))
-                        } else {
-                            stream_response.stream
-                        }
-                    } else {
-                        stream_response.stream
-                    };
-
-                    // Wrap stream with Tap if enabled (after DLP)
-                    let stream: Pin<
-                        Box<
-                            dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>>
-                                + Send,
-                        >,
-                    > = if let Some(ref tap) = state.tap_sender {
-                        let req_id = uuid::Uuid::new_v4().to_string();
-                        if let Ok(body_json) = serde_json::to_string(&anthropic_request) {
-                            tap.try_send(crate::features::tap::TapEvent::Request {
-                                request_id: req_id.clone(),
-                                tenant_id: tenant_id.clone(),
-                                model: model.clone(),
-                                body: body_json,
-                            });
-                        }
-                        Box::pin(crate::features::tap::stream::TapStream::new(
-                            stream,
-                            Arc::clone(tap),
-                            req_id,
-                        ))
-                    } else {
-                        stream
-                    };
-
-                    // Wrap Anthropic SSE → OpenAI SSE
-                    let mut transformer =
-                        openai_compat::AnthropicToOpenAIStream::new(model.clone());
-                    let mapped = stream
-                        .map_ok(move |bytes| transformer.transform_bytes(&bytes))
-                        .try_filter(|b| futures::future::ready(!b.is_empty()));
-
-                    let body =
-                        Body::from_stream(mapped.map_err(|e| std::io::Error::other(e.to_string())));
-
-                    let mut response = Response::builder()
-                        .status(200)
-                        .header("Content-Type", "text/event-stream")
-                        .header("Cache-Control", "no-cache")
-                        .header("Connection", "keep-alive")
-                        .body(body)
-                        .expect("streaming response builder");
-
-                    if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
-                        apply_transparency_headers(response.headers_mut(), &mapping.provider, &mapping.actual_model, req_id);
-                    }
-
-                    return Ok(response);
-                }
-                Err(e) => {
-                    // Record circuit breaker failure
-                    if let Some(ref cb) = state.circuit_breakers {
-                        cb.record_failure(&mapping.provider).await;
-                    }
-                    let is_rate_limit = matches!(
-                        &e,
-                        crate::providers::error::ProviderError::ApiError { status: 429, .. }
-                    );
-                    if is_rate_limit {
-                        warn!("Provider {} rate limited, falling back", mapping.provider);
-                        metrics::counter!("grob_ratelimit_hits_total", "provider" => mapping.provider.clone()).increment(1);
-                    }
-                    metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
-                    info!(
-                        "⚠️ Provider {} streaming failed: {}, trying next fallback",
-                        mapping.provider, e
-                    );
-                    continue;
-                }
-            }
-        } else {
-            // ── Non-streaming path with retry ──
-            let mut last_error = None;
-            for attempt in 0..=MAX_RETRIES {
-                if attempt > 0 {
-                    let delay = retry_delay(attempt - 1);
-                    warn!(
-                        "⏳ Retrying provider {} (attempt {}/{}), backoff {}ms",
-                        mapping.provider,
-                        attempt + 1,
-                        MAX_RETRIES + 1,
-                        delay.as_millis()
-                    );
-                    tokio::time::sleep(delay).await;
-                }
-                match provider.send_message(anthropic_request.clone()).await {
-                    Ok(mut anthropic_response) => {
-                        // Record circuit breaker success
-                        if let Some(ref cb) = state.circuit_breakers {
-                            cb.record_success(&mapping.provider).await;
-                        }
-                        let latency_ms = start_time.elapsed().as_millis() as u64;
-                        let tok_s = (anthropic_response.usage.output_tokens as f32 * 1000.0)
-                            / latency_ms as f32;
-                        let cost = calculate_cost(
-                            &state,
-                            &mapping.actual_model,
-                            anthropic_response.usage.input_tokens,
-                            anthropic_response.usage.output_tokens,
-                            is_sub,
-                        )
-                        .await;
-                        info!(
-                            "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
-                            mapping.actual_model,
-                            mapping.provider,
-                            latency_ms,
-                            tok_s,
-                            anthropic_response.usage.output_tokens,
-                            cost.estimated_cost_usd,
-                            if is_sub { " (subscription)" } else { "" }
-                        );
-
-                        record_request_metrics(
-                            &mapping.actual_model,
-                            &mapping.provider,
-                            &decision.route_type,
-                            "ok",
-                            latency_ms,
-                            anthropic_response.usage.input_tokens,
-                            anthropic_response.usage.output_tokens,
-                            cost.estimated_cost_usd,
-                        );
-
-                        // Record spend for budget tracking
-                        record_spend(
-                            &state,
-                            &mapping.provider,
-                            &decision.model_name,
-                            cost.estimated_cost_usd,
-                            tenant_id.as_deref(),
-                        )
-                        .await;
-
-                        // DLP: sanitize response (deanonymize names, scan secrets)
-                        if let Some(ref dlp_engine) = dlp {
-                            if dlp_engine.config.scan_output {
-                                sanitize_provider_response(&mut anthropic_response, dlp_engine);
-                            }
-                        }
-
-                        // Audit: successful response
-                        if let Some(ref al) = state.audit_log {
-                            log_audit(
-                                al,
-                                tenant_id.as_deref().unwrap_or("anon"),
-                                crate::security::audit_log::AuditEvent::Response,
-                                &mapping.provider,
-                                vec![],
-                                &peer_ip,
-                                latency_ms,
-                                AuditCompliance {
-                                    config: &inner.config.compliance,
-                                    model_name: Some(&mapping.actual_model),
-                                    token_counts: Some((anthropic_response.usage.input_tokens, anthropic_response.usage.output_tokens)),
-                                    risk_level: Some(crate::security::audit_log::RiskLevel::Low),
-                                },
-                            );
-                        }
-
-                        // Cache store (non-streaming success)
-                        if let (Some(ref cache), Some(ref key)) = (&state.response_cache, &cache_key) {
-                            if let Ok(body) = serde_json::to_vec(&anthropic_response) {
-                                cache.put(key.clone(), crate::cache::CachedResponse {
-                                    body,
-                                    content_type: "application/json".to_string(),
-                                    provider: mapping.provider.clone(),
-                                    model: mapping.actual_model.clone(),
-                                }).await;
-                            }
-                        }
-
-                        let openai_response = openai_compat::transform_anthropic_to_openai(
-                            anthropic_response,
-                            model.clone(),
-                        );
-                        if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
-                            let body = serde_json::to_vec(&openai_response).unwrap_or_default();
-                            let mut resp = Response::builder()
-                                .status(200)
-                                .header("content-type", "application/json")
-                                .body(Body::from(body))
-                                .expect("response builder");
-                            apply_transparency_headers(resp.headers_mut(), &mapping.provider, &mapping.actual_model, req_id);
-                            return Ok(resp);
-                        }
-                        return Ok(Json(openai_response).into_response());
-                    }
-                    Err(e) => {
-                        let retryable = is_retryable(&e);
-                        let is_rate_limit = matches!(
-                            &e,
-                            crate::providers::error::ProviderError::ApiError { status: 429, .. }
-                        );
-                        if is_rate_limit {
-                            warn!("Provider {} rate limited", mapping.provider);
-                            metrics::counter!("grob_ratelimit_hits_total", "provider" => mapping.provider.clone()).increment(1);
-                        }
-                        metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
-
-                        if retryable && attempt < MAX_RETRIES {
-                            warn!("⚠️ Provider {} failed (retryable): {}", mapping.provider, e);
-                            last_error = Some(e);
-                            continue;
-                        }
-
-                        // Non-retryable or max retries exhausted
-                        // Record circuit breaker failure
-                        if let Some(ref cb) = state.circuit_breakers {
-                            cb.record_failure(&mapping.provider).await;
-                        }
-                        info!(
-                            "⚠️ Provider {} failed: {}, trying next fallback",
-                            mapping.provider, e
-                        );
-                        last_error = Some(e);
-                        break;
-                    }
-                }
-            }
-            let _ = last_error; // consumed by fallback loop
-        }
-    }
-
-    // Audit: all providers failed
-    if let Some(ref al) = state.audit_log {
-        log_audit(
-            al,
-            tenant_id.as_deref().unwrap_or("anon"),
-            crate::security::audit_log::AuditEvent::Error,
-            "NONE",
-            vec![],
-            &peer_ip,
-            start_time.elapsed().as_millis() as u64,
-            AuditCompliance {
-                config: &inner.config.compliance,
-                model_name: None,
-                token_counts: None,
-                risk_level: None,
-            },
-        );
-    }
-
-    error!(
-        request_id = req_id,
-        "❌ All provider mappings failed for model: {}", decision.model_name
-    );
-    Err(AppError::ProviderError(format!(
-        "All {} provider mappings failed for model: {}",
-        sorted_mappings.len(),
-        decision.model_name
-    )))
 }
 
 /// Resolve and sort provider mappings for a routing decision.
@@ -2213,733 +1772,111 @@ async fn handle_messages(
 ) -> Result<Response, AppError> {
     let _guard = ActiveRequestGuard::new(&state);
     let req_id = &request_id.0;
-    let model = request_json
+    let model: String = request_json
         .get("model")
         .and_then(|m| m.as_str())
-        .unwrap_or("unknown");
-    let start_time = std::time::Instant::now();
+        .unwrap_or("unknown")
+        .to_string();
     let tenant_id = claims.as_ref().map(|c| c.tenant_id().to_string());
     let peer_ip = extract_client_ip(&headers);
-
-    // Get snapshot of reloadable state
     let inner = state.snapshot();
-
-    // Resolve DLP engine for this request (session-aware: tenant_id > api_key)
     let session_key = tenant_id.as_deref().or_else(|| extract_api_key(&headers));
-    let dlp = state
-        .dlp_sessions
-        .as_ref()
-        .map(|mgr| mgr.engine_for(session_key));
-
-    // Generate trace ID for correlating request/response
+    let dlp = state.dlp_sessions.as_ref().map(|mgr| mgr.engine_for(session_key));
     let trace_id = state.message_tracer.new_trace_id();
 
-    // DEBUG: Log request body for debugging
-    if let Ok(json_str) = serde_json::to_string_pretty(&request_json) {
-        tracing::debug!("📥 Incoming request body:\n{}", json_str);
+    // DEBUG: Log request body for debugging (gate serialization on log level)
+    if tracing::event_enabled!(tracing::Level::DEBUG) {
+        if let Ok(json_str) = serde_json::to_string_pretty(&request_json) {
+            tracing::debug!("📥 Incoming request body:\n{}", json_str);
+        }
     }
 
-    // 1. Parse request for routing decision (mutable for tag extraction)
-    let mut request_for_routing: AnthropicRequest = serde_json::from_value(request_json.clone())
+    let mut request: AnthropicRequest = serde_json::from_value(request_json)
         .map_err(|e| {
-            // Log the full request on parse failure for debugging
-            if let Ok(pretty) = serde_json::to_string_pretty(&request_json) {
-                tracing::error!(
-                    "❌ Failed to parse request: {}\n📋 Request body:\n{}",
-                    e,
-                    pretty
-                );
-            } else {
-                tracing::error!("❌ Failed to parse request: {}", e);
-            }
+            tracing::error!("❌ Failed to parse request: {}", e);
             AppError::ParseError(format!("Invalid request format: {}", e))
         })?;
 
-    // DLP: check for prompt injection (before routing/sending)
-    if let Some(ref dlp_engine) = dlp {
-        if dlp_engine.config.scan_input {
-            if let Err(block_err) = dlp_engine.sanitize_request_checked(&mut request_for_routing) {
-                let had_injection = matches!(&block_err, crate::features::dlp::DlpBlockError::InjectionBlocked(_));
-                let risk = crate::security::risk::assess_risk(1, true, had_injection, false);
-                if inner.config.compliance.enabled && inner.config.compliance.risk_classification {
-                    let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
-                        &inner.config.compliance.escalation_threshold,
-                    );
-                    crate::security::risk::maybe_escalate(
-                        risk, threshold, &inner.config.compliance.escalation_webhook,
-                        req_id, tenant_id.as_deref().unwrap_or("anon"), model,
-                    );
-                }
-                if let Some(ref al) = state.audit_log {
-                    log_audit(
-                        al,
-                        tenant_id.as_deref().unwrap_or("anon"),
-                        crate::security::audit_log::AuditEvent::DlpBlock,
-                        "BLOCKED",
-                        vec![block_err.to_string()],
-                        &peer_ip,
-                        start_time.elapsed().as_millis() as u64,
-                        AuditCompliance {
-                            config: &inner.config.compliance,
-                            model_name: Some(model),
-                            token_counts: None,
-                            risk_level: Some(risk),
-                        },
-                    );
-                }
-                return Err(AppError::DlpBlocked(format!("{}", block_err)));
+    let is_streaming = request.stream == Some(true);
+
+    let ctx = dispatch::DispatchContext {
+        state: &state,
+        inner: &inner,
+        dlp: &dlp,
+        model: model.clone(),
+        is_streaming,
+        tenant_id,
+        peer_ip,
+        req_id,
+        start_time: std::time::Instant::now(),
+        headers: &headers,
+        trace_id: Some(trace_id),
+    };
+
+    match dispatch::dispatch(&ctx, &mut request).await? {
+        dispatch::DispatchResult::CacheHit(resp) => Ok(resp),
+
+        dispatch::DispatchResult::Streaming { stream, provider, actual_model, upstream_headers } => {
+            let body_stream = stream.map_err(|e| {
+                error!("Stream error: {}", e);
+                std::io::Error::other(e.to_string())
+            });
+            let body = Body::from_stream(body_stream);
+            let mut response_builder = Response::builder()
+                .status(200)
+                .header("Content-Type", "text/event-stream")
+                .header("Cache-Control", "no-cache")
+                .header("Connection", "keep-alive");
+
+            // Forward upstream rate-limit headers
+            for (name, value) in &upstream_headers {
+                response_builder = response_builder.header(name.as_str(), value.as_str());
             }
+
+            // Transparency headers
+            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                let mut hdrs = HeaderMap::new();
+                apply_transparency_headers(&mut hdrs, &provider, &actual_model, req_id);
+                for (k, v) in hdrs {
+                    if let Some(k) = k {
+                        response_builder = response_builder.header(k, v);
+                    }
+                }
+            }
+
+            let response = response_builder
+                .body(body)
+                .expect("streaming response builder");
+            Ok(response)
         }
-    }
 
-    // Compute cache key (before routing, after DLP)
-    let cache_key = state.response_cache.as_ref().and_then(|_cache| {
-        let messages_json = serde_json::to_value(&request_for_routing.messages).ok()?;
-        let system_json = request_for_routing.system.as_ref().and_then(|s| serde_json::to_value(s).ok());
-        let tools_json = request_for_routing.tools.as_ref().and_then(|t| serde_json::to_value(t).ok());
-        crate::cache::ResponseCache::compute_key(
-            tenant_id.as_deref().unwrap_or("anon"),
-            &request_for_routing.model,
-            &messages_json,
-            system_json.as_ref(),
-            tools_json.as_ref(),
-            Some(request_for_routing.max_tokens as u64),
-            request_for_routing.temperature.map(|t| t as f64),
-        )
-    });
-
-    // 2. Route the request (may modify system prompt to remove CCM-SUBAGENT-MODEL tag)
-    let decision = inner
-        .router
-        .route(&mut request_for_routing)
-        .map_err(|e| AppError::RoutingError(e.to_string()))?;
-
-    // Cache hit check (non-streaming only, before provider loop)
-    let is_streaming = request_for_routing.stream == Some(true);
-    if !is_streaming {
-        if let (Some(ref cache), Some(ref key)) = (&state.response_cache, &cache_key) {
-            if let Some(cached) = cache.get(key).await {
+        dispatch::DispatchResult::Complete { response, provider, actual_model, response_bytes } => {
+            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+                let body = response_bytes.unwrap_or_else(|| serde_json::to_vec(&response).unwrap_or_default());
                 let mut resp = Response::builder()
                     .status(200)
-                    .header("content-type", &cached.content_type)
-                    .header("x-grob-cache", "hit")
-                    .body(Body::from(cached.body.clone()))
-                    .expect("cached response");
-                if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
-                    apply_transparency_headers(resp.headers_mut(), &cached.provider, &cached.model, req_id);
-                }
-                return Ok(resp);
-            }
-        }
-    }
-
-    // 3. Try model mappings with fallback or fan-out (1:N mapping)
-    if let Some(model_config) = inner.find_model(&decision.model_name) {
-        // Fan-out strategy: dispatch to multiple providers in parallel
-        if model_config.strategy == crate::cli::ModelStrategy::FanOut {
-            if let Some(ref fan_out_config) = model_config.fan_out {
-                let mut sorted_mappings = model_config.mappings.clone();
-                sorted_mappings.sort_by_key(|m| m.priority);
-
-                // Apply GDPR filtering
-                let gdpr = inner.config.router.gdpr;
-                let required_region = inner.config.router.region.as_deref();
-                if gdpr || required_region.is_some() {
-                    let region_filter = required_region.unwrap_or("eu");
-                    sorted_mappings.retain(|m| {
-                        let provider_region = inner
-                            .config
-                            .providers
-                            .iter()
-                            .find(|p| p.name == m.provider)
-                            .and_then(|p| p.region.as_deref())
-                            .unwrap_or("global");
-                        provider_region == region_filter || provider_region == "global"
-                    });
-                }
-
-                let mut fan_request = request_for_routing.clone();
-                // DLP on input
-                if let Some(ref dlp_engine) = dlp {
-                    if dlp_engine.config.scan_input {
-                        dlp_engine.sanitize_request(&mut fan_request);
-                    }
-                }
-
-                match fan_out::handle_fan_out(
-                    &fan_request,
-                    &sorted_mappings,
-                    fan_out_config,
-                    &inner.provider_registry,
-                )
-                .await
-                {
-                    Ok((mut response, provider_info)) => {
-                        // DLP on output
-                        if let Some(ref dlp_engine) = dlp {
-                            if dlp_engine.config.scan_output {
-                                sanitize_provider_response(&mut response, dlp_engine);
-                            }
-                        }
-
-                        // Track cost for ALL providers called
-                        let latency_ms = start_time.elapsed().as_millis() as u64;
-                        for (prov, actual) in &provider_info {
-                            let is_sub = is_provider_subscription(&inner, prov);
-                            let counter = calculate_cost(
-                                &state,
-                                actual,
-                                response.usage.input_tokens,
-                                response.usage.output_tokens,
-                                is_sub,
-                            )
-                            .await;
-                            let mut tracker = state.spend_tracker.lock().await;
-                            tracker.record(prov, actual, counter.estimated_cost_usd);
-                        }
-
-                        record_request_metrics(
-                            model,
-                            "fan_out",
-                            &decision.route_type,
-                            "success",
-                            latency_ms,
-                            response.usage.input_tokens,
-                            response.usage.output_tokens,
-                            0.0,
-                        );
-
-                        // Audit: fan-out success
-                        if let Some(ref al) = state.audit_log {
-                            let fan_out_model = provider_info.first().map(|(_, m)| m.as_str()).unwrap_or("fan_out");
-                            log_audit(
-                                al,
-                                tenant_id.as_deref().unwrap_or("anon"),
-                                crate::security::audit_log::AuditEvent::Response,
-                                "fan_out",
-                                vec![],
-                                &peer_ip,
-                                latency_ms,
-                                AuditCompliance {
-                                    config: &inner.config.compliance,
-                                    model_name: Some(fan_out_model),
-                                    token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
-                                    risk_level: Some(crate::security::audit_log::RiskLevel::Low),
-                                },
-                            );
-                        }
-
-                        // Restore original model name in response
-                        response.model = model.to_string();
-                        return Ok(Json(response).into_response());
-                    }
-                    Err(e) => {
-                        return Err(AppError::ProviderError(format!("Fan-out failed: {}", e)));
-                    }
-                }
-            }
-        }
-
-        // Check for X-Provider header to override priority
-        let forced_provider = headers
-            .get("x-provider")
-            .and_then(|v| v.to_str().ok())
-            .filter(|s| !s.is_empty()) // Ignore empty strings
-            .map(|s| s.to_string());
-
-        if let Some(ref provider_name) = forced_provider {
-            info!(
-                "🎯 Using forced provider from X-Provider header: {}",
-                provider_name
-            );
-        }
-
-        // Sort mappings by priority (or filter by forced provider)
-        let mut sorted_mappings = model_config.mappings.clone();
-
-        if let Some(ref provider_name) = forced_provider {
-            // Filter to only the specified provider
-            sorted_mappings.retain(|m| m.provider == *provider_name);
-            if sorted_mappings.is_empty() {
-                return Err(AppError::RoutingError(format!(
-                    "Provider '{}' not found in mappings for model '{}'",
-                    provider_name, decision.model_name
-                )));
-            }
-        } else {
-            // Use priority ordering
-            sorted_mappings.sort_by_key(|m| m.priority);
-        }
-
-        // Try each mapping in priority order (or just the forced one)
-        for (idx, mapping) in sorted_mappings.iter().enumerate() {
-            // Try to get provider from registry
-            if let Some(provider) = inner.provider_registry.get_provider(&mapping.provider) {
-                // Circuit breaker check
-                if let Some(ref cb) = state.circuit_breakers {
-                    if !cb.can_execute(&mapping.provider).await {
-                        info!("⚡ Circuit breaker open for {}, skipping", mapping.provider);
-                        metrics::counter!("grob_circuit_breaker_rejected_total", "provider" => mapping.provider.clone()).increment(1);
-                        continue;
-                    }
-                }
-
-                // Budget check before sending request
-                check_budget(&state, &inner, &mapping.provider, &decision.model_name).await?;
-
-                // Clone the already-parsed request (struct clone, not JSON re-parse)
-                let mut anthropic_request = request_for_routing.clone();
-
-                // Save original model name for response
-                let original_model = anthropic_request.model.clone();
-
-                // Update model to actual model name
-                anthropic_request.model = mapping.actual_model.clone();
-
-                // DLP: sanitize request (names → pseudonyms, secrets → canary)
-                if let Some(ref dlp_engine) = dlp {
-                    if dlp_engine.config.scan_input {
-                        dlp_engine.sanitize_request(&mut anthropic_request);
-                    }
-                }
-
-                // Inject continuation prompt if configured (skip for background tasks)
-                if mapping.inject_continuation_prompt
-                    && decision.route_type != RouteType::Background
-                {
-                    if let Some(last_msg) = anthropic_request.messages.last_mut() {
-                        if should_inject_continuation(last_msg) {
-                            info!(
-                                "💉 Injecting continuation prompt for model: {}",
-                                mapping.actual_model
-                            );
-                            inject_continuation_text(last_msg);
-                        }
-                    }
-                }
-
-                // Check if streaming is requested
-                let is_streaming = anthropic_request.stream == Some(true);
-                let is_sub = is_provider_subscription(&inner, &mapping.provider);
-
-                // Build retry indicator (only show if not first attempt)
-                let retry_info = if idx > 0 {
-                    format!(" [{}/{}]", idx + 1, sorted_mappings.len())
-                } else {
-                    String::new()
-                };
-
-                let stream_mode = if is_streaming { "stream" } else { "sync" };
-
-                // Build route type display (include matched prompt snippet if available)
-                let route_type_display = match &decision.matched_prompt {
-                    Some(matched) => {
-                        // Trim prompt to max 30 chars
-                        let trimmed = if matched.len() > 30 {
-                            format!("{}...", &matched[..27])
-                        } else {
-                            matched.clone()
-                        };
-                        format!("{}:{}", decision.route_type, trimmed)
-                    }
-                    None => decision.route_type.to_string(),
-                };
-
-                info!(
-                    request_id = req_id,
-                    "[{:<15}:{}] {:<25} → {}/{}{}",
-                    route_type_display,
-                    stream_mode,
-                    model,
-                    mapping.provider,
-                    mapping.actual_model,
-                    retry_info
-                );
-
-                // Trace the request
-                state.message_tracer.trace_request(
-                    &trace_id,
-                    &anthropic_request,
-                    &mapping.provider,
-                    &decision.route_type,
-                    is_streaming,
-                );
-
-                if is_streaming {
-                    // Capture request body for tap before ownership moves
-                    let tap_request_body = if state.tap_sender.is_some() {
-                        serde_json::to_string(&anthropic_request).ok()
-                    } else {
-                        None
-                    };
-
-                    // Streaming request
-                    match provider.send_message_stream(anthropic_request).await {
-                        Ok(stream_response) => {
-                            // Record circuit breaker success
-                            if let Some(ref cb) = state.circuit_breakers {
-                                cb.record_success(&mapping.provider).await;
-                            }
-                            // Wrap stream with DLP if enabled for output scanning
-                            let stream: Pin<
-                                Box<
-                                    dyn Stream<
-                                            Item = Result<
-                                                Bytes,
-                                                crate::providers::error::ProviderError,
-                                            >,
-                                        > + Send,
-                                >,
-                            > = if let Some(ref dlp_engine) = dlp {
-                                if dlp_engine.config.scan_output {
-                                    Box::pin(crate::features::dlp::stream::DlpStream::new(
-                                        stream_response.stream,
-                                        Arc::clone(dlp_engine),
-                                    ))
-                                } else {
-                                    stream_response.stream
-                                }
-                            } else {
-                                stream_response.stream
-                            };
-
-                            // Wrap stream with Tap if enabled (after DLP)
-                            let stream: Pin<
-                                Box<
-                                    dyn Stream<
-                                            Item = Result<
-                                                Bytes,
-                                                crate::providers::error::ProviderError,
-                                            >,
-                                        > + Send,
-                                >,
-                            > = if let Some(ref tap) = state.tap_sender {
-                                let req_id = uuid::Uuid::new_v4().to_string();
-                                if let Some(body_json) = tap_request_body {
-                                    tap.try_send(crate::features::tap::TapEvent::Request {
-                                        request_id: req_id.clone(),
-                                        tenant_id: tenant_id.clone(),
-                                        model: model.to_string(),
-                                        body: body_json,
-                                    });
-                                }
-                                Box::pin(crate::features::tap::stream::TapStream::new(
-                                    stream,
-                                    Arc::clone(tap),
-                                    req_id,
-                                ))
-                            } else {
-                                stream
-                            };
-
-                            // Convert provider stream to HTTP response
-                            let body_stream = stream.map_err(|e| {
-                                error!("Stream error: {}", e);
-                                std::io::Error::other(e.to_string())
-                            });
-
-                            let body = Body::from_stream(body_stream);
-                            let mut response_builder = Response::builder()
-                                .status(200)
-                                .header("Content-Type", "text/event-stream")
-                                .header("Cache-Control", "no-cache")
-                                .header("Connection", "keep-alive");
-
-                            // Forward Anthropic rate limit headers
-                            for (name, value) in stream_response.headers {
-                                response_builder = response_builder.header(name, value);
-                            }
-
-                            // EU AI Act transparency headers on streaming responses
-                            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
-                                let mut hdrs = HeaderMap::new();
-                                apply_transparency_headers(&mut hdrs, &mapping.provider, &mapping.actual_model, req_id);
-                                for (k, v) in hdrs {
-                                    if let Some(k) = k {
-                                        response_builder = response_builder.header(k, v);
-                                    }
-                                }
-                            }
-
-                            let response = response_builder
-                                .body(body)
-                                .expect("streaming response builder");
-
-                            return Ok(response);
-                        }
-                        Err(e) => {
-                            // Record circuit breaker failure
-                            if let Some(ref cb) = state.circuit_breakers {
-                                cb.record_failure(&mapping.provider).await;
-                            }
-                            state.message_tracer.trace_error(&trace_id, &e.to_string());
-                            let is_rate_limit = matches!(
-                                &e,
-                                crate::providers::error::ProviderError::ApiError {
-                                    status: 429,
-                                    ..
-                                }
-                            );
-                            if is_rate_limit {
-                                warn!("Provider {} rate limited, falling back", mapping.provider);
-                                metrics::counter!("grob_ratelimit_hits_total", "provider" => mapping.provider.clone()).increment(1);
-                            }
-                            metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
-                            info!(
-                                "⚠️ Provider {} streaming failed: {}, trying next fallback",
-                                mapping.provider, e
-                            );
-                            continue;
-                        }
-                    }
-                } else {
-                    // Non-streaming request with retry
-                    let mut last_error = None;
-                    for attempt in 0..=MAX_RETRIES {
-                        if attempt > 0 {
-                            let delay = retry_delay(attempt - 1);
-                            warn!(
-                                "⏳ Retrying provider {} (attempt {}/{}), backoff {}ms",
-                                mapping.provider,
-                                attempt + 1,
-                                MAX_RETRIES + 1,
-                                delay.as_millis()
-                            );
-                            tokio::time::sleep(delay).await;
-                        }
-                        match provider.send_message(anthropic_request.clone()).await {
-                            Ok(mut response) => {
-                                // Record circuit breaker success
-                                if let Some(ref cb) = state.circuit_breakers {
-                                    cb.record_success(&mapping.provider).await;
-                                }
-                                // DLP: sanitize response (deanonymize names, scan secrets)
-                                if let Some(ref dlp_engine) = dlp {
-                                    if dlp_engine.config.scan_output {
-                                        sanitize_provider_response(&mut response, dlp_engine);
-                                    }
-                                }
-
-                                // Restore original model name in response
-                                response.model = original_model;
-                                info!(
-                                    "✅ Request succeeded with provider: {}, response model: {}",
-                                    mapping.provider, response.model
-                                );
-
-                                // Calculate and log metrics with dynamic pricing
-                                let latency_ms = start_time.elapsed().as_millis() as u64;
-                                let tok_s = (response.usage.output_tokens as f32 * 1000.0)
-                                    / latency_ms as f32;
-                                let cost = calculate_cost(
-                                    &state,
-                                    &mapping.actual_model,
-                                    response.usage.input_tokens,
-                                    response.usage.output_tokens,
-                                    is_sub,
-                                )
-                                .await;
-                                info!(
-                                    "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
-                                    mapping.actual_model,
-                                    mapping.provider,
-                                    latency_ms,
-                                    tok_s,
-                                    response.usage.output_tokens,
-                                    cost.estimated_cost_usd,
-                                    if is_sub { " (subscription)" } else { "" }
-                                );
-
-                                // Record Prometheus metrics
-                                record_request_metrics(
-                                    &mapping.actual_model,
-                                    &mapping.provider,
-                                    &decision.route_type,
-                                    "ok",
-                                    latency_ms,
-                                    response.usage.input_tokens,
-                                    response.usage.output_tokens,
-                                    cost.estimated_cost_usd,
-                                );
-
-                                // Record spend for budget tracking
-                                record_spend(
-                                    &state,
-                                    &mapping.provider,
-                                    &decision.model_name,
-                                    cost.estimated_cost_usd,
-                                    tenant_id.as_deref(),
-                                )
-                                .await;
-
-                                // Trace the response
-                                state
-                                    .message_tracer
-                                    .trace_response(&trace_id, &response, latency_ms);
-
-                                // Audit: successful response
-                                if let Some(ref al) = state.audit_log {
-                                    log_audit(
-                                        al,
-                                        tenant_id.as_deref().unwrap_or("anon"),
-                                        crate::security::audit_log::AuditEvent::Response,
-                                        &mapping.provider,
-                                        vec![],
-                                        &peer_ip,
-                                        latency_ms,
-                                        AuditCompliance {
-                                            config: &inner.config.compliance,
-                                            model_name: Some(&mapping.actual_model),
-                                            token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
-                                            risk_level: Some(crate::security::audit_log::RiskLevel::Low),
-                                        },
-                                    );
-                                }
-
-                                // Cache store (non-streaming success)
-                                if let (Some(ref cache), Some(ref key)) = (&state.response_cache, &cache_key) {
-                                    if let Ok(body) = serde_json::to_vec(&response) {
-                                        cache.put(key.clone(), crate::cache::CachedResponse {
-                                            body,
-                                            content_type: "application/json".to_string(),
-                                            provider: mapping.provider.clone(),
-                                            model: mapping.actual_model.clone(),
-                                        }).await;
-                                    }
-                                }
-
-                                if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
-                                    let body = serde_json::to_vec(&response).unwrap_or_default();
-                                    let mut resp = Response::builder()
-                                        .status(200)
-                                        .header("content-type", "application/json")
-                                        .body(Body::from(body))
-                                        .expect("response builder");
-                                    apply_transparency_headers(resp.headers_mut(), &mapping.provider, &mapping.actual_model, req_id);
-                                    return Ok(resp);
-                                }
-                                return Ok(Json(response).into_response());
-                            }
-                            Err(e) => {
-                                let retryable = is_retryable(&e);
-                                state.message_tracer.trace_error(&trace_id, &e.to_string());
-                                let is_rate_limit = matches!(
-                                    &e,
-                                    crate::providers::error::ProviderError::ApiError {
-                                        status: 429,
-                                        ..
-                                    }
-                                );
-                                if is_rate_limit {
-                                    warn!("Provider {} rate limited", mapping.provider);
-                                    metrics::counter!("grob_ratelimit_hits_total", "provider" => mapping.provider.clone()).increment(1);
-                                }
-                                metrics::counter!("grob_provider_errors_total", "provider" => mapping.provider.clone()).increment(1);
-
-                                if retryable && attempt < MAX_RETRIES {
-                                    warn!(
-                                        "⚠️ Provider {} failed (retryable): {}",
-                                        mapping.provider, e
-                                    );
-                                    last_error = Some(e);
-                                    continue;
-                                }
-
-                                // Non-retryable or max retries exhausted
-                                if let Some(ref cb) = state.circuit_breakers {
-                                    cb.record_failure(&mapping.provider).await;
-                                }
-                                info!(
-                                    "⚠️ Provider {} failed: {}, trying next fallback",
-                                    mapping.provider, e
-                                );
-                                last_error = Some(e);
-                                break;
-                            }
-                        }
-                    }
-                    let _ = last_error;
-                }
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("response builder");
+                apply_transparency_headers(resp.headers_mut(), &provider, &actual_model, req_id);
+                Ok(resp)
+            } else if let Some(body) = response_bytes {
+                Ok(Response::builder()
+                    .status(200)
+                    .header("content-type", "application/json")
+                    .body(Body::from(body))
+                    .expect("response builder"))
             } else {
-                info!(
-                    "⚠️ Provider {} not found in registry, trying next fallback",
-                    mapping.provider
-                );
-                continue;
+                Ok(Json(response).into_response())
             }
         }
 
-        // Audit: all providers failed
-        if let Some(ref al) = state.audit_log {
-            log_audit(
-                al,
-                tenant_id.as_deref().unwrap_or("anon"),
-                crate::security::audit_log::AuditEvent::Error,
-                "NONE",
-                vec![],
-                &peer_ip,
-                start_time.elapsed().as_millis() as u64,
-                AuditCompliance {
-                    config: &inner.config.compliance,
-                    model_name: None,
-                    token_counts: None,
-                    risk_level: None,
-                },
-            );
+        dispatch::DispatchResult::FanOut { response } => {
+            Ok(Json(response).into_response())
         }
-
-        error!(
-            request_id = req_id,
-            "❌ All provider mappings failed for model: {}", decision.model_name
-        );
-        Err(AppError::ProviderError(format!(
-            "All {} provider mappings failed for model: {}",
-            sorted_mappings.len(),
-            decision.model_name
-        )))
-    } else {
-        // No model mapping found, try direct provider registry lookup (backward compatibility)
-        if let Ok(provider) = inner
-            .provider_registry
-            .get_provider_for_model(&decision.model_name)
-        {
-            info!(
-                "📦 Using provider from registry (direct lookup): {}",
-                decision.model_name
-            );
-
-            // Clone the already-parsed request (struct clone, not JSON re-parse)
-            let mut anthropic_request = request_for_routing.clone();
-
-            // Save original model name for response
-            let original_model = anthropic_request.model.clone();
-
-            // Update model to routed model
-            anthropic_request.model = decision.model_name.clone();
-
-            // Call provider
-            let mut provider_response = provider
-                .send_message(anthropic_request)
-                .await
-                .map_err(|e| AppError::ProviderError(e.to_string()))?;
-
-            // Restore original model name in response
-            provider_response.model = original_model;
-
-            // Return provider response
-            return Ok(Json(provider_response).into_response());
-        }
-
-        error!(
-            "❌ No model mapping or provider found for model: {}",
-            decision.model_name
-        );
-        Err(AppError::ProviderError(format!(
-            "No model mapping or provider found for model: {}",
-            decision.model_name
-        )))
     }
 }
+
 
 /// Handle /v1/messages/count_tokens requests
 async fn handle_count_tokens(

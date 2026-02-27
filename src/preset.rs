@@ -14,8 +14,6 @@ const BUILTIN_EU_AI_ACT: &str = include_str!("../presets/eu-ai-act.toml");
 pub struct PresetInfo {
     pub name: String,
     pub description: String,
-    #[allow(dead_code)]
-    pub path: Option<PathBuf>,
     pub is_builtin: bool,
 }
 
@@ -34,46 +32,39 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
         PresetInfo {
             name: "perf".to_string(),
             description: "Performance max — Anthropic + OpenAI + Gemini, top models".to_string(),
-            path: None,
             is_builtin: true,
         },
         PresetInfo {
             name: "medium".to_string(),
             description: "Best quality/price — Anthropic thinking + OpenRouter defaults"
                 .to_string(),
-            path: None,
             is_builtin: true,
         },
         PresetInfo {
             name: "local".to_string(),
             description: "Ollama local + Anthropic thinking — private, zero API cost for defaults"
                 .to_string(),
-            path: None,
             is_builtin: true,
         },
         PresetInfo {
             name: "cheap".to_string(),
             description: "Budget max — GLM-5 + DeepSeek + Gemini Flash, $0-5/month".to_string(),
-            path: None,
             is_builtin: true,
         },
         PresetInfo {
             name: "fast".to_string(),
             description: "Premium rapide — Opus + GPT-5.2 + Gemini Pro, qualite max sans limite"
                 .to_string(),
-            path: None,
             is_builtin: true,
         },
         PresetInfo {
             name: "gdpr".to_string(),
             description: "EU-only GDPR compliant — Mistral, Scaleway, OVH (region=eu)".to_string(),
-            path: None,
             is_builtin: true,
         },
         PresetInfo {
             name: "eu-ai-act".to_string(),
             description: "EU AI Act compliant — EU providers + transparency headers + risk classification".to_string(),
-            path: None,
             is_builtin: true,
         },
     ];
@@ -99,7 +90,6 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
                 presets.push(PresetInfo {
                     name,
                     description: "Installed preset".to_string(),
-                    path: Some(path),
                     is_builtin: false,
                 });
             }
@@ -1131,8 +1121,6 @@ pub struct MappingResult {
     pub actual_model: String,
     pub ok: bool,
     pub detail: String,
-    #[allow(dead_code)]
-    pub latency_ms: u64,
 }
 
 /// Result of validating a router model (with all its fallback mappings)
@@ -1209,7 +1197,6 @@ pub async fn validate_config(
                         actual_model: "?".to_string(),
                         ok: false,
                         detail: "Model not found in [[models]]".to_string(),
-                        latency_ms: 0,
                     }],
                 });
                 continue;
@@ -1231,7 +1218,6 @@ pub async fn validate_config(
                         actual_model: mapping.actual_model.clone(),
                         ok: false,
                         detail: "Provider not in registry".to_string(),
-                        latency_ms: 0,
                     });
                     continue;
                 }
@@ -1256,7 +1242,6 @@ pub async fn validate_config(
                         actual_model: mapping.actual_model.clone(),
                         ok: true,
                         detail: format!("OK ({}ms)", latency),
-                        latency_ms: latency,
                     });
                 }
                 Ok(Err(e)) => {
@@ -1273,7 +1258,6 @@ pub async fn validate_config(
                         actual_model: mapping.actual_model.clone(),
                         ok: false,
                         detail: short,
-                        latency_ms: latency,
                     });
                 }
                 Err(_) => {
@@ -1283,7 +1267,6 @@ pub async fn validate_config(
                         actual_model: mapping.actual_model.clone(),
                         ok: false,
                         detail: "Timeout (30s)".to_string(),
-                        latency_ms: 30_000,
                     });
                 }
             }

@@ -87,6 +87,17 @@ impl TokenStore {
         })
     }
 
+    /// Create an empty token store (no persistence, no OAuth).
+    /// Used when the `oauth` feature is disabled.
+    #[allow(dead_code)]
+    pub fn new_empty() -> Self {
+        Self {
+            file_path: PathBuf::new(),
+            tokens: Arc::new(RwLock::new(HashMap::new())),
+            store: None,
+        }
+    }
+
     /// Create a new token store (legacy JSON mode).
     pub fn new(file_path: PathBuf) -> Result<Self> {
         let tokens = if file_path.exists() {

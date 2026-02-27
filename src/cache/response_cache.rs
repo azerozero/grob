@@ -70,6 +70,7 @@ impl ResponseCache {
 
     /// Compute a cache key from request parameters.
     /// Returns `None` if the request is not cacheable (temperature != 0).
+    #[cfg(test)]
     pub fn compute_key(
         tenant_id: &str,
         model: &str,
@@ -108,6 +109,55 @@ impl ResponseCache {
         Some(hex::encode(hasher.finalize()))
     }
 
+    /// Compute a cache key directly from an AnthropicRequest, streaming JSON
+    /// into the hasher without intermediate String/Value allocations.
+    pub fn compute_key_from_request(
+        tenant_id: &str,
+        request: &crate::models::AnthropicRequest,
+    ) -> Option<String> {
+        use std::io::Write as _;
+
+        // Only cache deterministic requests (temperature == 0 or absent)
+        if request.temperature.map(|t| t != 0.0).unwrap_or(false) {
+            return None;
+        }
+
+        let mut hasher = Sha256Writer(Sha256::new());
+        let _ = hasher.write_all(tenant_id.as_bytes());
+        let _ = hasher.write_all(b"|");
+        let _ = hasher.write_all(request.model.as_bytes());
+        let _ = hasher.write_all(b"|");
+        let _ = serde_json::to_writer(&mut hasher, &request.messages);
+        let _ = hasher.write_all(b"|");
+        if let Some(ref s) = request.system {
+            let _ = serde_json::to_writer(&mut hasher, s);
+        }
+        let _ = hasher.write_all(b"|");
+        if let Some(ref t) = request.tools {
+            let _ = serde_json::to_writer(&mut hasher, t);
+        }
+        let _ = hasher.write_all(b"|");
+        let _ = write!(hasher, "{}", request.max_tokens);
+
+        Some(hex::encode(hasher.0.finalize()))
+    }
+}
+
+/// Adapter to stream writes directly into a SHA-256 hasher.
+struct Sha256Writer(Sha256);
+
+impl std::io::Write for Sha256Writer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.update(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl ResponseCache {
     /// Try to get a cached response.
     pub async fn get(&self, key: &str) -> Option<CachedResponse> {
         match self.inner.get(key).await {

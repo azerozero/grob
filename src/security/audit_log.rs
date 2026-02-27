@@ -160,18 +160,11 @@ impl RiskLevel {
 
 /// Audit log configuration
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // fields used by future rotation/retention/encryption logic
 pub struct AuditConfig {
     /// Log directory
     pub log_dir: PathBuf,
-    /// Rotation size (bytes)
-    pub rotation_size: u64,
-    /// Retention days
-    pub retention_days: u32,
     /// Sign key path (if None, generates ephemeral) — used for ECDSA
     pub sign_key_path: Option<PathBuf>,
-    /// Encrypt at rest
-    pub encrypt: bool,
     /// Signing algorithm (default: ECDSA P-256)
     pub signing_algorithm: SigningAlgorithm,
     /// HMAC key path (only for HMAC-SHA256 algorithm)
@@ -182,25 +175,26 @@ impl Default for AuditConfig {
     fn default() -> Self {
         Self {
             log_dir: PathBuf::from("/var/lib/grob/audit"),
-            rotation_size: 100 * 1024 * 1024, // 100MB
-            retention_days: 365,              // PCI DSS: 1 year minimum
             sign_key_path: None,
-            encrypt: true,
             signing_algorithm: SigningAlgorithm::default(),
             hmac_key_path: None,
         }
     }
 }
 
+/// Combined mutable state for the audit log, protected by a single Mutex.
+struct AuditLogState {
+    file: std::fs::File,
+    size: u64,
+    last_hash: String,
+}
+
 /// Audit log writer with integrity guarantees
 pub struct AuditLog {
-    #[allow(dead_code)] // used by future rotation logic
-    config: AuditConfig,
+    _config: AuditConfig,
     signing_material: SigningMaterial,
     algorithm: SigningAlgorithm,
-    current_file: Mutex<std::fs::File>,
-    current_size: Mutex<u64>,
-    last_hash: Mutex<String>,
+    state: Mutex<AuditLogState>,
 }
 
 impl AuditLog {
@@ -241,12 +235,14 @@ impl AuditLog {
         let current_size = metadata.len();
 
         Ok(Self {
-            config,
+            _config: config,
             signing_material,
             algorithm,
-            current_file: Mutex::new(file),
-            current_size: Mutex::new(current_size),
-            last_hash: Mutex::new(last_hash),
+            state: Mutex::new(AuditLogState {
+                file,
+                size: current_size,
+                last_hash,
+            }),
         })
     }
 
@@ -336,10 +332,13 @@ impl AuditLog {
         hex::encode(Sha256::digest(b"GROB_AUDIT_GENESIS"))
     }
 
-    /// Hash an entry for chaining
+    /// Hash an entry for chaining (writes directly into hasher, no intermediate String)
     fn hash_entry(entry: &AuditEntry) -> String {
+        use std::io::Write as _;
+        let mut hasher = Sha256::new();
         // Hash of all fields except signature and signature_algorithm
-        let canonical = format!(
+        let _ = write!(
+            hasher,
             "{}|{}|{}|{}|{:?}|{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{:?}",
             entry.timestamp.to_rfc3339(),
             entry.event_id,
@@ -358,15 +357,15 @@ impl AuditLog {
             entry.output_tokens.unwrap_or(0),
             entry.risk_level
         );
-        hex::encode(Sha256::digest(canonical.as_bytes()))
+        hex::encode(hasher.finalize())
     }
 
     /// Write an audit entry with signature and hash chain
     pub fn write(&self, mut entry: AuditEntry) -> Result<()> {
-        let mut last_hash = self.last_hash.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
         // Chain: set previous_hash from last entry
-        entry.previous_hash = last_hash.clone();
+        entry.previous_hash = state.last_hash.clone();
 
         // Set signature algorithm label
         entry.signature_algorithm = self.algorithm.label().to_string();
@@ -391,15 +390,15 @@ impl AuditLog {
         let mut line = serde_json::to_string(&entry).context("Failed to serialize audit entry")?;
         line.push('\n');
 
-        let mut file = self.current_file.lock().unwrap_or_else(|e| e.into_inner());
-        file.write_all(line.as_bytes())
+        state
+            .file
+            .write_all(line.as_bytes())
             .context("Failed to write audit entry")?;
-        file.flush().context("Failed to flush audit log")?;
+        state.file.flush().context("Failed to flush audit log")?;
 
         // Update chain state
-        let mut size = self.current_size.lock().unwrap_or_else(|e| e.into_inner());
-        *size += line.len() as u64;
-        *last_hash = hash;
+        state.size += line.len() as u64;
+        state.last_hash = hash;
 
         Ok(())
     }
@@ -421,7 +420,6 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
-            rotation_size: 1024 * 1024,
             ..Default::default()
         };
 

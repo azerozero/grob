@@ -577,54 +577,6 @@ impl OAuthClient {
         })
     }
 
-    /// Get a valid access token (refreshing if needed)
-    #[allow(dead_code)]
-    pub async fn get_valid_token(&self, provider_id: &str) -> Result<String> {
-        let token = self
-            .token_store
-            .get(provider_id)
-            .context("No token found for provider")?;
-
-        if token.needs_refresh() {
-            let refreshed = self.refresh_token(provider_id).await?;
-            Ok(refreshed.access_token.expose_secret().to_string())
-        } else {
-            Ok(token.access_token.expose_secret().to_string())
-        }
-    }
-
-    /// Create an API key using OAuth token (for Anthropic Console flow)
-    #[allow(dead_code)]
-    pub async fn create_api_key(&self, provider_id: &str) -> Result<String> {
-        let access_token = self.get_valid_token(provider_id).await?;
-
-        #[derive(Deserialize)]
-        struct ApiKeyResponse {
-            raw_key: String,
-        }
-
-        let response = self
-            .http_client
-            .post("https://api.anthropic.com/api/oauth/claude_cli/create_api_key")
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", access_token))
-            .send()
-            .await
-            .context("Failed to create API key")?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("API key creation failed: {} - {}", status, body));
-        }
-
-        let api_key_response: ApiKeyResponse = response
-            .json()
-            .await
-            .context("Failed to parse API key response")?;
-
-        Ok(api_key_response.raw_key)
-    }
 }
 
 #[cfg(test)]

@@ -18,6 +18,9 @@ pub struct SprtDetector {
     /// SPRT log-likelihood ratio bounds.
     upper_bound: f32, // ln((1-beta)/alpha)
     lower_bound: f32, // ln(beta/(1-alpha))
+    /// Precomputed log-likelihood ratios for per-byte SPRT updates.
+    ln_h1_over_h0: f32, // evidence for random (high-entropy)
+    ln_h0_over_h1: f32, // evidence for natural (low-entropy)
 }
 
 impl Default for SprtDetector {
@@ -30,12 +33,16 @@ impl SprtDetector {
     pub fn new() -> Self {
         let alpha = 0.01_f32; // false positive rate
         let beta = 0.01_f32; // false negative rate
+        let h0_entropy = 4.0_f32;
+        let h1_entropy = 7.0_f32;
 
         Self {
             min_window: 16,
             entropy_threshold: 5.5,
             upper_bound: ((1.0 - beta) / alpha).ln(),
             lower_bound: (beta / (1.0 - alpha)).ln(),
+            ln_h1_over_h0: (h1_entropy / h0_entropy).ln(),
+            ln_h0_over_h1: (h0_entropy / h1_entropy).ln(),
         }
     }
 
@@ -98,24 +105,19 @@ impl SprtDetector {
         let bytes = token.as_bytes();
         let mut log_ratio = 0.0_f32;
 
-        // H0: character drawn from natural code distribution (~4.0 bits/byte)
-        // H1: character drawn from random/secret distribution (~7.0 bits/byte)
-        let h0_entropy = 4.0_f32;
-        let h1_entropy = 7.0_f32;
-
         for &b in bytes {
             if !b.is_ascii() {
                 // Non-ASCII: treat as natural text (Unicode identifiers)
-                log_ratio += (h0_entropy / h1_entropy).ln();
+                log_ratio += self.ln_h0_over_h1;
             } else {
                 // Approximate: characters in [A-Za-z0-9+/=] are "high entropy candidates"
                 let is_b64_char = b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=';
                 if is_b64_char {
                     // Evidence for H1 (random)
-                    log_ratio += (h1_entropy / h0_entropy).ln();
+                    log_ratio += self.ln_h1_over_h0;
                 } else {
                     // Evidence for H0 (natural)
-                    log_ratio += (h0_entropy / h1_entropy).ln();
+                    log_ratio += self.ln_h0_over_h1;
                 }
             }
 

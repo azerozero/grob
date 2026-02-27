@@ -165,8 +165,9 @@ fn spawn_background_service(port: Option<u16>, config: Option<String>) -> anyhow
 
 #[derive(Parser)]
 #[command(name = "grob")]
-#[command(about = "Grob - High-performance LLM routing proxy\n\nQuick start:\n  grob exec -- claude     Launch Claude Code through Grob\n  grob exec -- aider      Launch Aider through Grob\n  grob start -d           Start Grob in background\n  grob status             Show service status and models", long_about = None)]
 #[command(version)]
+#[command(before_help = concat!("Grob v", env!("CARGO_PKG_VERSION")))]
+#[command(about = "High-performance LLM routing proxy\n\nQuick start:\n  grob exec -- claude     Launch Claude Code through Grob\n  grob exec -- aider      Launch Aider through Grob\n  grob start -d           Start Grob in background\n  grob status             Show service status and models", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -259,6 +260,8 @@ enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// Install shell completions for your current shell (zsh, bash, fish)
+    SetupCompletions,
     /// Check environment variables required by configured providers
     Env,
     /// Set up credentials for providers (interactive)
@@ -1033,6 +1036,59 @@ async fn main() -> anyhow::Result<()> {
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();
             generate(shell, &mut cmd, "grob", &mut std::io::stdout());
+            // Print install hint to stderr (doesn't pollute stdout pipe)
+            match shell {
+                Shell::Zsh => eprintln!("\n# Add to ~/.zshrc:\n# eval \"$(grob completions zsh)\""),
+                Shell::Bash => {
+                    eprintln!("\n# Add to ~/.bashrc:\n# eval \"$(grob completions bash)\"")
+                }
+                Shell::Fish => eprintln!("\n# Run: grob completions fish | source"),
+                _ => {}
+            }
+        }
+        Commands::SetupCompletions => {
+            let shell_str = std::env::var("SHELL").unwrap_or_default();
+            let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+
+            if shell_str.ends_with("zsh") {
+                let zfunc_dir = format!("{}/.zfunc", home);
+                std::fs::create_dir_all(&zfunc_dir)?;
+                let dest = format!("{}/_grob", zfunc_dir);
+                let mut file = std::fs::File::create(&dest)?;
+                let mut cmd = Cli::command();
+                generate(Shell::Zsh, &mut cmd, "grob", &mut file);
+                println!("Installed zsh completions to {}", dest);
+                println!(
+                    "Add to ~/.zshrc if not already present:\n  fpath=(~/.zfunc $fpath)\n  autoload -Uz compinit && compinit"
+                );
+            } else if shell_str.ends_with("bash") {
+                let dest = format!("{}/.local/share/bash-completion/completions/grob", home);
+                if let Some(parent) = std::path::Path::new(&dest).parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let mut file = std::fs::File::create(&dest)?;
+                let mut cmd = Cli::command();
+                generate(Shell::Bash, &mut cmd, "grob", &mut file);
+                println!("Installed bash completions to {}", dest);
+            } else if shell_str.ends_with("fish") {
+                let dest = format!(
+                    "{}/.config/fish/completions/grob.fish",
+                    home
+                );
+                if let Some(parent) = std::path::Path::new(&dest).parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let mut file = std::fs::File::create(&dest)?;
+                let mut cmd = Cli::command();
+                generate(Shell::Fish, &mut cmd, "grob", &mut file);
+                println!("Installed fish completions to {}", dest);
+            } else {
+                eprintln!(
+                    "Could not detect shell from $SHELL ({}). Use `grob completions <shell>` instead.",
+                    shell_str
+                );
+                std::process::exit(1);
+            }
         }
         Commands::Env => {
             println!("🔑 Environment Variables");

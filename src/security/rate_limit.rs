@@ -19,35 +19,37 @@ pub struct RateLimitConfig {
     pub _window: Duration,
 }
 
-/// Token bucket state
+/// Token bucket state using integer milli-tokens (1000 = 1 full token)
 #[derive(Debug)]
 struct TokenBucket {
-    tokens: f64,
+    tokens_milli: u64,
     last_update: Instant,
-    config: RateLimitConfig,
+    rps: u32,
+    burst_milli: u64,
 }
 
 impl TokenBucket {
     fn new(config: RateLimitConfig) -> Self {
         Self {
-            tokens: config.burst as f64,
+            tokens_milli: config.burst as u64 * 1000,
             last_update: Instant::now(),
-            config,
+            rps: config.requests_per_second,
+            burst_milli: config.burst as u64 * 1000,
         }
     }
 
     /// Try to consume a token, returns true if allowed
     fn try_consume(&mut self) -> bool {
         let now = Instant::now();
-        let elapsed = now.duration_since(self.last_update).as_secs_f64();
+        let elapsed_ms = now.duration_since(self.last_update).as_millis() as u64;
         self.last_update = now;
 
-        // Add tokens based on elapsed time
-        self.tokens = (self.tokens + elapsed * self.config.requests_per_second as f64)
-            .min(self.config.burst as f64);
+        // Add tokens based on elapsed time (milli-tokens)
+        self.tokens_milli = (self.tokens_milli + elapsed_ms * self.rps as u64)
+            .min(self.burst_milli);
 
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
+        if self.tokens_milli >= 1000 {
+            self.tokens_milli -= 1000;
             true
         } else {
             false
@@ -56,7 +58,7 @@ impl TokenBucket {
 
     /// Get remaining tokens (for headers)
     fn remaining(&self) -> u32 {
-        self.tokens as u32
+        (self.tokens_milli / 1000) as u32
     }
 }
 
@@ -113,10 +115,10 @@ impl RateLimiter {
         let reset_after = if allowed {
             None
         } else {
-            // Calculate time until 1 token is available
-            let needed = 1.0 - bucket.tokens;
-            let seconds = needed / self.default_config.requests_per_second as f64;
-            Some(Duration::from_secs_f64(seconds))
+            // Calculate time until 1 token is available (using milli-tokens)
+            let needed_milli = 1000u64.saturating_sub(bucket.tokens_milli);
+            let ms = needed_milli / self.default_config.requests_per_second.max(1) as u64;
+            Some(Duration::from_millis(ms))
         };
 
         (allowed, remaining, reset_after)

@@ -260,6 +260,8 @@ async fn reload_once(
                 .increment(1);
             })?;
         }
+
+        metrics::counter!("grob_dlp_signature_verified_total", "result" => "valid").increment(1);
     }
 
     // Hash check — skip if unchanged
@@ -271,14 +273,26 @@ async fn reload_once(
         }
     }
 
+    // Log old → new hash on change
+    {
+        let current = hot_config.read().unwrap();
+        tracing::info!(
+            old_hash = %current.source_hash,
+            new_hash = %hash,
+            source = %settings.source,
+            "DLP signed config changed"
+        );
+    }
+
     // Apply new config
     apply_config(&content, domain_mode, hot_config)?;
 
-    // Update hash
+    // Update hash and expose as gauge label for observability
     {
         let mut hot = hot_config.write().unwrap();
-        hot.source_hash = hash;
+        hot.source_hash = hash.clone();
     }
+    metrics::gauge!("grob_dlp_config_hash_info", "hash" => hash[..16].to_string()).set(1.0);
 
     Ok(ReloadStatus::Updated)
 }
