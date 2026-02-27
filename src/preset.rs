@@ -64,7 +64,9 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
         },
         PresetInfo {
             name: "eu-ai-act".to_string(),
-            description: "EU AI Act compliant — EU providers + transparency headers + risk classification".to_string(),
+            description:
+                "EU AI Act compliant — EU providers + transparency headers + risk classification"
+                    .to_string(),
             is_builtin: true,
         },
     ];

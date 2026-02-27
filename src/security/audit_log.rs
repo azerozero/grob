@@ -278,13 +278,9 @@ impl AuditLog {
             .unwrap_or_else(|| config.log_dir.join("audit_hmac.key"));
 
         if key_path.exists() {
-            let key_bytes =
-                std::fs::read(&key_path).with_context(|| "Failed to read HMAC key")?;
+            let key_bytes = std::fs::read(&key_path).with_context(|| "Failed to read HMAC key")?;
             if key_bytes.len() != 32 {
-                anyhow::bail!(
-                    "HMAC key must be exactly 32 bytes, got {}",
-                    key_bytes.len()
-                );
+                anyhow::bail!("HMAC key must be exactly 32 bytes, got {}", key_bytes.len());
             }
             let mut key = [0u8; 32];
             key.copy_from_slice(&key_bytes);

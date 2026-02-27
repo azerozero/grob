@@ -19,10 +19,10 @@ mod auth;
 mod cache;
 mod cli;
 mod features;
-mod net;
 mod instance;
 mod message_tracing;
 mod models;
+mod net;
 mod pid;
 mod preset;
 mod providers;
@@ -874,9 +874,10 @@ async fn main() -> anyhow::Result<()> {
                     let mut sigterm =
                         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
                             .expect("failed to register SIGTERM handler");
-                    let mut sigusr1 =
-                        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
-                            .expect("failed to register SIGUSR1 handler");
+                    let mut sigusr1 = tokio::signal::unix::signal(
+                        tokio::signal::unix::SignalKind::user_defined1(),
+                    )
+                    .expect("failed to register SIGUSR1 handler");
                     tokio::select! {
                         _ = ctrl_c => { tracing::info!("Received SIGINT, shutting down..."); }
                         _ = sigterm.recv() => { tracing::info!("Received SIGTERM, shutting down..."); }
@@ -1071,10 +1072,7 @@ async fn main() -> anyhow::Result<()> {
                 generate(Shell::Bash, &mut cmd, "grob", &mut file);
                 println!("Installed bash completions to {}", dest);
             } else if shell_str.ends_with("fish") {
-                let dest = format!(
-                    "{}/.config/fish/completions/grob.fish",
-                    home
-                );
+                let dest = format!("{}/.config/fish/completions/grob.fish", home);
                 if let Some(parent) = std::path::Path::new(&dest).parent() {
                     std::fs::create_dir_all(parent)?;
                 }
@@ -1406,16 +1404,18 @@ async fn main() -> anyhow::Result<()> {
             let base_url = cli::format_base_url(&config.server.host, config.server.port);
 
             // 1. Find old PID via /health
-            let old_pid = match instance::find_instance_pid(&config.server.host, config.server.port)
-                .await
-            {
-                Some(pid) => pid,
-                None => {
-                    eprintln!("❌ No running Grob instance found on port {}", config.server.port);
-                    eprintln!("   Start one first with: grob start -d");
-                    return Ok(());
-                }
-            };
+            let old_pid =
+                match instance::find_instance_pid(&config.server.host, config.server.port).await {
+                    Some(pid) => pid,
+                    None => {
+                        eprintln!(
+                            "❌ No running Grob instance found on port {}",
+                            config.server.port
+                        );
+                        eprintln!("   Start one first with: grob start -d");
+                        return Ok(());
+                    }
+                };
             println!("🔄 Upgrading Grob (old PID: {})...", old_pid);
 
             // 2. Spawn new process (SO_REUSEPORT allows binding same port)

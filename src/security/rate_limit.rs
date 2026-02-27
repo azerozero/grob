@@ -45,8 +45,8 @@ impl TokenBucket {
         self.last_update = now;
 
         // Add tokens based on elapsed time (milli-tokens)
-        self.tokens_milli = (self.tokens_milli + elapsed_ms * self.rps as u64)
-            .min(self.burst_milli);
+        self.tokens_milli =
+            (self.tokens_milli + elapsed_ms * self.rps as u64).min(self.burst_milli);
 
         if self.tokens_milli >= 1000 {
             self.tokens_milli -= 1000;

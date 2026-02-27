@@ -188,8 +188,8 @@ impl AuditEntryBuilder {
             dlp_rules_triggered: self.dlp_rules,
             ip_source: self.ip,
             duration_ms: self.duration_ms,
-            previous_hash: String::new(), // filled by write()
-            signature: vec![],            // filled by write()
+            previous_hash: String::new(),       // filled by write()
+            signature: vec![],                  // filled by write()
             signature_algorithm: String::new(), // filled by write()
             model_name: self.model_name,
             input_tokens: self.input_tokens,
@@ -222,8 +222,8 @@ fn log_audit(
     duration_ms: u64,
     eu: AuditCompliance<'_>,
 ) {
-    let mut builder = AuditEntryBuilder::new(tenant_id, action, backend, ip, duration_ms)
-        .dlp_rules(dlp_rules);
+    let mut builder =
+        AuditEntryBuilder::new(tenant_id, action, backend, ip, duration_ms).dlp_rules(dlp_rules);
     if eu.config.enabled && eu.config.audit_model_name {
         if let Some(m) = eu.model_name {
             builder = builder.model(m);
@@ -270,10 +270,7 @@ fn apply_transparency_headers(
     if let Ok(v) = HeaderValue::from_str(audit_id) {
         headers.insert("x-grob-audit-id", v);
     }
-    headers.insert(
-        "x-ai-generated",
-        HeaderValue::from_static("true"),
-    );
+    headers.insert("x-ai-generated", HeaderValue::from_static("true"));
 }
 
 /// Auth middleware: supports three modes:
@@ -361,9 +358,7 @@ async fn auth_middleware(
                     }
                     Err(e) => auth_error_response(&format!("JWT validation failed: {}", e)),
                 },
-                None => auth_error_response(
-                    &crate::auth::jwt::AuthError::MissingToken.to_string(),
-                ),
+                None => auth_error_response(&crate::auth::jwt::AuthError::MissingToken.to_string()),
             }
         }
         other => {
@@ -1527,7 +1522,10 @@ async fn handle_openai_chat_completions(
 
     let inner = state.snapshot();
     let session_key = tenant_id.as_deref().or_else(|| extract_api_key(&headers));
-    let dlp = state.dlp_sessions.as_ref().map(|mgr| mgr.engine_for(session_key));
+    let dlp = state
+        .dlp_sessions
+        .as_ref()
+        .map(|mgr| mgr.engine_for(session_key));
 
     // Transform OpenAI → Anthropic format
     let mut anthropic_request = openai_compat::transform_openai_to_anthropic(openai_request)
@@ -1550,7 +1548,12 @@ async fn handle_openai_chat_completions(
     match dispatch::dispatch(&ctx, &mut anthropic_request).await? {
         dispatch::DispatchResult::CacheHit(resp) => Ok(resp),
 
-        dispatch::DispatchResult::Streaming { stream, provider, actual_model, .. } => {
+        dispatch::DispatchResult::Streaming {
+            stream,
+            provider,
+            actual_model,
+            ..
+        } => {
             let mut transformer = openai_compat::AnthropicToOpenAIStream::new(model.clone());
             let mapped = stream
                 .map_ok(move |bytes| transformer.transform_bytes(&bytes))
@@ -1564,13 +1567,24 @@ async fn handle_openai_chat_completions(
                 .body(body)
                 .expect("streaming response builder");
             if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
-                apply_transparency_headers(response.headers_mut(), &provider, &actual_model, &request_id.0);
+                apply_transparency_headers(
+                    response.headers_mut(),
+                    &provider,
+                    &actual_model,
+                    &request_id.0,
+                );
             }
             Ok(response)
         }
 
-        dispatch::DispatchResult::Complete { response: anthropic_response, provider, actual_model, .. } => {
-            let openai_response = openai_compat::transform_anthropic_to_openai(anthropic_response, model.clone());
+        dispatch::DispatchResult::Complete {
+            response: anthropic_response,
+            provider,
+            actual_model,
+            ..
+        } => {
+            let openai_response =
+                openai_compat::transform_anthropic_to_openai(anthropic_response, model.clone());
             if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
                 let body = serde_json::to_vec(&openai_response).unwrap_or_default();
                 let mut resp = Response::builder()
@@ -1578,7 +1592,12 @@ async fn handle_openai_chat_completions(
                     .header("content-type", "application/json")
                     .body(Body::from(body))
                     .expect("response builder");
-                apply_transparency_headers(resp.headers_mut(), &provider, &actual_model, &request_id.0);
+                apply_transparency_headers(
+                    resp.headers_mut(),
+                    &provider,
+                    &actual_model,
+                    &request_id.0,
+                );
                 Ok(resp)
             } else {
                 Ok(Json(openai_response).into_response())
@@ -1586,7 +1605,8 @@ async fn handle_openai_chat_completions(
         }
 
         dispatch::DispatchResult::FanOut { response } => {
-            let openai_response = openai_compat::transform_anthropic_to_openai(response, model.clone());
+            let openai_response =
+                openai_compat::transform_anthropic_to_openai(response, model.clone());
             Ok(Json(openai_response).into_response())
         }
     }
@@ -1781,7 +1801,10 @@ async fn handle_messages(
     let peer_ip = extract_client_ip(&headers);
     let inner = state.snapshot();
     let session_key = tenant_id.as_deref().or_else(|| extract_api_key(&headers));
-    let dlp = state.dlp_sessions.as_ref().map(|mgr| mgr.engine_for(session_key));
+    let dlp = state
+        .dlp_sessions
+        .as_ref()
+        .map(|mgr| mgr.engine_for(session_key));
     let trace_id = state.message_tracer.new_trace_id();
 
     // DEBUG: Log request body for debugging (gate serialization on log level)
@@ -1791,11 +1814,10 @@ async fn handle_messages(
         }
     }
 
-    let mut request: AnthropicRequest = serde_json::from_value(request_json)
-        .map_err(|e| {
-            tracing::error!("❌ Failed to parse request: {}", e);
-            AppError::ParseError(format!("Invalid request format: {}", e))
-        })?;
+    let mut request: AnthropicRequest = serde_json::from_value(request_json).map_err(|e| {
+        tracing::error!("❌ Failed to parse request: {}", e);
+        AppError::ParseError(format!("Invalid request format: {}", e))
+    })?;
 
     let is_streaming = request.stream == Some(true);
 
@@ -1816,7 +1838,12 @@ async fn handle_messages(
     match dispatch::dispatch(&ctx, &mut request).await? {
         dispatch::DispatchResult::CacheHit(resp) => Ok(resp),
 
-        dispatch::DispatchResult::Streaming { stream, provider, actual_model, upstream_headers } => {
+        dispatch::DispatchResult::Streaming {
+            stream,
+            provider,
+            actual_model,
+            upstream_headers,
+        } => {
             let body_stream = stream.map_err(|e| {
                 error!("Stream error: {}", e);
                 std::io::Error::other(e.to_string())
@@ -1850,9 +1877,15 @@ async fn handle_messages(
             Ok(response)
         }
 
-        dispatch::DispatchResult::Complete { response, provider, actual_model, response_bytes } => {
+        dispatch::DispatchResult::Complete {
+            response,
+            provider,
+            actual_model,
+            response_bytes,
+        } => {
             if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
-                let body = response_bytes.unwrap_or_else(|| serde_json::to_vec(&response).unwrap_or_default());
+                let body = response_bytes
+                    .unwrap_or_else(|| serde_json::to_vec(&response).unwrap_or_default());
                 let mut resp = Response::builder()
                     .status(200)
                     .header("content-type", "application/json")
@@ -1871,12 +1904,9 @@ async fn handle_messages(
             }
         }
 
-        dispatch::DispatchResult::FanOut { response } => {
-            Ok(Json(response).into_response())
-        }
+        dispatch::DispatchResult::FanOut { response } => Ok(Json(response).into_response()),
     }
 }
-
 
 /// Handle /v1/messages/count_tokens requests
 async fn handle_count_tokens(

@@ -51,9 +51,7 @@ pub fn bind_reuseport_std(addr: &str) -> Result<std::net::TcpListener> {
         .bind(&socket_addr.into())
         .with_context(|| format!("Failed to bind to {}", addr))?;
 
-    socket
-        .listen(1024)
-        .context("Failed to listen on socket")?;
+    socket.listen(1024).context("Failed to listen on socket")?;
 
     Ok(socket.into())
 }

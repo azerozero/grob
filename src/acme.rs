@@ -31,9 +31,7 @@ pub fn resolve_cache_dir(config: &AcmeConfig) -> Result<PathBuf> {
 /// Returns an `axum_server::accept::Accept`-compatible acceptor.
 /// Spawns the ACME event loop in the background for certificate renewals.
 #[cfg(feature = "acme")]
-pub fn build_acme_acceptor(
-    config: &AcmeConfig,
-) -> Result<rustls_acme::axum::AxumAcceptor> {
+pub fn build_acme_acceptor(config: &AcmeConfig) -> Result<rustls_acme::axum::AxumAcceptor> {
     use futures::StreamExt;
 
     let cache_dir = resolve_cache_dir(config)?;

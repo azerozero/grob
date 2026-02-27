@@ -48,10 +48,7 @@ pub(crate) enum DispatchResult {
     Streaming {
         /// DLP + Tap wrapped stream (Anthropic SSE format).
         stream: Pin<
-            Box<
-                dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>>
-                    + Send,
-            >,
+            Box<dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send>,
         >,
         provider: String,
         actual_model: String,
@@ -67,9 +64,7 @@ pub(crate) enum DispatchResult {
         response_bytes: Option<Vec<u8>>,
     },
     /// Fan-out response (multiple providers called in parallel).
-    FanOut {
-        response: ProviderResponse,
-    },
+    FanOut { response: ProviderResponse },
 }
 
 /// Run the full dispatch pipeline: DLP → cache → route → provider loop.
@@ -141,7 +136,10 @@ pub(crate) async fn dispatch(
 }
 
 /// DLP input scanning with risk assessment and audit logging.
-fn scan_dlp_input(ctx: &DispatchContext<'_>, request: &mut AnthropicRequest) -> Result<(), AppError> {
+fn scan_dlp_input(
+    ctx: &DispatchContext<'_>,
+    request: &mut AnthropicRequest,
+) -> Result<(), AppError> {
     let Some(ref dlp_engine) = ctx.dlp else {
         return Ok(());
     };
@@ -150,8 +148,10 @@ fn scan_dlp_input(ctx: &DispatchContext<'_>, request: &mut AnthropicRequest) -> 
     }
 
     if let Err(block_err) = dlp_engine.sanitize_request_checked(request) {
-        let had_injection =
-            matches!(&block_err, crate::features::dlp::DlpBlockError::InjectionBlocked(_));
+        let had_injection = matches!(
+            &block_err,
+            crate::features::dlp::DlpBlockError::InjectionBlocked(_)
+        );
         let risk = crate::security::risk::assess_risk(1, true, had_injection, false);
 
         if ctx.inner.config.compliance.enabled && ctx.inner.config.compliance.risk_classification {
@@ -304,10 +304,7 @@ async fn dispatch_provider_loop(
         // Circuit breaker check
         if let Some(ref cb) = ctx.state.circuit_breakers {
             if !cb.can_execute(&mapping.provider).await {
-                info!(
-                    "⚡ Circuit breaker open for {}, skipping",
-                    mapping.provider
-                );
+                info!("⚡ Circuit breaker open for {}, skipping", mapping.provider);
                 metrics::counter!(
                     "grob_circuit_breaker_rejected_total",
                     "provider" => mapping.provider.clone()
@@ -318,7 +315,13 @@ async fn dispatch_provider_loop(
         }
 
         // Budget check
-        check_budget(ctx.state, ctx.inner, &mapping.provider, &decision.model_name).await?;
+        check_budget(
+            ctx.state,
+            ctx.inner,
+            &mapping.provider,
+            &decision.model_name,
+        )
+        .await?;
 
         let retry_info = if idx > 0 {
             format!(" [{}/{}]", idx + 1, sorted_mappings.len())
@@ -450,8 +453,7 @@ async fn dispatch_provider_loop(
 
     error!(
         request_id = ctx.req_id,
-        "❌ All provider mappings failed for model: {}",
-        decision.model_name
+        "❌ All provider mappings failed for model: {}", decision.model_name
     );
     Err(AppError::ProviderError(format!(
         "All {} provider mappings failed for model: {}",
@@ -489,8 +491,7 @@ async fn dispatch_streaming(
             // Wrap stream with DLP if enabled
             let stream: Pin<
                 Box<
-                    dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>>
-                        + Send,
+                    dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send,
                 >,
             > = if let Some(ref dlp_engine) = ctx.dlp {
                 if dlp_engine.config.scan_output {
@@ -508,8 +509,7 @@ async fn dispatch_streaming(
             // Wrap stream with Tap if enabled (after DLP)
             let stream: Pin<
                 Box<
-                    dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>>
-                        + Send,
+                    dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send,
                 >,
             > = if let Some(ref tap) = ctx.state.tap_sender {
                 let tap_req_id = uuid::Uuid::new_v4().to_string();
@@ -530,10 +530,8 @@ async fn dispatch_streaming(
                 stream
             };
 
-            let upstream_headers: Vec<(String, String)> = stream_response
-                .headers
-                .into_iter()
-                .collect();
+            let upstream_headers: Vec<(String, String)> =
+                stream_response.headers.into_iter().collect();
 
             Ok(DispatchResult::Streaming {
                 stream,
@@ -603,8 +601,7 @@ async fn dispatch_non_streaming(
 
                 // Calculate and log metrics
                 let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
-                let tok_s =
-                    (response.usage.output_tokens as f32 * 1000.0) / latency_ms as f32;
+                let tok_s = (response.usage.output_tokens as f32 * 1000.0) / latency_ms as f32;
                 let cost = calculate_cost(
                     ctx.state,
                     &mapping.actual_model,
@@ -711,10 +708,7 @@ async fn dispatch_non_streaming(
 
                 let is_rate_limit = matches!(
                     &e,
-                    crate::providers::error::ProviderError::ApiError {
-                        status: 429,
-                        ..
-                    }
+                    crate::providers::error::ProviderError::ApiError { status: 429, .. }
                 );
                 if is_rate_limit {
                     warn!("Provider {} rate limited", mapping.provider);
@@ -731,10 +725,7 @@ async fn dispatch_non_streaming(
                 .increment(1);
 
                 if retryable && attempt < MAX_RETRIES {
-                    warn!(
-                        "⚠️ Provider {} failed (retryable): {}",
-                        mapping.provider, e
-                    );
+                    warn!("⚠️ Provider {} failed (retryable): {}", mapping.provider, e);
                     last_error = Some(e);
                     continue;
                 }
@@ -764,10 +755,7 @@ fn handle_provider_error(
 ) {
     let is_rate_limit = matches!(
         e,
-        crate::providers::error::ProviderError::ApiError {
-            status: 429,
-            ..
-        }
+        crate::providers::error::ProviderError::ApiError { status: 429, .. }
     );
     if is_rate_limit {
         warn!("Provider {} rate limited, falling back", mapping.provider);

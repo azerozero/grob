@@ -32,8 +32,8 @@ async fn test_cache_miss_then_hit() {
     let cache = ResponseCache::new(100, 60, 1_000_000);
     let request = test_request("claude-3-5-sonnet", "Hello");
 
-    let key = ResponseCache::compute_key_from_request("tenant-1", &request)
-        .expect("should compute key");
+    let key =
+        ResponseCache::compute_key_from_request("tenant-1", &request).expect("should compute key");
 
     // First access: cache miss
     let miss = cache.get(&key).await;
@@ -62,12 +62,15 @@ async fn test_cache_different_tenants_independent() {
     let cache = ResponseCache::new(100, 60, 1_000_000);
     let request = test_request("claude-3-5-sonnet", "Hello");
 
-    let key_a = ResponseCache::compute_key_from_request("tenant-a", &request)
-        .expect("should compute key");
-    let key_b = ResponseCache::compute_key_from_request("tenant-b", &request)
-        .expect("should compute key");
+    let key_a =
+        ResponseCache::compute_key_from_request("tenant-a", &request).expect("should compute key");
+    let key_b =
+        ResponseCache::compute_key_from_request("tenant-b", &request).expect("should compute key");
 
-    assert_ne!(key_a, key_b, "Different tenants should have different cache keys");
+    assert_ne!(
+        key_a, key_b,
+        "Different tenants should have different cache keys"
+    );
 
     // Store for tenant A only
     cache
@@ -92,20 +95,23 @@ async fn test_cache_different_prompts_independent() {
     let req1 = test_request("claude-3-5-sonnet", "Hello");
     let req2 = test_request("claude-3-5-sonnet", "Goodbye");
 
-    let key1 = ResponseCache::compute_key_from_request("tenant", &req1)
-        .expect("should compute key");
-    let key2 = ResponseCache::compute_key_from_request("tenant", &req2)
-        .expect("should compute key");
+    let key1 =
+        ResponseCache::compute_key_from_request("tenant", &req1).expect("should compute key");
+    let key2 =
+        ResponseCache::compute_key_from_request("tenant", &req2).expect("should compute key");
 
-    assert_ne!(key1, key2, "Different prompts should have different cache keys");
+    assert_ne!(
+        key1, key2,
+        "Different prompts should have different cache keys"
+    );
 }
 
 #[tokio::test]
 async fn test_cache_invalidate_all() {
     let cache = ResponseCache::new(100, 60, 1_000_000);
     let request = test_request("claude-3-5-sonnet", "Hello");
-    let key = ResponseCache::compute_key_from_request("tenant", &request)
-        .expect("should compute key");
+    let key =
+        ResponseCache::compute_key_from_request("tenant", &request).expect("should compute key");
 
     cache
         .put(
@@ -119,11 +125,17 @@ async fn test_cache_invalidate_all() {
         )
         .await;
 
-    assert!(cache.get(&key).await.is_some(), "Should hit before invalidate");
+    assert!(
+        cache.get(&key).await.is_some(),
+        "Should hit before invalidate"
+    );
 
     cache.invalidate_all();
 
-    assert!(cache.get(&key).await.is_none(), "Should miss after invalidate");
+    assert!(
+        cache.get(&key).await.is_none(),
+        "Should miss after invalidate"
+    );
 }
 
 #[tokio::test]
@@ -131,8 +143,8 @@ async fn test_cache_hit_miss_counters() {
     let cache = ResponseCache::new(100, 60, 1_000_000);
 
     let request = test_request("claude-3-5-sonnet", "Hello");
-    let key = ResponseCache::compute_key_from_request("tenant", &request)
-        .expect("should compute key");
+    let key =
+        ResponseCache::compute_key_from_request("tenant", &request).expect("should compute key");
 
     // Miss
     let _ = cache.get(&key).await;

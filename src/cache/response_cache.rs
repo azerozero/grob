@@ -210,8 +210,14 @@ pub fn synthesize_anthropic_sse_from_cached(cached: &CachedResponse) -> Vec<u8> 
     let mut output = Vec::new();
 
     if let Ok(resp) = serde_json::from_slice::<serde_json::Value>(&cached.body) {
-        let model = resp.get("model").and_then(|v| v.as_str()).unwrap_or("unknown");
-        let msg_id = resp.get("id").and_then(|v| v.as_str()).unwrap_or("msg_cached");
+        let model = resp
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let msg_id = resp
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("msg_cached");
 
         // message_start
         let start = serde_json::json!({
@@ -270,9 +276,8 @@ pub fn synthesize_anthropic_sse_from_cached(cached: &CachedResponse) -> Vec<u8> 
             "delta": { "stop_reason": stop_reason },
             "usage": resp.get("usage").cloned().unwrap_or(serde_json::json!({}))
         });
-        output.extend_from_slice(
-            format!("event: message_delta\ndata: {}\n\n", msg_delta).as_bytes(),
-        );
+        output
+            .extend_from_slice(format!("event: message_delta\ndata: {}\n\n", msg_delta).as_bytes());
         output.extend_from_slice(
             format!(
                 "event: message_stop\ndata: {}\n\n",
@@ -295,7 +300,10 @@ pub fn synthesize_openai_sse_from_cached(cached: &CachedResponse) -> Vec<u8> {
             .get("id")
             .and_then(|v| v.as_str())
             .unwrap_or("chatcmpl-cached");
-        let model = resp.get("model").and_then(|v| v.as_str()).unwrap_or("unknown");
+        let model = resp
+            .get("model")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
 
         // Extract first choice content
         let content = resp
@@ -384,7 +392,15 @@ mod tests {
     #[test]
     fn test_compute_key_cacheable() {
         let messages = serde_json::json!([{"role": "user", "content": "hello"}]);
-        let key = ResponseCache::compute_key("tenant", "model", &messages, None, None, Some(1024), Some(0.0));
+        let key = ResponseCache::compute_key(
+            "tenant",
+            "model",
+            &messages,
+            None,
+            None,
+            Some(1024),
+            Some(0.0),
+        );
         assert!(key.is_some());
         assert_eq!(key.as_ref().unwrap().len(), 64); // SHA-256 hex
     }
@@ -392,7 +408,8 @@ mod tests {
     #[test]
     fn test_compute_key_not_cacheable() {
         let messages = serde_json::json!([{"role": "user", "content": "hello"}]);
-        let key = ResponseCache::compute_key("tenant", "model", &messages, None, None, None, Some(0.7));
+        let key =
+            ResponseCache::compute_key("tenant", "model", &messages, None, None, None, Some(0.7));
         assert!(key.is_none());
     }
 

@@ -313,19 +313,16 @@ pub async fn init_pricing_table() -> SharedPricingTable {
 }
 
 /// Static pricing lookup map for O(1) exact match.
-static PRICING_MAP: std::sync::LazyLock<std::collections::HashMap<&'static str, &'static ModelPricing>> =
-    std::sync::LazyLock::new(|| {
-        KNOWN_PRICING.iter().map(|p| (p.model, p)).collect()
-    });
+static PRICING_MAP: std::sync::LazyLock<
+    std::collections::HashMap<&'static str, &'static ModelPricing>,
+> = std::sync::LazyLock::new(|| KNOWN_PRICING.iter().map(|p| (p.model, p)).collect());
 
 /// Get pricing for a model from the static fallback table (case-insensitive)
 pub fn get_pricing(model: &str) -> Option<&'static ModelPricing> {
     // Try exact match first (O(1), no allocation)
     PRICING_MAP.get(model).copied().or_else(|| {
         let lower = model.to_lowercase();
-        KNOWN_PRICING
-            .iter()
-            .find(|p| lower.contains(p.model))
+        KNOWN_PRICING.iter().find(|p| lower.contains(p.model))
     })
 }
 

@@ -576,7 +576,6 @@ impl OAuthClient {
             anyhow!("No project ID available. Set GOOGLE_CLOUD_PROJECT environment variable.")
         })
     }
-
 }
 
 #[cfg(test)]
