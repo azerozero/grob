@@ -114,7 +114,11 @@ impl GrobStore {
     /// Load spend data (from in-memory cache for global, from db for tenants).
     pub fn load_spend(&self, tenant: Option<&str>) -> SpendData {
         if tenant.is_none() {
-            return self.spend_cache.lock().unwrap().clone();
+            return self
+                .spend_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
         }
         Self::load_spend_from_db(&self.db, tenant).unwrap_or_default()
     }
@@ -123,7 +127,7 @@ impl GrobStore {
     pub fn record_spend(&self, tenant: Option<&str>, amount: f64, provider: &str, model: &str) {
         // Update in-memory cache (always for global)
         if tenant.is_none() {
-            let mut cache = self.spend_cache.lock().unwrap();
+            let mut cache = self.spend_cache.lock().unwrap_or_else(|e| e.into_inner());
             let now = crate::features::token_pricing::spend::current_month();
             if cache.month != now {
                 *cache = SpendData::default();
@@ -156,7 +160,10 @@ impl GrobStore {
 
     fn flush_spend_for(&self, tenant: Option<&str>) {
         let data = if tenant.is_none() {
-            self.spend_cache.lock().unwrap().clone()
+            self.spend_cache
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
         } else {
             Self::load_spend_from_db(&self.db, tenant).unwrap_or_default()
         };
@@ -188,7 +195,6 @@ impl GrobStore {
     }
 
     /// Get an OAuth token by provider ID.
-    #[allow(dead_code)]
     pub fn get_oauth_token(&self, provider_id: &str) -> Option<OAuthToken> {
         let read_txn = self.db.begin_read().ok()?;
         let table = read_txn.open_table(OAUTH_TABLE).ok()?;
@@ -208,7 +214,6 @@ impl GrobStore {
     }
 
     /// List all provider IDs that have tokens.
-    #[allow(dead_code)]
     pub fn list_oauth_providers(&self) -> Vec<String> {
         let read_txn = match self.db.begin_read() {
             Ok(t) => t,

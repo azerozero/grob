@@ -1,12 +1,13 @@
 use super::gemini::GeminiProvider;
 use super::{
     error::ProviderError, AnthropicCompatibleProvider, AnthropicProvider, OpenAIProvider,
-    ProviderConfig,
+    ProviderConfig, ProviderParams,
 };
 use crate::auth::TokenStore;
-use crate::cli::ModelConfig;
+use crate::cli::{ModelConfig, TimeoutConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Default base URL for OpenAI-compatible API
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -31,174 +32,201 @@ impl ProviderRegistry {
         }
     }
 
+    /// Build standard ProviderParams from a config entry.
+    fn build_params(
+        config: &ProviderConfig,
+        api_key: String,
+        default_base_url: &str,
+        token_store: &Option<TokenStore>,
+        api_timeout: Duration,
+        connect_timeout: Duration,
+    ) -> ProviderParams {
+        ProviderParams {
+            name: config.name.clone(),
+            api_key,
+            base_url: Some(
+                config
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| default_base_url.to_string()),
+            ),
+            models: config.models.clone(),
+            oauth_provider: config.oauth_provider.clone(),
+            token_store: token_store.clone(),
+            api_timeout,
+            connect_timeout,
+        }
+    }
+
+    /// Resolve the API key from a provider config.
+    fn resolve_api_key(config: &ProviderConfig) -> Result<String, ProviderError> {
+        match &config.auth_type {
+            super::AuthType::ApiKey => config.api_key.clone().ok_or_else(|| {
+                ProviderError::ConfigError(format!(
+                    "Provider '{}' requires api_key for ApiKey auth",
+                    config.name
+                ))
+            }),
+            super::AuthType::OAuth => Ok(config
+                .oauth_provider
+                .clone()
+                .unwrap_or_else(|| config.name.clone())),
+        }
+    }
+
+    /// Create a provider instance based on provider type.
+    fn create_provider(
+        config: &ProviderConfig,
+        api_key: String,
+        token_store: &Option<TokenStore>,
+        api_timeout: Duration,
+        connect_timeout: Duration,
+    ) -> Result<Box<dyn AnthropicProvider>, ProviderError> {
+        match config.provider_type.as_str() {
+            "openai" => {
+                let headers: Vec<(String, String)> = config
+                    .headers
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+                let params = Self::build_params(
+                    config,
+                    api_key,
+                    DEFAULT_OPENAI_BASE_URL,
+                    token_store,
+                    api_timeout,
+                    connect_timeout,
+                );
+                Ok(Box::new(OpenAIProvider::with_headers(params, headers)))
+            }
+
+            "openrouter" => {
+                let params = Self::build_params(
+                    config,
+                    api_key,
+                    "https://openrouter.ai/api/v1",
+                    token_store,
+                    api_timeout,
+                    connect_timeout,
+                );
+                Ok(Box::new(OpenAIProvider::with_headers(
+                    params,
+                    vec![
+                        ("HTTP-Referer".to_string(), REPO_URL.to_string()),
+                        ("X-Title".to_string(), "Claude Code Mux".to_string()),
+                    ],
+                )))
+            }
+
+            "anthropic" => {
+                let params = Self::build_params(
+                    config,
+                    api_key,
+                    "https://api.anthropic.com",
+                    token_store,
+                    api_timeout,
+                    connect_timeout,
+                );
+                Ok(Box::new(AnthropicCompatibleProvider::new(params)))
+            }
+
+            "z.ai" | "minimax" | "zenmux" | "kimi-coding" => {
+                let base_url = match config.provider_type.as_str() {
+                    "z.ai" => "https://api.z.ai/api/anthropic",
+                    "minimax" => "https://api.minimax.io/anthropic",
+                    "zenmux" => "https://zenmux.ai/api/anthropic",
+                    "kimi-coding" => "https://api.kimi.com/coding",
+                    _ => unreachable!(),
+                };
+                Ok(Box::new(AnthropicCompatibleProvider::named(
+                    &config.provider_type,
+                    base_url,
+                    api_key,
+                    config.models.clone(),
+                    token_store.clone(),
+                    api_timeout,
+                    connect_timeout,
+                )))
+            }
+
+            "gemini" => {
+                let gemini_api_key = if config.auth_type == super::AuthType::ApiKey {
+                    api_key
+                } else {
+                    String::new()
+                };
+                let params = Self::build_params(
+                    config,
+                    gemini_api_key,
+                    "",
+                    token_store,
+                    api_timeout,
+                    connect_timeout,
+                );
+                // build_params sets base_url to Some("") — override with config's value
+                let mut params = params;
+                params.base_url = config.base_url.clone();
+                Ok(Box::new(GeminiProvider::new(
+                    params,
+                    HashMap::new(),
+                    None,
+                    None,
+                )))
+            }
+
+            "vertex-ai" => {
+                let mut params = Self::build_params(
+                    config,
+                    String::new(),
+                    "",
+                    token_store,
+                    api_timeout,
+                    connect_timeout,
+                );
+                params.base_url = config.base_url.clone();
+                params.oauth_provider = None;
+                Ok(Box::new(GeminiProvider::new(
+                    params,
+                    HashMap::new(),
+                    config.project_id.clone(),
+                    config.location.clone(),
+                )))
+            }
+
+            other => Err(ProviderError::ConfigError(format!(
+                "Unknown provider type: {}",
+                other
+            ))),
+        }
+    }
+
     /// Load providers from configuration with model mappings
     pub fn from_configs_with_models(
         configs: &[ProviderConfig],
         token_store: Option<TokenStore>,
         models: &[ModelConfig],
+        timeouts: &TimeoutConfig,
     ) -> Result<Self, ProviderError> {
         let mut registry = Self::new();
+        let api_timeout = Duration::from_millis(timeouts.api_timeout_ms);
+        let connect_timeout = Duration::from_millis(timeouts.connect_timeout_ms);
 
         for config in configs {
-            // Skip disabled providers
             if !config.is_enabled() {
                 continue;
             }
 
-            // Get API key - required for API key auth, skipped for OAuth
-            let api_key = match &config.auth_type {
-                super::AuthType::ApiKey => config.api_key.clone().ok_or_else(|| {
-                    ProviderError::ConfigError(format!(
-                        "Provider '{}' requires api_key for ApiKey auth",
-                        config.name
-                    ))
-                })?,
-                super::AuthType::OAuth => {
-                    // OAuth providers will handle authentication differently
-                    // For now, use a placeholder - will be replaced with token
-                    config
-                        .oauth_provider
-                        .clone()
-                        .unwrap_or_else(|| config.name.clone())
-                }
-            };
+            let api_key = Self::resolve_api_key(config)?;
+            let provider =
+                Self::create_provider(config, api_key, &token_store, api_timeout, connect_timeout)?;
 
-            // Create provider instance based on type
-            let provider: Box<dyn AnthropicProvider> = match config.provider_type.as_str() {
-                // OpenAI-compatible providers (unified with custom headers support)
-                "openai" => {
-                    let base_url = config
-                        .base_url
-                        .clone()
-                        .unwrap_or_else(|| DEFAULT_OPENAI_BASE_URL.to_string());
-                    let custom_headers: Vec<(String, String)> = config
-                        .headers
-                        .clone()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .collect();
-
-                    Box::new(OpenAIProvider::with_headers(
-                        config.name.clone(),
-                        api_key,
-                        base_url,
-                        config.models.clone(),
-                        custom_headers,
-                        config.oauth_provider.clone(),
-                        token_store.clone(),
-                    ))
-                }
-
-                // OpenRouter (OpenAI-compatible)
-                // Note: OpenRouter's Anthropic-compatible endpoint only supports Claude models,
-                // so we use the OpenAI endpoint to support all models (Kimi, DeepSeek, etc.)
-                "openrouter" => Box::new(OpenAIProvider::with_headers(
-                    config.name.clone(),
-                    api_key,
-                    config
-                        .base_url
-                        .clone()
-                        .unwrap_or_else(|| "https://openrouter.ai/api/v1".to_string()),
-                    config.models.clone(),
-                    vec![
-                        ("HTTP-Referer".to_string(), REPO_URL.to_string()),
-                        ("X-Title".to_string(), "Claude Code Mux".to_string()),
-                    ],
-                    config.oauth_provider.clone(),
-                    token_store.clone(),
-                )),
-
-                // Anthropic-compatible providers
-                "anthropic" => Box::new(AnthropicCompatibleProvider::new(
-                    config.name.clone(),
-                    api_key,
-                    config
-                        .base_url
-                        .clone()
-                        .unwrap_or_else(|| "https://api.anthropic.com".to_string()),
-                    config.models.clone(),
-                    config.oauth_provider.clone(),
-                    token_store.clone(),
-                )),
-                "z.ai" => Box::new(AnthropicCompatibleProvider::zai(
-                    api_key,
-                    config.models.clone(),
-                    token_store.clone(),
-                )),
-                "minimax" => Box::new(AnthropicCompatibleProvider::minimax(
-                    api_key,
-                    config.models.clone(),
-                    token_store.clone(),
-                )),
-                "zenmux" => Box::new(AnthropicCompatibleProvider::zenmux(
-                    api_key,
-                    config.models.clone(),
-                    token_store.clone(),
-                )),
-                "kimi-coding" => Box::new(AnthropicCompatibleProvider::kimi_coding(
-                    api_key,
-                    config.models.clone(),
-                    token_store.clone(),
-                )),
-
-                // Google Gemini (supports OAuth, API Key, Vertex AI)
-                "gemini" => {
-                    let api_key_opt = if config.auth_type == super::AuthType::ApiKey {
-                        Some(api_key.clone())
-                    } else {
-                        None
-                    };
-
-                    Box::new(GeminiProvider::new(
-                        config.name.clone(),
-                        api_key_opt,
-                        config.base_url.clone(),
-                        config.models.clone(),
-                        HashMap::new(), // custom headers
-                        config.oauth_provider.clone(),
-                        token_store.clone(),
-                        None, // No project_id/location for Gemini (AI Studio/OAuth only)
-                        None,
-                    ))
-                }
-
-                "vertex-ai" => {
-                    // Vertex AI provider (separate from Gemini)
-                    // Uses Google Cloud Vertex AI with ADC authentication
-                    Box::new(GeminiProvider::new(
-                        config.name.clone(),
-                        None, // No API key for Vertex AI (uses ADC)
-                        config.base_url.clone(),
-                        config.models.clone(),
-                        HashMap::new(), // custom headers
-                        None,           // No OAuth for Vertex AI
-                        token_store.clone(),
-                        config.project_id.clone(), // GCP project ID
-                        config.location.clone(),   // GCP location
-                    ))
-                }
-
-                other => {
-                    return Err(ProviderError::ConfigError(format!(
-                        "Unknown provider type: {}",
-                        other
-                    )));
-                }
-            };
-
-            // NOTE: models field in provider config is deprecated
-            // Model mappings are now defined in [[models]] section
-            // We only register the provider by name
-
-            // Add provider to registry
             registry
                 .providers
                 .insert(config.name.clone(), Arc::from(provider));
         }
 
-        // Populate model_to_provider mappings from model configurations
         for model in models {
-            // Map each model name to its first (highest priority) provider
             if let Some(first_mapping) = model.mappings.first() {
                 registry
                     .model_to_provider
@@ -244,6 +272,28 @@ impl ProviderRegistry {
     /// List all providers
     pub fn list_providers(&self) -> Vec<String> {
         self.providers.keys().cloned().collect()
+    }
+
+    /// Pre-warm TLS connections to all providers (fire-and-forget).
+    /// Spawns a background task per provider to open a TCP+TLS connection.
+    pub fn warmup_connections(self: &Arc<Self>) {
+        let warmup_client = super::build_provider_client(Duration::from_secs(5));
+
+        for (name, provider) in &self.providers {
+            if let Some(base_url) = provider.base_url() {
+                let url = base_url.to_string();
+                let name = name.clone();
+                let client = warmup_client.clone();
+                tokio::spawn(async move {
+                    match client.head(&url).send().await {
+                        Ok(_) => tracing::debug!("Warmed up connection to {}", name),
+                        Err(e) => {
+                            tracing::debug!("Warmup to {} failed (non-fatal): {}", name, e)
+                        }
+                    }
+                });
+            }
+        }
     }
 }
 
@@ -339,8 +389,10 @@ mod tests {
 
         // Actually test the method we implemented
         let registry = ProviderRegistry::from_configs_with_models(
-            &providers, None, // token_store
+            &providers,
+            None, // token_store
             &models,
+            &TimeoutConfig::default(),
         )
         .unwrap();
 

@@ -3,6 +3,7 @@ pub mod acme;
 pub mod auth;
 pub mod cache;
 pub mod cli;
+pub mod commands;
 pub mod features;
 pub mod instance;
 pub mod message_tracing;

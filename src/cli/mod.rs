@@ -5,7 +5,7 @@ use crate::providers::ProviderConfig;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Where the configuration comes from: local file or remote URL
 #[derive(Debug, Clone)]
@@ -40,7 +40,7 @@ fn default_warn_percent() -> u32 {
 
 /// Security configuration (wired into middleware stack)
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct SecurityTomlConfig {
+pub struct SecurityConfig {
     /// Master switch for security middleware
     #[serde(default = "default_true")]
     pub enabled: bool,
@@ -70,7 +70,7 @@ pub struct SecurityTomlConfig {
     pub audit_hmac_key_path: String,
 }
 
-impl Default for SecurityTomlConfig {
+impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
             enabled: true,
@@ -192,7 +192,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub tap: TapConfig,
     #[serde(default)]
-    pub security: SecurityTomlConfig,
+    pub security: SecurityConfig,
     /// LLM response cache configuration
     #[serde(default)]
     pub cache: CacheConfig,
@@ -505,8 +505,6 @@ pub struct ModelMapping {
     pub inject_continuation_prompt: bool,
 }
 
-impl ModelConfig {}
-
 impl AppConfig {
     /// Get default config file path
     /// Returns ~/.grob/config.toml (cross-platform)
@@ -523,7 +521,7 @@ impl AppConfig {
     }
 
     /// Load configuration from a TOML file
-    pub fn from_file(path: &PathBuf) -> Result<Self> {
+    pub fn from_file(path: &Path) -> Result<Self> {
         // Check if file exists, if not create a default one
         if !path.exists() {
             Self::create_default_config(path)?;
@@ -702,7 +700,7 @@ impl AppConfig {
     }
 
     /// Create a default configuration file or migrate existing one
-    fn create_default_config(path: &PathBuf) -> Result<()> {
+    fn create_default_config(path: &Path) -> Result<()> {
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
@@ -1042,7 +1040,7 @@ think = "my-think-model"
         let mut temp_file = NamedTempFile::new().unwrap();
         temp_file.write_all(config_content.as_bytes()).unwrap();
 
-        let config = AppConfig::from_file(&temp_file.path().to_path_buf()).unwrap();
+        let config = AppConfig::from_file(temp_file.path()).unwrap();
 
         assert_eq!(config.server.port, 3456);
         assert_eq!(config.router.default, "my-default-model");

@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 
 /// OpenAI Chat Completions request format
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct OpenAIRequest {
     pub model: String,
     pub messages: Vec<OpenAIMessage>,
@@ -33,7 +32,6 @@ pub struct OpenAIMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<OpenAIContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[allow(dead_code)]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<OpenAIToolCallInput>>,
@@ -43,7 +41,6 @@ pub struct OpenAIMessage {
 
 /// Tool call in an incoming request (assistant message)
 #[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
 pub struct OpenAIToolCallInput {
     pub id: String,
     pub r#type: Option<String>,
@@ -185,6 +182,110 @@ fn openai_content_to_anthropic(content: Option<OpenAIContent>) -> MessageContent
     }
 }
 
+/// Extract text from OpenAI content (string or parts).
+fn extract_text(content: OpenAIContent) -> String {
+    match content {
+        OpenAIContent::String(s) => s,
+        OpenAIContent::Parts(parts) => parts
+            .iter()
+            .filter_map(|p| {
+                if let OpenAIContentPart::Text { text } = p {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    }
+}
+
+/// Convert an OpenAI assistant message (with optional tool_calls) to Anthropic blocks.
+fn convert_assistant_message(msg: OpenAIMessage) -> crate::models::Message {
+    let mut blocks: Vec<ContentBlock> = Vec::new();
+
+    if let Some(openai_content) = msg.content {
+        match openai_content {
+            OpenAIContent::String(text) if !text.is_empty() => {
+                blocks.push(ContentBlock::text(text, None));
+            }
+            OpenAIContent::Parts(parts) => {
+                for part in &parts {
+                    if let OpenAIContentPart::Text { text } = part {
+                        if !text.is_empty() {
+                            blocks.push(ContentBlock::text(text.clone(), None));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(tool_calls) = msg.tool_calls {
+        for tc in tool_calls {
+            let input: serde_json::Value = serde_json::from_str(&tc.function.arguments)
+                .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+            blocks.push(ContentBlock::tool_use(tc.id, tc.function.name, input));
+        }
+    }
+
+    if blocks.is_empty() {
+        blocks.push(ContentBlock::text(String::new(), None));
+    }
+
+    crate::models::Message {
+        role: "assistant".to_string(),
+        content: MessageContent::Blocks(blocks),
+    }
+}
+
+/// Convert OpenAI tools JSON to Anthropic Tool format.
+fn convert_tools(tools: &[serde_json::Value]) -> Vec<Tool> {
+    tools
+        .iter()
+        .filter_map(|t| {
+            let func = t.get("function")?;
+            Some(Tool {
+                r#type: None,
+                name: func
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                description: func
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                input_schema: func.get("parameters").cloned(),
+            })
+        })
+        .collect()
+}
+
+/// Convert OpenAI tool_choice to Anthropic format.
+fn convert_tool_choice(tc: &serde_json::Value) -> Option<serde_json::Value> {
+    if let Some(s) = tc.as_str() {
+        match s {
+            "auto" | "none" => Some(serde_json::json!({"type": "auto"})),
+            "required" => Some(serde_json::json!({"type": "any"})),
+            _ => None,
+        }
+    } else if let Some(obj) = tc.as_object() {
+        if obj.get("type").and_then(|v| v.as_str()) == Some("function") {
+            let name = obj
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("");
+            Some(serde_json::json!({"type": "tool", "name": name}))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
 /// Transform OpenAI request to Anthropic format
 pub fn transform_openai_to_anthropic(
     openai_req: OpenAIRequest,
@@ -192,96 +293,25 @@ pub fn transform_openai_to_anthropic(
     let mut messages = Vec::new();
     let mut system_prompt: Option<SystemPrompt> = None;
 
-    // Process messages
     for msg in openai_req.messages {
         match msg.role.as_str() {
             "system" => {
-                // Extract system message
                 if let Some(content) = msg.content {
-                    let text = match content {
-                        OpenAIContent::String(s) => s,
-                        OpenAIContent::Parts(parts) => parts
-                            .iter()
-                            .filter_map(|p| {
-                                if let OpenAIContentPart::Text { text } = p {
-                                    Some(text.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n"),
-                    };
-                    system_prompt = Some(SystemPrompt::Text(text));
+                    system_prompt = Some(SystemPrompt::Text(extract_text(content)));
                 }
             }
             "user" => {
-                // Convert user messages
-                let content = openai_content_to_anthropic(msg.content);
                 messages.push(crate::models::Message {
                     role: "user".to_string(),
-                    content,
+                    content: openai_content_to_anthropic(msg.content),
                 });
             }
             "assistant" => {
-                // Convert assistant messages — may include tool_calls
-                let mut blocks: Vec<ContentBlock> = Vec::new();
-
-                // Text content
-                if let Some(openai_content) = msg.content {
-                    match openai_content {
-                        OpenAIContent::String(text) if !text.is_empty() => {
-                            blocks.push(ContentBlock::text(text, None));
-                        }
-                        OpenAIContent::Parts(parts) => {
-                            for part in &parts {
-                                if let OpenAIContentPart::Text { text } = part {
-                                    if !text.is_empty() {
-                                        blocks.push(ContentBlock::text(text.clone(), None));
-                                    }
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Tool calls → ToolUse blocks
-                if let Some(tool_calls) = msg.tool_calls {
-                    for tc in tool_calls {
-                        let input: serde_json::Value = serde_json::from_str(&tc.function.arguments)
-                            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-                        blocks.push(ContentBlock::tool_use(tc.id, tc.function.name, input));
-                    }
-                }
-
-                if blocks.is_empty() {
-                    blocks.push(ContentBlock::text(String::new(), None));
-                }
-
-                messages.push(crate::models::Message {
-                    role: "assistant".to_string(),
-                    content: MessageContent::Blocks(blocks),
-                });
+                messages.push(convert_assistant_message(msg));
             }
             "tool" => {
-                // Tool result → Anthropic tool_result block inside a user message
                 let tool_use_id = msg.tool_call_id.unwrap_or_default();
-                let text = match msg.content {
-                    Some(OpenAIContent::String(s)) => s,
-                    Some(OpenAIContent::Parts(parts)) => parts
-                        .iter()
-                        .filter_map(|p| {
-                            if let OpenAIContentPart::Text { text } = p {
-                                Some(text.clone())
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                    None => String::new(),
-                };
+                let text = msg.content.map(extract_text).unwrap_or_default();
                 let block = ContentBlock::Known(KnownContentBlock::ToolResult {
                     tool_use_id,
                     content: ToolResultContent::Text(text),
@@ -293,7 +323,6 @@ pub fn transform_openai_to_anthropic(
                 if let Some(last) = messages.last_mut() {
                     if last.role == "user" {
                         if let MessageContent::Blocks(ref mut existing) = &mut last.content {
-                            // Only merge if last message contains only tool_result blocks
                             if existing.iter().all(|b| b.is_tool_result()) {
                                 existing.push(block);
                                 continue;
@@ -329,49 +358,11 @@ pub fn transform_openai_to_anthropic(
         stream: openai_req.stream,
         metadata: None,
         system: system_prompt,
-        tools: openai_req.tools.as_ref().map(|tools| {
-            tools
-                .iter()
-                .filter_map(|t| {
-                    let func = t.get("function")?;
-                    Some(Tool {
-                        r#type: None,
-                        name: func
-                            .get("name")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string()),
-                        description: func
-                            .get("description")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string()),
-                        input_schema: func.get("parameters").cloned(),
-                    })
-                })
-                .collect()
-        }),
-        tool_choice: openai_req.tool_choice.as_ref().and_then(|tc| {
-            if let Some(s) = tc.as_str() {
-                match s {
-                    "auto" => Some(serde_json::json!({"type": "auto"})),
-                    "required" => Some(serde_json::json!({"type": "any"})),
-                    "none" => Some(serde_json::json!({"type": "auto"})),
-                    _ => None,
-                }
-            } else if let Some(obj) = tc.as_object() {
-                if obj.get("type").and_then(|v| v.as_str()) == Some("function") {
-                    let name = obj
-                        .get("function")
-                        .and_then(|f| f.get("name"))
-                        .and_then(|n| n.as_str())
-                        .unwrap_or("");
-                    Some(serde_json::json!({"type": "tool", "name": name}))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }),
+        tools: openai_req.tools.as_ref().map(|tools| convert_tools(tools)),
+        tool_choice: openai_req
+            .tool_choice
+            .as_ref()
+            .and_then(convert_tool_choice),
     })
 }
 
@@ -432,7 +423,7 @@ pub fn transform_anthropic_to_openai(
         object: "chat.completion".to_string(),
         created: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs(),
         model,
         choices: vec![OpenAIChoice {
@@ -550,145 +541,132 @@ impl AnthropicToOpenAIStream {
         }
     }
 
+    fn handle_content_block_start(&mut self, data: &str) -> Option<Bytes> {
+        let json: serde_json::Value = serde_json::from_str(data).ok()?;
+        let cb = json.get("content_block")?;
+        if cb.get("type").and_then(|v| v.as_str()) != Some("tool_use") {
+            return None;
+        }
+        let id = cb
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let name = cb
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let idx = self.tool_call_index;
+        self.tool_call_index += 1;
+        let chunk = self.base_chunk(
+            OpenAIStreamDelta {
+                role: None,
+                content: None,
+                tool_calls: Some(vec![OpenAIStreamToolCallDelta {
+                    index: idx,
+                    id: Some(id),
+                    r#type: Some("function".into()),
+                    function: Some(OpenAIStreamFunctionDelta {
+                        name: Some(name),
+                        arguments: None,
+                    }),
+                }]),
+            },
+            None,
+        );
+        Some(self.make_sse(&chunk))
+    }
+
+    fn handle_content_block_delta(&mut self, data: &str) -> Option<Bytes> {
+        let json: serde_json::Value = serde_json::from_str(data).ok()?;
+        let delta = json.get("delta")?;
+        let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match delta_type {
+            "text_delta" => {
+                let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let chunk = self.base_chunk(
+                    OpenAIStreamDelta {
+                        role: None,
+                        content: Some(text.to_string()),
+                        tool_calls: None,
+                    },
+                    None,
+                );
+                Some(self.make_sse(&chunk))
+            }
+            "input_json_delta" => {
+                let partial = delta
+                    .get("partial_json")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let idx = self.tool_call_index.saturating_sub(1);
+                let chunk = self.base_chunk(
+                    OpenAIStreamDelta {
+                        role: None,
+                        content: None,
+                        tool_calls: Some(vec![OpenAIStreamToolCallDelta {
+                            index: idx,
+                            id: None,
+                            r#type: None,
+                            function: Some(OpenAIStreamFunctionDelta {
+                                name: None,
+                                arguments: Some(partial.to_string()),
+                            }),
+                        }]),
+                    },
+                    None,
+                );
+                Some(self.make_sse(&chunk))
+            }
+            _ => None,
+        }
+    }
+
+    fn handle_message_delta(&mut self, data: &str) -> Option<Bytes> {
+        let json: serde_json::Value = serde_json::from_str(data).ok()?;
+        let d = json.get("delta")?;
+        let stop = d
+            .get("stop_reason")
+            .and_then(|v| v.as_str())
+            .map(|r| match r {
+                "end_turn" | "stop_sequence" => "stop".to_string(),
+                "max_tokens" => "length".to_string(),
+                "tool_use" => "tool_calls".to_string(),
+                other => other.to_string(),
+            });
+        stop.as_ref()?;
+        let chunk = self.base_chunk(
+            OpenAIStreamDelta {
+                role: None,
+                content: None,
+                tool_calls: None,
+            },
+            stop,
+        );
+        Some(self.make_sse(&chunk))
+    }
+
     /// Transform a single Anthropic SSE event → bytes for the OpenAI client (or None to skip).
     pub fn transform_event(&mut self, event: &SseEvent) -> Option<Bytes> {
-        let event_type = event.event.as_deref()?;
-
-        match event_type {
-            "message_start" => {
-                if !self.sent_role {
-                    self.sent_role = true;
-                    let chunk = self.base_chunk(
-                        OpenAIStreamDelta {
-                            role: Some("assistant".into()),
-                            content: None,
-                            tool_calls: None,
-                        },
-                        None,
-                    );
-                    return Some(self.make_sse(&chunk));
-                }
-                None
+        match event.event.as_deref()? {
+            "message_start" if !self.sent_role => {
+                self.sent_role = true;
+                let chunk = self.base_chunk(
+                    OpenAIStreamDelta {
+                        role: Some("assistant".into()),
+                        content: None,
+                        tool_calls: None,
+                    },
+                    None,
+                );
+                Some(self.make_sse(&chunk))
             }
-            "content_block_start" => {
-                // Parse to detect tool_use blocks
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&event.data) {
-                    if let Some(cb) = json.get("content_block") {
-                        if cb.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
-                            let id = cb
-                                .get("id")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            let name = cb
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            let idx = self.tool_call_index;
-                            self.tool_call_index += 1;
-                            let chunk = self.base_chunk(
-                                OpenAIStreamDelta {
-                                    role: None,
-                                    content: None,
-                                    tool_calls: Some(vec![OpenAIStreamToolCallDelta {
-                                        index: idx,
-                                        id: Some(id),
-                                        r#type: Some("function".into()),
-                                        function: Some(OpenAIStreamFunctionDelta {
-                                            name: Some(name),
-                                            arguments: None,
-                                        }),
-                                    }]),
-                                },
-                                None,
-                            );
-                            return Some(self.make_sse(&chunk));
-                        }
-                    }
-                }
-                None
-            }
-            "content_block_delta" => {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&event.data) {
-                    if let Some(delta) = json.get("delta") {
-                        let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                        match delta_type {
-                            "text_delta" => {
-                                let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                                let chunk = self.base_chunk(
-                                    OpenAIStreamDelta {
-                                        role: None,
-                                        content: Some(text.to_string()),
-                                        tool_calls: None,
-                                    },
-                                    None,
-                                );
-                                return Some(self.make_sse(&chunk));
-                            }
-                            "input_json_delta" => {
-                                let partial = delta
-                                    .get("partial_json")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("");
-                                let idx = if self.tool_call_index > 0 {
-                                    self.tool_call_index - 1
-                                } else {
-                                    0
-                                };
-                                let chunk = self.base_chunk(
-                                    OpenAIStreamDelta {
-                                        role: None,
-                                        content: None,
-                                        tool_calls: Some(vec![OpenAIStreamToolCallDelta {
-                                            index: idx,
-                                            id: None,
-                                            r#type: None,
-                                            function: Some(OpenAIStreamFunctionDelta {
-                                                name: None,
-                                                arguments: Some(partial.to_string()),
-                                            }),
-                                        }]),
-                                    },
-                                    None,
-                                );
-                                return Some(self.make_sse(&chunk));
-                            }
-                            _ => {} // skip thinking_delta etc.
-                        }
-                    }
-                }
-                None
-            }
-            "message_delta" => {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&event.data) {
-                    if let Some(d) = json.get("delta") {
-                        let stop = d
-                            .get("stop_reason")
-                            .and_then(|v| v.as_str())
-                            .map(|r| match r {
-                                "end_turn" | "stop_sequence" => "stop".to_string(),
-                                "max_tokens" => "length".to_string(),
-                                "tool_use" => "tool_calls".to_string(),
-                                other => other.to_string(),
-                            });
-                        if stop.is_some() {
-                            let chunk = self.base_chunk(
-                                OpenAIStreamDelta {
-                                    role: None,
-                                    content: None,
-                                    tool_calls: None,
-                                },
-                                stop,
-                            );
-                            return Some(self.make_sse(&chunk));
-                        }
-                    }
-                }
-                None
-            }
+            "content_block_start" => self.handle_content_block_start(&event.data),
+            "content_block_delta" => self.handle_content_block_delta(&event.data),
+            "message_delta" => self.handle_message_delta(&event.data),
             "message_stop" => Some(Bytes::from("data: [DONE]\n\n")),
-            _ => None, // content_block_stop, ping, etc.
+            _ => None,
         }
     }
 

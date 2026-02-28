@@ -5,14 +5,12 @@ use grob::security::{
     apply_security_headers, CircuitBreakerRegistry, CircuitState, RateLimitConfig, RateLimitKey,
     RateLimiter, SecurityHeadersConfig,
 };
-use std::time::Duration;
 
 #[tokio::test]
 async fn test_rate_limiting_returns_429_after_burst() {
     let limiter = RateLimiter::new(RateLimitConfig {
         requests_per_second: 10,
         burst: 5,
-        _window: Duration::from_secs(60),
     });
 
     let key = RateLimitKey::Tenant("test-tenant".to_string());
@@ -104,7 +102,6 @@ async fn test_rate_limit_per_tenant_isolation() {
     let limiter = RateLimiter::new(RateLimitConfig {
         requests_per_second: 10,
         burst: 3,
-        _window: Duration::from_secs(60),
     });
 
     let tenant_a = RateLimitKey::Tenant("tenant-a".to_string());

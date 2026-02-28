@@ -1,21 +1,20 @@
-use super::{AnthropicProvider, ProviderError, ProviderResponse, StreamResponse, Usage};
-use crate::auth::{OAuthClient, OAuthConfig, TokenStore};
-use crate::models::{
-    AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt,
+use super::{
+    build_provider_client, AnthropicProvider, ProviderError, ProviderResponse, StreamResponse,
+    Usage,
 };
+use crate::auth::{OAuthConfig, TokenStore};
+use crate::models::{AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent};
 use async_trait::async_trait;
 use reqwest::Client;
-use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 /// Google Gemini provider supporting three authentication methods:
 /// 1. OAuth 2.0 (Google AI Pro/Ultra) - Uses Code Assist API
 /// 2. API Key (Google AI Studio) - Uses public Gemini API
 /// 3. Vertex AI (Google Cloud) - Uses Vertex AI API
 pub struct GeminiProvider {
-    #[allow(dead_code)]
-    pub name: String,
     pub api_key: Option<String>,
     pub base_url: String,
     pub models: Vec<String>,
@@ -25,8 +24,10 @@ pub struct GeminiProvider {
     pub project_id: Option<String>,
     pub location: Option<String>,
     // OAuth fields
-    pub oauth_provider_id: Option<String>,
+    pub oauth_provider: Option<String>,
     pub token_store: Option<TokenStore>,
+    /// Per-request timeout from server config
+    pub api_timeout: Duration,
 }
 
 /// Remove JSON Schema metadata fields that Gemini API doesn't support
@@ -59,55 +60,48 @@ fn clean_json_schema(value: &mut serde_json::Value) {
 }
 
 impl GeminiProvider {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        name: String,
-        api_key: Option<String>,
-        base_url: Option<String>,
-        models: Vec<String>,
+        params: super::ProviderParams,
         custom_headers: HashMap<String, String>,
-        oauth_provider_id: Option<String>,
-        token_store: Option<TokenStore>,
         project_id: Option<String>,
         location: Option<String>,
     ) -> Self {
-        let base_url = base_url.unwrap_or_else(|| {
-            if oauth_provider_id.is_some() {
-                // Code Assist API (OAuth)
+        let api_key = if params.api_key.is_empty() {
+            None
+        } else {
+            Some(params.api_key)
+        };
+
+        let base_url = params.base_url.unwrap_or_else(|| {
+            if params.oauth_provider.is_some() {
                 "https://cloudcode-pa.googleapis.com/v1internal".to_string()
             } else if project_id.is_some() && location.is_some() {
-                // Vertex AI
                 format!(
                     "https://{}-aiplatform.googleapis.com/v1",
                     location.as_deref().unwrap_or("us-central1")
                 )
             } else {
-                // Google AI (API Key)
                 "https://generativelanguage.googleapis.com/v1beta".to_string()
             }
         });
 
         Self {
-            name,
             api_key,
             base_url,
-            models,
-            client: Client::builder()
-                .pool_max_idle_per_host(20)
-                .pool_idle_timeout(std::time::Duration::from_secs(90))
-                .build()
-                .unwrap_or_else(|_| Client::new()),
+            models: params.models,
+            client: build_provider_client(params.connect_timeout),
             custom_headers,
             project_id,
             location,
-            oauth_provider_id,
-            token_store,
+            oauth_provider: params.oauth_provider,
+            token_store: params.token_store,
+            api_timeout: params.api_timeout,
         }
     }
 
     /// Check if this provider uses OAuth (Code Assist API)
     fn is_oauth(&self) -> bool {
-        self.oauth_provider_id.is_some() && self.token_store.is_some()
+        self.oauth_provider.is_some() && self.token_store.is_some()
     }
 
     /// Check if this provider uses Vertex AI
@@ -121,54 +115,126 @@ impl GeminiProvider {
         !model.contains("lite") && !model.contains("flash-lite")
     }
 
-    /// Get OAuth bearer token (with automatic refresh)
     async fn get_auth_header(&self) -> Result<Option<String>, ProviderError> {
-        if let (Some(oauth_provider_id), Some(token_store)) =
-            (&self.oauth_provider_id, &self.token_store)
-        {
-            if let Some(token) = token_store.get(oauth_provider_id) {
-                // Check if token needs refresh
-                if token.needs_refresh() {
-                    tracing::info!(
-                        "🔄 Token for '{}' needs refresh, refreshing...",
-                        oauth_provider_id
-                    );
+        if self.oauth_provider.is_some() {
+            let token = super::auth::resolve_access_token(
+                self.oauth_provider.as_deref(),
+                self.token_store.as_ref(),
+                OAuthConfig::gemini,
+                "",
+            )
+            .await?;
+            Ok(Some(format!("Bearer {}", token)))
+        } else {
+            Ok(None)
+        }
+    }
 
-                    // Refresh token
-                    let config = OAuthConfig::gemini();
-                    let oauth_client = OAuthClient::new(config, token_store.clone());
+    /// Convert a single Anthropic content block to a Gemini part.
+    fn convert_block(
+        block: &ContentBlock,
+        tool_id_to_name: &HashMap<String, String>,
+    ) -> Option<GeminiPart> {
+        match block {
+            ContentBlock::Known(KnownContentBlock::Text { text, .. }) => {
+                Some(GeminiPart::Text { text: text.clone() })
+            }
+            ContentBlock::Known(KnownContentBlock::Image { source }) => {
+                let (media_type, data) = (source.media_type.as_ref()?, source.data.as_ref()?);
+                Some(GeminiPart::InlineData {
+                    inline_data: GeminiInlineData {
+                        mime_type: media_type.clone(),
+                        data: data.clone(),
+                    },
+                })
+            }
+            ContentBlock::Known(KnownContentBlock::Thinking { raw }) => {
+                let thinking = raw.get("thinking").and_then(|v| v.as_str())?;
+                Some(GeminiPart::Text {
+                    text: thinking.to_string(),
+                })
+            }
+            ContentBlock::Known(KnownContentBlock::ToolUse { name, input, .. }) => {
+                Some(GeminiPart::FunctionCall {
+                    function_call: GeminiFunctionCall {
+                        name: name.clone(),
+                        args: input.clone(),
+                    },
+                })
+            }
+            ContentBlock::Known(KnownContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            }) => {
+                let fn_name = tool_id_to_name
+                    .get(tool_use_id)
+                    .cloned()
+                    .unwrap_or_else(|| tool_use_id.clone());
+                Some(GeminiPart::FunctionResponse {
+                    function_response: GeminiFunctionResponse {
+                        name: fn_name,
+                        response: serde_json::json!({ "content": content.to_string() }),
+                    },
+                })
+            }
+            _ => None,
+        }
+    }
 
-                    match oauth_client.refresh_token(oauth_provider_id).await {
-                        Ok(new_token) => {
-                            tracing::info!("✅ Token refreshed successfully");
-                            return Ok(Some(format!(
-                                "Bearer {}",
-                                new_token.access_token.expose_secret()
-                            )));
-                        }
-                        Err(e) => {
-                            tracing::error!("❌ Failed to refresh token: {}", e);
-                            return Err(ProviderError::AuthError(format!(
-                                "Failed to refresh OAuth token: {}",
-                                e
-                            )));
-                        }
+    /// Convert Anthropic tools to Gemini tool format.
+    fn convert_tools(tools: &[crate::models::Tool]) -> Vec<GeminiTool> {
+        let mut gemini_tools = Vec::new();
+        let mut function_declarations = Vec::new();
+
+        for tool in tools {
+            match tool.name.as_deref().unwrap_or("") {
+                "WebSearch" => gemini_tools.push(GeminiTool::GoogleSearch {
+                    google_search: GoogleSearchTool {},
+                }),
+                "WebFetch" => gemini_tools.push(GeminiTool::UrlContext {
+                    url_context: UrlContextTool {},
+                }),
+                _ => {
+                    let mut parameters = tool.input_schema.clone().unwrap_or_default();
+                    clean_json_schema(&mut parameters);
+                    if let Some(name) = &tool.name {
+                        function_declarations.push(GeminiFunctionDeclaration {
+                            name: name.clone(),
+                            description: tool.description.clone().unwrap_or_default(),
+                            parameters,
+                        });
                     }
-                } else {
-                    // Token is still valid
-                    return Ok(Some(format!(
-                        "Bearer {}",
-                        token.access_token.expose_secret()
-                    )));
                 }
-            } else {
-                return Err(ProviderError::AuthError(format!(
-                    "OAuth provider '{}' configured but no token found in store",
-                    oauth_provider_id
-                )));
             }
         }
-        Ok(None)
+
+        if !function_declarations.is_empty() {
+            gemini_tools.push(GeminiTool::FunctionDeclarations {
+                function_declarations,
+            });
+        }
+        gemini_tools
+    }
+
+    /// Convert Anthropic tool_choice to Gemini tool_config.
+    fn convert_tool_config(tc: &serde_json::Value) -> Option<GeminiToolConfig> {
+        let tc_type = tc.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let (mode, names) = match tc_type {
+            "auto" => ("AUTO", None),
+            "any" => ("ANY", None),
+            "tool" => {
+                let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                ("ANY", Some(vec![name.to_string()]))
+            }
+            _ => return None,
+        };
+        Some(GeminiToolConfig {
+            function_calling_config: GeminiFunctionCallingConfig {
+                mode: mode.to_string(),
+                allowed_function_names: names,
+            },
+        })
     }
 
     /// Transform Anthropic request to Gemini format
@@ -176,221 +242,82 @@ impl GeminiProvider {
         &self,
         request: &AnthropicRequest,
     ) -> Result<GeminiRequest, ProviderError> {
-        // Transform system prompt
-        let system_instruction = request.system.as_ref().map(|system| {
-            let text = match system {
-                SystemPrompt::Text(text) => text.clone(),
-                SystemPrompt::Blocks(blocks) => blocks
-                    .iter()
-                    .map(|b| b.text.clone())
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            };
-            GeminiSystemInstruction {
-                parts: vec![GeminiPart::Text { text }],
-            }
-        });
-
-        // Build a lookup map: tool_use_id → tool name (for tool_result → FunctionResponse)
-        let mut tool_id_to_name: HashMap<String, String> = HashMap::new();
-        for msg in &request.messages {
-            if let MessageContent::Blocks(blocks) = &msg.content {
-                for block in blocks {
-                    if let ContentBlock::Known(KnownContentBlock::ToolUse { id, name, .. }) = block
-                    {
-                        tool_id_to_name.insert(id.clone(), name.clone());
-                    }
-                }
-            }
-        }
-
-        // Transform messages
-        let mut contents = Vec::new();
-        for msg in &request.messages {
-            let role = match msg.role.as_str() {
-                "user" => "user",
-                "assistant" => "model",
-                _ => continue,
-            };
-
-            let parts = match &msg.content {
-                MessageContent::Text(text) => {
-                    vec![GeminiPart::Text { text: text.clone() }]
-                }
-                MessageContent::Blocks(blocks) => {
-                    let mut parts = Vec::new();
-                    for block in blocks {
-                        match block {
-                            ContentBlock::Known(KnownContentBlock::Text { text, .. }) => {
-                                parts.push(GeminiPart::Text { text: text.clone() });
-                            }
-                            ContentBlock::Known(KnownContentBlock::Image { source }) => {
-                                // Convert to Gemini inline_data format
-                                if let (Some(media_type), Some(data)) =
-                                    (&source.media_type, &source.data)
-                                {
-                                    parts.push(GeminiPart::InlineData {
-                                        inline_data: GeminiInlineData {
-                                            mime_type: media_type.clone(),
-                                            data: data.clone(),
-                                        },
-                                    });
-                                }
-                            }
-                            ContentBlock::Known(KnownContentBlock::Thinking { raw }) => {
-                                // Gemini doesn't have thinking blocks, convert to text
-                                if let Some(thinking) = raw.get("thinking").and_then(|v| v.as_str())
-                                {
-                                    parts.push(GeminiPart::Text {
-                                        text: thinking.to_string(),
-                                    });
-                                }
-                            }
-                            ContentBlock::Known(KnownContentBlock::ToolUse {
-                                id: _,
-                                name,
-                                input,
-                            }) => {
-                                parts.push(GeminiPart::FunctionCall {
-                                    function_call: GeminiFunctionCall {
-                                        name: name.clone(),
-                                        args: input.clone(),
-                                    },
-                                });
-                            }
-                            ContentBlock::Known(KnownContentBlock::ToolResult {
-                                tool_use_id,
-                                content,
-                                ..
-                            }) => {
-                                let fn_name = tool_id_to_name
-                                    .get(tool_use_id)
-                                    .cloned()
-                                    .unwrap_or_else(|| tool_use_id.clone());
-                                parts.push(GeminiPart::FunctionResponse {
-                                    function_response: GeminiFunctionResponse {
-                                        name: fn_name,
-                                        response: serde_json::json!({
-                                            "content": content.to_string()
-                                        }),
-                                    },
-                                });
-                            }
-                            _ => {
-                                // Skip unknown block types
-                            }
-                        }
-                    }
-                    parts
-                }
-            };
-
-            // Skip empty parts (can happen if all blocks were filtered)
-            if parts.is_empty() {
-                continue;
-            }
-
-            contents.push(GeminiContent {
-                role: role.to_string(),
-                parts,
+        let system_instruction = request
+            .system
+            .as_ref()
+            .map(|system| GeminiSystemInstruction {
+                parts: vec![GeminiPart::Text {
+                    text: system.to_text(),
+                }],
             });
-        }
 
-        // Transform generation config
-        let generation_config = GeminiGenerationConfig {
-            temperature: request.temperature,
-            top_p: request.top_p,
-            top_k: Some(40), // Gemini default
-            max_output_tokens: Some(request.max_tokens as i32),
-            stop_sequences: request.stop_sequences.clone(),
-        };
-
-        // Transform tools if present
-        let tools = if self.supports_tools(&request.model) {
-            request.tools.as_ref().map(|anthropic_tools| {
-                let mut gemini_tools = Vec::new();
-                let mut function_declarations = Vec::new();
-
-                for tool in anthropic_tools {
-                    let tool_name = tool.name.as_deref().unwrap_or("");
-
-                    match tool_name {
-                        "WebSearch" => {
-                            // Convert to Gemini's native Google Search tool
-                            gemini_tools.push(GeminiTool::GoogleSearch {
-                                google_search: GoogleSearchTool {},
-                            });
-                        }
-                        "WebFetch" => {
-                            // Convert to Gemini's native URL Context tool
-                            gemini_tools.push(GeminiTool::UrlContext {
-                                url_context: UrlContextTool {},
-                            });
-                        }
-                        _ => {
-                            // Regular function calling tool
-                            let mut parameters = tool.input_schema.clone().unwrap_or_default();
-                            clean_json_schema(&mut parameters);
-
-                            if let Some(name) = &tool.name {
-                                function_declarations.push(GeminiFunctionDeclaration {
-                                    name: name.clone(),
-                                    description: tool.description.clone().unwrap_or_default(),
-                                    parameters,
-                                });
-                            }
-                        }
-                    }
-                }
-
-                // Add function declarations if any
-                if !function_declarations.is_empty() {
-                    gemini_tools.push(GeminiTool::FunctionDeclarations {
-                        function_declarations,
-                    });
-                }
-
-                gemini_tools
+        // Build tool_use_id → name map for resolving tool_result references
+        let tool_id_to_name: HashMap<String, String> = request
+            .messages
+            .iter()
+            .flat_map(|msg| match &msg.content {
+                MessageContent::Blocks(blocks) => blocks.as_slice(),
+                _ => &[],
             })
-        } else {
-            None // lite/flash-lite models don't support tools
-        };
-
-        // Map tool_choice → tool_config
-        let tool_config = request.tool_choice.as_ref().and_then(|tc| {
-            let tc_type = tc.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            match tc_type {
-                "auto" => Some(GeminiToolConfig {
-                    function_calling_config: GeminiFunctionCallingConfig {
-                        mode: "AUTO".to_string(),
-                        allowed_function_names: None,
-                    },
-                }),
-                "any" => Some(GeminiToolConfig {
-                    function_calling_config: GeminiFunctionCallingConfig {
-                        mode: "ANY".to_string(),
-                        allowed_function_names: None,
-                    },
-                }),
-                "tool" => {
-                    let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                    Some(GeminiToolConfig {
-                        function_calling_config: GeminiFunctionCallingConfig {
-                            mode: "ANY".to_string(),
-                            allowed_function_names: Some(vec![name.to_string()]),
-                        },
-                    })
+            .filter_map(|block| match block {
+                ContentBlock::Known(KnownContentBlock::ToolUse { id, name, .. }) => {
+                    Some((id.clone(), name.clone()))
                 }
                 _ => None,
-            }
-        });
+            })
+            .collect();
+
+        // Transform messages
+        let contents: Vec<GeminiContent> = request
+            .messages
+            .iter()
+            .filter_map(|msg| {
+                let role = match msg.role.as_str() {
+                    "user" => "user",
+                    "assistant" => "model",
+                    _ => return None,
+                };
+                let parts = match &msg.content {
+                    MessageContent::Text(text) => vec![GeminiPart::Text { text: text.clone() }],
+                    MessageContent::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| Self::convert_block(b, &tool_id_to_name))
+                        .collect(),
+                };
+                if parts.is_empty() {
+                    return None;
+                }
+                Some(GeminiContent {
+                    role: role.to_string(),
+                    parts,
+                })
+            })
+            .collect();
+
+        let tools = if self.supports_tools(&request.model) {
+            request
+                .tools
+                .as_ref()
+                .map(|tools| Self::convert_tools(tools))
+        } else {
+            None
+        };
 
         Ok(GeminiRequest {
             contents,
             system_instruction,
-            generation_config: Some(generation_config),
+            generation_config: Some(GeminiGenerationConfig {
+                temperature: request.temperature,
+                top_p: request.top_p,
+                top_k: Some(40),
+                max_output_tokens: Some(request.max_tokens as i32),
+                stop_sequences: request.stop_sequences.clone(),
+            }),
             tools,
-            tool_config,
+            tool_config: request
+                .tool_choice
+                .as_ref()
+                .and_then(Self::convert_tool_config),
         })
     }
 
@@ -542,11 +469,11 @@ impl AnthropicProvider for GeminiProvider {
             })?;
 
             // Get project_id from token store
-            let project_id = if let (Some(oauth_provider_id), Some(token_store)) =
-                (&self.oauth_provider_id, &self.token_store)
+            let project_id = if let (Some(oauth_provider), Some(token_store)) =
+                (&self.oauth_provider, &self.token_store)
             {
                 token_store
-                    .get(oauth_provider_id)
+                    .get(oauth_provider)
                     .and_then(|token| token.project_id.clone())
             } else {
                 None
@@ -592,6 +519,7 @@ impl AnthropicProvider for GeminiProvider {
             let bearer_token = bearer_token.clone();
             let code_assist_request = code_assist_request.clone();
             let url = url.clone();
+            let api_timeout = self.api_timeout;
 
             // Use retry handler for 429 errors
             let response = self
@@ -602,13 +530,14 @@ impl AnthropicProvider for GeminiProvider {
                             .header("Content-Type", "application/json")
                             .header("Authorization", &bearer_token);
 
-                        // Add custom headers
                         for (key, value) in &custom_headers {
                             req_builder = req_builder.header(key, value);
                         }
 
-                        // Send request
-                        req_builder.json(&code_assist_request).send()
+                        req_builder
+                            .timeout(api_timeout)
+                            .json(&code_assist_request)
+                            .send()
                     },
                     3, // max_retries
                 )
@@ -689,6 +618,7 @@ impl AnthropicProvider for GeminiProvider {
             let custom_headers = self.custom_headers.clone();
             let gemini_request = gemini_request.clone();
             let url = url.clone();
+            let api_timeout = self.api_timeout;
 
             // Use retry handler for 429 errors
             let response = self
@@ -697,13 +627,14 @@ impl AnthropicProvider for GeminiProvider {
                         let mut req_builder =
                             client.post(&url).header("Content-Type", "application/json");
 
-                        // Add custom headers
                         for (key, value) in &custom_headers {
                             req_builder = req_builder.header(key, value);
                         }
 
-                        // Send request
-                        req_builder.json(&gemini_request).send()
+                        req_builder
+                            .timeout(api_timeout)
+                            .json(&gemini_request)
+                            .send()
                     },
                     3, // max_retries
                 )
@@ -747,11 +678,11 @@ impl AnthropicProvider for GeminiProvider {
             })?;
 
             // Get project_id from token store
-            let project_id = if let (Some(oauth_provider_id), Some(token_store)) =
-                (&self.oauth_provider_id, &self.token_store)
+            let project_id = if let (Some(oauth_provider), Some(token_store)) =
+                (&self.oauth_provider, &self.token_store)
             {
                 token_store
-                    .get(oauth_provider_id)
+                    .get(oauth_provider)
                     .and_then(|token| token.project_id.clone())
             } else {
                 None
@@ -793,13 +724,15 @@ impl AnthropicProvider for GeminiProvider {
                 .header("Content-Type", "application/json")
                 .header("Authorization", bearer_token);
 
-            // Add custom headers
             for (key, value) in &self.custom_headers {
                 req_builder = req_builder.header(key, value);
             }
 
-            // Send request
-            let response = req_builder.json(&code_assist_request).send().await?;
+            let response = req_builder
+                .timeout(self.api_timeout)
+                .json(&code_assist_request)
+                .send()
+                .await?;
 
             if !response.status().is_success() {
                 let status = response.status().as_u16();
@@ -863,13 +796,15 @@ impl AnthropicProvider for GeminiProvider {
                 .post(&url)
                 .header("Content-Type", "application/json");
 
-            // Add custom headers
             for (key, value) in &self.custom_headers {
                 req_builder = req_builder.header(key, value);
             }
 
-            // Send request
-            let response = req_builder.json(&gemini_request).send().await?;
+            let response = req_builder
+                .timeout(self.api_timeout)
+                .json(&gemini_request)
+                .send()
+                .await?;
 
             if !response.status().is_success() {
                 let status = response.status().as_u16();
@@ -895,16 +830,17 @@ impl AnthropicProvider for GeminiProvider {
 
     async fn count_tokens(
         &self,
-        _request: crate::models::CountTokensRequest,
+        request: crate::models::CountTokensRequest,
     ) -> Result<crate::models::CountTokensResponse, ProviderError> {
-        // TODO: Implement token counting for Gemini
-        Err(ProviderError::ConfigError(
-            "Token counting not yet implemented for Gemini".to_string(),
-        ))
+        Ok(super::helpers::estimate_token_count(&request))
     }
 
     fn supports_model(&self, model: &str) -> bool {
         self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
+    }
+
+    fn base_url(&self) -> Option<&str> {
+        Some(&self.base_url)
     }
 }
 
@@ -1194,4 +1130,125 @@ fn extract_retry_delay(error_text: &str) -> Option<std::time::Duration> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Tool;
+
+    #[test]
+    fn test_parse_retry_delay_seconds() {
+        let d = parse_retry_delay("3.5s").unwrap();
+        assert_eq!(d, Duration::from_millis(3500));
+    }
+
+    #[test]
+    fn test_parse_retry_delay_milliseconds() {
+        let d = parse_retry_delay("900ms").unwrap();
+        assert_eq!(d, Duration::from_millis(900));
+    }
+
+    #[test]
+    fn test_parse_retry_delay_integer_seconds() {
+        let d = parse_retry_delay("60s").unwrap();
+        assert_eq!(d, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_parse_retry_delay_invalid() {
+        assert!(parse_retry_delay("invalid").is_none());
+        assert!(parse_retry_delay("").is_none());
+    }
+
+    #[test]
+    fn test_convert_block_text() {
+        let block = ContentBlock::text("hello".to_string(), None);
+        let map = HashMap::new();
+        let part = GeminiProvider::convert_block(&block, &map).unwrap();
+        match part {
+            GeminiPart::Text { text } => assert_eq!(text, "hello"),
+            _ => panic!("Expected Text part"),
+        }
+    }
+
+    #[test]
+    fn test_convert_block_tool_use() {
+        let block = ContentBlock::tool_use(
+            "id-1".to_string(),
+            "my_tool".to_string(),
+            serde_json::json!({"key": "value"}),
+        );
+        let map = HashMap::new();
+        let part = GeminiProvider::convert_block(&block, &map).unwrap();
+        match part {
+            GeminiPart::FunctionCall { function_call } => {
+                assert_eq!(function_call.name, "my_tool");
+                assert_eq!(function_call.args["key"], "value");
+            }
+            _ => panic!("Expected FunctionCall part"),
+        }
+    }
+
+    #[test]
+    fn test_convert_tools_websearch() {
+        let tools = vec![Tool {
+            r#type: None,
+            name: Some("WebSearch".to_string()),
+            description: None,
+            input_schema: None,
+        }];
+        let gemini_tools = GeminiProvider::convert_tools(&tools);
+        assert_eq!(gemini_tools.len(), 1);
+        assert!(matches!(gemini_tools[0], GeminiTool::GoogleSearch { .. }));
+    }
+
+    #[test]
+    fn test_convert_tools_function() {
+        let tools = vec![Tool {
+            r#type: None,
+            name: Some("get_weather".to_string()),
+            description: Some("Get weather data".to_string()),
+            input_schema: Some(serde_json::json!({"type": "object"})),
+        }];
+        let gemini_tools = GeminiProvider::convert_tools(&tools);
+        assert_eq!(gemini_tools.len(), 1);
+        match &gemini_tools[0] {
+            GeminiTool::FunctionDeclarations {
+                function_declarations,
+            } => {
+                assert_eq!(function_declarations.len(), 1);
+                assert_eq!(function_declarations[0].name, "get_weather");
+            }
+            _ => panic!("Expected FunctionDeclarations"),
+        }
+    }
+
+    #[test]
+    fn test_convert_tool_config_auto() {
+        let tc = serde_json::json!({"type": "auto"});
+        let config = GeminiProvider::convert_tool_config(&tc).unwrap();
+        assert_eq!(config.function_calling_config.mode, "AUTO");
+        assert!(config
+            .function_calling_config
+            .allowed_function_names
+            .is_none());
+    }
+
+    #[test]
+    fn test_convert_tool_config_specific_tool() {
+        let tc = serde_json::json!({"type": "tool", "name": "my_func"});
+        let config = GeminiProvider::convert_tool_config(&tc).unwrap();
+        assert_eq!(config.function_calling_config.mode, "ANY");
+        assert_eq!(
+            config.function_calling_config.allowed_function_names,
+            Some(vec!["my_func".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_convert_tool_config_unknown() {
+        let tc = serde_json::json!({"type": "unknown"});
+        assert!(GeminiProvider::convert_tool_config(&tc).is_none());
+    }
 }

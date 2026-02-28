@@ -20,7 +20,7 @@ use super::{
     inject_continuation_text, is_provider_subscription, is_retryable, log_audit,
     record_request_metrics, record_spend, resolve_provider_mappings, retry_delay,
     sanitize_provider_response, should_inject_continuation, AppError, AppState, AuditCompliance,
-    ReloadableState, MAX_RETRIES,
+    AuditParams, ReloadableState, RequestMetrics, MAX_RETRIES,
 };
 
 /// All context needed to dispatch a request through the provider pipeline.
@@ -106,9 +106,7 @@ pub(crate) async fn dispatch(
                     .header("x-grob-cache", "hit")
                     .body(axum::body::Body::from(cached.body.clone()))
                     .expect("cached response");
-                if ctx.inner.config.compliance.enabled
-                    && ctx.inner.config.compliance.transparency_headers
-                {
+                if super::should_apply_transparency(&ctx.inner.config) {
                     apply_transparency_headers(
                         resp.headers_mut(),
                         &cached.provider,
@@ -152,7 +150,12 @@ fn scan_dlp_input(
             &block_err,
             crate::features::dlp::DlpBlockError::InjectionBlocked(_)
         );
-        let risk = crate::security::risk::assess_risk(1, true, had_injection, false);
+        let risk = crate::security::risk::assess_risk(&crate::security::risk::SecurityOutcome {
+            dlp_rules_triggered: 1,
+            was_blocked: true,
+            had_injection,
+            had_pii: false,
+        });
 
         if ctx.inner.config.compliance.enabled && ctx.inner.config.compliance.risk_classification {
             let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
@@ -169,21 +172,21 @@ fn scan_dlp_input(
         }
 
         if let Some(ref al) = ctx.state.audit_log {
-            log_audit(
-                al,
-                ctx.tenant_id.as_deref().unwrap_or("anon"),
-                crate::security::audit_log::AuditEvent::DlpBlock,
-                "BLOCKED",
-                vec![block_err.to_string()],
-                &ctx.peer_ip,
-                ctx.start_time.elapsed().as_millis() as u64,
-                AuditCompliance {
+            log_audit(&AuditParams {
+                audit_log: al,
+                tenant_id: ctx.tenant_id.as_deref().unwrap_or("anon"),
+                action: crate::security::audit_log::AuditEvent::DlpBlock,
+                backend: "BLOCKED",
+                dlp_rules: vec![block_err.to_string()],
+                ip: &ctx.peer_ip,
+                duration_ms: ctx.start_time.elapsed().as_millis() as u64,
+                eu: AuditCompliance {
                     config: &ctx.inner.config.compliance,
                     model_name: Some(&ctx.model),
                     token_counts: None,
                     risk_level: Some(risk),
                 },
-            );
+            });
         }
         return Err(AppError::DlpBlocked(format!("{}", block_err)));
     }
@@ -239,16 +242,16 @@ async fn dispatch_fan_out(
                 tracker.record(prov, actual, counter.estimated_cost_usd);
             }
 
-            record_request_metrics(
-                &ctx.model,
-                "fan_out",
-                &decision.route_type,
-                "success",
+            record_request_metrics(&RequestMetrics {
+                model: &ctx.model,
+                provider: "fan_out",
+                route_type: &decision.route_type,
+                status: "success",
                 latency_ms,
-                response.usage.input_tokens,
-                response.usage.output_tokens,
-                0.0,
-            );
+                input_tokens: response.usage.input_tokens,
+                output_tokens: response.usage.output_tokens,
+                cost_usd: 0.0,
+            });
 
             // Audit: fan-out success
             if let Some(ref al) = ctx.state.audit_log {
@@ -256,15 +259,15 @@ async fn dispatch_fan_out(
                     .first()
                     .map(|(_, m)| m.as_str())
                     .unwrap_or("fan_out");
-                log_audit(
-                    al,
-                    ctx.tenant_id.as_deref().unwrap_or("anon"),
-                    crate::security::audit_log::AuditEvent::Response,
-                    "fan_out",
-                    vec![],
-                    &ctx.peer_ip,
-                    latency_ms,
-                    AuditCompliance {
+                log_audit(&AuditParams {
+                    audit_log: al,
+                    tenant_id: ctx.tenant_id.as_deref().unwrap_or("anon"),
+                    action: crate::security::audit_log::AuditEvent::Response,
+                    backend: "fan_out",
+                    dlp_rules: vec![],
+                    ip: &ctx.peer_ip,
+                    duration_ms: latency_ms,
+                    eu: AuditCompliance {
                         config: &ctx.inner.config.compliance,
                         model_name: Some(fan_out_model),
                         token_counts: Some((
@@ -273,7 +276,7 @@ async fn dispatch_fan_out(
                         )),
                         risk_level: Some(crate::security::audit_log::RiskLevel::Low),
                     },
-                );
+                });
             }
 
             // Restore original model name
@@ -342,30 +345,8 @@ async fn dispatch_provider_loop(
             retry_info
         );
 
-        // Prepare per-provider request
-        let mut provider_request = request.clone();
-        let original_model = provider_request.model.clone();
-        provider_request.model = mapping.actual_model.clone();
-
-        // DLP: sanitize request (names → pseudonyms, secrets → canary)
-        if let Some(ref dlp_engine) = ctx.dlp {
-            if dlp_engine.config.scan_input {
-                dlp_engine.sanitize_request(&mut provider_request);
-            }
-        }
-
-        // Inject continuation prompt if configured
-        if mapping.inject_continuation_prompt && decision.route_type != RouteType::Background {
-            if let Some(last_msg) = provider_request.messages.last_mut() {
-                if should_inject_continuation(last_msg) {
-                    info!(
-                        "💉 Injecting continuation prompt for model: {}",
-                        mapping.actual_model
-                    );
-                    inject_continuation_text(last_msg);
-                }
-            }
-        }
+        let (provider_request, original_model) =
+            prepare_provider_request(ctx, request, mapping, &decision.route_type);
 
         let is_sub = is_provider_subscription(ctx.inner, &mapping.provider);
 
@@ -390,11 +371,13 @@ async fn dispatch_provider_loop(
                 ctx,
                 provider_request,
                 provider.as_ref(),
-                mapping,
-                decision,
-                cache_key,
-                &original_model,
-                is_sub,
+                &ProviderAttempt {
+                    mapping,
+                    decision,
+                    cache_key,
+                    original_model: &original_model,
+                    is_sub,
+                },
             )
             .await
             {
@@ -405,50 +388,27 @@ async fn dispatch_provider_loop(
     }
 
     // All providers exhausted — try backward-compat direct lookup
-    if let Ok(provider) = ctx
-        .inner
-        .provider_registry
-        .get_provider_for_model(&decision.model_name)
-    {
-        info!(
-            "📦 Using provider from registry (direct lookup): {}",
-            decision.model_name
-        );
-        let mut fallback_request = request.clone();
-        let original_model = fallback_request.model.clone();
-        fallback_request.model = decision.model_name.clone();
-
-        let mut response = provider
-            .send_message(fallback_request)
-            .await
-            .map_err(|e| AppError::ProviderError(e.to_string()))?;
-        response.model = original_model;
-
-        return Ok(DispatchResult::Complete {
-            response,
-            provider: decision.model_name.clone(),
-            actual_model: decision.model_name.clone(),
-            response_bytes: None,
-        });
+    if let Some(result) = try_direct_provider_lookup(ctx, request, &decision.model_name).await? {
+        return Ok(result);
     }
 
     // Audit: all providers failed
     if let Some(ref al) = ctx.state.audit_log {
-        log_audit(
-            al,
-            ctx.tenant_id.as_deref().unwrap_or("anon"),
-            crate::security::audit_log::AuditEvent::Error,
-            "NONE",
-            vec![],
-            &ctx.peer_ip,
-            ctx.start_time.elapsed().as_millis() as u64,
-            AuditCompliance {
+        log_audit(&AuditParams {
+            audit_log: al,
+            tenant_id: ctx.tenant_id.as_deref().unwrap_or("anon"),
+            action: crate::security::audit_log::AuditEvent::Error,
+            backend: "NONE",
+            dlp_rules: vec![],
+            ip: &ctx.peer_ip,
+            duration_ms: ctx.start_time.elapsed().as_millis() as u64,
+            eu: AuditCompliance {
                 config: &ctx.inner.config.compliance,
                 model_name: None,
                 token_counts: None,
                 risk_level: None,
             },
-        );
+        });
     }
 
     error!(
@@ -460,6 +420,116 @@ async fn dispatch_provider_loop(
         sorted_mappings.len(),
         decision.model_name
     )))
+}
+
+/// Clone the request, substitute the actual model, run DLP, and optionally inject continuation.
+fn prepare_provider_request(
+    ctx: &DispatchContext<'_>,
+    request: &AnthropicRequest,
+    mapping: &crate::cli::ModelMapping,
+    route_type: &RouteType,
+) -> (AnthropicRequest, String) {
+    let mut provider_request = request.clone();
+    let original_model = provider_request.model.clone();
+    provider_request.model = mapping.actual_model.clone();
+
+    if let Some(ref dlp_engine) = ctx.dlp {
+        if dlp_engine.config.scan_input {
+            dlp_engine.sanitize_request(&mut provider_request);
+        }
+    }
+
+    if mapping.inject_continuation_prompt && *route_type != RouteType::Background {
+        if let Some(last_msg) = provider_request.messages.last_mut() {
+            if should_inject_continuation(last_msg) {
+                info!(
+                    "💉 Injecting continuation prompt for model: {}",
+                    mapping.actual_model
+                );
+                inject_continuation_text(last_msg);
+            }
+        }
+    }
+
+    (provider_request, original_model)
+}
+
+/// Backward-compat fallback: try direct model→provider lookup from the registry.
+async fn try_direct_provider_lookup(
+    ctx: &DispatchContext<'_>,
+    request: &AnthropicRequest,
+    model_name: &str,
+) -> Result<Option<DispatchResult>, AppError> {
+    let Ok(provider) = ctx
+        .inner
+        .provider_registry
+        .get_provider_for_model(model_name)
+    else {
+        return Ok(None);
+    };
+    info!(
+        "📦 Using provider from registry (direct lookup): {}",
+        model_name
+    );
+    let mut fallback_request = request.clone();
+    let original_model = fallback_request.model.clone();
+    fallback_request.model = model_name.to_string();
+
+    let mut response = provider
+        .send_message(fallback_request)
+        .await
+        .map_err(|e| AppError::ProviderError(e.to_string()))?;
+    response.model = original_model;
+
+    Ok(Some(DispatchResult::Complete {
+        response,
+        provider: model_name.to_string(),
+        actual_model: model_name.to_string(),
+        response_bytes: None,
+    }))
+}
+
+/// Wrap a raw provider stream with DLP sanitization and Tap recording layers.
+fn wrap_stream_with_middleware(
+    ctx: &DispatchContext<'_>,
+    raw_stream: Pin<
+        Box<dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send>,
+    >,
+    tap_request_body: Option<String>,
+) -> Pin<Box<dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send>> {
+    let stream: Pin<
+        Box<dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send>,
+    > = if let Some(ref dlp_engine) = ctx.dlp {
+        if dlp_engine.config.scan_output {
+            Box::pin(crate::features::dlp::stream::DlpStream::new(
+                raw_stream,
+                Arc::clone(dlp_engine),
+            ))
+        } else {
+            raw_stream
+        }
+    } else {
+        raw_stream
+    };
+
+    if let Some(ref tap) = ctx.state.tap_sender {
+        let tap_req_id = uuid::Uuid::new_v4().to_string();
+        if let Some(body_json) = tap_request_body {
+            tap.try_send(crate::features::tap::TapEvent::Request {
+                request_id: tap_req_id.clone(),
+                tenant_id: ctx.tenant_id.clone(),
+                model: ctx.model.clone(),
+                body: body_json,
+            });
+        }
+        Box::pin(crate::features::tap::stream::TapStream::new(
+            stream,
+            Arc::clone(tap),
+            tap_req_id,
+        ))
+    } else {
+        stream
+    }
 }
 
 /// Internal signal to continue the provider loop.
@@ -483,52 +553,11 @@ async fn dispatch_streaming(
 
     match provider.send_message_stream(provider_request).await {
         Ok(stream_response) => {
-            // Record circuit breaker success
             if let Some(ref cb) = ctx.state.circuit_breakers {
                 cb.record_success(&mapping.provider).await;
             }
 
-            // Wrap stream with DLP if enabled
-            let stream: Pin<
-                Box<
-                    dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send,
-                >,
-            > = if let Some(ref dlp_engine) = ctx.dlp {
-                if dlp_engine.config.scan_output {
-                    Box::pin(crate::features::dlp::stream::DlpStream::new(
-                        stream_response.stream,
-                        Arc::clone(dlp_engine),
-                    ))
-                } else {
-                    stream_response.stream
-                }
-            } else {
-                stream_response.stream
-            };
-
-            // Wrap stream with Tap if enabled (after DLP)
-            let stream: Pin<
-                Box<
-                    dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send,
-                >,
-            > = if let Some(ref tap) = ctx.state.tap_sender {
-                let tap_req_id = uuid::Uuid::new_v4().to_string();
-                if let Some(body_json) = tap_request_body {
-                    tap.try_send(crate::features::tap::TapEvent::Request {
-                        request_id: tap_req_id.clone(),
-                        tenant_id: ctx.tenant_id.clone(),
-                        model: ctx.model.clone(),
-                        body: body_json,
-                    });
-                }
-                Box::pin(crate::features::tap::stream::TapStream::new(
-                    stream,
-                    Arc::clone(tap),
-                    tap_req_id,
-                ))
-            } else {
-                stream
-            };
+            let stream = wrap_stream_with_middleware(ctx, stream_response.stream, tap_request_body);
 
             let upstream_headers: Vec<(String, String)> =
                 stream_response.headers.into_iter().collect();
@@ -556,17 +585,171 @@ async fn dispatch_streaming(
     }
 }
 
+/// Calculate cost and emit performance metrics + Prometheus counters.
+async fn calculate_and_record_metrics(
+    ctx: &DispatchContext<'_>,
+    mapping: &crate::cli::ModelMapping,
+    decision: &crate::models::RouteDecision,
+    response: &ProviderResponse,
+    latency_ms: u64,
+    is_sub: bool,
+) -> f64 {
+    let tok_s = (response.usage.output_tokens as f32 * 1000.0) / latency_ms as f32;
+    let cost = calculate_cost(
+        ctx.state,
+        &mapping.actual_model,
+        response.usage.input_tokens,
+        response.usage.output_tokens,
+        is_sub,
+    )
+    .await;
+    info!(
+        "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
+        mapping.actual_model,
+        mapping.provider,
+        latency_ms,
+        tok_s,
+        response.usage.output_tokens,
+        cost.estimated_cost_usd,
+        if is_sub { " (subscription)" } else { "" }
+    );
+
+    record_request_metrics(&RequestMetrics {
+        model: &mapping.actual_model,
+        provider: &mapping.provider,
+        route_type: &decision.route_type,
+        status: "ok",
+        latency_ms,
+        input_tokens: response.usage.input_tokens,
+        output_tokens: response.usage.output_tokens,
+        cost_usd: cost.estimated_cost_usd,
+    });
+
+    cost.estimated_cost_usd
+}
+
+/// Record spend tracking, message tracing, and audit logging for a successful response.
+async fn record_success_telemetry(
+    ctx: &DispatchContext<'_>,
+    mapping: &crate::cli::ModelMapping,
+    decision: &crate::models::RouteDecision,
+    response: &ProviderResponse,
+    latency_ms: u64,
+    cost_usd: f64,
+) {
+    record_spend(
+        ctx.state,
+        &mapping.provider,
+        &decision.model_name,
+        cost_usd,
+        ctx.tenant_id.as_deref(),
+    )
+    .await;
+
+    if let Some(ref trace_id) = ctx.trace_id {
+        ctx.state
+            .message_tracer
+            .trace_response(trace_id, response, latency_ms);
+    }
+
+    if let Some(ref al) = ctx.state.audit_log {
+        log_audit(&AuditParams {
+            audit_log: al,
+            tenant_id: ctx.tenant_id.as_deref().unwrap_or("anon"),
+            action: crate::security::audit_log::AuditEvent::Response,
+            backend: &mapping.provider,
+            dlp_rules: vec![],
+            ip: &ctx.peer_ip,
+            duration_ms: latency_ms,
+            eu: AuditCompliance {
+                config: &ctx.inner.config.compliance,
+                model_name: Some(&mapping.actual_model),
+                token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
+                risk_level: Some(crate::security::audit_log::RiskLevel::Low),
+            },
+        });
+    }
+}
+
+/// Serialize the response and store it in the cache if enabled.
+async fn store_response_cache(
+    ctx: &DispatchContext<'_>,
+    mapping: &crate::cli::ModelMapping,
+    cache_key: &Option<String>,
+    response: &ProviderResponse,
+) -> Option<Vec<u8>> {
+    let response_bytes = serde_json::to_vec(response).ok();
+
+    if let (Some(ref cache), Some(ref key), Some(ref bytes)) =
+        (&ctx.state.response_cache, cache_key, &response_bytes)
+    {
+        cache
+            .put(
+                key.clone(),
+                crate::cache::CachedResponse {
+                    body: bytes.clone(),
+                    content_type: "application/json".to_string(),
+                    provider: mapping.provider.clone(),
+                    model: mapping.actual_model.clone(),
+                },
+            )
+            .await;
+    }
+
+    response_bytes
+}
+
+/// Classify a provider error, emit metrics, and decide whether to retry or break.
+/// Returns `true` if the retry loop should continue (retryable + attempts remaining).
+fn classify_and_handle_error(
+    ctx: &DispatchContext<'_>,
+    mapping: &crate::cli::ModelMapping,
+    e: &crate::providers::error::ProviderError,
+    attempt: u32,
+) -> bool {
+    let retryable = is_retryable(e);
+    if let Some(ref trace_id) = ctx.trace_id {
+        ctx.state
+            .message_tracer
+            .trace_error(trace_id, &e.to_string());
+    }
+
+    let is_rate_limit = matches!(
+        e,
+        crate::providers::error::ProviderError::ApiError { status: 429, .. }
+    );
+    if is_rate_limit {
+        warn!("Provider {} rate limited", mapping.provider);
+        metrics::counter!(
+            "grob_ratelimit_hits_total",
+            "provider" => mapping.provider.clone()
+        )
+        .increment(1);
+    }
+    metrics::counter!(
+        "grob_provider_errors_total",
+        "provider" => mapping.provider.clone()
+    )
+    .increment(1);
+
+    retryable && attempt < MAX_RETRIES
+}
+
+/// Per-provider dispatch parameters (non-streaming path).
+struct ProviderAttempt<'a> {
+    mapping: &'a crate::cli::ModelMapping,
+    decision: &'a crate::models::RouteDecision,
+    cache_key: &'a Option<String>,
+    original_model: &'a str,
+    is_sub: bool,
+}
+
 /// Handle the non-streaming path with retry for a single provider.
-#[allow(clippy::too_many_arguments)]
 async fn dispatch_non_streaming(
     ctx: &DispatchContext<'_>,
     provider_request: AnthropicRequest,
     provider: &dyn crate::providers::AnthropicProvider,
-    mapping: &crate::cli::ModelMapping,
-    decision: &crate::models::RouteDecision,
-    cache_key: &Option<String>,
-    original_model: &str,
-    is_sub: bool,
+    pa: &ProviderAttempt<'_>,
 ) -> Result<DispatchResult, ProviderLoopAction> {
     let mut last_error = None;
     for attempt in 0..=MAX_RETRIES {
@@ -574,7 +757,7 @@ async fn dispatch_non_streaming(
             let delay = retry_delay(attempt - 1);
             warn!(
                 "⏳ Retrying provider {} (attempt {}/{}), backoff {}ms",
-                mapping.provider,
+                pa.mapping.provider,
                 attempt + 1,
                 MAX_RETRIES + 1,
                 delay.as_millis()
@@ -584,159 +767,61 @@ async fn dispatch_non_streaming(
 
         match provider.send_message(provider_request.clone()).await {
             Ok(mut response) => {
-                // Record circuit breaker success
                 if let Some(ref cb) = ctx.state.circuit_breakers {
-                    cb.record_success(&mapping.provider).await;
+                    cb.record_success(&pa.mapping.provider).await;
                 }
-
-                // DLP: sanitize response
                 if let Some(ref dlp_engine) = ctx.dlp {
                     if dlp_engine.config.scan_output {
                         sanitize_provider_response(&mut response, dlp_engine);
                     }
                 }
+                response.model = pa.original_model.to_string();
 
-                // Restore original model name
-                response.model = original_model.to_string();
-
-                // Calculate and log metrics
                 let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
-                let tok_s = (response.usage.output_tokens as f32 * 1000.0) / latency_ms as f32;
-                let cost = calculate_cost(
-                    ctx.state,
-                    &mapping.actual_model,
-                    response.usage.input_tokens,
-                    response.usage.output_tokens,
-                    is_sub,
+                let cost_usd = calculate_and_record_metrics(
+                    ctx,
+                    pa.mapping,
+                    pa.decision,
+                    &response,
+                    latency_ms,
+                    pa.is_sub,
                 )
                 .await;
-                info!(
-                    "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
-                    mapping.actual_model,
-                    mapping.provider,
+                record_success_telemetry(
+                    ctx,
+                    pa.mapping,
+                    pa.decision,
+                    &response,
                     latency_ms,
-                    tok_s,
-                    response.usage.output_tokens,
-                    cost.estimated_cost_usd,
-                    if is_sub { " (subscription)" } else { "" }
-                );
-
-                record_request_metrics(
-                    &mapping.actual_model,
-                    &mapping.provider,
-                    &decision.route_type,
-                    "ok",
-                    latency_ms,
-                    response.usage.input_tokens,
-                    response.usage.output_tokens,
-                    cost.estimated_cost_usd,
-                );
-
-                // Record spend for budget tracking
-                record_spend(
-                    ctx.state,
-                    &mapping.provider,
-                    &decision.model_name,
-                    cost.estimated_cost_usd,
-                    ctx.tenant_id.as_deref(),
+                    cost_usd,
                 )
                 .await;
-
-                // Trace the response (Messages handler only)
-                if let Some(ref trace_id) = ctx.trace_id {
-                    ctx.state
-                        .message_tracer
-                        .trace_response(trace_id, &response, latency_ms);
-                }
-
-                // Audit: successful response
-                if let Some(ref al) = ctx.state.audit_log {
-                    log_audit(
-                        al,
-                        ctx.tenant_id.as_deref().unwrap_or("anon"),
-                        crate::security::audit_log::AuditEvent::Response,
-                        &mapping.provider,
-                        vec![],
-                        &ctx.peer_ip,
-                        latency_ms,
-                        AuditCompliance {
-                            config: &ctx.inner.config.compliance,
-                            model_name: Some(&mapping.actual_model),
-                            token_counts: Some((
-                                response.usage.input_tokens,
-                                response.usage.output_tokens,
-                            )),
-                            risk_level: Some(crate::security::audit_log::RiskLevel::Low),
-                        },
-                    );
-                }
-
-                // Serialize once for both cache and response
-                let response_bytes = serde_json::to_vec(&response).ok();
-
-                // Cache store (non-streaming success)
-                if let (Some(ref cache), Some(ref key), Some(ref bytes)) =
-                    (&ctx.state.response_cache, cache_key, &response_bytes)
-                {
-                    cache
-                        .put(
-                            key.clone(),
-                            crate::cache::CachedResponse {
-                                body: bytes.clone(),
-                                content_type: "application/json".to_string(),
-                                provider: mapping.provider.clone(),
-                                model: mapping.actual_model.clone(),
-                            },
-                        )
-                        .await;
-                }
+                let response_bytes =
+                    store_response_cache(ctx, pa.mapping, pa.cache_key, &response).await;
 
                 return Ok(DispatchResult::Complete {
                     response,
-                    provider: mapping.provider.clone(),
-                    actual_model: mapping.actual_model.clone(),
+                    provider: pa.mapping.provider.clone(),
+                    actual_model: pa.mapping.actual_model.clone(),
                     response_bytes,
                 });
             }
             Err(e) => {
-                let retryable = is_retryable(&e);
-                if let Some(ref trace_id) = ctx.trace_id {
-                    ctx.state
-                        .message_tracer
-                        .trace_error(trace_id, &e.to_string());
-                }
-
-                let is_rate_limit = matches!(
-                    &e,
-                    crate::providers::error::ProviderError::ApiError { status: 429, .. }
-                );
-                if is_rate_limit {
-                    warn!("Provider {} rate limited", mapping.provider);
-                    metrics::counter!(
-                        "grob_ratelimit_hits_total",
-                        "provider" => mapping.provider.clone()
-                    )
-                    .increment(1);
-                }
-                metrics::counter!(
-                    "grob_provider_errors_total",
-                    "provider" => mapping.provider.clone()
-                )
-                .increment(1);
-
-                if retryable && attempt < MAX_RETRIES {
-                    warn!("⚠️ Provider {} failed (retryable): {}", mapping.provider, e);
+                if classify_and_handle_error(ctx, pa.mapping, &e, attempt) {
+                    warn!(
+                        "⚠️ Provider {} failed (retryable): {}",
+                        pa.mapping.provider, e
+                    );
                     last_error = Some(e);
                     continue;
                 }
 
-                // Non-retryable or max retries exhausted
                 if let Some(ref cb) = ctx.state.circuit_breakers {
-                    cb.record_failure(&mapping.provider).await;
+                    cb.record_failure(&pa.mapping.provider).await;
                 }
                 info!(
                     "⚠️ Provider {} failed: {}, trying next fallback",
-                    mapping.provider, e
+                    pa.mapping.provider, e
                 );
                 last_error = Some(e);
                 break;

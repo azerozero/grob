@@ -72,7 +72,6 @@ impl SpendTracker {
     }
 
     /// Load spend data from disk (legacy mode, no GrobStore).
-    #[allow(dead_code)]
     pub fn load(path: PathBuf) -> Self {
         let data = if path.exists() {
             match std::fs::read_to_string(&path) {

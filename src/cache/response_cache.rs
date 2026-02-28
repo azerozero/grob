@@ -24,7 +24,6 @@ pub struct CachedResponse {
 
 /// Cache statistics
 #[derive(Debug, Clone, Default)]
-#[allow(dead_code)] // exposed for metrics endpoint consumers
 pub struct CacheStats {
     pub hits: u64,
     pub misses: u64,
@@ -39,7 +38,6 @@ pub struct ResponseCache {
     max_entry_bytes: usize,
     hits: AtomicU64,
     misses: AtomicU64,
-    #[allow(dead_code)] // read via stats() in metrics/tests
     evictions: std::sync::Arc<AtomicU64>,
     skipped_too_large: AtomicU64,
 }
@@ -109,8 +107,13 @@ impl ResponseCache {
         Some(hex::encode(hasher.finalize()))
     }
 
-    /// Compute a cache key directly from an AnthropicRequest, streaming JSON
-    /// into the hasher without intermediate String/Value allocations.
+    /// Compute a cache key directly from an AnthropicRequest.
+    ///
+    /// Streams each request field (tenant, model, messages, system, tools, max_tokens)
+    /// through a SHA-256 hasher via `Sha256Writer`, separated by `|` delimiters.
+    /// This avoids allocating an intermediate String or serde_json::Value — the JSON
+    /// bytes flow directly into the digest. Returns `None` for non-deterministic
+    /// requests (temperature != 0).
     pub fn compute_key_from_request(
         tenant_id: &str,
         request: &crate::models::AnthropicRequest,
@@ -143,7 +146,10 @@ impl ResponseCache {
     }
 }
 
-/// Adapter to stream writes directly into a SHA-256 hasher.
+/// `io::Write` adapter that feeds all bytes into a SHA-256 hasher.
+///
+/// This lets `serde_json::to_writer` serialize directly into the digest
+/// without buffering the serialized JSON in memory first.
 struct Sha256Writer(Sha256);
 
 impl std::io::Write for Sha256Writer {
@@ -185,13 +191,11 @@ impl ResponseCache {
     }
 
     /// Invalidate all entries.
-    #[allow(dead_code)] // public API for config reload / admin endpoint
     pub fn invalidate_all(&self) {
         self.inner.invalidate_all();
     }
 
     /// Get cache statistics.
-    #[allow(dead_code)] // public API for metrics endpoint
     pub fn stats(&self) -> CacheStats {
         CacheStats {
             hits: self.hits.load(Ordering::Relaxed),

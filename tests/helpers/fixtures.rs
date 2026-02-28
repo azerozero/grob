@@ -98,6 +98,25 @@ pub fn test_router_config() -> grob::cli::RouterConfig {
     }
 }
 
+/// Creates a minimal ProviderConfig for testing
+pub fn base_provider_config(name: &str) -> grob::providers::ProviderConfig {
+    grob::providers::ProviderConfig {
+        name: name.to_string(),
+        provider_type: "anthropic".to_string(),
+        auth_type: grob::providers::AuthType::ApiKey,
+        api_key: Some("sk-test".to_string()),
+        base_url: None,
+        models: vec![],
+        enabled: Some(true),
+        oauth_provider: None,
+        project_id: None,
+        location: None,
+        headers: None,
+        budget_usd: None,
+        region: None,
+    }
+}
+
 /// Creates test AppConfig
 pub fn test_app_config() -> grob::cli::AppConfig {
     use grob::cli::{AppConfig, ServerConfig};

@@ -15,8 +15,6 @@ pub struct RateLimitConfig {
     pub requests_per_second: u32,
     /// Burst capacity
     pub burst: u32,
-    /// Window for sliding window (optional)
-    pub _window: Duration,
 }
 
 /// Token bucket state using integer milli-tokens (1000 = 1 full token)
@@ -152,7 +150,6 @@ mod tests {
         let config = RateLimitConfig {
             requests_per_second: 10,
             burst: 5,
-            _window: Duration::from_secs(60),
         };
 
         let mut bucket = TokenBucket::new(config);
@@ -177,7 +174,6 @@ mod tests {
         let limiter = RateLimiter::new(RateLimitConfig {
             requests_per_second: 100,
             burst: 10,
-            _window: Duration::from_secs(60),
         });
 
         let key = RateLimitKey::Tenant("test-tenant".to_string());

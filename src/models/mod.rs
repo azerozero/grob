@@ -52,6 +52,19 @@ pub enum SystemPrompt {
     Blocks(Vec<SystemBlock>),
 }
 
+impl SystemPrompt {
+    pub fn to_text(&self) -> String {
+        match self {
+            SystemPrompt::Text(text) => text.clone(),
+            SystemPrompt::Blocks(blocks) => blocks
+                .iter()
+                .map(|b| b.text.clone())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+}
+
 /// System message block
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SystemBlock {
@@ -258,72 +271,58 @@ pub struct CountTokensResponse {
     pub input_tokens: u32,
 }
 
+/// Model pattern → default max output tokens.
+/// Order matters: first match wins (checked with `starts_with` then `contains`).
+const MODEL_MAX_TOKENS_PREFIX: &[(&str, u32)] = &[
+    ("o1", 32_768), // OpenAI reasoning models (o-series): up to 100k, conservative 32k
+    ("o3", 32_768),
+    ("o4", 32_768),
+];
+
+const MODEL_MAX_TOKENS_CONTAINS: &[(&str, u32)] = &[
+    ("gpt-4.1", 32_768),         // OpenAI GPT-4.1 family
+    ("gpt-4o", 16_384),          // OpenAI GPT-4o family
+    ("gpt-4-turbo", 4_096),      // OpenAI GPT-4 turbo
+    ("gpt-3.5", 4_096),          // OpenAI GPT-3.5
+    ("gpt-4-", 4_096),           // OpenAI GPT-4 variants
+    ("gemini-2.5", 65_536),      // Gemini 2.5 family
+    ("gemini-2.0", 8_192),       // Gemini 2.0
+    ("gemini-1.5", 8_192),       // Gemini 1.5
+    ("gemini-1.0", 8_192),       // Gemini 1.0
+    ("claude-opus", 16_384),     // Claude 4.x Opus (up to 128k with extended output)
+    ("claude-sonnet-4", 16_384), // Claude 4.x Sonnet
+    ("claude-3.5", 8_192),       // Claude 3.5
+    ("claude-3-5", 8_192),       // Claude 3.5 (alternate naming)
+    ("claude-haiku", 8_192),     // Claude Haiku
+    ("claude-3-opus", 4_096),    // Claude 3 Opus
+    ("claude-3.0", 4_096),       // Claude 3.0
+    ("deepseek", 8_192),         // DeepSeek
+    ("codex", 16_384),           // Codex
+];
+
+const DEFAULT_MAX_TOKENS: u32 = 8_192;
+
 /// Returns a sensible default max_tokens for a given model when the client
 /// doesn't specify one. Based on each model's documented output token limit.
 ///
 /// This is used by the OpenAI compat layer where max_tokens is optional.
 /// Anthropic-native clients must always provide max_tokens explicitly.
 pub fn default_max_tokens(model: &str) -> u32 {
-    let m = model.to_lowercase();
+    let model_lower = model.to_lowercase();
 
-    // --- OpenAI reasoning models (o-series) ---
-    // o3, o4-mini support up to 100k output; use conservative 32k default
-    if m.starts_with("o1") || m.starts_with("o3") || m.starts_with("o4") {
-        return 32768;
+    for &(prefix, tokens) in MODEL_MAX_TOKENS_PREFIX {
+        if model_lower.starts_with(prefix) {
+            return tokens;
+        }
     }
 
-    // --- OpenAI GPT-4.1 family: 32k output ---
-    if m.contains("gpt-4.1") {
-        return 32768;
+    for &(pattern, tokens) in MODEL_MAX_TOKENS_CONTAINS {
+        if model_lower.contains(pattern) {
+            return tokens;
+        }
     }
 
-    // --- OpenAI GPT-4o family: 16k output ---
-    if m.contains("gpt-4o") {
-        return 16384;
-    }
-
-    // --- OpenAI GPT-4 turbo / GPT-3.5: 4k output ---
-    if m.contains("gpt-4-turbo") || m.contains("gpt-3.5") || m.contains("gpt-4-") {
-        return 4096;
-    }
-
-    // --- Gemini 2.5 family: 65k output ---
-    if m.contains("gemini-2.5") {
-        return 65536;
-    }
-
-    // --- Gemini 2.0 / 1.5: 8k output ---
-    if m.contains("gemini-2.0") || m.contains("gemini-1.5") || m.contains("gemini-1.0") {
-        return 8192;
-    }
-
-    // --- Anthropic Claude 4.x (opus, sonnet): 16k default (up to 128k with extended output) ---
-    if m.contains("claude-opus") || m.contains("claude-sonnet-4") {
-        return 16384;
-    }
-
-    // --- Anthropic Claude 3.5 / Haiku 4.5: 8k ---
-    if m.contains("claude-3.5") || m.contains("claude-3-5") || m.contains("claude-haiku") {
-        return 8192;
-    }
-
-    // --- Anthropic Claude 3 Opus: 4k ---
-    if m.contains("claude-3-opus") || m.contains("claude-3.0") {
-        return 4096;
-    }
-
-    // --- DeepSeek: 8k ---
-    if m.contains("deepseek") {
-        return 8192;
-    }
-
-    // --- Codex: 16k ---
-    if m.contains("codex") {
-        return 16384;
-    }
-
-    // Fallback: safe default for unknown models
-    8192
+    DEFAULT_MAX_TOKENS
 }
 
 #[cfg(test)]

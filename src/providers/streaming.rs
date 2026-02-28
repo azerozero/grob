@@ -76,6 +76,13 @@ where
 {
     type Item = Result<SseEvent, reqwest::Error>;
 
+    /// Buffer incoming bytes and split on `"\n\n"` (SSE event delimiter).
+    ///
+    /// Bytes from the inner stream accumulate in `self.buffer`. When at least one
+    /// complete `"\n\n"` delimiter is found, everything up to the last delimiter
+    /// is parsed into `SseEvent`s and queued. The incomplete trailing portion
+    /// stays in the buffer for the next poll. This ensures partial chunks
+    /// (common with HTTP chunked transfer) are reassembled correctly.
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
 
@@ -141,6 +148,14 @@ where
     }
 }
 
+/// Token counts tracked during stream processing.
+struct StreamTokens {
+    input: u64,
+    output: u64,
+    cache_creation: u64,
+    cache_read: u64,
+}
+
 /// Stream adapter that logs useful information from SSE events while passing through original bytes
 #[pin_project]
 pub struct LoggingSseStream<S> {
@@ -176,6 +191,161 @@ impl<S> LoggingSseStream<S> {
     }
 }
 
+impl<S> LoggingSseStream<S> {
+    /// Process SSE events from a chunk to track usage metrics.
+    fn track_events(
+        buffer: &[u8],
+        logged_message_start: &mut bool,
+        first_token_time: &mut Option<std::time::Instant>,
+        input_tokens: &mut u64,
+        cache_creation: &mut u64,
+        cache_read: &mut u64,
+        output_tokens: &mut u64,
+    ) {
+        let Ok(text) = std::str::from_utf8(buffer) else {
+            return;
+        };
+        if !text.contains("\n\n") {
+            return;
+        }
+        for event in parse_sse_events(text) {
+            match event.event.as_deref() {
+                Some("message_start") if !*logged_message_start => {
+                    if let Ok(json) = serde_json::from_str::<Value>(&event.data) {
+                        if let Some(usage) = json.pointer("/message/usage") {
+                            *input_tokens = usage
+                                .get("input_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            *cache_creation = usage
+                                .get("cache_creation_input_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            *cache_read = usage
+                                .get("cache_read_input_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                        }
+                    }
+                    *logged_message_start = true;
+                }
+                Some("content_block_delta") => {
+                    if first_token_time.is_none() {
+                        *first_token_time = Some(std::time::Instant::now());
+                    }
+                }
+                Some("message_delta") => {
+                    if let Ok(json) = serde_json::from_str::<Value>(&event.data) {
+                        if let Some(usage) = json.get("usage") {
+                            *output_tokens += usage
+                                .get("output_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0);
+                            if let Some(input) = usage.get("input_tokens").and_then(|v| v.as_u64())
+                            {
+                                if input > 0 && *input_tokens == 0 {
+                                    *input_tokens = input;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Log final stream stats and record Prometheus metrics.
+    fn log_final_stats(
+        provider_name: &str,
+        model_name: &str,
+        start_time: std::time::Instant,
+        first_token_time: Option<std::time::Instant>,
+        tokens: &StreamTokens,
+    ) {
+        let total_time = start_time.elapsed();
+        let ttft = first_token_time
+            .map(|t| t.duration_since(start_time))
+            .unwrap_or(total_time);
+
+        let tok_per_sec = if total_time.as_secs_f64() > 0.0 && tokens.output > 0 {
+            tokens.output as f64 / total_time.as_secs_f64()
+        } else {
+            0.0
+        };
+
+        let total_input = tokens.input + tokens.cache_creation + tokens.cache_read;
+
+        let cache_info = if tokens.cache_creation > 0 || tokens.cache_read > 0 {
+            let cache_pct = if total_input > 0 {
+                (tokens.cache_read * 100) / total_input
+            } else {
+                0
+            };
+            format!(" cache:{}%", cache_pct)
+        } else {
+            String::new()
+        };
+
+        // Keep last 2 slash-separated segments for cleaner logs
+        let model_display: std::borrow::Cow<str> = {
+            let slash_count = model_name.matches('/').count();
+            if slash_count >= 2 {
+                let parts: Vec<&str> = model_name.rsplitn(3, '/').collect();
+                format!("{}/{}", parts[1], parts[0]).into()
+            } else {
+                model_name.into()
+            }
+        };
+
+        let cost = get_pricing(model_name)
+            .map(|p| p.calculate(total_input as u32, tokens.output as u32))
+            .unwrap_or(0.0);
+        let cost_info = if cost > 0.0 {
+            format!(" ${:.4}", cost)
+        } else {
+            String::new()
+        };
+
+        tracing::info!(
+            "📊 {}:{} {}ms ttft:{}ms {:.1}t/s out:{} in:{}{}{}",
+            provider_name,
+            model_display,
+            total_time.as_millis(),
+            ttft.as_millis(),
+            tok_per_sec,
+            tokens.output,
+            total_input,
+            cache_info,
+            cost_info
+        );
+
+        let model_label = model_name.to_string();
+        let provider_label = provider_name.to_string();
+        metrics::counter!("grob_requests_total",
+            "model" => model_label.clone(), "provider" => provider_label.clone(), "route_type" => "stream", "status" => "ok"
+        ).increment(1);
+        metrics::histogram!("grob_request_duration_seconds",
+            "model" => model_label.clone(), "provider" => provider_label.clone()
+        )
+        .record(total_time.as_secs_f64());
+        metrics::counter!("grob_tokens_input_total",
+            "model" => model_label.clone(), "provider" => provider_label.clone()
+        )
+        .increment(total_input);
+        metrics::counter!("grob_tokens_output_total",
+            "model" => model_label.clone(), "provider" => provider_label.clone()
+        )
+        .increment(tokens.output);
+        if cost > 0.0 {
+            metrics::gauge!("grob_estimated_cost_usd",
+                "model" => model_label, "provider" => provider_label
+            )
+            .increment(cost);
+        }
+    }
+}
+
 impl<S, E> Stream for LoggingSseStream<S>
 where
     S: Stream<Item = Result<Bytes, E>>,
@@ -185,65 +355,18 @@ where
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.as_mut().project().inner.poll_next(cx) {
             Poll::Ready(Some(Ok(bytes))) => {
-                // Accumulate bytes for parsing and track events
                 let this = self.as_mut().project();
                 this.buffer.extend_from_slice(&bytes);
 
-                // Parse events from accumulated buffer (no clone — borrow in-place)
-                if let Ok(text) = std::str::from_utf8(this.buffer) {
-                    if text.contains("\n\n") {
-                        let events = parse_sse_events(text);
-
-                        for event in events {
-                            match event.event.as_deref() {
-                                Some("message_start") if !*this.logged_message_start => {
-                                    if let Ok(json) = serde_json::from_str::<Value>(&event.data) {
-                                        if let Some(message) = json.get("message") {
-                                            if let Some(usage) = message.get("usage") {
-                                                *this.input_tokens = usage
-                                                    .get("input_tokens")
-                                                    .and_then(|v| v.as_u64())
-                                                    .unwrap_or(0);
-                                                *this.cache_creation = usage
-                                                    .get("cache_creation_input_tokens")
-                                                    .and_then(|v| v.as_u64())
-                                                    .unwrap_or(0);
-                                                *this.cache_read = usage
-                                                    .get("cache_read_input_tokens")
-                                                    .and_then(|v| v.as_u64())
-                                                    .unwrap_or(0);
-                                            }
-                                        }
-                                    }
-                                    *this.logged_message_start = true;
-                                }
-                                Some("content_block_delta") => {
-                                    if this.first_token_time.is_none() {
-                                        *this.first_token_time = Some(std::time::Instant::now());
-                                    }
-                                }
-                                Some("message_delta") => {
-                                    if let Ok(json) = serde_json::from_str::<Value>(&event.data) {
-                                        if let Some(usage) = json.get("usage") {
-                                            *this.output_tokens += usage
-                                                .get("output_tokens")
-                                                .and_then(|v| v.as_u64())
-                                                .unwrap_or(0);
-                                            if let Some(input) =
-                                                usage.get("input_tokens").and_then(|v| v.as_u64())
-                                            {
-                                                if input > 0 && *this.input_tokens == 0 {
-                                                    *this.input_tokens = input;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                }
+                Self::track_events(
+                    this.buffer,
+                    this.logged_message_start,
+                    this.first_token_time,
+                    this.input_tokens,
+                    this.cache_creation,
+                    this.cache_read,
+                    this.output_tokens,
+                );
 
                 // Keep buffer from growing unbounded
                 if this.buffer.len() > 1024 * 10 {
@@ -254,90 +377,19 @@ where
             }
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
             Poll::Ready(None) => {
-                // Stream ended - log final stats
                 let this = self.as_ref().project_ref();
-                let total_time = this.start_time.elapsed();
-                let ttft = this
-                    .first_token_time
-                    .map(|t| t.duration_since(*this.start_time))
-                    .unwrap_or(total_time);
-
-                let tok_per_sec = if total_time.as_secs_f64() > 0.0 && *this.output_tokens > 0 {
-                    *this.output_tokens as f64 / total_time.as_secs_f64()
-                } else {
-                    0.0
-                };
-
-                let total_input = *this.input_tokens + *this.cache_creation + *this.cache_read;
-
-                // Build cache info string if caching was used
-                let cache_info = if *this.cache_creation > 0 || *this.cache_read > 0 {
-                    let cache_pct = if total_input > 0 {
-                        (*this.cache_read * 100) / total_input
-                    } else {
-                        0
-                    };
-                    format!(" cache:{}%", cache_pct)
-                } else {
-                    String::new()
-                };
-                // Keep last 2 slash-separated segments for cleaner logs (e.g. "accounts/fireworks/models/x" -> "models/x")
-                let model_display: std::borrow::Cow<str> = {
-                    let slash_count = this.model_name.matches('/').count();
-                    if slash_count >= 2 {
-                        let parts: Vec<&str> = this.model_name.rsplitn(3, '/').collect();
-                        format!("{}/{}", parts[1], parts[0]).into()
-                    } else {
-                        this.model_name.as_str().into()
-                    }
-                };
-                let cost = get_pricing(this.model_name)
-                    .map(|p| p.calculate(total_input as u32, *this.output_tokens as u32))
-                    .unwrap_or(0.0);
-                let cost_info = if cost > 0.0 {
-                    format!(" ${:.4}", cost)
-                } else {
-                    String::new()
-                };
-                tracing::info!(
-                    "📊 {}:{} {}ms ttft:{}ms {:.1}t/s out:{} in:{}{}{}",
+                Self::log_final_stats(
                     this.provider_name,
-                    model_display,
-                    total_time.as_millis(),
-                    ttft.as_millis(),
-                    tok_per_sec,
-                    *this.output_tokens,
-                    total_input,
-                    cache_info,
-                    cost_info
+                    this.model_name,
+                    *this.start_time,
+                    *this.first_token_time,
+                    &StreamTokens {
+                        input: *this.input_tokens,
+                        output: *this.output_tokens,
+                        cache_creation: *this.cache_creation,
+                        cache_read: *this.cache_read,
+                    },
                 );
-
-                // Record Prometheus metrics (allocate label strings once, reuse)
-                let m = this.model_name.to_string();
-                let p = this.provider_name.to_string();
-                metrics::counter!("grob_requests_total",
-                    "model" => m.clone(), "provider" => p.clone(), "route_type" => "stream", "status" => "ok"
-                ).increment(1);
-                metrics::histogram!("grob_request_duration_seconds",
-                    "model" => m.clone(), "provider" => p.clone()
-                )
-                .record(total_time.as_secs_f64());
-                metrics::counter!("grob_tokens_input_total",
-                    "model" => m.clone(), "provider" => p.clone()
-                )
-                .increment(total_input);
-                metrics::counter!("grob_tokens_output_total",
-                    "model" => m.clone(), "provider" => p.clone()
-                )
-                .increment(*this.output_tokens);
-                if cost > 0.0 {
-                    metrics::gauge!("grob_estimated_cost_usd",
-                        "model" => m, "provider" => p
-                    )
-                    .increment(cost);
-                }
-
-                // Clear buffer
                 self.as_mut().project().buffer.clear();
                 Poll::Ready(None)
             }

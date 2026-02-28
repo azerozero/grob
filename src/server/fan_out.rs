@@ -123,12 +123,12 @@ async fn fan_out_best_quality(
     }
 
     if results.len() == 1 {
-        let r = results
+        let single_result = results
             .into_iter()
             .next()
             .expect("results.len()==1 verified above");
-        let info = vec![(r.provider, r.actual_model)];
-        return Ok((r.response, info));
+        let info = vec![(single_result.provider, single_result.actual_model)];
+        return Ok((single_result.response, info));
     }
 
     // Build judge prompt

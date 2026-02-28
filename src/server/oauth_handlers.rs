@@ -295,10 +295,8 @@ pub async fn oauth_refresh_token(
 
 /// OAuth callback query parameters
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct OAuthCallbackQuery {
     pub code: Option<String>,
-    pub state: Option<String>,
     pub error: Option<String>,
     pub error_description: Option<String>,
 }
@@ -479,10 +477,10 @@ pub async fn oauth_callback(Query(params): Query<OAuthCallbackQuery>) -> Html<St
         <div class="code-box">
             <div class="code" id="authCode">{code}</div>
         </div>
-        
+
         <button class="copy-button" onclick="copyCode()">📋 Copy Code</button>
         <div class="copied" id="copiedMsg">✓ Copied to clipboard!</div>
-        
+
         <div class="instructions">
             <strong>Next steps:</strong>
             <ol>
@@ -492,7 +490,7 @@ pub async fn oauth_callback(Query(params): Query<OAuthCallbackQuery>) -> Html<St
                 <li>Press Enter to complete the OAuth flow</li>
             </ol>
         </div>
-        
+
         <p style="margin-top: 2rem; color: #666;">You can close this window after copying the code.</p>
     </div>
 
@@ -507,7 +505,7 @@ pub async fn oauth_callback(Query(params): Query<OAuthCallbackQuery>) -> Html<St
                 }}, 2000);
             }});
         }}
-        
+
         // Auto-select code on click
         document.getElementById('authCode').addEventListener('click', function() {{
             const range = document.createRange();

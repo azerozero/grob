@@ -12,9 +12,6 @@ pub struct NameAnonymizer {
     /// Reverse automaton: pseudonyms → real names.
     reverse_ac: AhoCorasick,
     rules: Vec<NameRule>,
-    /// HMAC key for deterministic pseudonym generation.
-    #[allow(dead_code)]
-    secret_key: [u8; 32],
     /// Precomputed pseudonyms (parallel to rules).
     pseudonyms: Vec<String>,
 }
@@ -70,7 +67,6 @@ impl NameAnonymizer {
             forward_ac,
             reverse_ac,
             rules: rules.to_vec(),
-            secret_key: *secret_key,
             pseudonyms,
         }
     }

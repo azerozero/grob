@@ -37,67 +37,40 @@ pub struct Router {
     prompt_rules: Vec<CompiledPromptRule>,
 }
 
+fn compile_regex_with_fallback(pattern: Option<&str>, default: &str, name: &str) -> Option<Regex> {
+    let effective = pattern.map(|p| {
+        if p.is_empty() {
+            Regex::new(default).unwrap_or_else(|_| panic!("Invalid default {} regex", name))
+        } else {
+            match Regex::new(p) {
+                Ok(regex) => regex,
+                Err(e) => {
+                    eprintln!("Warning: Invalid {} pattern '{}': {}", name, p, e);
+                    eprintln!("Falling back to default {} pattern", name);
+                    Regex::new(default).unwrap_or_else(|_| panic!("Invalid default {} regex", name))
+                }
+            }
+        }
+    });
+    effective.or_else(|| {
+        Some(Regex::new(default).unwrap_or_else(|_| panic!("Invalid default {} regex", name)))
+    })
+}
+
 impl Router {
     /// Create a new router with configuration
     pub fn new(config: AppConfig) -> Self {
-        // Compile auto-map regex
-        let auto_map_regex = config
-            .router
-            .auto_map_regex
-            .as_ref()
-            .map(|pattern| {
-                if pattern.is_empty() {
-                    // Empty string: use default Claude pattern
-                    Regex::new(r"^claude-").expect("Invalid default Claude regex")
-                } else {
-                    // Custom pattern provided
-                    match Regex::new(pattern) {
-                        Ok(regex) => regex,
-                        Err(e) => {
-                            eprintln!(
-                                "Warning: Invalid auto_map_regex pattern '{}': {}",
-                                pattern, e
-                            );
-                            eprintln!("Falling back to default Claude pattern");
-                            Regex::new(r"^claude-").expect("Invalid default Claude regex")
-                        }
-                    }
-                }
-            })
-            .or_else(|| {
-                // None: use default Claude pattern for backward compatibility
-                Some(Regex::new(r"^claude-").expect("Invalid default Claude regex"))
-            });
+        let auto_map_regex = compile_regex_with_fallback(
+            config.router.auto_map_regex.as_deref(),
+            r"^claude-",
+            "auto_map_regex",
+        );
 
-        // Compile background-task regex
-        let background_regex = config
-            .router
-            .background_regex
-            .as_ref()
-            .map(|pattern| {
-                if pattern.is_empty() {
-                    // Empty string: use default claude-haiku pattern
-                    Regex::new(r"(?i)claude.*haiku").expect("Invalid default background regex")
-                } else {
-                    // Custom pattern provided
-                    match Regex::new(pattern) {
-                        Ok(regex) => regex,
-                        Err(e) => {
-                            eprintln!(
-                                "Warning: Invalid background_regex pattern '{}': {}",
-                                pattern, e
-                            );
-                            eprintln!("Falling back to default claude-haiku pattern");
-                            Regex::new(r"(?i)claude.*haiku")
-                                .expect("Invalid default background regex")
-                        }
-                    }
-                }
-            })
-            .or_else(|| {
-                // None: use default claude-haiku pattern for backward compatibility
-                Some(Regex::new(r"(?i)claude.*haiku").expect("Invalid default background regex"))
-            });
+        let background_regex = compile_regex_with_fallback(
+            config.router.background_regex.as_deref(),
+            r"(?i)claude.*haiku",
+            "background_regex",
+        );
 
         // Compile prompt rules
         let prompt_rules: Vec<CompiledPromptRule> = config

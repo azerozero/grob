@@ -67,7 +67,7 @@ pub enum Classification {
 }
 
 /// Audit event types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AuditEvent {
     /// Request received

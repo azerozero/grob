@@ -1,10 +1,14 @@
 pub mod anthropic_compatible;
+pub mod auth;
+pub mod constants;
 pub mod error;
 pub mod gemini;
+pub mod helpers;
 pub mod openai;
 pub mod registry;
 pub mod streaming;
 
+use crate::auth::TokenStore;
 use crate::models::{
     AnthropicRequest, ContentBlock, CountTokensRequest, CountTokensResponse, KnownContentBlock,
 };
@@ -12,9 +16,11 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use error::ProviderError;
 use futures::stream::Stream;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::pin::Pin;
+use std::time::Duration;
 
 /// Provider response that maintains Anthropic API compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +53,21 @@ pub struct StreamResponse {
     pub headers: HashMap<String, String>,
 }
 
+/// Build an optimized reqwest::Client for provider API calls.
+///
+/// Applies: TCP_NODELAY (disable Nagle), connect timeout (fail-fast),
+/// connection pooling, and HTTP/2 adaptive flow control.
+pub fn build_provider_client(connect_timeout: Duration) -> Client {
+    Client::builder()
+        .tcp_nodelay(true)
+        .connect_timeout(connect_timeout)
+        .pool_max_idle_per_host(20)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .http2_adaptive_window(true)
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
 /// Main provider trait - all providers must implement this
 /// Maintains Anthropic Messages API compatibility
 #[async_trait]
@@ -74,6 +95,24 @@ pub trait AnthropicProvider: Send + Sync {
 
     /// Check if provider supports a specific model
     fn supports_model(&self, model: &str) -> bool;
+
+    /// Return the provider's base URL for connection warmup.
+    /// Override to enable pre-warming TLS connections on startup.
+    fn base_url(&self) -> Option<&str> {
+        None
+    }
+}
+
+/// Common parameters shared across all provider constructors.
+pub struct ProviderParams {
+    pub name: String,
+    pub api_key: String,
+    pub base_url: Option<String>,
+    pub models: Vec<String>,
+    pub oauth_provider: Option<String>,
+    pub token_store: Option<TokenStore>,
+    pub api_timeout: Duration,
+    pub connect_timeout: Duration,
 }
 
 /// Authentication type for providers
@@ -140,7 +179,6 @@ impl ProviderConfig {
     }
 }
 
-// Re-export provider implementations
 pub use anthropic_compatible::AnthropicCompatibleProvider;
 pub use openai::OpenAIProvider;
 pub use registry::ProviderRegistry;

@@ -3,6 +3,7 @@ pub mod canary;
 pub mod config;
 pub mod dfa;
 pub mod hot_config;
+mod injection_patterns;
 pub mod names;
 pub mod pii;
 pub mod prompt_injection;

@@ -17,8 +17,6 @@ pub struct SecretMatch {
 pub struct DlpEvent {
     pub rule_name: String,
     pub action: String,
-    #[allow(dead_code)]
-    pub event_type: &'static str,
 }
 
 /// Internal rule representation (unified from SecretRule + CustomPrefixRule).
@@ -208,7 +206,6 @@ impl SecretScanner {
             events.push(DlpEvent {
                 rule_name: rule.name.clone(),
                 action: rule.action.to_string(),
-                event_type: "secret",
             });
 
             last_end = m.end;

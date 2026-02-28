@@ -68,37 +68,15 @@ mode = "kerberos"
     /// Test: validate rejects fan_out strategy without fan_out config block
     #[test]
     fn test_validate_rejects_fan_out_without_config() {
+        use crate::helpers::fixtures::{base_provider_config, test_app_config};
         use grob::cli::{ModelConfig, ModelMapping, ModelStrategy};
 
-        // Build config programmatically to avoid TOML parsing issues with nested arrays
         let config = AppConfig {
-            server: ServerConfig::default(),
             router: RouterConfig {
                 default: "my-model".to_string(),
-                background: None,
-                think: None,
-                websearch: None,
-                auto_map_regex: None,
-                background_regex: None,
-                prompt_rules: vec![],
-                gdpr: false,
-                region: None,
+                ..test_app_config().router
             },
-            providers: vec![grob::providers::ProviderConfig {
-                name: "prov1".to_string(),
-                provider_type: "anthropic".to_string(),
-                auth_type: grob::providers::AuthType::ApiKey,
-                api_key: Some("sk-test".to_string()),
-                base_url: None,
-                models: vec![],
-                enabled: Some(true),
-                oauth_provider: None,
-                project_id: None,
-                location: None,
-                headers: None,
-                budget_usd: None,
-                region: None,
-            }],
+            providers: vec![base_provider_config("prov1")],
             models: vec![ModelConfig {
                 name: "my-model".to_string(),
                 mappings: vec![ModelMapping {
@@ -112,16 +90,7 @@ mode = "kerberos"
                 fan_out: None, // Missing fan_out config!
                 deprecated: None,
             }],
-            presets: Default::default(),
-            budget: Default::default(),
-            dlp: Default::default(),
-            auth: Default::default(),
-            tap: Default::default(),
-            security: Default::default(),
-            cache: Default::default(),
-            compliance: Default::default(),
-            version: None,
-            user: Default::default(),
+            ..test_app_config()
         };
 
         let result = config.validate();
@@ -137,53 +106,18 @@ mode = "kerberos"
     /// Test: validate passes valid config with fan_out config block present
     #[test]
     fn test_validate_passes_valid_fan_out_config() {
+        use crate::helpers::fixtures::{base_provider_config, test_app_config};
         use grob::cli::{FanOutConfig, FanOutMode, ModelConfig, ModelMapping, ModelStrategy};
 
+        let mut prov2 = base_provider_config("prov2");
+        prov2.api_key = Some("sk-test2".to_string());
+
         let config = AppConfig {
-            server: ServerConfig::default(),
             router: RouterConfig {
                 default: "my-model".to_string(),
-                background: None,
-                think: None,
-                websearch: None,
-                auto_map_regex: None,
-                background_regex: None,
-                prompt_rules: vec![],
-                gdpr: false,
-                region: None,
+                ..test_app_config().router
             },
-            providers: vec![
-                grob::providers::ProviderConfig {
-                    name: "prov1".to_string(),
-                    provider_type: "anthropic".to_string(),
-                    auth_type: grob::providers::AuthType::ApiKey,
-                    api_key: Some("sk-test".to_string()),
-                    base_url: None,
-                    models: vec![],
-                    enabled: Some(true),
-                    oauth_provider: None,
-                    project_id: None,
-                    location: None,
-                    headers: None,
-                    budget_usd: None,
-                    region: None,
-                },
-                grob::providers::ProviderConfig {
-                    name: "prov2".to_string(),
-                    provider_type: "anthropic".to_string(),
-                    auth_type: grob::providers::AuthType::ApiKey,
-                    api_key: Some("sk-test2".to_string()),
-                    base_url: None,
-                    models: vec![],
-                    enabled: Some(true),
-                    oauth_provider: None,
-                    project_id: None,
-                    location: None,
-                    headers: None,
-                    budget_usd: None,
-                    region: None,
-                },
-            ],
+            providers: vec![base_provider_config("prov1"), prov2],
             models: vec![ModelConfig {
                 name: "my-model".to_string(),
                 mappings: vec![
@@ -210,16 +144,7 @@ mode = "kerberos"
                 }),
                 deprecated: None,
             }],
-            presets: Default::default(),
-            budget: Default::default(),
-            dlp: Default::default(),
-            auth: Default::default(),
-            tap: Default::default(),
-            security: Default::default(),
-            cache: Default::default(),
-            compliance: Default::default(),
-            version: None,
-            user: Default::default(),
+            ..test_app_config()
         };
 
         let result = config.validate();
@@ -233,6 +158,8 @@ mode = "kerberos"
     /// Test: validate passes a fully valid config
     #[test]
     fn test_validate_passes_valid_config() {
+        use crate::helpers::fixtures::{base_provider_config, test_app_config};
+
         let config = AppConfig {
             server: ServerConfig {
                 port: 8080,
@@ -240,41 +167,10 @@ mode = "kerberos"
             },
             router: RouterConfig {
                 default: "my-model".to_string(),
-                background: None,
-                think: None,
-                websearch: None,
-                auto_map_regex: None,
-                background_regex: None,
-                prompt_rules: vec![],
-                gdpr: false,
-                region: None,
+                ..test_app_config().router
             },
-            providers: vec![grob::providers::ProviderConfig {
-                name: "prov1".to_string(),
-                provider_type: "anthropic".to_string(),
-                auth_type: grob::providers::AuthType::ApiKey,
-                api_key: Some("sk-test".to_string()),
-                base_url: None,
-                models: vec![],
-                enabled: Some(true),
-                oauth_provider: None,
-                project_id: None,
-                location: None,
-                headers: None,
-                budget_usd: None,
-                region: None,
-            }],
-            models: vec![],
-            presets: Default::default(),
-            budget: Default::default(),
-            dlp: Default::default(),
-            auth: Default::default(),
-            tap: Default::default(),
-            security: Default::default(),
-            cache: Default::default(),
-            compliance: Default::default(),
-            version: None,
-            user: Default::default(),
+            providers: vec![base_provider_config("prov1")],
+            ..test_app_config()
         };
 
         let result = config.validate();

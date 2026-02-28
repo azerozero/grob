@@ -1,11 +1,11 @@
 // E2E mock tests
 // Tests for full request lifecycle with mockito
 
-use grob::cli::{AppConfig, SecurityTomlConfig};
+use grob::cli::{AppConfig, SecurityConfig};
 
 #[test]
 fn test_security_config_defaults() {
-    let config = SecurityTomlConfig::default();
+    let config = SecurityConfig::default();
     assert!(config.enabled);
     assert_eq!(config.rate_limit_rps, 100);
     assert_eq!(config.rate_limit_burst, 200);

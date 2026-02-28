@@ -4,23 +4,21 @@
 
 use crate::security::audit_log::RiskLevel;
 
+/// DLP/security outcome for a single request, used as input to risk classification.
+pub struct SecurityOutcome {
+    pub dlp_rules_triggered: usize,
+    pub was_blocked: bool,
+    pub had_injection: bool,
+    pub had_pii: bool,
+}
+
 /// Assess risk level for a request based on DLP and security outcomes.
-///
-/// - `dlp_rules_triggered`: number of DLP rules that fired
-/// - `was_blocked`: whether the request was blocked by DLP
-/// - `had_injection`: whether prompt injection was detected
-/// - `had_pii`: whether PII was detected in the request
-pub fn assess_risk(
-    dlp_rules_triggered: usize,
-    was_blocked: bool,
-    had_injection: bool,
-    had_pii: bool,
-) -> RiskLevel {
-    if had_injection || (was_blocked && had_pii) {
+pub fn assess_risk(outcome: &SecurityOutcome) -> RiskLevel {
+    if outcome.had_injection || (outcome.was_blocked && outcome.had_pii) {
         RiskLevel::Critical
-    } else if was_blocked {
+    } else if outcome.was_blocked {
         RiskLevel::High
-    } else if had_pii || dlp_rules_triggered > 2 {
+    } else if outcome.had_pii || outcome.dlp_rules_triggered > 2 {
         RiskLevel::Medium
     } else {
         RiskLevel::Low
@@ -68,6 +66,7 @@ pub fn maybe_escalate(
                 .await
             {
                 tracing::error!("Risk escalation webhook failed: {}", e);
+                metrics::counter!("grob_escalation_webhook_failures_total").increment(1);
             }
         });
     }
@@ -77,35 +76,70 @@ pub fn maybe_escalate(
 mod tests {
     use super::*;
 
+    fn outcome(
+        dlp_rules_triggered: usize,
+        was_blocked: bool,
+        had_injection: bool,
+        had_pii: bool,
+    ) -> SecurityOutcome {
+        SecurityOutcome {
+            dlp_rules_triggered,
+            was_blocked,
+            had_injection,
+            had_pii,
+        }
+    }
+
     #[test]
     fn test_risk_low() {
-        assert_eq!(assess_risk(0, false, false, false), RiskLevel::Low);
-        assert_eq!(assess_risk(1, false, false, false), RiskLevel::Low);
+        assert_eq!(
+            assess_risk(&outcome(0, false, false, false)),
+            RiskLevel::Low
+        );
+        assert_eq!(
+            assess_risk(&outcome(1, false, false, false)),
+            RiskLevel::Low
+        );
     }
 
     #[test]
     fn test_risk_medium_pii() {
-        assert_eq!(assess_risk(0, false, false, true), RiskLevel::Medium);
+        assert_eq!(
+            assess_risk(&outcome(0, false, false, true)),
+            RiskLevel::Medium
+        );
     }
 
     #[test]
     fn test_risk_medium_many_rules() {
-        assert_eq!(assess_risk(3, false, false, false), RiskLevel::Medium);
+        assert_eq!(
+            assess_risk(&outcome(3, false, false, false)),
+            RiskLevel::Medium
+        );
     }
 
     #[test]
     fn test_risk_high_blocked() {
-        assert_eq!(assess_risk(1, true, false, false), RiskLevel::High);
+        assert_eq!(
+            assess_risk(&outcome(1, true, false, false)),
+            RiskLevel::High
+        );
     }
 
     #[test]
     fn test_risk_critical_injection() {
-        assert_eq!(assess_risk(0, false, true, false), RiskLevel::Critical);
+        assert_eq!(
+            assess_risk(&outcome(0, false, true, false)),
+            RiskLevel::Critical
+        );
     }
 
     #[test]
     fn test_risk_critical_blocked_pii() {
-        assert_eq!(assess_risk(1, true, false, true), RiskLevel::Critical);
+        assert_eq!(
+            assess_risk(&outcome(1, true, false, true)),
+            RiskLevel::Critical
+        );
     }
 
     #[test]

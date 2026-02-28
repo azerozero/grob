@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use grob::cli::{AppConfig, RouterConfig, SecurityTomlConfig, ServerConfig};
+    use grob::cli::{AppConfig, RouterConfig, SecurityConfig, ServerConfig};
 
     #[test]
     fn test_health_config_defaults() {
@@ -77,7 +77,7 @@ api_key = "my-secret-key"
 
     #[test]
     fn test_security_headers_config_enabled() {
-        let config = SecurityTomlConfig {
+        let config = SecurityConfig {
             enabled: true,
             security_headers: true,
             ..Default::default()
@@ -195,7 +195,7 @@ api_key = "my-secret-key"
     #[test]
     fn test_metrics_body_limit_config() {
         // Default max body size should be reasonable
-        let config = SecurityTomlConfig::default();
+        let config = SecurityConfig::default();
         assert!(config.max_body_size > 0, "max_body_size should be > 0");
     }
 

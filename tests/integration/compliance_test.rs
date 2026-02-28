@@ -177,19 +177,36 @@ fn test_risk_level_ordering() {
 
 #[test]
 fn test_risk_assessment() {
+    use grob::security::risk::SecurityOutcome;
+
     // No violations → Low risk
-    let risk = grob::security::risk::assess_risk(0, false, false, false);
+    let risk = grob::security::risk::assess_risk(&SecurityOutcome {
+        dlp_rules_triggered: 0,
+        was_blocked: false,
+        had_injection: false,
+        had_pii: false,
+    });
     assert_eq!(risk, RiskLevel::Low);
 
     // DLP violations → Medium or higher
-    let risk = grob::security::risk::assess_risk(3, true, false, false);
+    let risk = grob::security::risk::assess_risk(&SecurityOutcome {
+        dlp_rules_triggered: 3,
+        was_blocked: true,
+        had_injection: false,
+        had_pii: false,
+    });
     assert!(
         risk >= RiskLevel::Medium,
         "DLP violations should raise risk"
     );
 
     // Injection attempt → High or higher
-    let risk = grob::security::risk::assess_risk(1, true, true, false);
+    let risk = grob::security::risk::assess_risk(&SecurityOutcome {
+        dlp_rules_triggered: 1,
+        was_blocked: true,
+        had_injection: true,
+        had_pii: false,
+    });
     assert!(
         risk >= RiskLevel::High,
         "Injection should raise risk to High+"

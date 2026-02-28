@@ -1,0 +1,85 @@
+fail_fast = true
+default_install_hook_types = ["pre-commit", "pre-push"]
+
+# Builtin fast hooks (Rust-native, no network, no environment)
+[[repos]]
+repo = "builtin"
+hooks = [
+  { id = "trailing-whitespace" },
+  { id = "end-of-file-fixer" },
+  { id = "check-toml" },
+  { id = "check-yaml", args = ["--allow-multiple-documents"] },
+  { id = "check-merge-conflict" },
+  { id = "mixed-line-ending", args = ["--fix", "lf"] },
+]
+
+# Cargo fmt — fast, runs on pre-commit
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "cargo-fmt"
+name = "cargo fmt"
+language = "system"
+entry = "cargo fmt --all --"
+types = ["rust"]
+pass_filenames = false
+
+# Clippy — runs on pre-commit (catches warnings before CI)
+[[repos.hooks]]
+id = "cargo-clippy"
+name = "cargo clippy"
+language = "system"
+entry = "cargo clippy --all-targets -- -D warnings"
+types = ["rust"]
+pass_filenames = false
+
+# Tests — expensive, runs only on pre-push
+[[repos.hooks]]
+id = "cargo-test"
+name = "cargo test"
+language = "system"
+entry = "cargo nextest run --profile ci"
+types = ["rust"]
+pass_filenames = false
+stages = ["pre-push"]
+
+# Doc tests — not covered by nextest
+[[repos.hooks]]
+id = "cargo-doctest"
+name = "cargo doc tests"
+language = "system"
+entry = "cargo test --doc"
+types = ["rust"]
+pass_filenames = false
+stages = ["pre-push"]
+
+# Cargo deny — license & dependency checks
+[[repos.hooks]]
+id = "cargo-deny"
+name = "cargo deny"
+language = "system"
+entry = "cargo deny check"
+types = ["toml"]
+pass_filenames = false
+stages = ["pre-push"]
+
+# Cargo machete — unused dependencies
+[[repos.hooks]]
+id = "cargo-machete"
+name = "cargo machete"
+language = "system"
+entry = "cargo machete"
+types = ["toml"]
+pass_filenames = false
+stages = ["pre-push"]
+
+# Security audit — known vulnerabilities
+[[repos.hooks]]
+id = "cargo-audit"
+name = "cargo audit"
+language = "system"
+entry = "cargo audit"
+types = ["toml"]
+pass_filenames = false
+stages = ["pre-push"]

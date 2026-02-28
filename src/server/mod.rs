@@ -1,28 +1,39 @@
+mod budget;
 pub(crate) mod dispatch;
 pub mod fan_out;
+mod init;
+mod middleware;
 mod oauth_handlers;
 pub mod openai_compat;
+
+pub(crate) use budget::{
+    calculate_cost, check_budget, is_provider_subscription, is_retryable, record_request_metrics,
+    record_spend, retry_delay, RequestMetrics, MAX_RETRIES,
+};
+pub(crate) use init::{
+    init_auth, init_core_services, init_dlp, init_observability, init_security, maybe_preset_sync,
+};
+pub(crate) use middleware::{
+    apply_transparency_headers, auth_middleware, extract_api_credential, extract_client_ip,
+    rate_limit_check_middleware, request_id_middleware, security_headers_response_middleware,
+    should_apply_transparency, RequestId,
+};
 
 use crate::auth::TokenStore;
 use crate::cli::AppConfig;
 use crate::features::dlp::session::DlpSessionManager;
 use crate::features::dlp::DlpEngine;
 use crate::features::token_pricing::spend::SpendTracker;
-use crate::features::token_pricing::{SharedPricingTable, TokenCounter};
+use crate::features::token_pricing::SharedPricingTable;
 use crate::message_tracing::MessageTracer;
-use crate::models::{AnthropicRequest, RouteType};
-use crate::providers::{AuthType, ProviderRegistry};
+use crate::models::AnthropicRequest;
+use crate::providers::ProviderRegistry;
 use crate::router::Router;
-use crate::security::{
-    apply_security_headers, AuditLog, CircuitBreakerRegistry, RateLimitConfig, RateLimitKey,
-    RateLimiter, SecurityHeadersConfig,
-};
-use crate::storage::GrobStore;
+use crate::security::{AuditLog, CircuitBreakerRegistry, RateLimiter};
 use axum::{
     body::Body,
     extract::State,
-    http::{HeaderMap, HeaderValue, Request, StatusCode},
-    middleware::Next,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router as AxumRouter,
@@ -106,15 +117,6 @@ impl AppState {
     pub fn snapshot(&self) -> Arc<ReloadableState> {
         self.inner.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
-}
-
-/// Constant-time string comparison to prevent timing side-channel attacks.
-fn constant_time_eq(a: &str, b: &str) -> bool {
-    use subtle::ConstantTimeEq;
-    if a.len() != b.len() {
-        return false;
-    }
-    a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
 /// Builder for constructing AuditEntry with optional EU AI Act fields.
@@ -207,283 +209,43 @@ struct AuditCompliance<'a> {
     risk_level: Option<crate::security::audit_log::RiskLevel>,
 }
 
+/// Parameters for writing an audit log entry.
+struct AuditParams<'a> {
+    audit_log: &'a AuditLog,
+    tenant_id: &'a str,
+    action: crate::security::audit_log::AuditEvent,
+    backend: &'a str,
+    dlp_rules: Vec<String>,
+    ip: &'a str,
+    duration_ms: u64,
+    eu: AuditCompliance<'a>,
+}
+
 /// Fire-and-forget audit log entry writer.
 /// Builds an `AuditEntry` and writes it; errors are logged but never propagate.
 /// When EU AI Act compliance is enabled, conditionally records model name, token counts,
 /// and risk level per Articles 12 and 14.
-#[allow(clippy::too_many_arguments)]
-fn log_audit(
-    audit_log: &AuditLog,
-    tenant_id: &str,
-    action: crate::security::audit_log::AuditEvent,
-    backend: &str,
-    dlp_rules: Vec<String>,
-    ip: &str,
-    duration_ms: u64,
-    eu: AuditCompliance<'_>,
-) {
-    let mut builder =
-        AuditEntryBuilder::new(tenant_id, action, backend, ip, duration_ms).dlp_rules(dlp_rules);
-    if eu.config.enabled && eu.config.audit_model_name {
-        if let Some(m) = eu.model_name {
+fn log_audit(p: &AuditParams<'_>) {
+    let mut builder = AuditEntryBuilder::new(p.tenant_id, p.action, p.backend, p.ip, p.duration_ms)
+        .dlp_rules(p.dlp_rules.clone());
+    if p.eu.config.enabled && p.eu.config.audit_model_name {
+        if let Some(m) = p.eu.model_name {
             builder = builder.model(m);
         }
     }
-    if eu.config.enabled && eu.config.audit_token_counts {
-        if let Some((i, o)) = eu.token_counts {
+    if p.eu.config.enabled && p.eu.config.audit_token_counts {
+        if let Some((i, o)) = p.eu.token_counts {
             builder = builder.tokens(i, o);
         }
     }
-    if eu.config.enabled && eu.config.risk_classification {
-        if let Some(r) = eu.risk_level {
+    if p.eu.config.enabled && p.eu.config.risk_classification {
+        if let Some(r) = p.eu.risk_level {
             builder = builder.risk(r);
         }
     }
-    if let Err(e) = audit_log.write(builder.build()) {
+    if let Err(e) = p.audit_log.write(builder.build()) {
         error!("Audit write failed: {}", e);
     }
-}
-
-/// Extract client IP from headers (X-Forwarded-For or fallback to "unknown").
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
-/// Apply EU AI Act transparency headers to a response.
-fn apply_transparency_headers(
-    headers: &mut HeaderMap,
-    provider: &str,
-    model: &str,
-    audit_id: &str,
-) {
-    if let Ok(v) = HeaderValue::from_str(provider) {
-        headers.insert("x-ai-provider", v);
-    }
-    if let Ok(v) = HeaderValue::from_str(model) {
-        headers.insert("x-ai-model", v);
-    }
-    if let Ok(v) = HeaderValue::from_str(audit_id) {
-        headers.insert("x-grob-audit-id", v);
-    }
-    headers.insert("x-ai-generated", HeaderValue::from_static("true"));
-}
-
-/// Auth middleware: supports three modes:
-/// - "none" (default): all requests pass
-/// - "api_key": checks Bearer token or x-api-key against configured key
-/// - "jwt": validates JWT, extracts tenant_id, injects GrobClaims into request extensions
-///
-/// Skips auth for health/metrics/oauth paths.
-async fn auth_middleware(
-    State(state): State<Arc<AppState>>,
-    mut request: Request<Body>,
-    next: Next,
-) -> Response {
-    // Skip auth for operational/oauth paths
-    let path = request.uri().path();
-    if matches!(
-        path,
-        "/health" | "/live" | "/ready" | "/metrics" | "/auth/callback" | "/api/oauth/callback"
-    ) {
-        return next.run(request).await;
-    }
-
-    let inner = state.snapshot();
-    let auth_mode = inner.config.auth.mode.as_str();
-
-    // Determine effective auth mode:
-    // If [auth] section is not configured (mode == "none"), fall back to legacy server.api_key
-    let effective_mode = if auth_mode == "none" {
-        let legacy_key = inner.config.server.api_key.as_deref().unwrap_or("");
-        if legacy_key.is_empty() {
-            "none"
-        } else {
-            "api_key"
-        }
-    } else {
-        auth_mode
-    };
-
-    match effective_mode {
-        "none" => next.run(request).await,
-        "api_key" => {
-            // Use [auth].api_key or fall back to server.api_key
-            let api_key = inner
-                .config
-                .auth
-                .api_key
-                .as_deref()
-                .filter(|k| !k.is_empty())
-                .or_else(|| inner.config.server.api_key.as_deref())
-                .unwrap_or("");
-
-            if api_key.is_empty() {
-                return next.run(request).await;
-            }
-
-            let token = extract_bearer_or_api_key(&request);
-            match token {
-                Some(t) if constant_time_eq(t, api_key) => next.run(request).await,
-                _ => auth_error_response("Invalid or missing API key. Provide via Authorization: Bearer <key> or x-api-key header."),
-            }
-        }
-        "jwt" => {
-            let validator = match &state.jwt_validator {
-                Some(v) => v,
-                None => {
-                    error!("JWT auth mode configured but no validator initialized");
-                    return auth_error_response(
-                        "Server misconfiguration: JWT validator not initialized",
-                    );
-                }
-            };
-
-            let token = request
-                .headers()
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "));
-
-            match token {
-                Some(t) => match validator.validate(t) {
-                    Ok(claims) => {
-                        debug!("JWT auth: tenant_id={}", claims.tenant_id());
-                        request.extensions_mut().insert(claims);
-                        next.run(request).await
-                    }
-                    Err(e) => auth_error_response(&format!("JWT validation failed: {}", e)),
-                },
-                None => auth_error_response(&crate::auth::jwt::AuthError::MissingToken.to_string()),
-            }
-        }
-        other => {
-            error!("Unknown auth mode: {}", other);
-            auth_error_response(&format!("Unknown auth mode: {}", other))
-        }
-    }
-}
-
-/// Request ID middleware: reads X-Request-Id header or generates UUID v4.
-/// Stores in request extensions and echoes in response header.
-async fn request_id_middleware(mut request: Request<Body>, next: Next) -> Response {
-    let request_id = request
-        .headers()
-        .get("x-request-id")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-    request
-        .extensions_mut()
-        .insert(RequestId(request_id.clone()));
-
-    let mut response = next.run(request).await;
-    if let Ok(val) = HeaderValue::from_str(&request_id) {
-        response.headers_mut().insert("x-request-id", val);
-    }
-    response
-}
-
-/// Stored in request extensions for correlation
-#[derive(Clone, Debug)]
-struct RequestId(String);
-
-/// Rate limiting middleware: checks rate limiter before processing.
-/// Returns 429 with Retry-After header when rate exceeded.
-async fn rate_limit_check_middleware(
-    State(state): State<Arc<AppState>>,
-    request: Request<Body>,
-    next: Next,
-) -> Response {
-    // Skip rate limiting for health/metrics/liveness/readiness paths
-    let path = request.uri().path();
-    if matches!(path, "/health" | "/metrics" | "/live" | "/ready") {
-        return next.run(request).await;
-    }
-
-    let limiter = match &state.rate_limiter {
-        Some(l) => l,
-        None => return next.run(request).await,
-    };
-
-    // Extract key: JWT tenant_id > Bearer token > x-api-key > IP (fallback "anonymous")
-    let key = request
-        .extensions()
-        .get::<crate::auth::GrobClaims>()
-        .map(|c| RateLimitKey::Tenant(c.tenant_id().to_string()))
-        .or_else(|| {
-            request
-                .headers()
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("Bearer "))
-                .map(|k| RateLimitKey::Tenant(k.to_string()))
-        })
-        .or_else(|| {
-            request
-                .headers()
-                .get("x-api-key")
-                .and_then(|v| v.to_str().ok())
-                .map(|k| RateLimitKey::Tenant(k.to_string()))
-        })
-        .unwrap_or_else(|| RateLimitKey::Ip("anonymous".to_string()));
-
-    let (allowed, _remaining, reset_after) = limiter.check(&key).await;
-
-    if !allowed {
-        metrics::counter!("grob_ratelimit_rejected_total").increment(1);
-        let retry_after = reset_after
-            .map(|d| d.as_secs().max(1).to_string())
-            .unwrap_or_else(|| "1".to_string());
-        return Response::builder()
-            .status(StatusCode::TOO_MANY_REQUESTS)
-            .header("Retry-After", &retry_after)
-            .header("X-RateLimit-Remaining", "0")
-            .header("Content-Type", "application/json")
-            .body(Body::from(
-                r#"{"error":{"type":"rate_limit_error","message":"Rate limit exceeded. Please slow down."}}"#,
-            ))
-            .expect("rate limit response");
-    }
-
-    next.run(request).await
-}
-
-/// Security headers middleware: applies OWASP security headers to all responses.
-async fn security_headers_response_middleware(request: Request<Body>, next: Next) -> Response {
-    let response = next.run(request).await;
-    let config = SecurityHeadersConfig::api_mode();
-    apply_security_headers(response, &config)
-}
-
-/// Extract Bearer token or x-api-key from request headers.
-fn extract_bearer_or_api_key(request: &Request<Body>) -> Option<&str> {
-    request
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .or_else(|| {
-            request
-                .headers()
-                .get("x-api-key")
-                .and_then(|v| v.to_str().ok())
-        })
-}
-
-fn auth_error_response(message: &str) -> Response {
-    let body = Json(serde_json::json!({
-        "error": {
-            "type": "authentication_error",
-            "message": message
-        }
-    }));
-    (StatusCode::UNAUTHORIZED, body).into_response()
 }
 
 /// Start the HTTP server with graceful shutdown support.
@@ -494,269 +256,25 @@ pub async fn start_server(
     config_source: crate::cli::ConfigSource,
     shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
-    let router = Router::new(config.clone());
+    let (grob_store, token_store, provider_registry) = init_core_services(&config).await?;
+    let (message_tracer, spend_tracker, pricing_table, metrics_handle) =
+        init_observability(&config, &grob_store).await?;
+    let dlp_sessions = init_dlp(&config);
+    let jwt_validator = init_auth(&config).await?;
 
-    // Initialize shared storage (redb)
-    let grob_store = Arc::new(
-        GrobStore::open(&GrobStore::default_path())
-            .map_err(|e| anyhow::anyhow!("Failed to initialize storage: {}", e))?,
-    );
-    info!("💾 Storage initialized at {}", grob_store.path().display());
-
-    // Initialize OAuth token store backed by GrobStore
-    #[cfg(feature = "oauth")]
-    let token_store = {
-        let ts = TokenStore::with_store(grob_store.clone())
-            .map_err(|e| anyhow::anyhow!("Failed to initialize token store: {}", e))?;
-        let existing_tokens = ts.list_providers();
-        if !existing_tokens.is_empty() {
-            info!(
-                "🔐 Loaded {} OAuth tokens from storage",
-                existing_tokens.len()
-            );
-        }
-        ts
-    };
-    #[cfg(not(feature = "oauth"))]
-    let token_store = TokenStore::new_empty();
-
-    // Initialize provider registry from config (with token store and model mappings)
-    let provider_registry = Arc::new(
-        ProviderRegistry::from_configs_with_models(
-            &config.providers,
-            Some(token_store.clone()),
-            &config.models,
-        )
-        .map_err(|e| anyhow::anyhow!("Failed to initialize provider registry: {}", e))?,
-    );
-
-    info!(
-        "📦 Loaded {} providers with {} models",
-        provider_registry.list_providers().len(),
-        provider_registry.list_models().len()
-    );
-
-    // Validate providers and models with real API calls (non-blocking)
-    {
-        let config_ref = config.clone();
-        let registry_ref = provider_registry.clone();
-        tokio::spawn(async move {
-            info!("🔍 Validating providers and models...");
-            let results = crate::preset::validate_config(&config_ref, &registry_ref).await;
-            crate::preset::log_validation_results(&results);
-
-            let total = results.len();
-            let healthy = results.iter().filter(|r| r.any_ok()).count();
-            if healthy == total {
-                info!(
-                    "✅ Validation complete: {}/{} models healthy",
-                    healthy, total
-                );
-            } else {
-                error!(
-                    "⚠️ Validation: {}/{} models healthy — some models will fail at runtime",
-                    healthy, total
-                );
-            }
-        });
-    }
-
-    // Initialize message tracer
-    let message_tracer = Arc::new(MessageTracer::new(config.server.tracing.clone()));
-
-    // Initialize spend tracker backed by GrobStore
-    let spend_tracker = SpendTracker::with_store(grob_store.clone());
-    if spend_tracker.total() > 0.0 {
-        info!(
-            "💰 Loaded spend tracker: ${:.2} spent this month",
-            spend_tracker.total()
-        );
-    }
-
-    // Initialize dynamic pricing table (fetches from OpenRouter)
-    let pricing_table = crate::features::token_pricing::init_pricing_table().await;
-
-    // Install Prometheus metrics recorder
-    let prometheus_builder = metrics_exporter_prometheus::PrometheusBuilder::new();
-    let metrics_handle = prometheus_builder
-        .install_recorder()
-        .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))?;
-
-    // Initialize DLP session manager (if DLP enabled in config)
-    #[cfg(feature = "dlp")]
-    let dlp_sessions = {
-        let sessions = DlpSessionManager::from_config(config.dlp.clone());
-        // Spawn DLP signed config hot-reload (if enabled)
-        if let Some(ref dlp_mgr) = sessions {
-            let dlp_cfg = dlp_mgr.config();
-            if dlp_cfg.signed_config.enabled {
-                let public_key = if dlp_cfg.signed_config.verify_signature {
-                    match crate::features::dlp::signed_config::load_public_key(
-                        &dlp_cfg.signed_config.public_key_path,
-                    ) {
-                        Ok(pk) => Some(pk),
-                        Err(e) => {
-                            warn!("Failed to load DLP signing public key: {}", e);
-                            None
-                        }
-                    }
-                } else {
-                    None
-                };
-                crate::features::dlp::signed_config::spawn_hot_reload(
-                    dlp_cfg.signed_config.clone(),
-                    dlp_mgr.hot_config().clone(),
-                    dlp_cfg.url_exfil.domain_match_mode.clone(),
-                    public_key,
-                );
-            }
-        }
-        sessions
-    };
-    #[cfg(not(feature = "dlp"))]
-    let dlp_sessions: Option<Arc<DlpSessionManager>> = None;
-
-    // Initialize JWT validator (if auth mode == "jwt")
-    let jwt_validator = if config.auth.mode == "jwt" {
-        let validator = Arc::new(
-            crate::auth::JwtValidator::from_config(&config.auth.jwt)
-                .map_err(|e| anyhow::anyhow!("Failed to initialize JWT validator: {}", e))?,
-        );
-        // Initial JWKS fetch if configured
-        if validator.jwks_url().is_some() {
-            let v = validator.clone();
-            if let Err(e) = v.refresh_jwks().await {
-                warn!("Initial JWKS fetch failed (will retry): {}", e);
-            }
-            // Spawn background JWKS refresh with exponential backoff on failure
-            let base_interval = config.auth.jwt.jwks_refresh_interval;
-            tokio::spawn(async move {
-                let mut current_interval = base_interval;
-                let max_interval = base_interval * 8;
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(current_interval)).await;
-                    match v.refresh_jwks().await {
-                        Ok(_) => {
-                            current_interval = base_interval; // Reset on success
-                        }
-                        Err(e) => {
-                            warn!(
-                                "JWKS refresh failed (next retry in {}s): {}",
-                                current_interval.min(max_interval) * 2,
-                                e
-                            );
-                            current_interval = (current_interval * 2).min(max_interval);
-                        }
-                    }
-                }
-            });
-        }
-        info!("🔐 JWT auth enabled");
-        Some(validator)
-    } else {
-        None
-    };
-
-    // Initialize webhook tap (if enabled in config)
     #[cfg(feature = "tap")]
     let tap_sender = crate::features::tap::init_tap(&config.tap);
     #[cfg(not(feature = "tap"))]
     let tap_sender: Option<Arc<crate::features::tap::TapSender>> = None;
 
-    // Build reloadable state
+    let router = Router::new(config.clone());
     let reloadable = Arc::new(ReloadableState::new(
         config.clone(),
         router,
         provider_registry,
     ));
 
-    // Initialize security layer from config
-    let security_enabled = config.security.enabled;
-    let rate_limiter = if security_enabled {
-        let rl_config = RateLimitConfig {
-            requests_per_second: config.security.rate_limit_rps,
-            burst: config.security.rate_limit_burst,
-            _window: std::time::Duration::from_secs(60),
-        };
-        info!(
-            "🛡️  Security: rate limit {}rps burst={}, body limit {}MB, headers={}, circuit_breaker={}",
-            config.security.rate_limit_rps,
-            config.security.rate_limit_burst,
-            config.security.max_body_size / (1024 * 1024),
-            config.security.security_headers,
-            config.security.circuit_breaker,
-        );
-        Some(Arc::new(RateLimiter::new(rl_config)))
-    } else {
-        info!("🛡️  Security middleware disabled");
-        None
-    };
-
-    let circuit_breakers = if security_enabled && config.security.circuit_breaker {
-        Some(Arc::new(CircuitBreakerRegistry::new()))
-    } else {
-        None
-    };
-
-    // Initialize audit log (if audit_dir configured)
-    #[cfg(not(feature = "compliance"))]
-    let audit_log: Option<Arc<AuditLog>> = None;
-    #[cfg(feature = "compliance")]
-    let audit_log = if !config.security.audit_dir.is_empty() {
-        let audit_dir = if config.security.audit_dir.starts_with('~') {
-            let home = dirs::home_dir().unwrap_or_default();
-            home.join(&config.security.audit_dir[2..])
-        } else {
-            std::path::PathBuf::from(&config.security.audit_dir)
-        };
-        let signing_algorithm = if config.security.audit_signing_algorithm.is_empty() {
-            crate::security::audit_log::SigningAlgorithm::default()
-        } else {
-            crate::security::audit_log::SigningAlgorithm::from_str_config(
-                &config.security.audit_signing_algorithm,
-            )
-        };
-        let hmac_key_path = if config.security.audit_hmac_key_path.is_empty() {
-            None
-        } else {
-            Some(std::path::PathBuf::from(
-                &config.security.audit_hmac_key_path,
-            ))
-        };
-        match AuditLog::new(crate::security::audit_log::AuditConfig {
-            log_dir: audit_dir.clone(),
-            sign_key_path: Some(audit_dir.join("audit_key.pem")),
-            signing_algorithm,
-            hmac_key_path,
-        }) {
-            Ok(log) => {
-                info!("📝 Audit logging enabled: {}", audit_dir.display());
-                Some(Arc::new(log))
-            }
-            Err(e) => {
-                error!("⚠️  Failed to initialize audit log: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // Initialize response cache (if enabled)
-    let response_cache = if config.cache.enabled {
-        let cache = crate::cache::ResponseCache::new(
-            config.cache.max_capacity,
-            config.cache.ttl_secs,
-            config.cache.max_entry_bytes,
-        );
-        info!(
-            "💾 Response cache enabled: max_capacity={}, ttl={}s, max_entry={}B",
-            config.cache.max_capacity, config.cache.ttl_secs, config.cache.max_entry_bytes
-        );
-        Some(Arc::new(cache))
-    } else {
-        None
-    };
+    let (rate_limiter, circuit_breakers, audit_log, response_cache) = init_security(&config)?;
 
     let state = Arc::new(AppState {
         inner: std::sync::RwLock::new(reloadable),
@@ -777,47 +295,39 @@ pub async fn start_server(
         started_at: chrono::Utc::now(),
     });
 
-    // Spawn background preset sync if configured and auto_sync is enabled
-    if config.presets.auto_sync {
-        if let Some(ref sync_url) = config.presets.sync_url {
-            // Initial sync
-            info!("🔄 Initial preset sync from {}...", sync_url);
-            match crate::preset::sync_presets(sync_url).await {
-                Ok(_) => info!("✅ Initial preset sync complete"),
-                Err(e) => error!("⚠️ Initial preset sync failed: {}", e),
-            }
+    maybe_preset_sync(&config).await;
 
-            // Periodic sync if interval configured
-            if let Some(ref interval) = config.presets.sync_interval {
-                crate::preset::spawn_background_sync(sync_url.clone(), interval.clone());
-            }
-        }
-    }
+    let app = build_app_router(&config, state.clone());
+    let oauth_state = state.clone();
+    let drain_state = state.clone();
 
-    // Build router
+    spawn_oauth_callback(oauth_state);
+    bind_and_serve(&config, app, shutdown_signal).await?;
+    drain_in_flight(&drain_state).await;
+
+    Ok(())
+}
+
+fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
     let app = AxumRouter::new()
-        // LLM API endpoints
         .route("/v1/messages", post(handle_messages))
         .route("/v1/messages/count_tokens", post(handle_count_tokens))
         .route("/v1/chat/completions", post(handle_openai_chat_completions))
         .route("/v1/models", get(handle_openai_models))
-        // Operational endpoints
         .route("/health", get(health_check))
         .route("/live", get(liveness_check))
         .route("/ready", get(readiness_check))
         .route("/metrics", get(metrics_endpoint))
-        // Config management
         .route("/api/config", get(get_config_json))
         .route("/api/config", post(update_config_json))
         .route("/api/config/reload", post(reload_config))
-        // OAuth endpoints
         .route(
             "/api/oauth/authorize",
             post(oauth_handlers::oauth_authorize),
         )
         .route("/api/oauth/exchange", post(oauth_handlers::oauth_exchange))
         .route("/api/oauth/callback", get(oauth_handlers::oauth_callback))
-        .route("/auth/callback", get(oauth_handlers::oauth_callback)) // OpenAI Codex uses this path
+        .route("/auth/callback", get(oauth_handlers::oauth_callback))
         .route("/api/oauth/tokens", get(oauth_handlers::oauth_list_tokens))
         .route(
             "/api/oauth/tokens/delete",
@@ -828,23 +338,16 @@ pub async fn start_server(
             post(oauth_handlers::oauth_refresh_token),
         );
 
-    // Middleware stack (applied bottom-to-top, so outermost layer listed last):
-    // 1. Auth middleware (innermost — runs after rate limit + request ID)
     let app = app.layer(axum::middleware::from_fn_with_state(
         state.clone(),
         auth_middleware,
     ));
 
-    // 2. Rate limiting middleware (before auth — outermost check)
-    if security_enabled {
-        // We apply rate limiting via from_fn_with_state on the already-built app
-    }
     let app = app.layer(axum::middleware::from_fn_with_state(
         state.clone(),
         rate_limit_check_middleware,
     ));
 
-    // 3. Security headers middleware (wraps response)
     let app = if config.security.security_headers {
         app.layer(axum::middleware::from_fn(
             security_headers_response_middleware,
@@ -853,21 +356,19 @@ pub async fn start_server(
         app
     };
 
-    // 4. Request body size limit
     let app = app.layer(RequestBodyLimitLayer::new(config.security.max_body_size));
-
-    // 5. Request ID middleware (outermost — always runs first)
     let app = app.layer(axum::middleware::from_fn(request_id_middleware));
 
-    // Clone state before moving it
-    let oauth_state = state.clone();
-    let drain_state = state.clone();
-    let app = app.with_state(state);
+    app.with_state(state)
+}
 
-    // Bind to main address (IPv6 addresses need bracket notation)
+async fn bind_and_serve(
+    config: &AppConfig,
+    app: axum::Router,
+    shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
     let addr = crate::cli::format_bind_addr(&config.server.host, config.server.port);
 
-    // TLS support (requires `tls` cargo feature)
     #[cfg(feature = "tls")]
     let tls_manual = config.server.tls.enabled
         && !config.server.tls.cert_path.is_empty()
@@ -892,36 +393,25 @@ pub async fn start_server(
         anyhow::bail!("ACME is enabled in config but grob was built without the `acme` feature. Rebuild with: cargo build --features acme");
     }
 
-    // Start OAuth callback (must be before main server await)
-    spawn_oauth_callback(oauth_state);
-
     if !tls_enabled {
-        // Use SO_REUSEPORT for zero-downtime restart support
         let listener = crate::net::bind_reuseport(&addr).await?;
         info!("🚀 Server listening on {} (SO_REUSEPORT)", addr);
-
-        // Start main server (plain HTTP) with graceful shutdown
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal)
             .await?;
     } else if tls_acme {
-        // ACME auto-certificate mode
         #[cfg(feature = "acme")]
         {
             let acceptor = crate::acme::build_acme_acceptor(&config.server.tls.acme)?;
-
             info!("🔒 Server listening on {} (ACME TLS, SO_REUSEPORT)", addr);
-
             let listener = crate::net::bind_reuseport(&addr).await?;
             axum_server::Server::bind(addr.parse()?)
                 .acceptor(acceptor)
                 .serve(app.into_make_service())
                 .await?;
-            // Keep listener alive for SO_REUSEPORT
             drop(listener);
         }
     } else {
-        // Manual TLS certificate mode
         #[cfg(feature = "tls")]
         {
             use axum_server::tls_rustls::RustlsConfig;
@@ -930,10 +420,7 @@ pub async fn start_server(
                 &config.server.tls.key_path,
             )
             .await?;
-
             info!("🔒 Server listening on {} (TLS, SO_REUSEPORT)", addr);
-
-            // Use SO_REUSEPORT std listener for zero-downtime restart support
             let std_listener = crate::net::bind_reuseport_std(&addr)?;
             axum_server::from_tcp_rustls(std_listener, rustls_config)
                 .serve(app.into_make_service())
@@ -941,11 +428,14 @@ pub async fn start_server(
         }
     }
 
-    // Drain in-flight requests (max 30s)
+    Ok(())
+}
+
+async fn drain_in_flight(state: &Arc<AppState>) {
     let drain_start = std::time::Instant::now();
     let drain_timeout = std::time::Duration::from_secs(30);
     loop {
-        let active = drain_state
+        let active = state
             .active_requests
             .load(std::sync::atomic::Ordering::Relaxed);
         if active == 0 {
@@ -961,8 +451,6 @@ pub async fn start_server(
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-
-    Ok(())
 }
 
 /// Spawn the OAuth callback server (required for OpenAI Codex OAuth)
@@ -1303,6 +791,7 @@ async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
         &new_config.providers,
         Some(state.token_store.clone()),
         &new_config.models,
+        &new_config.server.timeouts,
     ) {
         Ok(r) => Arc::new(r),
         Err(e) => {
@@ -1340,171 +829,6 @@ async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
     Json(serde_json::json!({"status": "success", "message": "Configuration reloaded", "active_requests": active})).into_response()
 }
 
-/// Record Prometheus metrics for a completed request.
-///
-/// Naming follows Prometheus/OpenMetrics conventions:
-/// - Counters end with `_total`
-/// - Units in metric name as suffix (`_seconds`, `_usd`)
-/// - No label names embedded in metric names
-#[allow(clippy::too_many_arguments)]
-fn record_request_metrics(
-    model: &str,
-    provider: &str,
-    route_type: &RouteType,
-    status: &str,
-    latency_ms: u64,
-    input_tokens: u32,
-    output_tokens: u32,
-    cost_usd: f64,
-) {
-    // Allocate label strings once and reuse across all metric calls
-    let m = model.to_string();
-    let p = provider.to_string();
-    let rt = route_type.to_string();
-    let s = status.to_string();
-    metrics::counter!("grob_requests_total",
-        "model" => m.clone(), "provider" => p.clone(), "route_type" => rt, "status" => s
-    )
-    .increment(1);
-    metrics::histogram!("grob_request_duration_seconds",
-        "model" => m.clone(), "provider" => p.clone()
-    )
-    .record(latency_ms as f64 / 1000.0);
-    metrics::counter!("grob_input_tokens_total",
-        "model" => m.clone(), "provider" => p.clone()
-    )
-    .increment(input_tokens as u64);
-    metrics::counter!("grob_output_tokens_total",
-        "model" => m.clone(), "provider" => p.clone()
-    )
-    .increment(output_tokens as u64);
-    if cost_usd > 0.0 {
-        // Gauge used as monotonic accumulator (Counter only supports u64,
-        // but cost is fractional USD). Supports rate() in PromQL.
-        // Month-to-date persistent total is in grob_spend_usd (set in /metrics).
-        metrics::gauge!("grob_request_cost_usd",
-            "model" => m, "provider" => p
-        )
-        .increment(cost_usd);
-    }
-}
-
-/// Check budget before a request. Returns Err(AppError::BudgetExceeded) if any limit is hit.
-async fn check_budget(
-    state: &Arc<AppState>,
-    inner: &Arc<ReloadableState>,
-    provider_name: &str,
-    model_name: &str,
-) -> Result<(), AppError> {
-    let budget_config = &inner.config.budget;
-    let global_limit = budget_config.monthly_limit_usd;
-
-    // Find provider and model budget limits
-    let provider_limit = inner
-        .config
-        .providers
-        .iter()
-        .find(|p| p.name == provider_name)
-        .and_then(|p| p.budget_usd);
-
-    let model_limit = inner.find_model(model_name).and_then(|m| m.budget_usd);
-
-    let tracker = state.spend_tracker.lock().await;
-
-    // Check budget
-    if let Err(e) = tracker.check_budget(
-        provider_name,
-        model_name,
-        global_limit,
-        provider_limit,
-        model_limit,
-    ) {
-        return Err(AppError::BudgetExceeded(e.message));
-    }
-
-    // Check warnings
-    if let Some(warning) = tracker.check_warnings(
-        provider_name,
-        model_name,
-        global_limit,
-        provider_limit,
-        model_limit,
-        budget_config.warn_at_percent,
-    ) {
-        warn!("Budget warning: {}", warning);
-    }
-
-    Ok(())
-}
-
-/// Record spend after a successful request (global + per-tenant if applicable)
-async fn record_spend(
-    state: &Arc<AppState>,
-    provider_name: &str,
-    model_name: &str,
-    cost: f64,
-    tenant_id: Option<&str>,
-) {
-    if cost > 0.0 {
-        let mut tracker = state.spend_tracker.lock().await;
-        if let Some(tenant) = tenant_id {
-            tracker.record_tenant(tenant, provider_name, model_name, cost);
-        } else {
-            tracker.record(provider_name, model_name, cost);
-        }
-    }
-}
-
-/// Check if a provider uses OAuth (subscription = $0 cost)
-fn is_provider_subscription(inner: &Arc<ReloadableState>, provider_name: &str) -> bool {
-    inner
-        .config
-        .providers
-        .iter()
-        .find(|p| p.name == provider_name)
-        .map(|p| p.auth_type == AuthType::OAuth)
-        .unwrap_or(false)
-}
-
-/// Calculate cost using dynamic pricing table
-async fn calculate_cost(
-    state: &Arc<AppState>,
-    actual_model: &str,
-    input_tokens: u32,
-    output_tokens: u32,
-    is_subscription: bool,
-) -> TokenCounter {
-    let table = state.pricing_table.read().await;
-    TokenCounter::with_pricing(
-        actual_model,
-        input_tokens,
-        output_tokens,
-        is_subscription,
-        Some(&table),
-    )
-}
-
-/// Maximum retries per provider before falling back to the next mapping.
-const MAX_RETRIES: u32 = 2;
-
-/// Check if a provider error is retryable (429, 500, 502, 503, network errors).
-fn is_retryable(e: &crate::providers::error::ProviderError) -> bool {
-    match e {
-        crate::providers::error::ProviderError::ApiError { status, .. } => {
-            matches!(status, 429 | 500 | 502 | 503)
-        }
-        crate::providers::error::ProviderError::HttpError(_) => true,
-        _ => false,
-    }
-}
-
-/// Calculate retry delay with exponential backoff and jitter.
-fn retry_delay(attempt: u32) -> std::time::Duration {
-    let base_ms = 200u64 * 4u64.pow(attempt);
-    let jitter = rand::random::<u64>() % (base_ms / 2 + 1);
-    std::time::Duration::from_millis(base_ms + jitter)
-}
-
 /// Handle /v1/chat/completions requests (OpenAI-compatible endpoint)
 /// Supports both streaming (SSE) and non-streaming responses, plus tool calling.
 async fn handle_openai_chat_completions(
@@ -1521,7 +845,9 @@ async fn handle_openai_chat_completions(
     let peer_ip = extract_client_ip(&headers);
 
     let inner = state.snapshot();
-    let session_key = tenant_id.as_deref().or_else(|| extract_api_key(&headers));
+    let session_key = tenant_id
+        .as_deref()
+        .or_else(|| extract_api_credential(&headers));
     let dlp = state
         .dlp_sessions
         .as_ref()
@@ -1566,7 +892,7 @@ async fn handle_openai_chat_completions(
                 .header("Connection", "keep-alive")
                 .body(body)
                 .expect("streaming response builder");
-            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+            if should_apply_transparency(&inner.config) {
                 apply_transparency_headers(
                     response.headers_mut(),
                     &provider,
@@ -1585,7 +911,7 @@ async fn handle_openai_chat_completions(
         } => {
             let openai_response =
                 openai_compat::transform_anthropic_to_openai(anthropic_response, model.clone());
-            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+            if should_apply_transparency(&inner.config) {
                 let body = serde_json::to_vec(&openai_response).unwrap_or_default();
                 let mut resp = Response::builder()
                     .status(200)
@@ -1692,15 +1018,6 @@ fn sanitize_provider_response(
     }
 }
 
-/// Extract API key from request headers (Bearer token or x-api-key).
-fn extract_api_key(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .or_else(|| headers.get("x-api-key").and_then(|v| v.to_str().ok()))
-}
-
 /// Format route type for logging
 fn format_route_type(decision: &crate::models::RouteDecision) -> String {
     match &decision.matched_prompt {
@@ -1800,7 +1117,9 @@ async fn handle_messages(
     let tenant_id = claims.as_ref().map(|c| c.tenant_id().to_string());
     let peer_ip = extract_client_ip(&headers);
     let inner = state.snapshot();
-    let session_key = tenant_id.as_deref().or_else(|| extract_api_key(&headers));
+    let session_key = tenant_id
+        .as_deref()
+        .or_else(|| extract_api_credential(&headers));
     let dlp = state
         .dlp_sessions
         .as_ref()
@@ -1861,7 +1180,7 @@ async fn handle_messages(
             }
 
             // Transparency headers
-            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+            if should_apply_transparency(&inner.config) {
                 let mut hdrs = HeaderMap::new();
                 apply_transparency_headers(&mut hdrs, &provider, &actual_model, req_id);
                 for (k, v) in hdrs {
@@ -1883,7 +1202,7 @@ async fn handle_messages(
             actual_model,
             response_bytes,
         } => {
-            if inner.config.compliance.enabled && inner.config.compliance.transparency_headers {
+            if should_apply_transparency(&inner.config) {
                 let body = response_bytes
                     .unwrap_or_else(|| serde_json::to_vec(&response).unwrap_or_default());
                 let mut resp = Response::builder()
@@ -1955,98 +1274,43 @@ async fn handle_count_tokens(
 
     // 3. Try model mappings with fallback (1:N mapping)
     if let Some(model_config) = inner.find_model(&decision.model_name) {
-        debug!(
-            "📋 Found {} provider mappings for token counting: {}",
-            model_config.mappings.len(),
-            decision.model_name
-        );
-
-        // Sort mappings by priority
         let mut sorted_mappings = model_config.mappings.clone();
         sorted_mappings.sort_by_key(|m| m.priority);
 
-        // Try each mapping in priority order
-        for (idx, mapping) in sorted_mappings.iter().enumerate() {
-            debug!(
-                "🔄 Trying token count mapping {}/{}: provider={}, actual_model={}",
-                idx + 1,
-                sorted_mappings.len(),
-                mapping.provider,
-                mapping.actual_model
-            );
-
-            // Try to get provider from registry
-            if let Some(provider) = inner.provider_registry.get_provider(&mapping.provider) {
-                // Trust the model mapping configuration - no need to validate
-
-                // Update model to actual model name
-                let mut count_request_for_provider = count_request.clone();
-                count_request_for_provider.model = mapping.actual_model.clone();
-
-                // Call provider's count_tokens
-                match provider.count_tokens(count_request_for_provider).await {
-                    Ok(response) => {
-                        debug!(
-                            "✅ Token count succeeded with provider: {}",
-                            mapping.provider
-                        );
-                        return Ok(Json(response).into_response());
-                    }
-                    Err(e) => {
-                        debug!(
-                            "⚠️ Provider {} failed: {}, trying next fallback",
-                            mapping.provider, e
-                        );
-                        continue;
-                    }
-                }
-            } else {
-                debug!(
-                    "⚠️ Provider {} not found in registry, trying next fallback",
-                    mapping.provider
-                );
+        for mapping in &sorted_mappings {
+            let Some(provider) = inner.provider_registry.get_provider(&mapping.provider) else {
                 continue;
+            };
+
+            let mut req = count_request.clone();
+            req.model = mapping.actual_model.clone();
+
+            match provider.count_tokens(req).await {
+                Ok(response) => return Ok(Json(response).into_response()),
+                Err(e) => {
+                    debug!("Provider {} count_tokens failed: {}", mapping.provider, e);
+                    continue;
+                }
             }
         }
 
-        error!(
-            "❌ All provider mappings failed for token counting: {}",
-            decision.model_name
-        );
         Err(AppError::ProviderError(format!(
             "All {} provider mappings failed for token counting: {}",
             sorted_mappings.len(),
             decision.model_name
         )))
+    } else if let Ok(provider) = inner
+        .provider_registry
+        .get_provider_for_model(&decision.model_name)
+    {
+        let mut req = count_request.clone();
+        req.model = decision.model_name.clone();
+        let response = provider
+            .count_tokens(req)
+            .await
+            .map_err(|e| AppError::ProviderError(e.to_string()))?;
+        Ok(Json(response).into_response())
     } else {
-        // No model mapping found, try direct provider registry lookup (backward compatibility)
-        if let Ok(provider) = inner
-            .provider_registry
-            .get_provider_for_model(&decision.model_name)
-        {
-            debug!(
-                "📦 Using provider from registry (direct lookup) for token counting: {}",
-                decision.model_name
-            );
-
-            // Update model to routed model
-            let mut count_request_for_provider = count_request.clone();
-            count_request_for_provider.model = decision.model_name.clone();
-
-            // Call provider's count_tokens
-            let response = provider
-                .count_tokens(count_request_for_provider)
-                .await
-                .map_err(|e| AppError::ProviderError(e.to_string()))?;
-
-            debug!("✅ Token count completed via provider");
-            return Ok(Json(response).into_response());
-        }
-
-        error!(
-            "❌ No model mapping or provider found for token counting: {}",
-            decision.model_name
-        );
         Err(AppError::ProviderError(format!(
             "No model mapping or provider found for token counting: {}",
             decision.model_name
