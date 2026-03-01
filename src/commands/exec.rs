@@ -8,7 +8,7 @@ pub async fn cmd_exec(
     cmd: Vec<String>,
     cli_config: Option<String>,
 ) -> anyhow::Result<()> {
-    let effective_port = port.unwrap_or(config.server.port);
+    let effective_port = port.unwrap_or(config.server.port.value());
     let base_url = cli::format_base_url(&config.server.host, effective_port);
     let mut we_started = false;
 

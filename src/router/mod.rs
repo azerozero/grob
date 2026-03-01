@@ -1,22 +1,13 @@
+//! Request routing engine with regex-based prompt rules and task-type classification.
+
+mod message;
+mod rules;
+
 use crate::cli::AppConfig;
-use crate::models::{AnthropicRequest, MessageContent, RouteDecision, RouteType, SystemPrompt};
+use crate::models::{AnthropicRequest, RouteDecision, RouteType};
 use anyhow::Result;
 use regex::Regex;
-use std::sync::LazyLock;
 use tracing::{debug, info};
-
-/// Regex to detect capture group references ($1, $name, ${1}, ${name})
-static CAPTURE_REF_PATTERN: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\$(?:\d+|[a-zA-Z_]\w*|\{[^}]+\})").unwrap());
-
-/// Pre-compiled regex for subagent model tag extraction (avoids per-request compilation)
-static SUBAGENT_TAG_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<GROB-SUBAGENT-MODEL>(.*?)</GROB-SUBAGENT-MODEL>").unwrap());
-
-/// Check if a string contains capture group references
-fn contains_capture_reference(s: &str) -> bool {
-    s.contains('$') && CAPTURE_REF_PATTERN.is_match(s)
-}
 
 /// Compiled prompt rule with pre-compiled regex
 #[derive(Clone)]
@@ -37,36 +28,16 @@ pub struct Router {
     prompt_rules: Vec<CompiledPromptRule>,
 }
 
-fn compile_regex_with_fallback(pattern: Option<&str>, default: &str, name: &str) -> Option<Regex> {
-    let effective = pattern.map(|p| {
-        if p.is_empty() {
-            Regex::new(default).unwrap_or_else(|_| panic!("Invalid default {} regex", name))
-        } else {
-            match Regex::new(p) {
-                Ok(regex) => regex,
-                Err(e) => {
-                    eprintln!("Warning: Invalid {} pattern '{}': {}", name, p, e);
-                    eprintln!("Falling back to default {} pattern", name);
-                    Regex::new(default).unwrap_or_else(|_| panic!("Invalid default {} regex", name))
-                }
-            }
-        }
-    });
-    effective.or_else(|| {
-        Some(Regex::new(default).unwrap_or_else(|_| panic!("Invalid default {} regex", name)))
-    })
-}
-
 impl Router {
     /// Create a new router with configuration
     pub fn new(config: AppConfig) -> Self {
-        let auto_map_regex = compile_regex_with_fallback(
+        let auto_map_regex = rules::compile_regex_with_fallback(
             config.router.auto_map_regex.as_deref(),
             r"^claude-",
             "auto_map_regex",
         );
 
-        let background_regex = compile_regex_with_fallback(
+        let background_regex = rules::compile_regex_with_fallback(
             config.router.background_regex.as_deref(),
             r"(?i)claude.*haiku",
             "background_regex",
@@ -79,7 +50,7 @@ impl Router {
             .iter()
             .filter_map(|rule| match Regex::new(&rule.pattern) {
                 Ok(regex) => {
-                    let is_dynamic = contains_capture_reference(&rule.model);
+                    let is_dynamic = rules::contains_capture_reference(&rule.model);
                     Some(CompiledPromptRule {
                         regex,
                         model: rule.model.clone(),
@@ -88,9 +59,10 @@ impl Router {
                     })
                 }
                 Err(e) => {
-                    eprintln!(
-                        "Warning: Invalid prompt_rule pattern '{}': {}. Skipping.",
-                        rule.pattern, e
+                    tracing::warn!(
+                        "Invalid prompt_rule pattern '{}': {}. Skipping.",
+                        rule.pattern,
+                        e
                     );
                     None
                 }
@@ -235,374 +207,6 @@ impl Router {
         } else {
             false
         }
-    }
-
-    /// Match prompt rules against the turn-starting user message content
-    /// Returns (model_name, matched_text) if a rule matches, None otherwise
-    /// Strips the matched phrase from the prompt if strip_match is true
-    /// For dynamic rules (model contains $refs), expands capture groups in the model name
-    ///
-    /// NOTE: We check the turn-starting message (not just the last user message) so that
-    /// prompt phrases like "OPUS" persist for the entire turn, even through tool calls.
-    fn match_prompt_rule(&self, request: &mut AnthropicRequest) -> Option<(String, String)> {
-        if self.prompt_rules.is_empty() {
-            return None;
-        }
-
-        // Debug: dump message structure for troubleshooting
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            use crate::models::ContentBlock;
-            for (idx, msg) in request.messages.iter().enumerate() {
-                let content_desc = match &msg.content {
-                    MessageContent::Text(t) => {
-                        let preview: String = t.chars().take(60).collect();
-                        format!(
-                            "Text({:?}{})",
-                            preview,
-                            if t.len() > 60 { "..." } else { "" }
-                        )
-                    }
-                    MessageContent::Blocks(blocks) => {
-                        let types: Vec<&str> = blocks
-                            .iter()
-                            .map(|b| match b {
-                                ContentBlock::Known(k) => match k {
-                                    crate::models::KnownContentBlock::Text { .. } => "text",
-                                    crate::models::KnownContentBlock::Image { .. } => "image",
-                                    crate::models::KnownContentBlock::ToolUse { .. } => "tool_use",
-                                    crate::models::KnownContentBlock::ToolResult { .. } => {
-                                        "tool_result"
-                                    }
-                                    crate::models::KnownContentBlock::Thinking { .. } => "thinking",
-                                },
-                                ContentBlock::Unknown(_) => "unknown",
-                            })
-                            .collect();
-                        format!("Blocks({:?})", types)
-                    }
-                };
-                debug!("🔍 msg[{}] role={}: {}", idx, msg.role, content_desc);
-            }
-        }
-
-        // Extract turn-starting user message content (persists through tool calls)
-        let user_content = self.extract_turn_starting_user_message(request)?;
-
-        // Check each rule in order (first match wins)
-        for rule in &self.prompt_rules {
-            if let Some(captures) = rule.regex.captures(&user_content) {
-                let matched_text = captures
-                    .get(0)
-                    .map(|m| m.as_str().to_string())
-                    .unwrap_or_default();
-
-                // Resolve the model name (expand capture refs if dynamic)
-                let model_name = if rule.is_dynamic {
-                    Self::expand_model_template(&rule.model, &captures)
-                } else {
-                    rule.model.clone()
-                };
-
-                debug!(
-                    "📝 Prompt rule matched: pattern='{}' → model='{}' (strip_match={})",
-                    rule.regex.as_str(),
-                    model_name,
-                    rule.strip_match
-                );
-
-                // Strip the matched phrase from the turn-starting message if requested
-                if rule.strip_match {
-                    self.strip_match_from_turn_starting_message(request, &rule.regex);
-                }
-
-                return Some((model_name, matched_text));
-            }
-        }
-
-        None
-    }
-
-    /// Expand capture group references in a model template string
-    /// Supports $1, $name, ${1}, ${name} syntax via regex crate's Captures::expand
-    fn expand_model_template(template: &str, captures: &regex::Captures) -> String {
-        let mut expanded = String::new();
-        captures.expand(template, &mut expanded);
-        expanded
-    }
-
-    /// Extract the text content from the last user message
-    fn extract_last_user_message(&self, request: &AnthropicRequest) -> Option<String> {
-        // Find the last user message
-        let last_user = request.messages.iter().rev().find(|m| m.role == "user")?;
-
-        // Extract text content (excluding system-reminder blocks)
-        match &last_user.content {
-            MessageContent::Text(text) => {
-                if text.trim().starts_with("<system-reminder>") {
-                    None
-                } else {
-                    Some(text.clone())
-                }
-            }
-            MessageContent::Blocks(blocks) => {
-                // Concatenate text blocks, excluding system-reminder blocks
-                let text: String = blocks
-                    .iter()
-                    .filter_map(|block| block.as_text())
-                    .filter(|s| !s.trim().starts_with("<system-reminder>"))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                if text.is_empty() {
-                    None
-                } else {
-                    Some(text)
-                }
-            }
-        }
-    }
-
-    /// Extract the text content from the turn-starting user message
-    ///
-    /// A "turn" starts when:
-    /// 1. The conversation begins, OR
-    /// 2. After an assistant message that has no tool_use (i.e., the previous turn ended)
-    ///
-    /// This allows prompt phrases like "OPUS" to persist throughout a turn,
-    /// even when the model makes tool calls and the last user message is just tool results.
-    fn find_turn_start_index(&self, request: &AnthropicRequest) -> usize {
-        use crate::models::ContentBlock;
-
-        // Debug: log message structure for prompt rule detection
-        debug!(
-            "🔍 find_turn_start_index: {} messages in request",
-            request.messages.len()
-        );
-
-        for (idx, msg) in request.messages.iter().enumerate().rev() {
-            if msg.role == "assistant" {
-                // Check if this assistant message has any tool_use blocks
-                let has_tool_use = match &msg.content {
-                    MessageContent::Text(_) => false,
-                    MessageContent::Blocks(blocks) => blocks.iter().any(|block| {
-                        matches!(
-                            block,
-                            ContentBlock::Known(crate::models::KnownContentBlock::ToolUse { .. })
-                        )
-                    }),
-                };
-
-                debug!(
-                    "🔍 Assistant msg at idx={}: has_tool_use={}",
-                    idx, has_tool_use
-                );
-
-                if !has_tool_use {
-                    // This assistant message ends the previous turn
-                    // Current turn starts after this message
-                    debug!(
-                        "🔍 Turn starts at idx={} (after assistant without tool_use)",
-                        idx + 1
-                    );
-                    return idx + 1;
-                }
-            }
-        }
-
-        debug!("🔍 No turn boundary found, starting from idx=0");
-        0 // No assistant message found, start from beginning
-    }
-
-    fn extract_turn_starting_user_message(&self, request: &AnthropicRequest) -> Option<String> {
-        let turn_start_idx = self.find_turn_start_index(request);
-
-        // Find the first user message with text content from turn_start_idx onwards
-        for (offset, msg) in request.messages.iter().skip(turn_start_idx).enumerate() {
-            if msg.role != "user" {
-                continue;
-            }
-
-            // Check if this user message has text content (not just tool_result)
-            let text_content = match &msg.content {
-                MessageContent::Text(text) => {
-                    if !text.trim().is_empty() && !text.trim().starts_with("<system-reminder>") {
-                        Some(text.clone())
-                    } else {
-                        None
-                    }
-                }
-                MessageContent::Blocks(blocks) => {
-                    // Get text blocks, excluding system-reminder blocks (which are generated by client)
-                    let text: String = blocks
-                        .iter()
-                        .filter_map(|block| block.as_text())
-                        .filter(|s| !s.trim().starts_with("<system-reminder>"))
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    if text.trim().is_empty() {
-                        None
-                    } else {
-                        Some(text)
-                    }
-                }
-            };
-
-            if let Some(ref content) = text_content {
-                let preview: String = content.chars().take(80).collect();
-                debug!(
-                    "🔍 Turn-starting user msg at idx={}: {:?}{}",
-                    turn_start_idx + offset,
-                    preview,
-                    if content.len() > 80 { "..." } else { "" }
-                );
-                return text_content;
-            }
-        }
-
-        // Fallback to last user message if no turn-starting message found
-        debug!("🔍 No turn-starting user message found, falling back to last user message");
-        self.extract_last_user_message(request)
-    }
-
-    /// Strip the matched phrase from the turn-starting user message
-    fn strip_match_from_turn_starting_message(
-        &self,
-        request: &mut AnthropicRequest,
-        regex: &Regex,
-    ) {
-        let turn_start_idx = self.find_turn_start_index(request);
-
-        // Find the first user message with text content from turn_start_idx onwards
-        for msg in request.messages.iter_mut().skip(turn_start_idx) {
-            if msg.role != "user" {
-                continue;
-            }
-
-            // Check if this message has non-system-reminder text content
-            let has_text = match &msg.content {
-                MessageContent::Text(text) => {
-                    !text.trim().is_empty() && !text.trim().starts_with("<system-reminder>")
-                }
-                MessageContent::Blocks(blocks) => blocks.iter().any(|block| {
-                    block
-                        .as_text()
-                        .map(|s| !s.trim().is_empty() && !s.trim().starts_with("<system-reminder>"))
-                        .unwrap_or(false)
-                }),
-            };
-
-            if has_text {
-                // This is the turn-starting message, strip from it and return
-                match &mut msg.content {
-                    MessageContent::Text(text) => {
-                        let new_text = regex.replace_all(text, "").to_string();
-                        if new_text != *text {
-                            debug!("🔪 Stripped matched phrase from turn-starting prompt");
-                            *text = new_text;
-                        }
-                    }
-                    MessageContent::Blocks(blocks) => {
-                        for block in blocks.iter_mut() {
-                            if let Some(text) = block.as_text_mut() {
-                                let new_text = regex.replace_all(text, "").to_string();
-                                if new_text != *text {
-                                    debug!("🔪 Stripped matched phrase from turn-starting prompt block");
-                                    *text = new_text;
-                                }
-                            }
-                        }
-                    }
-                }
-                return;
-            }
-        }
-
-        // Fallback: strip from last user message if no turn-starting message found
-        // (matches the fallback behavior in extract_turn_starting_user_message)
-        self.strip_match_from_last_user_message(request, regex);
-    }
-
-    /// Strip the matched phrase from the last user message (fallback for edge cases)
-    fn strip_match_from_last_user_message(&self, request: &mut AnthropicRequest, regex: &Regex) {
-        // Find the last user message (mutable)
-        let last_user = request.messages.iter_mut().rev().find(|m| m.role == "user");
-
-        if let Some(msg) = last_user {
-            match &mut msg.content {
-                MessageContent::Text(text) => {
-                    let stripped = regex.replace_all(text, "").to_string();
-                    if stripped != *text {
-                        debug!("🔪 Stripped matched phrase from prompt");
-                        *text = stripped;
-                    }
-                }
-                MessageContent::Blocks(blocks) => {
-                    // Strip from all text blocks
-                    for block in blocks.iter_mut() {
-                        if let Some(text) = block.as_text_mut() {
-                            let stripped = regex.replace_all(text, "").to_string();
-                            if stripped != *text {
-                                debug!("🔪 Stripped matched phrase from prompt block");
-                                *text = stripped;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Extract subagent model from system prompt tag
-    /// Checks for <GROB-SUBAGENT-MODEL>model-name</GROB-SUBAGENT-MODEL> in system[1].text
-    /// and removes the tag after extraction.
-    ///
-    /// First attempts to resolve the tag value as a model name in the models config.
-    /// Falls back to treating it as a direct provider model name (deprecated behavior).
-    fn extract_subagent_model(&self, request: &mut AnthropicRequest) -> Option<String> {
-        // Check if system exists and is Blocks type with at least 2 blocks
-        let system = request.system.as_mut()?;
-
-        if let SystemPrompt::Blocks(blocks) = system {
-            if blocks.len() < 2 {
-                return None;
-            }
-
-            // Check second block (index 1) for tag
-            let second_block = &mut blocks[1];
-            if !second_block.text.contains("<GROB-SUBAGENT-MODEL>") {
-                return None;
-            }
-
-            // Extract model name using pre-compiled regex
-            if let Some(captures) = SUBAGENT_TAG_REGEX.captures(&second_block.text) {
-                if let Some(model_match) = captures.get(1) {
-                    let tag_value = model_match.as_str().to_string();
-
-                    // Remove the tag from the text
-                    second_block.text = SUBAGENT_TAG_REGEX
-                        .replace_all(&second_block.text, "")
-                        .to_string();
-
-                    // First, try to find a model with this name in the models config (case-insensitive)
-                    if let Some(_model) = self
-                        .config
-                        .models
-                        .iter()
-                        .find(|m| m.name.eq_ignore_ascii_case(&tag_value))
-                    {
-                        // Found a configured model with this name (use the configured case)
-                        return Some(_model.name.clone());
-                    }
-
-                    // DEPRECATED: Fall back to treating the tag value as a direct provider model name
-                    // This behavior is deprecated and should not be relied upon.
-                    // Please configure a named model in the [models] section instead.
-                    debug!("⚠️  GROB-SUBAGENT-MODEL tag '{}' not found in models config, using as direct provider model name (deprecated)", tag_value);
-                    return Some(tag_value);
-                }
-            }
-        }
-
-        None
     }
 }
 
@@ -953,13 +557,13 @@ mod tests {
 
     #[test]
     fn test_contains_capture_reference() {
-        assert!(super::contains_capture_reference("$1"));
-        assert!(super::contains_capture_reference("$model"));
-        assert!(super::contains_capture_reference("${1}"));
-        assert!(super::contains_capture_reference("${name}"));
-        assert!(super::contains_capture_reference("prefix-$1-suffix"));
-        assert!(!super::contains_capture_reference("static-model"));
-        assert!(!super::contains_capture_reference("no-refs-here"));
+        assert!(super::rules::contains_capture_reference("$1"));
+        assert!(super::rules::contains_capture_reference("$model"));
+        assert!(super::rules::contains_capture_reference("${1}"));
+        assert!(super::rules::contains_capture_reference("${name}"));
+        assert!(super::rules::contains_capture_reference("prefix-$1-suffix"));
+        assert!(!super::rules::contains_capture_reference("static-model"));
+        assert!(!super::rules::contains_capture_reference("no-refs-here"));
     }
 
     #[test]

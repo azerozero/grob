@@ -11,7 +11,7 @@ mod tests {
     fn test_health_config_defaults() {
         // Verify the server config has sane defaults for health endpoints
         let config = ServerConfig::default();
-        assert_eq!(config.port, 13456);
+        assert_eq!(config.port.value(), 13456);
         assert_eq!(config.oauth_callback_port, 1455);
     }
 
@@ -196,7 +196,10 @@ api_key = "my-secret-key"
     fn test_metrics_body_limit_config() {
         // Default max body size should be reasonable
         let config = SecurityConfig::default();
-        assert!(config.max_body_size > 0, "max_body_size should be > 0");
+        assert!(
+            config.max_body_size.value() > 0,
+            "max_body_size should be > 0"
+        );
     }
 
     #[test]

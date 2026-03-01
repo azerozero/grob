@@ -7,7 +7,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use grob::cache::ResponseCache;
 use grob::features::dlp::sprt::SprtDetector;
-use grob::features::token_pricing::{get_pricing, PricingTable};
+use grob::features::token_pricing::{pricing, PricingTable};
 use grob::models::*;
 use grob::providers::streaming::parse_sse_events;
 
@@ -243,21 +243,21 @@ fn bench_sprt(c: &mut Criterion) {
 fn bench_pricing(c: &mut Criterion) {
     let mut group = c.benchmark_group("pricing");
 
-    // Static get_pricing (with LazyLock HashMap)
-    group.bench_function("get_pricing_exact", |b| {
-        b.iter(|| black_box(get_pricing("claude-sonnet-4-6")))
+    // Static pricing (with LazyLock HashMap)
+    group.bench_function("pricing_exact", |b| {
+        b.iter(|| black_box(pricing("claude-sonnet-4-6")))
     });
 
-    group.bench_function("get_pricing_fuzzy", |b| {
-        b.iter(|| black_box(get_pricing("anthropic/claude-sonnet-4-6:beta")))
+    group.bench_function("pricing_fuzzy", |b| {
+        b.iter(|| black_box(pricing("anthropic/claude-sonnet-4-6:beta")))
     });
 
-    group.bench_function("get_pricing_miss", |b| {
-        b.iter(|| black_box(get_pricing("unknown-model-xyz")))
+    group.bench_function("pricing_miss", |b| {
+        b.iter(|| black_box(pricing("unknown-model-xyz")))
     });
 
     // ModelPricing::calculate
-    let pricing = get_pricing("claude-sonnet-4-6").unwrap();
+    let pricing = pricing("claude-sonnet-4-6").unwrap();
     group.bench_function("calculate_cost", |b| {
         b.iter(|| black_box(pricing.calculate(1500, 350)))
     });

@@ -2,6 +2,19 @@ use super::config::{DlpAction, UrlExfilConfig};
 use super::hot_config::{is_domain_suspicious, SharedHotConfig};
 use regex::Regex;
 use std::borrow::Cow;
+use std::sync::LazyLock;
+
+// SAFETY: patterns are compile-time constants; unwrap cannot fail.
+static MD_IMAGE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"!\[[^\]]*\]\(([^)]+)\)").unwrap());
+static MD_LINK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[[^\]]*\]\(([^)]+)\)").unwrap());
+static RAW_URL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"https?://[^\s)\]>"']+"#).unwrap());
+static DATA_URI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"data:[a-zA-Z0-9/+.-]+;base64,[A-Za-z0-9+/=]+").unwrap());
+static BASE64_SEGMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"/[A-Za-z0-9+/=]{32,}").unwrap());
 
 /// Detection detail for a suspicious URL.
 #[derive(Debug, Clone)]
@@ -34,28 +47,12 @@ pub enum UrlExfilResult {
 pub struct UrlExfilScanner {
     config: UrlExfilConfig,
     hot_config: SharedHotConfig,
-    md_image_re: Regex,
-    md_link_re: Regex,
-    raw_url_re: Regex,
-    data_uri_re: Regex,
-    base64_segment_re: Regex,
     /// Fast reject: only proceed if text contains one of these first bytes.
     prefix_bytes: [bool; 256],
 }
 
 impl UrlExfilScanner {
     pub fn new(config: UrlExfilConfig, hot_config: SharedHotConfig) -> Self {
-        // ![alt](url) — markdown image
-        let md_image_re = Regex::new(r"!\[[^\]]*\]\(([^)]+)\)").unwrap();
-        // [text](url) — markdown link (we filter out images in find_suspicious_urls)
-        let md_link_re = Regex::new(r"\[[^\]]*\]\(([^)]+)\)").unwrap();
-        // Raw URLs
-        let raw_url_re = Regex::new(r#"https?://[^\s)\]>"']+"#).unwrap();
-        // data: URIs
-        let data_uri_re = Regex::new(r"data:[a-zA-Z0-9/+.-]+;base64,[A-Za-z0-9+/=]+").unwrap();
-        // Base64-like path segments (32+ chars)
-        let base64_segment_re = Regex::new(r"/[A-Za-z0-9+/=]{32,}").unwrap();
-
         let mut prefix_bytes = [false; 256];
         prefix_bytes[b'!' as usize] = true; // md image
         prefix_bytes[b'[' as usize] = true; // md link
@@ -67,11 +64,6 @@ impl UrlExfilScanner {
         Self {
             config,
             hot_config,
-            md_image_re,
-            md_link_re,
-            raw_url_re,
-            data_uri_re,
-            base64_segment_re,
             prefix_bytes,
         }
     }
@@ -120,7 +112,7 @@ impl UrlExfilScanner {
 
         // Check data URIs first
         if self.config.flag_data_uris {
-            for m in self.data_uri_re.find_iter(text) {
+            for m in DATA_URI_RE.find_iter(text) {
                 let range = (m.start(), m.end());
                 if !overlaps(&seen_ranges, range) {
                     detections.push(UrlExfilDetection {
@@ -136,7 +128,7 @@ impl UrlExfilScanner {
 
         // Check markdown images
         if self.config.scan_markdown_images {
-            for caps in self.md_image_re.captures_iter(text) {
+            for caps in MD_IMAGE_RE.captures_iter(text) {
                 if let Some(url_match) = caps.get(1) {
                     let full = caps.get(0).unwrap();
                     let range = (full.start(), full.end());
@@ -154,7 +146,7 @@ impl UrlExfilScanner {
 
         // Check markdown links
         if self.config.scan_markdown_links {
-            for caps in self.md_link_re.captures_iter(text) {
+            for caps in MD_LINK_RE.captures_iter(text) {
                 if let Some(url_match) = caps.get(1) {
                     let full = caps.get(0).unwrap();
                     let range = (full.start(), full.end());
@@ -172,7 +164,7 @@ impl UrlExfilScanner {
 
         // Check raw URLs
         if self.config.scan_raw_urls {
-            for m in self.raw_url_re.find_iter(text) {
+            for m in RAW_URL_RE.find_iter(text) {
                 let range = (m.start(), m.end());
                 if !overlaps(&seen_ranges, range) {
                     if let Some(det) = self.check_url(m.as_str(), m.start(), m.end(), "raw_url") {
@@ -201,7 +193,7 @@ impl UrlExfilScanner {
 
         // Check hostname against domain lists
         if let Some(hostname) = parsed.host_str() {
-            let hot = self.hot_config.read().unwrap();
+            let hot = self.hot_config.read().unwrap_or_else(|e| e.into_inner());
             if is_domain_suspicious(hostname, &hot.url_whitelist, &hot.url_blacklist) {
                 return Some(UrlExfilDetection {
                     url: url_str.to_string(),
@@ -229,7 +221,7 @@ impl UrlExfilScanner {
         // Check for base64-encoded data in path
         if self.config.flag_base64_in_path {
             let path = parsed.path();
-            if self.base64_segment_re.is_match(path) {
+            if BASE64_SEGMENT_RE.is_match(path) {
                 return Some(UrlExfilDetection {
                     url: url_str.to_string(),
                     reason: format!("{}_base64_in_path", source),

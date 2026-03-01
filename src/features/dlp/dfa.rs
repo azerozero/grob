@@ -129,7 +129,7 @@ impl SecretScanner {
 
     /// Returns the length of the longest pattern *string* (not max match length).
     /// For cross-chunk window sizing, prefer using the known max match length from rule config.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Public API for callers that need pattern-length heuristics
     pub fn max_pattern_str_len(&self) -> usize {
         self.regexes
             .iter()

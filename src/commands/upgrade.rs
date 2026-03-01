@@ -5,22 +5,23 @@ pub async fn cmd_upgrade(
     config: &cli::AppConfig,
     cli_config: Option<String>,
 ) -> anyhow::Result<()> {
-    let base_url = cli::format_base_url(&config.server.host, config.server.port);
+    let base_url = cli::format_base_url(&config.server.host, config.server.port.value());
 
-    let old_pid = match instance::find_instance_pid(&config.server.host, config.server.port).await {
-        Some(pid) => pid,
-        None => {
-            eprintln!(
-                "❌ No running Grob instance found on port {}",
-                config.server.port
-            );
-            eprintln!("   Start one first with: grob start -d");
-            return Ok(());
-        }
-    };
+    let old_pid =
+        match instance::find_instance_pid(&config.server.host, config.server.port.value()).await {
+            Some(pid) => pid,
+            None => {
+                eprintln!(
+                    "❌ No running Grob instance found on port {}",
+                    config.server.port
+                );
+                eprintln!("   Start one first with: grob start -d");
+                return Ok(());
+            }
+        };
     println!("🔄 Upgrading Grob (old PID: {})...", old_pid);
 
-    spawn_background_service(Some(config.server.port), cli_config)?;
+    spawn_background_service(Some(config.server.port.value()), cli_config)?;
     println!("   Spawned new process, waiting for health...");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);

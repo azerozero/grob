@@ -9,7 +9,7 @@ fn test_security_config_defaults() {
     assert!(config.enabled);
     assert_eq!(config.rate_limit_rps, 100);
     assert_eq!(config.rate_limit_burst, 200);
-    assert_eq!(config.max_body_size, 10 * 1024 * 1024);
+    assert_eq!(config.max_body_size.value(), 10 * 1024 * 1024);
     assert!(config.security_headers);
     assert!(config.circuit_breaker);
     assert!(config.audit_dir.is_empty());
@@ -35,7 +35,7 @@ fn test_security_config_from_toml() {
     assert!(config.security.enabled);
     assert_eq!(config.security.rate_limit_rps, 50);
     assert_eq!(config.security.rate_limit_burst, 100);
-    assert_eq!(config.security.max_body_size, 5_242_880);
+    assert_eq!(config.security.max_body_size.value(), 5_242_880);
     assert!(!config.security.circuit_breaker);
     assert_eq!(config.security.audit_dir, "/tmp/grob-audit");
 }

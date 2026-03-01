@@ -362,7 +362,7 @@ impl InjectionDetector {
 
         // Hot-loaded custom patterns
         {
-            let hot = self.hot_config.read().unwrap();
+            let hot = self.hot_config.read().unwrap_or_else(|e| e.into_inner());
             for (i, re) in hot.injection_custom_patterns.iter().enumerate() {
                 for m in re.find_iter(text) {
                     detections.push(InjectionDetection {

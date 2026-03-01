@@ -1,3 +1,5 @@
+//! CLI subcommands: start, stop, status, doctor, spend, etc.
+
 pub mod common;
 pub mod completions;
 pub mod config_diff;

@@ -145,7 +145,7 @@ fn apply_config(
     }
 
     // Write-lock and swap
-    let mut hot = hot_config.write().unwrap();
+    let mut hot = hot_config.write().unwrap_or_else(|e| e.into_inner());
     hot.url_whitelist = new_whitelist;
     hot.url_blacklist = new_blacklist;
     hot.injection_custom_patterns = new_injection_patterns;
@@ -267,7 +267,7 @@ async fn reload_once(
     // Hash check — skip if unchanged
     let hash = format!("{:x}", Sha256::digest(&content));
     {
-        let current = hot_config.read().unwrap();
+        let current = hot_config.read().unwrap_or_else(|e| e.into_inner());
         if current.source_hash == hash {
             return Ok(ReloadStatus::Unchanged);
         }
@@ -275,7 +275,7 @@ async fn reload_once(
 
     // Log old → new hash on change
     {
-        let current = hot_config.read().unwrap();
+        let current = hot_config.read().unwrap_or_else(|e| e.into_inner());
         tracing::info!(
             old_hash = %current.source_hash,
             new_hash = %hash,
@@ -289,7 +289,7 @@ async fn reload_once(
 
     // Update hash and expose as gauge label for observability
     {
-        let mut hot = hot_config.write().unwrap();
+        let mut hot = hot_config.write().unwrap_or_else(|e| e.into_inner());
         hot.source_hash = hash.clone();
     }
     metrics::gauge!("grob_dlp_config_hash_info", "hash" => hash[..16].to_string()).set(1.0);
@@ -316,7 +316,7 @@ custom_patterns = ["(?i)corporate\\s+override"]
 
         apply_config(toml_content, &DomainMatchMode::Suffix, &hot).unwrap();
 
-        let h = hot.read().unwrap();
+        let h = hot.read().unwrap_or_else(|e| e.into_inner());
         assert_eq!(h.url_whitelist.len(), 2);
         assert_eq!(h.url_blacklist.len(), 1);
         assert_eq!(h.injection_custom_patterns.len(), 1);
@@ -334,7 +334,7 @@ custom_patterns = ["(?i)valid", "[invalid"]
 
         apply_config(toml_content, &DomainMatchMode::Suffix, &hot).unwrap();
 
-        let h = hot.read().unwrap();
+        let h = hot.read().unwrap_or_else(|e| e.into_inner());
         // Only the valid pattern should be loaded
         assert_eq!(h.injection_custom_patterns.len(), 1);
     }

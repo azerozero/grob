@@ -1,4 +1,4 @@
-use crate::{cli, server};
+use crate::{cli, cli::Port, server};
 
 pub async fn cmd_run(
     mut config: cli::AppConfig,
@@ -7,7 +7,7 @@ pub async fn cmd_run(
     host: Option<String>,
 ) -> anyhow::Result<()> {
     if let Some(port) = port {
-        config.server.port = port;
+        config.server.port = Port::new(port).expect("valid port");
     }
     config.server.host = host.unwrap_or_else(|| "::".to_string());
 

@@ -56,7 +56,7 @@ async fn fan_out_fastest(
     let mut provider_info: Vec<(String, String)> = Vec::new();
 
     for mapping in mappings {
-        let Some(provider) = registry.get_provider(&mapping.provider) else {
+        let Some(provider) = registry.provider(&mapping.provider) else {
             continue;
         };
         let mut req = request.clone();
@@ -161,7 +161,7 @@ async fn fan_out_best_quality(
         .map(|r| (r.provider.clone(), r.actual_model.clone()))
         .collect();
 
-    if let Ok(judge_provider) = registry.get_provider_for_model(judge_model) {
+    if let Ok(judge_provider) = registry.provider_for_model(judge_model) {
         let judge_request = AnthropicRequest {
             model: judge_model.to_string(),
             messages: vec![crate::models::Message {
@@ -278,7 +278,7 @@ async fn fan_out_all(
     let futures: Vec<_> = mappings
         .iter()
         .filter_map(|mapping| {
-            let provider = registry.get_provider(&mapping.provider)?;
+            let provider = registry.provider(&mapping.provider)?;
             let mut req = request.clone();
             req.model = mapping.actual_model.clone();
             let provider_name = mapping.provider.clone();

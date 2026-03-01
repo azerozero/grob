@@ -1,3 +1,5 @@
+//! LLM provider trait and implementations (Anthropic, OpenAI, Gemini, etc.).
+
 pub mod anthropic_compatible;
 pub mod auth;
 pub mod constants;
@@ -65,13 +67,16 @@ pub fn build_provider_client(connect_timeout: Duration) -> Client {
         .pool_idle_timeout(Duration::from_secs(90))
         .http2_adaptive_window(true)
         .build()
-        .unwrap_or_else(|_| Client::new())
+        .unwrap_or_else(|e| {
+            tracing::warn!("Provider client build failed, using defaults: {}", e);
+            Client::new()
+        })
 }
 
 /// Main provider trait - all providers must implement this
 /// Maintains Anthropic Messages API compatibility
 #[async_trait]
-pub trait AnthropicProvider: Send + Sync {
+pub trait LlmProvider: Send + Sync {
     /// Send a message request to the provider
     /// Must transform to/from Anthropic format as needed
     async fn send_message(
@@ -165,7 +170,7 @@ pub struct ProviderConfig {
 
     /// Per-provider monthly budget in USD (optional, overrides global)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub budget_usd: Option<f64>,
+    pub budget_usd: Option<crate::cli::BudgetUsd>,
 
     /// Provider region for GDPR filtering (e.g., "eu", "us", "global")
     /// None defaults to "global" (no restriction)

@@ -1,3 +1,5 @@
+//! Persistent storage layer using redb (embedded key-value store).
+
 pub mod migrate;
 
 use crate::auth::token_store::OAuthToken;
@@ -149,7 +151,9 @@ impl GrobStore {
             data.total += amount;
             *data.by_provider.entry(provider.to_string()).or_default() += amount;
             *data.by_model.entry(model.to_string()).or_default() += amount;
-            let _ = self.write_spend_data(Some(t), &data);
+            if let Err(e) = self.write_spend_data(Some(t), &data) {
+                tracing::warn!("Failed to persist tenant spend data for {}: {}", t, e);
+            }
         }
     }
 
@@ -167,7 +171,9 @@ impl GrobStore {
         } else {
             Self::load_spend_from_db(&self.db, tenant).unwrap_or_default()
         };
-        let _ = self.write_spend_data(tenant, &data);
+        if let Err(e) = self.write_spend_data(tenant, &data) {
+            tracing::warn!("Failed to flush spend data to disk: {}", e);
+        }
     }
 
     fn write_spend_data(&self, tenant: Option<&str>, data: &SpendData) -> Result<()> {

@@ -101,7 +101,12 @@ pub async fn oauth_authorize(
     };
 
     let oauth_client = OAuthClient::new(config, state.token_store.clone());
-    let auth_url = oauth_client.get_authorization_url();
+    let auth_url = oauth_client.authorization_url().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to build authorization URL: {}", e),
+        )
+    })?;
 
     let instructions = match req.oauth_type.as_str() {
         "max" => "Visit the URL above to authorize with your Claude Pro/Max account. After authorization, you'll receive a code. Paste it in the next step.".to_string(),
@@ -113,7 +118,7 @@ pub async fn oauth_authorize(
 
     Ok(Json(OAuthAuthorizeResponse {
         url: auth_url.url,
-        verifier: auth_url.verifier.verifier,
+        verifier: auth_url.verifier.into_verifier(),
         instructions,
     }))
 }
@@ -303,7 +308,6 @@ pub struct OAuthCallbackQuery {
 
 /// OAuth callback handler - displays the authorization code to the user
 pub async fn oauth_callback(Query(params): Query<OAuthCallbackQuery>) -> Html<String> {
-    // Check for errors
     if let Some(error) = params.error {
         let error = html_escape(&error);
         let error_desc = html_escape(
@@ -311,9 +315,20 @@ pub async fn oauth_callback(Query(params): Query<OAuthCallbackQuery>) -> Html<St
                 .error_description
                 .unwrap_or_else(|| "Unknown error".to_string()),
         );
-        return Html(format!(
-            r#"
-<!DOCTYPE html>
+        return render_oauth_error_page(&error, &error_desc);
+    }
+
+    let code = html_escape(
+        &params
+            .code
+            .unwrap_or_else(|| "No code received".to_string()),
+    );
+    render_oauth_success_page(&code)
+}
+
+fn render_oauth_error_page(error: &str, error_desc: &str) -> Html<String> {
+    Html(format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -364,21 +379,13 @@ pub async fn oauth_callback(Query(params): Query<OAuthCallbackQuery>) -> Html<St
         <p style="margin-top: 2rem; color: #666;">You can close this window and try again.</p>
     </div>
 </body>
-</html>
-"#
-        ));
-    }
+</html>"#
+    ))
+}
 
-    // Extract code (state is not used for token exchange, verifier is stored in frontend)
-    let code = html_escape(
-        &params
-            .code
-            .unwrap_or_else(|| "No code received".to_string()),
-    );
-
+fn render_oauth_success_page(code: &str) -> Html<String> {
     Html(format!(
-        r#"
-<!DOCTYPE html>
+        r#"<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
@@ -516,7 +523,6 @@ pub async fn oauth_callback(Query(params): Query<OAuthCallbackQuery>) -> Html<St
         }});
     </script>
 </body>
-</html>
-"#
+</html>"#
     ))
 }

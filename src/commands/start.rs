@@ -1,5 +1,5 @@
 use super::common::*;
-use crate::{cli, instance};
+use crate::{cli, cli::Port, instance};
 
 pub async fn cmd_start(
     config: cli::AppConfig,
@@ -8,7 +8,7 @@ pub async fn cmd_start(
     detach: bool,
     cli_config: Option<String>,
 ) -> anyhow::Result<()> {
-    let effective_port = port.unwrap_or(config.server.port);
+    let effective_port = port.unwrap_or(config.server.port.value());
 
     if detach {
         println!("Starting Grob in background...");
@@ -49,12 +49,12 @@ pub async fn cmd_start(
     // Foreground mode
     let mut config = config;
     if let Some(port) = port {
-        config.server.port = port;
+        config.server.port = Port::new(port).expect("valid port");
     }
 
-    if instance::is_instance_running(&config.server.host, config.server.port).await {
+    if instance::is_instance_running(&config.server.host, config.server.port.value()).await {
         if let Some(pid) =
-            instance::find_instance_pid(&config.server.host, config.server.port).await
+            instance::find_instance_pid(&config.server.host, config.server.port.value()).await
         {
             eprintln!("❌ Error: Service is already running (PID: {})", pid);
         } else {

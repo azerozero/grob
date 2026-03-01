@@ -3,7 +3,9 @@ use crate::{cli, instance};
 
 pub async fn cmd_stop(config: &cli::AppConfig) -> anyhow::Result<()> {
     println!("Stopping Grob...");
-    if let Some(pid) = instance::find_instance_pid(&config.server.host, config.server.port).await {
+    if let Some(pid) =
+        instance::find_instance_pid(&config.server.host, config.server.port.value()).await
+    {
         match stop_service(pid).await {
             Ok(_) => {
                 println!("✅ Service stopped successfully (PID: {})", pid);

@@ -3,14 +3,14 @@ use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 
 /// Get the PID file path
-pub fn get_pid_file() -> PathBuf {
+pub fn pid_file_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".grob").join("grob.pid")
 }
 
 /// Write the current process PID to the PID file
 pub fn write_pid() -> io::Result<()> {
-    let pid_file = get_pid_file();
+    let pid_file = pid_file_path();
 
     // Create parent directory if it doesn't exist
     if let Some(parent) = pid_file.parent() {
@@ -27,7 +27,7 @@ pub fn write_pid() -> io::Result<()> {
 /// Prevents partial reads during hot restarts.
 #[allow(dead_code)] // available for callers that need atomic PID writes
 pub fn write_pid_atomic() -> io::Result<()> {
-    let pid_file = get_pid_file();
+    let pid_file = pid_file_path();
 
     if let Some(parent) = pid_file.parent() {
         fs::create_dir_all(parent)?;
@@ -43,7 +43,7 @@ pub fn write_pid_atomic() -> io::Result<()> {
 
 /// Read the PID from the PID file
 pub fn read_pid() -> io::Result<u32> {
-    let pid_file = get_pid_file();
+    let pid_file = pid_file_path();
     let pid_str = fs::read_to_string(&pid_file)?;
     pid_str
         .trim()
@@ -53,7 +53,7 @@ pub fn read_pid() -> io::Result<u32> {
 
 /// Remove the PID file
 pub fn cleanup_pid() -> io::Result<()> {
-    let pid_file = get_pid_file();
+    let pid_file = pid_file_path();
     if pid_file.exists() {
         fs::remove_file(&pid_file)?;
         tracing::info!("PID file removed: {:?}", pid_file);

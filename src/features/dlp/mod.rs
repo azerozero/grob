@@ -1,3 +1,5 @@
+//! Data Loss Prevention engine: PII redaction, secret scanning, prompt injection detection.
+
 pub mod builtins;
 pub mod canary;
 pub mod config;

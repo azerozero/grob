@@ -1,10 +1,12 @@
+//! OpenAI provider implementation.
+
 mod streaming;
 mod transform;
 pub(crate) mod types;
 
 use super::{
-    build_provider_client, error::ProviderError, AnthropicProvider, ProviderResponse,
-    StreamResponse, Usage,
+    build_provider_client, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse,
+    Usage,
 };
 use crate::auth::{OAuthConfig, TokenStore};
 use crate::models::{AnthropicRequest, CountTokensRequest, CountTokensResponse};
@@ -58,7 +60,7 @@ impl OpenAIProvider {
         }
     }
 
-    async fn get_auth_header(&self) -> Result<String, ProviderError> {
+    async fn auth_header(&self) -> Result<String, ProviderError> {
         super::auth::resolve_access_token(
             self.oauth_provider.as_deref(),
             self.token_store.as_ref(),
@@ -161,12 +163,12 @@ impl OpenAIProvider {
 }
 
 #[async_trait]
-impl AnthropicProvider for OpenAIProvider {
+impl LlmProvider for OpenAIProvider {
     async fn send_message(
         &self,
         request: AnthropicRequest,
     ) -> Result<ProviderResponse, ProviderError> {
-        let auth_value = self.get_auth_header().await?;
+        let auth_value = self.auth_header().await?;
         let base_url = self.effective_base_url();
 
         // Determine endpoint: OAuth always uses Responses API, API key only for codex models
@@ -284,7 +286,7 @@ impl AnthropicProvider for OpenAIProvider {
     ) -> Result<StreamResponse, ProviderError> {
         use futures::stream::TryStreamExt;
 
-        let auth_value = self.get_auth_header().await?;
+        let auth_value = self.auth_header().await?;
         let base_url = self.effective_base_url();
         let is_codex = Self::is_codex_model(&request.model);
 
@@ -346,69 +348,10 @@ impl AnthropicProvider for OpenAIProvider {
                 let message_id = message_id.clone();
                 let state = state.clone();
                 let provider_name = provider_name.clone();
-
                 async move {
                     match result {
                         Ok(sse_event) => {
-                            if state.lock().unwrap_or_else(|e| e.into_inner()).stream_ended {
-                                tracing::debug!("Stream already ended, skipping chunk");
-                                return Ok(Bytes::new());
-                            }
-
-                            tracing::debug!("Received SSE chunk: {}", sse_event.data);
-
-                            if sse_event.data.trim().is_empty() {
-                                return Ok(Bytes::new());
-                            }
-
-                            if sse_event.data.trim() == "[DONE]" {
-                                tracing::debug!("Stream finished with [DONE]");
-                                return Ok(Bytes::new());
-                            }
-
-                            // Check for error response (some providers return HTTP 200 with error in body)
-                            if let Ok(error_response) =
-                                serde_json::from_str::<OpenAIStreamError>(&sse_event.data)
-                            {
-                                let status = error_response.status_code.unwrap_or(500);
-                                let error_type =
-                                    error_response.error.r#type.as_deref().unwrap_or("unknown");
-                                tracing::error!(
-                                    "{} upstream error ({}): {} [type={}]",
-                                    provider_name,
-                                    status,
-                                    error_response.error.message,
-                                    error_type
-                                );
-                                return Err(ProviderError::ApiError {
-                                    status,
-                                    message: format!(
-                                        "{}: {}",
-                                        provider_name, error_response.error.message
-                                    ),
-                                });
-                            }
-
-                            match serde_json::from_str::<OpenAIStreamChunk>(&sse_event.data) {
-                                Ok(chunk) => {
-                                    let sse_output =
-                                        streaming::transform_openai_chunk_to_anthropic_sse(
-                                            &chunk,
-                                            &message_id,
-                                            &mut state.lock().unwrap_or_else(|e| e.into_inner()),
-                                        );
-                                    Ok(Bytes::from(sse_output))
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "{} failed to parse chunk: {} - Data: {}",
-                                        provider_name,
-                                        e,
-                                        sse_event.data
-                                    );
-                                    Ok(Bytes::new())
-                                }
-                            }
+                            process_sse_event(&sse_event.data, &state, &message_id, &provider_name)
                         }
                         Err(e) => {
                             tracing::error!("Stream error: {}", e);
@@ -454,6 +397,62 @@ impl AnthropicProvider for OpenAIProvider {
 
     fn base_url(&self) -> Option<&str> {
         Some(&self.base_url)
+    }
+}
+
+/// Transform a single OpenAI SSE event into Anthropic SSE format.
+/// Returns empty bytes for events that should be filtered out (empty, [DONE], post-end).
+fn process_sse_event(
+    data: &str,
+    state: &std::sync::Arc<std::sync::Mutex<StreamTransformState>>,
+    message_id: &str,
+    provider_name: &str,
+) -> Result<Bytes, ProviderError> {
+    // Skip if stream already ended
+    if state.lock().unwrap_or_else(|e| e.into_inner()).stream_ended {
+        return Ok(Bytes::new());
+    }
+
+    let trimmed = data.trim();
+    if trimmed.is_empty() || trimmed == "[DONE]" {
+        return Ok(Bytes::new());
+    }
+
+    // Check for error response (some providers return HTTP 200 with error in body)
+    if let Ok(error_response) = serde_json::from_str::<OpenAIStreamError>(data) {
+        let status = error_response.status_code.unwrap_or(500);
+        let error_type = error_response.error.r#type.as_deref().unwrap_or("unknown");
+        tracing::error!(
+            "{} upstream error ({}): {} [type={}]",
+            provider_name,
+            status,
+            error_response.error.message,
+            error_type
+        );
+        return Err(ProviderError::ApiError {
+            status,
+            message: format!("{}: {}", provider_name, error_response.error.message),
+        });
+    }
+
+    match serde_json::from_str::<OpenAIStreamChunk>(data) {
+        Ok(chunk) => {
+            let sse_output = streaming::transform_openai_chunk_to_anthropic_sse(
+                &chunk,
+                message_id,
+                &mut state.lock().unwrap_or_else(|e| e.into_inner()),
+            );
+            Ok(Bytes::from(sse_output))
+        }
+        Err(e) => {
+            tracing::warn!(
+                "{} failed to parse chunk: {} - Data: {}",
+                provider_name,
+                e,
+                data
+            );
+            Ok(Bytes::new())
+        }
     }
 }
 

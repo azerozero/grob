@@ -4,9 +4,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[derive(Debug, Clone)]
 pub struct CanaryToken {
     pub fake: String,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Stored for forensic tracking; used in audit logs
     pub canary_id: u64,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Stored for forensic tracking; used in audit logs
     pub family: &'static str,
 }
 
@@ -73,12 +73,15 @@ fn generate_jwt_canary(id: u64) -> String {
     let header = format!(r#"{{"alg":"HS256","typ":"JWT","kid":"canary-{}"}}"#, id);
     let payload = format!(r#"{{"sub":"canary","iat":0,"canary_id":{}}}"#, id);
 
-    let h = engine.encode(header.as_bytes());
-    let p = engine.encode(payload.as_bytes());
+    let encoded_header = engine.encode(header.as_bytes());
+    let encoded_payload = engine.encode(payload.as_bytes());
     // Fake signature: 32 bytes of zeros
-    let s = engine.encode([0u8; 32]);
+    let encoded_signature = engine.encode([0u8; 32]);
 
-    format!("{}.{}.{}", h, p, s)
+    format!(
+        "{}.{}.{}",
+        encoded_header, encoded_payload, encoded_signature
+    )
 }
 
 /// Generic canary: uses `~` marker to avoid re-matching alnum-only patterns.

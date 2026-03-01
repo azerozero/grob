@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod tests {
-    use grob::cli::{AppConfig, RouterConfig, ServerConfig};
+    use grob::cli::{AppConfig, Port, RouterConfig, ServerConfig};
 
     /// Test: Config parsing with default values
     /// RED: This test should fail initially (no default port defined)
@@ -12,7 +12,7 @@ mod tests {
     #[test]
     fn test_default_server_config() {
         let config = ServerConfig::default();
-        assert_eq!(config.port, 13456); // Expected default port
+        assert_eq!(config.port.value(), 13456); // Expected default port
     }
 
     /// Test: Router config serialization
@@ -162,7 +162,7 @@ mode = "kerberos"
 
         let config = AppConfig {
             server: ServerConfig {
-                port: 8080,
+                port: Port::new(8080).unwrap(),
                 ..Default::default()
             },
             router: RouterConfig {

@@ -318,7 +318,7 @@ static PRICING_MAP: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| KNOWN_PRICING.iter().map(|p| (p.model, p)).collect());
 
 /// Get pricing for a model from the static fallback table (case-insensitive)
-pub fn get_pricing(model: &str) -> Option<&'static ModelPricing> {
+pub fn pricing(model: &str) -> Option<&'static ModelPricing> {
     // Try exact match first (O(1), no allocation)
     PRICING_MAP.get(model).copied().or_else(|| {
         let lower = model.to_lowercase();
@@ -335,7 +335,7 @@ impl TokenCounter {
     /// Create from usage and calculate cost (uses static fallback table)
     #[cfg(test)]
     pub fn new(model: &str, input_tokens: u32, output_tokens: u32) -> Self {
-        let cost = get_pricing(model)
+        let cost = pricing(model)
             .map(|p| p.calculate(input_tokens, output_tokens))
             .unwrap_or(0.0);
 
@@ -363,12 +363,12 @@ impl TokenCounter {
                 })
                 .unwrap_or_else(|| {
                     // Fall back to static table
-                    get_pricing(model)
+                    pricing(model)
                         .map(|p| p.calculate(input_tokens, output_tokens))
                         .unwrap_or(0.0)
                 })
         } else {
-            get_pricing(model)
+            pricing(model)
                 .map(|p| p.calculate(input_tokens, output_tokens))
                 .unwrap_or(0.0)
         };
@@ -385,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_claude_pricing() {
-        let pricing = get_pricing("claude-sonnet-4-6").unwrap();
+        let pricing = pricing("claude-sonnet-4-6").unwrap();
         assert_eq!(pricing.input_per_million, 3.0);
 
         let cost = pricing.calculate(1000, 500);

@@ -9,7 +9,7 @@ pub fn cmd_config_diff(
         .as_deref()
         .unwrap_or_else(|| config.presets.active.as_deref().unwrap_or("medium"));
 
-    let preset_content = match preset::get_preset_content(target_name) {
+    let preset_content = match preset::preset_content(target_name) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("❌ Failed to load target '{}': {}", target_name, e);

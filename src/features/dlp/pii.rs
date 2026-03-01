@@ -1,5 +1,13 @@
 use super::config::{PiiAction, PiiConfig};
 use regex::Regex;
+use std::sync::LazyLock;
+
+// SAFETY: patterns are compile-time constants; unwrap cannot fail.
+static CC_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:\d[ -]?){13,19}\b").unwrap());
+static IBAN_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b[A-Z]{2}\d{2}[A-Z0-9]{12,30}\b").unwrap());
+static BIC_REGEX: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b").unwrap());
 
 /// Type of PII detected.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,9 +39,9 @@ pub struct PiiDetection {
 /// Separated from `SecretScanner` because PII requires post-match validation
 /// beyond simple regex matching.
 pub struct PiiScanner {
-    credit_card_re: Option<Regex>,
-    iban_re: Option<Regex>,
-    bic_re: Option<Regex>,
+    credit_card_re: Option<&'static Regex>,
+    iban_re: Option<&'static Regex>,
+    bic_re: Option<&'static Regex>,
     action: PiiAction,
 }
 
@@ -46,25 +54,18 @@ impl PiiScanner {
         }
 
         let credit_card_re = if config.credit_cards {
-            // 13-19 digits, optionally separated by spaces or dashes
-            Some(Regex::new(r"\b(?:\d[ -]?){13,19}\b").expect("credit card regex"))
+            Some(&*CC_REGEX)
         } else {
             None
         };
 
         let iban_re = if config.iban {
-            // 2 letters (country) + 2 digits (check) + 12-30 alphanumeric (BBAN)
-            Some(Regex::new(r"\b[A-Z]{2}\d{2}[A-Z0-9]{12,30}\b").expect("iban regex"))
+            Some(&*IBAN_REGEX)
         } else {
             None
         };
 
-        let bic_re = if config.bic {
-            // 4 letters (bank) + 2 letters (country) + 2 alphanum (location) + optional 3 alphanum (branch)
-            Some(Regex::new(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b").expect("bic regex"))
-        } else {
-            None
-        };
+        let bic_re = if config.bic { Some(&*BIC_REGEX) } else { None };
 
         Some(Self {
             credit_card_re,
@@ -114,7 +115,7 @@ impl PiiScanner {
         let mut detections = Vec::new();
 
         // Collect all matches with positions
-        if let Some(ref re) = self.credit_card_re {
+        if let Some(re) = self.credit_card_re {
             for m in re.find_iter(text) {
                 let digits: String = m.as_str().chars().filter(|c| c.is_ascii_digit()).collect();
                 if digits.len() >= 13 && digits.len() <= 19 && luhn_check(&digits) {
@@ -127,7 +128,7 @@ impl PiiScanner {
             }
         }
 
-        if let Some(ref re) = self.iban_re {
+        if let Some(re) = self.iban_re {
             for m in re.find_iter(text) {
                 if iban_mod97_check(m.as_str()) {
                     detections.push(PiiDetection {
@@ -139,7 +140,7 @@ impl PiiScanner {
             }
         }
 
-        if let Some(ref re) = self.bic_re {
+        if let Some(re) = self.bic_re {
             for m in re.find_iter(text) {
                 if bic_format_check(m.as_str()) {
                     detections.push(PiiDetection {

@@ -1,3 +1,5 @@
+//! TAP (request/response tapping) for observability and debugging.
+
 pub mod stream;
 
 use bytes::Bytes;

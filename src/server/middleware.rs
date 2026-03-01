@@ -134,7 +134,7 @@ pub(crate) async fn auth_middleware(
             }
         }
         "jwt" => {
-            let Some(validator) = &state.jwt_validator else {
+            let Some(validator) = &state.security.jwt_validator else {
                 error!("JWT auth mode configured but no validator initialized");
                 return auth_error_response(
                     "Server misconfiguration: JWT validator not initialized",
@@ -199,7 +199,7 @@ pub(crate) async fn rate_limit_check_middleware(
         return next.run(request).await;
     }
 
-    let limiter = match &state.rate_limiter {
+    let limiter = match &state.security.rate_limiter {
         Some(l) => l,
         None => return next.run(request).await,
     };
@@ -227,7 +227,10 @@ pub(crate) async fn rate_limit_check_middleware(
             .body(Body::from(
                 r#"{"error":{"type":"rate_limit_error","message":"Rate limit exceeded. Please slow down."}}"#,
             ))
-            .expect("rate limit response");
+            // All header values are static ASCII; builder cannot fail here.
+            .unwrap_or_else(|_| {
+                Response::new(Body::from(r#"{"error":{"type":"rate_limit_error","message":"Rate limit exceeded."}}"#))
+            });
     }
 
     next.run(request).await

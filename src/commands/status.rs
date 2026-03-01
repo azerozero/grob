@@ -2,10 +2,10 @@ use crate::{cli, features, instance, preset, providers};
 
 pub async fn cmd_status(config: &cli::AppConfig) -> anyhow::Result<()> {
     let (running, pid_info) = if let Some(pid) =
-        instance::find_instance_pid(&config.server.host, config.server.port).await
+        instance::find_instance_pid(&config.server.host, config.server.port.value()).await
     {
         (true, format!(" (PID: {})", pid))
-    } else if instance::is_instance_running(&config.server.host, config.server.port).await {
+    } else if instance::is_instance_running(&config.server.host, config.server.port.value()).await {
         (true, String::new())
     } else if let Some(pid) = instance::legacy_pid() {
         if instance::is_process_running(pid) {
@@ -26,7 +26,7 @@ pub async fn cmd_status(config: &cli::AppConfig) -> anyhow::Result<()> {
 
     println!(
         "  Address:   {}",
-        cli::format_bind_addr(&config.server.host, config.server.port)
+        cli::format_bind_addr(&config.server.host, config.server.port.value())
     );
 
     if let Some(ref active) = config.presets.active {
@@ -121,9 +121,9 @@ pub async fn cmd_status(config: &cli::AppConfig) -> anyhow::Result<()> {
     }
 
     let spend = features::token_pricing::spend::load_spend_data();
-    if spend.total > 0.0 || config.budget.monthly_limit_usd > 0.0 {
+    if spend.total > 0.0 || config.budget.monthly_limit_usd.value() > 0.0 {
         println!();
-        let budget_limit = config.budget.monthly_limit_usd;
+        let budget_limit = config.budget.monthly_limit_usd.value();
         if budget_limit > 0.0 {
             let pct = (spend.total / budget_limit) * 100.0;
             println!(

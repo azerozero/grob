@@ -60,7 +60,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
     }
 
     // 5. Service running
-    let base_url = cli::format_base_url(&config.server.host, config.server.port);
+    let base_url = cli::format_base_url(&config.server.host, config.server.port.value());
     if is_grob_healthy(&base_url).await {
         println!("  ✅ Service: running on {}", base_url);
     } else {
@@ -69,7 +69,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
 
     // 6. Port availability
     if !is_grob_healthy(&base_url).await {
-        let addr = cli::format_bind_addr(&config.server.host, config.server.port);
+        let addr = cli::format_bind_addr(&config.server.host, config.server.port.value());
         match std::net::TcpListener::bind(&addr) {
             Ok(_) => println!("  ✅ Port {}: available", config.server.port),
             Err(_) => {

@@ -118,7 +118,7 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
 }
 
 /// Get preset content by name (builtin or installed file)
-pub fn get_preset_content(name: &str) -> Result<String> {
+pub fn preset_content(name: &str) -> Result<String> {
     // Check builtins first
     match name {
         "perf" => return Ok(BUILTIN_PERF.to_string()),
@@ -211,7 +211,7 @@ fn print_requirements_section(env_vars: &[String], needs_oauth: bool, needs_olla
 
 /// Print detailed info about a preset (providers, models, env vars, routing).
 pub fn print_preset_info(name: &str) -> Result<()> {
-    let content = get_preset_content(name)?;
+    let content = preset_content(name)?;
     let preset: toml::Value =
         toml::from_str(&content).with_context(|| format!("Failed to parse preset '{}'", name))?;
 
@@ -362,7 +362,7 @@ fn ensure_server_defaults(config_table: &mut toml::map::Map<String, toml::Value>
 /// Apply a preset to the config file.
 /// Keeps [server] and [presets] sections, replaces [router] + [[providers]] + [[models]].
 pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
-    let preset_content = get_preset_content(name)?;
+    let preset_content = preset_content(name)?;
 
     // Parse preset
     let preset: toml::Value = toml::from_str(&preset_content)
@@ -537,23 +537,23 @@ mod tests {
 
     #[test]
     fn test_get_builtin_preset_content() {
-        let content = get_preset_content("perf").unwrap();
+        let content = preset_content("perf").unwrap();
         assert!(content.contains("[router]"));
         assert!(content.contains("[[providers]]"));
 
-        let content = get_preset_content("medium").unwrap();
+        let content = preset_content("medium").unwrap();
         assert!(content.contains("[router]"));
 
-        let content = get_preset_content("cheap").unwrap();
+        let content = preset_content("cheap").unwrap();
         assert!(content.contains("deepseek"));
 
-        let content = get_preset_content("fast").unwrap();
+        let content = preset_content("fast").unwrap();
         assert!(content.contains("anthropic"));
     }
 
     #[test]
     fn test_get_nonexistent_preset() {
-        assert!(get_preset_content("nonexistent-xyz-999").is_err());
+        assert!(preset_content("nonexistent-xyz-999").is_err());
     }
 
     #[test]

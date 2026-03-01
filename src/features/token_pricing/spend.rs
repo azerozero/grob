@@ -1,15 +1,19 @@
-// Grob - Spend Tracking
-// Copyright (c) 2025 a00 SAS
-// License: Elastic License v2.0
-// See LICENSE for details
-
 //! Persistent monthly spend tracking
 //! Stores spend data in ~/.grob/spend.json, auto-resets on new month
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+// Note: SpendTracker is always accessed through `Mutex<SpendTracker>` in AppState,
+// so fields can use plain types instead of atomics.
+
+/// Budget limit parameters for warning checks.
+pub struct BudgetLimits {
+    pub global_limit: f64,
+    pub provider_limit: Option<f64>,
+    pub model_limit: Option<f64>,
+    pub warn_at_percent: u32,
+}
 
 /// Budget check error
 #[derive(Debug, Clone)]
@@ -56,7 +60,7 @@ pub struct SpendTracker {
     /// Standalone data (used when no store is provided, e.g. tests or CLI)
     data: SpendData,
     path: PathBuf,
-    request_count: AtomicU64,
+    request_count: u64,
 }
 
 impl SpendTracker {
@@ -67,7 +71,7 @@ impl SpendTracker {
             store: Some(store),
             data,
             path: PathBuf::new(),
-            request_count: AtomicU64::new(0),
+            request_count: 0,
         }
     }
 
@@ -106,7 +110,7 @@ impl SpendTracker {
             store: None,
             data,
             path,
-            request_count: AtomicU64::new(0),
+            request_count: 0,
         }
     }
 
@@ -133,8 +137,8 @@ impl SpendTracker {
                 .or_default() += cost;
             *self.data.by_model.entry(model.to_string()).or_default() += cost;
 
-            let count = self.request_count.fetch_add(1, Ordering::Relaxed);
-            if count.is_multiple_of(10) {
+            self.request_count += 1;
+            if self.request_count.is_multiple_of(10) {
                 self.save();
             }
         }
@@ -165,7 +169,7 @@ impl SpendTracker {
     }
 
     /// Load spend for a specific tenant
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Public API for tenant-level billing queries
     pub fn tenant_spend(&self, tenant: &str) -> SpendData {
         if let Some(ref store) = self.store {
             store.load_spend(Some(tenant))
@@ -262,11 +266,12 @@ impl SpendTracker {
         &self,
         provider: &str,
         model: &str,
-        global_limit: f64,
-        provider_limit: Option<f64>,
-        model_limit: Option<f64>,
-        warn_at_percent: u32,
+        limits: &BudgetLimits,
     ) -> Option<String> {
+        let global_limit = limits.global_limit;
+        let provider_limit = limits.provider_limit;
+        let model_limit = limits.model_limit;
+        let warn_at_percent = limits.warn_at_percent;
         let threshold = warn_at_percent as f64 / 100.0;
 
         if let Some(limit) = model_limit {
@@ -454,11 +459,29 @@ mod tests {
         tracker.record("openrouter", "model-a", 8.5);
 
         // At 85% of $10 → should warn at 80%
-        let warning = tracker.check_warnings("openrouter", "model-a", 10.0, None, None, 80);
+        let warning = tracker.check_warnings(
+            "openrouter",
+            "model-a",
+            &BudgetLimits {
+                global_limit: 10.0,
+                provider_limit: None,
+                model_limit: None,
+                warn_at_percent: 80,
+            },
+        );
         assert!(warning.is_some());
 
         // At 85% but threshold is 90% → no warning
-        let warning = tracker.check_warnings("openrouter", "model-a", 10.0, None, None, 90);
+        let warning = tracker.check_warnings(
+            "openrouter",
+            "model-a",
+            &BudgetLimits {
+                global_limit: 10.0,
+                provider_limit: None,
+                model_limit: None,
+                warn_at_percent: 90,
+            },
+        );
         assert!(warning.is_none());
     }
 }

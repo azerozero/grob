@@ -1,4 +1,4 @@
-use crate::features::token_pricing::get_pricing;
+use crate::features::token_pricing::pricing;
 use bytes::Bytes;
 use futures::stream::Stream;
 use pin_project::pin_project;
@@ -156,6 +156,16 @@ struct StreamTokens {
     cache_read: u64,
 }
 
+/// Mutable state tracked during SSE stream processing.
+struct StreamTrackingState {
+    logged_message_start: bool,
+    first_token_time: Option<std::time::Instant>,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_creation: u64,
+    cache_read: u64,
+}
+
 /// Stream adapter that logs useful information from SSE events while passing through original bytes
 #[pin_project]
 pub struct LoggingSseStream<S> {
@@ -164,13 +174,8 @@ pub struct LoggingSseStream<S> {
     provider_name: String,
     model_name: String,
     buffer: Vec<u8>,
-    logged_message_start: bool,
     start_time: std::time::Instant,
-    first_token_time: Option<std::time::Instant>,
-    output_tokens: u64,
-    input_tokens: u64,
-    cache_creation: u64,
-    cache_read: u64,
+    tracking: StreamTrackingState,
 }
 
 impl<S> LoggingSseStream<S> {
@@ -180,28 +185,22 @@ impl<S> LoggingSseStream<S> {
             provider_name,
             model_name,
             buffer: Vec::new(),
-            logged_message_start: false,
             start_time: std::time::Instant::now(),
-            first_token_time: None,
-            output_tokens: 0,
-            input_tokens: 0,
-            cache_creation: 0,
-            cache_read: 0,
+            tracking: StreamTrackingState {
+                logged_message_start: false,
+                first_token_time: None,
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_creation: 0,
+                cache_read: 0,
+            },
         }
     }
 }
 
 impl<S> LoggingSseStream<S> {
     /// Process SSE events from a chunk to track usage metrics.
-    fn track_events(
-        buffer: &[u8],
-        logged_message_start: &mut bool,
-        first_token_time: &mut Option<std::time::Instant>,
-        input_tokens: &mut u64,
-        cache_creation: &mut u64,
-        cache_read: &mut u64,
-        output_tokens: &mut u64,
-    ) {
+    fn track_events(buffer: &[u8], tracking: &mut StreamTrackingState) {
         let Ok(text) = std::str::from_utf8(buffer) else {
             return;
         };
@@ -210,43 +209,45 @@ impl<S> LoggingSseStream<S> {
         }
         for event in parse_sse_events(text) {
             match event.event.as_deref() {
-                Some("message_start") if !*logged_message_start => {
+                Some("message_start") if !tracking.logged_message_start => {
                     if let Ok(json) = serde_json::from_str::<Value>(&event.data) {
                         if let Some(usage) = json.pointer("/message/usage") {
-                            *input_tokens = usage
+                            tracking.input_tokens = usage
                                 .get("input_tokens")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0);
-                            *cache_creation = usage
+                            tracking.cache_creation = usage
                                 .get("cache_creation_input_tokens")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0);
-                            *cache_read = usage
+                            tracking.cache_read = usage
                                 .get("cache_read_input_tokens")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0);
                         }
                     }
-                    *logged_message_start = true;
+                    tracking.logged_message_start = true;
                 }
                 Some("content_block_delta") => {
-                    if first_token_time.is_none() {
-                        *first_token_time = Some(std::time::Instant::now());
+                    if tracking.first_token_time.is_none() {
+                        tracking.first_token_time = Some(std::time::Instant::now());
                     }
                 }
                 Some("message_delta") => {
-                    if let Ok(json) = serde_json::from_str::<Value>(&event.data) {
-                        if let Some(usage) = json.get("usage") {
-                            *output_tokens += usage
-                                .get("output_tokens")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0);
-                            if let Some(input) = usage.get("input_tokens").and_then(|v| v.as_u64())
-                            {
-                                if input > 0 && *input_tokens == 0 {
-                                    *input_tokens = input;
-                                }
-                            }
+                    let usage = serde_json::from_str::<Value>(&event.data)
+                        .ok()
+                        .and_then(|json| json.get("usage").cloned());
+                    if let Some(usage) = usage {
+                        tracking.output_tokens += usage
+                            .get("output_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let input = usage
+                            .get("input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        if input > 0 && tracking.input_tokens == 0 {
+                            tracking.input_tokens = input;
                         }
                     }
                 }
@@ -298,7 +299,7 @@ impl<S> LoggingSseStream<S> {
             }
         };
 
-        let cost = get_pricing(model_name)
+        let cost = pricing(model_name)
             .map(|p| p.calculate(total_input as u32, tokens.output as u32))
             .unwrap_or(0.0);
         let cost_info = if cost > 0.0 {
@@ -358,18 +359,11 @@ where
                 let this = self.as_mut().project();
                 this.buffer.extend_from_slice(&bytes);
 
-                Self::track_events(
-                    this.buffer,
-                    this.logged_message_start,
-                    this.first_token_time,
-                    this.input_tokens,
-                    this.cache_creation,
-                    this.cache_read,
-                    this.output_tokens,
-                );
+                Self::track_events(this.buffer, this.tracking);
 
                 // Keep buffer from growing unbounded
-                if this.buffer.len() > 1024 * 10 {
+                const MAX_TRACKING_BUFFER: usize = 10 * 1024;
+                if this.buffer.len() > MAX_TRACKING_BUFFER {
                     this.buffer.clear();
                 }
 
@@ -378,16 +372,17 @@ where
             Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
             Poll::Ready(None) => {
                 let this = self.as_ref().project_ref();
+                let tracking = this.tracking;
                 Self::log_final_stats(
                     this.provider_name,
                     this.model_name,
                     *this.start_time,
-                    *this.first_token_time,
+                    tracking.first_token_time,
                     &StreamTokens {
-                        input: *this.input_tokens,
-                        output: *this.output_tokens,
-                        cache_creation: *this.cache_creation,
-                        cache_read: *this.cache_read,
+                        input: tracking.input_tokens,
+                        output: tracking.output_tokens,
+                        cache_creation: tracking.cache_creation,
+                        cache_read: tracking.cache_read,
                     },
                 );
                 self.as_mut().project().buffer.clear();

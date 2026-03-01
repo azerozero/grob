@@ -15,11 +15,13 @@ pub fn cmd_spend(config: &cli::AppConfig) {
     println!("💰 Spend for {}", month_display);
     println!();
 
-    if budget.monthly_limit_usd > 0.0 {
-        let pct = (spend.total / budget.monthly_limit_usd) * 100.0;
+    if budget.monthly_limit_usd.value() > 0.0 {
+        let pct = (spend.total / budget.monthly_limit_usd.value()) * 100.0;
         println!(
             "  Total:       ${:.2} / ${:.2} ({:.0}%)",
-            spend.total, budget.monthly_limit_usd, pct
+            spend.total,
+            budget.monthly_limit_usd.value(),
+            pct
         );
     } else {
         println!("  Total:       ${:.2} (no limit)", spend.total);
@@ -29,7 +31,7 @@ pub fn cmd_spend(config: &cli::AppConfig) {
     if !spend.by_provider.is_empty() {
         println!("  By provider:");
         let mut provider_list: Vec<_> = spend.by_provider.iter().collect();
-        provider_list.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        provider_list.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         for (provider_name, amount) in &provider_list {
             let is_sub = config
@@ -43,7 +45,7 @@ pub fn cmd_spend(config: &cli::AppConfig) {
                 .providers
                 .iter()
                 .find(|p| &p.name == *provider_name)
-                .and_then(|p| p.budget_usd);
+                .and_then(|p| p.budget_usd.map(|b| b.value()));
 
             if is_sub {
                 println!("    {:<20} ${:.2} (subscription)", provider_name, amount);
@@ -70,14 +72,14 @@ pub fn cmd_spend(config: &cli::AppConfig) {
     if !spend.by_model.is_empty() {
         println!("  By model:");
         let mut models: Vec<_> = spend.by_model.iter().collect();
-        models.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+        models.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         for (model_name, amount) in &models {
             let model_budget = config
                 .models
                 .iter()
                 .find(|m| &m.name == *model_name)
-                .and_then(|m| m.budget_usd);
+                .and_then(|m| m.budget_usd.map(|b| b.value()));
 
             if let Some(limit) = model_budget {
                 let pct = (*amount / limit) * 100.0;
@@ -99,8 +101,8 @@ pub fn cmd_spend(config: &cli::AppConfig) {
         println!();
     }
 
-    if budget.monthly_limit_usd > 0.0 {
-        let remaining = (budget.monthly_limit_usd - spend.total).max(0.0);
+    if budget.monthly_limit_usd.value() > 0.0 {
+        let remaining = (budget.monthly_limit_usd.value() - spend.total).max(0.0);
         println!("  Budget remaining: ${:.2} (global)", remaining);
     }
 }

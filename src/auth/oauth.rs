@@ -26,8 +26,8 @@ fn gemini_default_client_secret() -> String {
 /// PKCE verifier for OAuth flow
 #[derive(Debug, Clone)]
 pub struct PKCEVerifier {
-    pub verifier: String,
-    pub challenge: String,
+    verifier: String,
+    challenge: String,
 }
 
 impl PKCEVerifier {
@@ -49,6 +49,18 @@ impl PKCEVerifier {
             challenge,
         }
     }
+
+    pub fn verifier(&self) -> &str {
+        &self.verifier
+    }
+
+    pub fn challenge(&self) -> &str {
+        &self.challenge
+    }
+
+    pub fn into_verifier(self) -> String {
+        self.verifier
+    }
 }
 
 /// Authorization URL with PKCE
@@ -56,6 +68,14 @@ impl PKCEVerifier {
 pub struct AuthorizationUrl {
     pub url: String,
     pub verifier: PKCEVerifier,
+}
+
+/// Detected OAuth provider type based on client_id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OAuthProviderType {
+    Anthropic,
+    OpenAI,
+    Gemini,
 }
 
 /// OAuth provider configuration
@@ -67,6 +87,19 @@ pub struct OAuthConfig {
     pub token_url: String,
     pub redirect_uri: String,
     pub scopes: Vec<String>,
+}
+
+impl OAuthConfig {
+    /// Detect the provider type from the client_id.
+    pub fn provider_type(&self) -> OAuthProviderType {
+        if self.client_id == "app_EMoamEEZ73f0CkXaXp7hrann" {
+            OAuthProviderType::OpenAI
+        } else if self.client_id.starts_with("681255809395-") {
+            OAuthProviderType::Gemini
+        } else {
+            OAuthProviderType::Anthropic
+        }
+    }
 }
 
 impl OAuthConfig {
@@ -164,66 +197,62 @@ impl OAuthClient {
     }
 
     /// Generate authorization URL with PKCE
-    pub fn get_authorization_url(&self) -> AuthorizationUrl {
+    pub fn authorization_url(&self) -> Result<AuthorizationUrl> {
         let pkce = PKCEVerifier::generate();
 
-        let mut url = url::Url::parse(&self.config.auth_url).expect("Invalid auth URL");
+        let mut url = url::Url::parse(&self.config.auth_url).context("Invalid OAuth auth URL")?;
 
-        // Check provider type based on client_id
-        let is_openai_codex = self.config.client_id == "app_EMoamEEZ73f0CkXaXp7hrann";
-        let is_gemini = self.config.client_id.starts_with("681255809395-");
+        match self.config.provider_type() {
+            OAuthProviderType::OpenAI => {
+                // OpenAI uses a separate random state (not the PKCE verifier)
+                use rand::Rng;
+                let random_bytes: Vec<u8> = (0..16).map(|_| rand::thread_rng().gen()).collect();
+                let state = random_bytes
+                    .iter()
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>();
 
-        if is_openai_codex {
-            // OpenAI uses a separate random state (not the PKCE verifier)
-            // Generate random state for CSRF protection
-            use rand::Rng;
-            let random_bytes: Vec<u8> = (0..16).map(|_| rand::thread_rng().gen()).collect();
-            let state = random_bytes
-                .iter()
-                .map(|b| format!("{:02x}", b))
-                .collect::<String>();
-
-            // OpenAI Codex specific parameters
-            url.query_pairs_mut()
-                .append_pair("response_type", "code")
-                .append_pair("client_id", &self.config.client_id)
-                .append_pair("redirect_uri", &self.config.redirect_uri)
-                .append_pair("scope", &self.config.scopes.join(" "))
-                .append_pair("code_challenge", &pkce.challenge)
-                .append_pair("code_challenge_method", "S256")
-                .append_pair("state", &state) // Random state, NOT verifier
-                .append_pair("id_token_add_organizations", "true")
-                .append_pair("codex_cli_simplified_flow", "true")
-                .append_pair("originator", "codex_cli_rs");
-        } else if is_gemini {
-            // Google OAuth uses standard OAuth 2.0 with PKCE
-            url.query_pairs_mut()
-                .append_pair("response_type", "code")
-                .append_pair("client_id", &self.config.client_id)
-                .append_pair("redirect_uri", &self.config.redirect_uri)
-                .append_pair("scope", &self.config.scopes.join(" "))
-                .append_pair("code_challenge", &pkce.challenge)
-                .append_pair("code_challenge_method", "S256")
-                .append_pair("state", &pkce.verifier) // Use verifier as state
-                .append_pair("access_type", "offline") // Request refresh token
-                .append_pair("prompt", "consent"); // Force consent screen
-        } else {
-            // Anthropic specific parameters (uses verifier as state)
-            url.query_pairs_mut()
-                .append_pair("code", "true") // Anthropic-specific non-standard parameter
-                .append_pair("client_id", &self.config.client_id)
-                .append_pair("response_type", "code")
-                .append_pair("redirect_uri", &self.config.redirect_uri)
-                .append_pair("scope", &self.config.scopes.join(" "))
-                .append_pair("code_challenge", &pkce.challenge)
-                .append_pair("code_challenge_method", "S256")
-                .append_pair("state", &pkce.verifier);
+                url.query_pairs_mut()
+                    .append_pair("response_type", "code")
+                    .append_pair("client_id", &self.config.client_id)
+                    .append_pair("redirect_uri", &self.config.redirect_uri)
+                    .append_pair("scope", &self.config.scopes.join(" "))
+                    .append_pair("code_challenge", pkce.challenge())
+                    .append_pair("code_challenge_method", "S256")
+                    .append_pair("state", &state)
+                    .append_pair("id_token_add_organizations", "true")
+                    .append_pair("codex_cli_simplified_flow", "true")
+                    .append_pair("originator", "codex_cli_rs");
+            }
+            OAuthProviderType::Gemini => {
+                url.query_pairs_mut()
+                    .append_pair("response_type", "code")
+                    .append_pair("client_id", &self.config.client_id)
+                    .append_pair("redirect_uri", &self.config.redirect_uri)
+                    .append_pair("scope", &self.config.scopes.join(" "))
+                    .append_pair("code_challenge", pkce.challenge())
+                    .append_pair("code_challenge_method", "S256")
+                    .append_pair("state", pkce.verifier())
+                    .append_pair("access_type", "offline")
+                    .append_pair("prompt", "consent");
+            }
+            OAuthProviderType::Anthropic => {
+                url.query_pairs_mut()
+                    .append_pair("code", "true")
+                    .append_pair("client_id", &self.config.client_id)
+                    .append_pair("response_type", "code")
+                    .append_pair("redirect_uri", &self.config.redirect_uri)
+                    .append_pair("scope", &self.config.scopes.join(" "))
+                    .append_pair("code_challenge", pkce.challenge())
+                    .append_pair("code_challenge_method", "S256")
+                    .append_pair("state", pkce.verifier());
+            }
         }
 
-        AuthorizationUrl {
+        Ok(AuthorizationUrl {
             url: url.to_string(),
             verifier: pkce,
-        }
+        })
     }
 
     /// Exchange authorization code for tokens
@@ -234,7 +263,6 @@ impl OAuthClient {
         provider_id: &str,
     ) -> Result<OAuthToken> {
         // Parse code (backward compatible: "code#state" or just "code")
-        // Note: For OpenAI, we now only receive "code" without state
         let auth_code = if code.contains('#') {
             code.split('#').next().unwrap_or(code)
         } else {
@@ -244,93 +272,11 @@ impl OAuthClient {
         #[derive(Deserialize)]
         struct TokenResponse {
             access_token: String,
-            refresh_token: Option<String>, // Google doesn't return new refresh_token
+            refresh_token: Option<String>,
             expires_in: i64,
         }
 
-        let is_openai_codex = self.config.client_id == "app_EMoamEEZ73f0CkXaXp7hrann";
-        let is_gemini = self.config.client_id.starts_with("681255809395-");
-
-        let response = if is_gemini {
-            // Google OAuth uses form-urlencoded with client_secret
-            tracing::debug!(
-                "🔍 Gemini token exchange for redirect_uri={}",
-                &self.config.redirect_uri
-            );
-
-            let client_secret = self
-                .config
-                .client_secret
-                .as_ref()
-                .ok_or_else(|| anyhow!("Gemini OAuth requires client_secret"))?;
-
-            let form_params = [
-                ("grant_type", "authorization_code"),
-                ("client_id", &self.config.client_id),
-                ("client_secret", client_secret),
-                ("code", auth_code),
-                ("code_verifier", verifier),
-                ("redirect_uri", &self.config.redirect_uri),
-            ];
-
-            self.http_client
-                .post(&self.config.token_url)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .form(&form_params)
-                .send()
-                .await
-                .context("Failed to exchange code for token")?
-        } else if is_openai_codex {
-            // OpenAI uses form-urlencoded and only needs code + code_verifier
-            tracing::debug!(
-                "🔍 OpenAI token exchange for redirect_uri={}",
-                &self.config.redirect_uri
-            );
-
-            let form_params = [
-                ("grant_type", "authorization_code"),
-                ("client_id", &self.config.client_id),
-                ("code", auth_code),
-                ("code_verifier", verifier), // This is the PKCE verifier from frontend
-                ("redirect_uri", &self.config.redirect_uri),
-            ];
-
-            self.http_client
-                .post(&self.config.token_url)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .form(&form_params)
-                .send()
-                .await
-                .context("Failed to exchange code for token")?
-        } else {
-            // Anthropic uses JSON and requires state (which equals verifier)
-            #[derive(Serialize)]
-            struct TokenRequest {
-                code: String,
-                state: String,
-                grant_type: String,
-                client_id: String,
-                redirect_uri: String,
-                code_verifier: String,
-            }
-
-            let request = TokenRequest {
-                code: auth_code.to_string(),
-                state: verifier.to_string(), // Anthropic uses verifier as state
-                grant_type: "authorization_code".to_string(),
-                client_id: self.config.client_id.clone(),
-                redirect_uri: self.config.redirect_uri.clone(),
-                code_verifier: verifier.to_string(),
-            };
-
-            self.http_client
-                .post(&self.config.token_url)
-                .header("Content-Type", "application/json")
-                .json(&request)
-                .send()
-                .await
-                .context("Failed to exchange code for token")?
-        };
+        let response = self.do_exchange(auth_code, verifier).await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -351,17 +297,52 @@ impl OAuthClient {
             refresh_token: SecretString::new(
                 token_response
                     .refresh_token
-                    .expect("Initial OAuth exchange must return refresh_token"),
+                    .ok_or_else(|| anyhow!("Initial OAuth exchange must return refresh_token"))?,
             ),
             expires_at,
             enterprise_url: None,
-            project_id: None, // Will be set by loadCodeAssist for Gemini
+            project_id: None,
         };
 
-        // Save token
         self.token_store.save(token.clone())?;
-
         Ok(token)
+    }
+
+    /// Send the provider-specific token exchange request.
+    async fn do_exchange(&self, auth_code: &str, verifier: &str) -> Result<reqwest::Response> {
+        let provider_type = self.config.provider_type();
+        tracing::debug!(
+            "🔍 {:?} token exchange for redirect_uri={}",
+            provider_type,
+            &self.config.redirect_uri
+        );
+
+        if matches!(provider_type, OAuthProviderType::Anthropic) {
+            self.send_json_request(&serde_json::json!({
+                "code": auth_code,
+                "state": verifier,
+                "grant_type": "authorization_code",
+                "client_id": &self.config.client_id,
+                "redirect_uri": &self.config.redirect_uri,
+                "code_verifier": verifier,
+            }))
+            .await
+        } else {
+            let mut params = vec![
+                ("grant_type", "authorization_code"),
+                ("client_id", self.config.client_id.as_str()),
+                ("code", auth_code),
+                ("code_verifier", verifier),
+                ("redirect_uri", self.config.redirect_uri.as_str()),
+            ];
+            // Gemini requires client_secret; OpenAI does not
+            let secret_str;
+            if let Some(secret) = &self.config.client_secret {
+                secret_str = secret.clone();
+                params.push(("client_secret", secret_str.as_str()));
+            }
+            self.send_form_request(&params).await
+        }
     }
 
     /// Refresh an access token
@@ -374,74 +355,11 @@ impl OAuthClient {
         #[derive(Deserialize)]
         struct TokenResponse {
             access_token: String,
-            refresh_token: Option<String>, // Google doesn't return new refresh_token
+            refresh_token: Option<String>,
             expires_in: i64,
         }
 
-        let is_openai_codex = self.config.client_id == "app_EMoamEEZ73f0CkXaXp7hrann";
-        let is_google =
-            self.config.client_secret.is_some() && self.config.token_url.contains("googleapis.com");
-
-        let response = if is_google {
-            // Google uses form-urlencoded WITH client_secret
-            let form_params = [
-                ("grant_type", "refresh_token"),
-                (
-                    "refresh_token",
-                    existing_token.refresh_token.expose_secret(),
-                ),
-                ("client_id", &self.config.client_id),
-                ("client_secret", self.config.client_secret.as_ref().unwrap()),
-            ];
-
-            self.http_client
-                .post(&self.config.token_url)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .form(&form_params)
-                .send()
-                .await
-                .context("Failed to refresh token")?
-        } else if is_openai_codex {
-            // OpenAI uses form-urlencoded WITHOUT client_secret
-            let form_params = [
-                ("grant_type", "refresh_token"),
-                (
-                    "refresh_token",
-                    existing_token.refresh_token.expose_secret(),
-                ),
-                ("client_id", &self.config.client_id),
-            ];
-
-            self.http_client
-                .post(&self.config.token_url)
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .form(&form_params)
-                .send()
-                .await
-                .context("Failed to refresh token")?
-        } else {
-            // Anthropic uses JSON WITHOUT client_secret
-            #[derive(Serialize)]
-            struct RefreshRequest {
-                grant_type: String,
-                refresh_token: String,
-                client_id: String,
-            }
-
-            let request = RefreshRequest {
-                grant_type: "refresh_token".to_string(),
-                refresh_token: existing_token.refresh_token.expose_secret().to_string(),
-                client_id: self.config.client_id.clone(),
-            };
-
-            self.http_client
-                .post(&self.config.token_url)
-                .header("Content-Type", "application/json")
-                .json(&request)
-                .send()
-                .await
-                .context("Failed to refresh token")?
-        };
+        let response = self.do_refresh(&existing_token).await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -466,20 +384,67 @@ impl OAuthClient {
         let token = OAuthToken {
             provider_id: provider_id.to_string(),
             access_token: SecretString::new(token_response.access_token),
-            // Use new refresh_token if provided, otherwise keep existing one (Google doesn't return new one)
             refresh_token: token_response
                 .refresh_token
                 .map(SecretString::new)
                 .unwrap_or(existing_token.refresh_token),
             expires_at,
             enterprise_url: existing_token.enterprise_url,
-            project_id: existing_token.project_id, // Preserve project_id from existing token
+            project_id: existing_token.project_id,
         };
 
-        // Save refreshed token
         self.token_store.save(token.clone())?;
-
         Ok(token)
+    }
+
+    /// Send the provider-specific token refresh request.
+    async fn do_refresh(&self, existing_token: &OAuthToken) -> Result<reqwest::Response> {
+        if matches!(self.config.provider_type(), OAuthProviderType::Anthropic) {
+            self.send_json_request(&serde_json::json!({
+                "grant_type": "refresh_token",
+                "refresh_token": existing_token.refresh_token.expose_secret(),
+                "client_id": &self.config.client_id,
+            }))
+            .await
+        } else {
+            let mut params = vec![
+                ("grant_type", "refresh_token"),
+                (
+                    "refresh_token",
+                    existing_token.refresh_token.expose_secret(),
+                ),
+                ("client_id", self.config.client_id.as_str()),
+            ];
+            // Gemini requires client_secret; OpenAI does not
+            let secret_str;
+            if let Some(secret) = &self.config.client_secret {
+                secret_str = secret.clone();
+                params.push(("client_secret", secret_str.as_str()));
+            }
+            self.send_form_request(&params).await
+        }
+    }
+
+    /// POST a form-encoded request to the token endpoint.
+    async fn send_form_request(&self, params: &[(&str, &str)]) -> Result<reqwest::Response> {
+        self.http_client
+            .post(&self.config.token_url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .form(params)
+            .send()
+            .await
+            .context("OAuth token request failed")
+    }
+
+    /// POST a JSON request to the token endpoint.
+    async fn send_json_request(&self, body: &impl Serialize) -> Result<reqwest::Response> {
+        self.http_client
+            .post(&self.config.token_url)
+            .header("Content-Type", "application/json")
+            .json(body)
+            .send()
+            .await
+            .context("OAuth token request failed")
     }
 
     /// Load Code Assist for Gemini and get project ID
@@ -587,11 +552,11 @@ mod tests {
         let pkce = PKCEVerifier::generate();
 
         // Verifier should be base64 URL-safe encoded
-        assert!(!pkce.verifier.is_empty());
-        assert!(!pkce.challenge.is_empty());
+        assert!(!pkce.verifier().is_empty());
+        assert!(!pkce.challenge().is_empty());
 
         // Challenge should be different from verifier
-        assert_ne!(pkce.verifier, pkce.challenge);
+        assert_ne!(pkce.verifier(), pkce.challenge());
     }
 
     #[test]
@@ -600,7 +565,7 @@ mod tests {
         let token_store = TokenStore::new(std::env::temp_dir().join("test_tokens.json")).unwrap();
         let client = OAuthClient::new(config, token_store);
 
-        let auth_url = client.get_authorization_url();
+        let auth_url = client.authorization_url().unwrap();
 
         assert!(auth_url.url.contains("client_id="));
         assert!(auth_url.url.contains("code_challenge="));

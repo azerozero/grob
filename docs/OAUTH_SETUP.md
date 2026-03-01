@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
     let oauth_client = OAuthClient::new(config, token_store);
 
     // Get authorization URL
-    let auth_url = oauth_client.get_authorization_url();
+    let auth_url = oauth_client.authorization_url();
 
     println!("Go to: {}", auth_url.url);
     println!();

@@ -25,36 +25,40 @@ pub fn assess_risk(outcome: &SecurityOutcome) -> RiskLevel {
     }
 }
 
+/// Context for a risk escalation event.
+pub struct EscalationEvent<'a> {
+    pub risk: RiskLevel,
+    pub threshold: RiskLevel,
+    pub webhook_url: &'a Option<String>,
+    pub event_id: &'a str,
+    pub tenant_id: &'a str,
+    pub model: &'a str,
+}
+
 /// Escalate risk events above threshold: emit metrics and optional webhook.
-pub fn maybe_escalate(
-    risk: RiskLevel,
-    threshold: RiskLevel,
-    webhook_url: &Option<String>,
-    event_id: &str,
-    tenant_id: &str,
-    model: &str,
-) {
-    if risk < threshold {
+pub fn maybe_escalate(event: &EscalationEvent<'_>) {
+    if event.risk < event.threshold {
         return;
     }
 
-    metrics::counter!("grob_risk_escalation_total", "level" => format!("{:?}", risk)).increment(1);
+    metrics::counter!("grob_risk_escalation_total", "level" => format!("{:?}", event.risk))
+        .increment(1);
     tracing::warn!(
-        risk = ?risk,
-        event_id = event_id,
-        tenant_id = tenant_id,
-        model = model,
+        risk = ?event.risk,
+        event_id = event.event_id,
+        tenant_id = event.tenant_id,
+        model = event.model,
         "EU AI Act risk escalation triggered"
     );
 
-    if let Some(url) = webhook_url {
+    if let Some(url) = event.webhook_url {
         let url = url.clone();
         let payload = serde_json::json!({
             "type": "risk_escalation",
-            "risk_level": format!("{:?}", risk),
-            "event_id": event_id,
-            "tenant_id": tenant_id,
-            "model": model,
+            "risk_level": format!("{:?}", event.risk),
+            "event_id": event.event_id,
+            "tenant_id": event.tenant_id,
+            "model": event.model,
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
         tokio::spawn(async move {

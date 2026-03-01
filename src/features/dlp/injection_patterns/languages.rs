@@ -1,97 +1,13 @@
-//! Builtin prompt injection patterns for 28 languages + universal obfuscation.
+//! Language-specific prompt injection pattern definitions (28 languages).
 //!
-//! This is a pure data module — all pattern definitions are extracted here
-//! to keep the detection engine in `prompt_injection.rs` focused on logic.
+//! Each function returns a `Vec<CompiledPattern>` for a single language.
+//! The patterns are consumed by `LANGUAGE_BUILDERS` in the parent module.
 
-use regex::Regex;
-
-/// Compiled injection pattern with a human-readable name.
-pub(super) struct CompiledPattern {
-    pub name: String,
-    pub regex: Regex,
-}
-
-pub(super) type LanguageBuilder = (&'static str, fn() -> Vec<CompiledPattern>);
-
-/// All supported language pattern builders.
-pub(super) const LANGUAGE_BUILDERS: &[LanguageBuilder] = &[
-    ("en", builtin_en_patterns),
-    ("fr", builtin_fr_patterns),
-    ("de", builtin_de_patterns),
-    ("es", builtin_es_patterns),
-    ("it", builtin_it_patterns),
-    ("pt", builtin_pt_patterns),
-    ("nl", builtin_nl_patterns),
-    ("pl", builtin_pl_patterns),
-    ("ro", builtin_ro_patterns),
-    ("hu", builtin_hu_patterns),
-    ("cs", builtin_cs_patterns),
-    ("el", builtin_el_patterns),
-    ("bg", builtin_bg_patterns),
-    ("sv", builtin_sv_patterns),
-    ("da", builtin_da_patterns),
-    ("fi", builtin_fi_patterns),
-    ("ru", builtin_ru_patterns),
-    ("uk", builtin_uk_patterns),
-    ("tr", builtin_tr_patterns),
-    ("ar", builtin_ar_patterns),
-    ("zh", builtin_zh_patterns),
-    ("ja", builtin_ja_patterns),
-    ("ko", builtin_ko_patterns),
-    ("hi", builtin_hi_patterns),
-    ("th", builtin_th_patterns),
-    ("vi", builtin_vi_patterns),
-    ("id", builtin_id_patterns),
-    ("eo", builtin_eo_patterns),
-];
-
-/// Universal obfuscation patterns (always active regardless of language config).
-pub(super) fn builtin_universal_patterns() -> Vec<CompiledPattern> {
-    compile_patterns(vec![
-        ("univ_base64_ignore", r"(?i)(?:aWdub3Jl|SWdub3Jl)"),
-        ("univ_base64_system_prompt", r"(?i)c3lzdGVtIHByb21wdA"),
-        (
-            "univ_hidden_instruction",
-            r"(?i)<\s*(hidden|invisible|system)\s*>.*?(instruction|prompt|ignore)",
-        ),
-        ("univ_rot13_ignore", r"(?i)\bvtaber\b"),
-        ("univ_jailbreak", r"(?i)\bjailbreak\b"),
-        ("univ_dan_mode", r"(?i)\bDAN\s+mode\b"),
-        (
-            "univ_developer_mode",
-            r"(?i)\bdeveloper\s+mode\s+(enabled|activated)\b",
-        ),
-        (
-            "univ_hidden_in_code",
-            r"(?i)```\s*(system|instruction|ignore\s+previous)",
-        ),
-        (
-            "univ_delimiter_injection",
-            r"(?i)-{5,}\s*(system|new\s+instruction|override)",
-        ),
-        ("univ_tag_chars", r"[\u{E0020}-\u{E007E}]{4,}"),
-    ])
-}
-
-fn compile_patterns(patterns: Vec<(&str, &str)>) -> Vec<CompiledPattern> {
-    patterns
-        .into_iter()
-        .filter_map(|(name, pat)| {
-            Regex::new(pat).ok().map(|regex| CompiledPattern {
-                name: name.to_string(),
-                regex,
-            })
-        })
-        .collect()
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// BUILTIN PATTERNS — 28 languages + universal
-// ═══════════════════════════════════════════════════════════════════════════════
+use super::{compile_patterns, CompiledPattern};
 
 // ── English (19 patterns) ───────────────────────────────────────────────────
 
-fn builtin_en_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_en_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "en_ignore_previous",
@@ -153,7 +69,7 @@ fn builtin_en_patterns() -> Vec<CompiledPattern> {
 
 // ── French (9 patterns) ─────────────────────────────────────────────────────
 
-fn builtin_fr_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_fr_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "fr_ignorer_instructions",
@@ -187,7 +103,7 @@ fn builtin_fr_patterns() -> Vec<CompiledPattern> {
 
 // ── German (10 patterns) ────────────────────────────────────────────────────
 
-fn builtin_de_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_de_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "de_ignoriere_anweisungen",
@@ -222,7 +138,7 @@ fn builtin_de_patterns() -> Vec<CompiledPattern> {
 
 // ── Spanish (10 patterns) ───────────────────────────────────────────────────
 
-fn builtin_es_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_es_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "es_ignora_instrucciones",
@@ -257,7 +173,7 @@ fn builtin_es_patterns() -> Vec<CompiledPattern> {
 
 // ── Italian (9 patterns) ────────────────────────────────────────────────────
 
-fn builtin_it_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_it_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "it_ignora_istruzioni",
@@ -288,7 +204,7 @@ fn builtin_it_patterns() -> Vec<CompiledPattern> {
 
 // ── Portuguese (9 patterns) ─────────────────────────────────────────────────
 
-fn builtin_pt_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_pt_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "pt_ignore_instrucoes",
@@ -316,7 +232,7 @@ fn builtin_pt_patterns() -> Vec<CompiledPattern> {
 
 // ── Dutch (8 patterns) ──────────────────────────────────────────────────────
 
-fn builtin_nl_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_nl_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "nl_negeer_instructies",
@@ -340,7 +256,7 @@ fn builtin_nl_patterns() -> Vec<CompiledPattern> {
 
 // ── Polish (8 patterns) ─────────────────────────────────────────────────────
 
-fn builtin_pl_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_pl_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "pl_ignoruj_instrukcje",
@@ -370,7 +286,7 @@ fn builtin_pl_patterns() -> Vec<CompiledPattern> {
 
 // ── Romanian (7 patterns) ───────────────────────────────────────────────────
 
-fn builtin_ro_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_ro_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "ro_ignora_instructiunile",
@@ -393,7 +309,7 @@ fn builtin_ro_patterns() -> Vec<CompiledPattern> {
 
 // ── Hungarian (7 patterns) ──────────────────────────────────────────────────
 
-fn builtin_hu_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_hu_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "hu_hagyd_figyelmen",
@@ -419,7 +335,7 @@ fn builtin_hu_patterns() -> Vec<CompiledPattern> {
 
 // ── Czech (7 patterns) ──────────────────────────────────────────────────────
 
-fn builtin_cs_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_cs_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "cs_ignoruj_instrukce",
@@ -442,7 +358,7 @@ fn builtin_cs_patterns() -> Vec<CompiledPattern> {
 
 // ── Greek (7 patterns) ──────────────────────────────────────────────────────
 
-fn builtin_el_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_el_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "el_agnoise_odegies",
@@ -465,7 +381,7 @@ fn builtin_el_patterns() -> Vec<CompiledPattern> {
 
 // ── Bulgarian (7 patterns) ──────────────────────────────────────────────────
 
-fn builtin_bg_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_bg_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "bg_ignorirai_instrukciite",
@@ -488,7 +404,7 @@ fn builtin_bg_patterns() -> Vec<CompiledPattern> {
 
 // ── Swedish (7 patterns) ────────────────────────────────────────────────────
 
-fn builtin_sv_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_sv_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "sv_ignorera_instruktioner",
@@ -511,7 +427,7 @@ fn builtin_sv_patterns() -> Vec<CompiledPattern> {
 
 // ── Danish (6 patterns) ─────────────────────────────────────────────────────
 
-fn builtin_da_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_da_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "da_ignorer_instruktioner",
@@ -530,7 +446,7 @@ fn builtin_da_patterns() -> Vec<CompiledPattern> {
 
 // ── Finnish (6 patterns) ────────────────────────────────────────────────────
 
-fn builtin_fi_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_fi_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "fi_ohita_ohjeet",
@@ -549,7 +465,7 @@ fn builtin_fi_patterns() -> Vec<CompiledPattern> {
 
 // ── Russian (9 patterns) ────────────────────────────────────────────────────
 
-fn builtin_ru_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_ru_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "ru_ignorirui_instruktsii",
@@ -577,7 +493,7 @@ fn builtin_ru_patterns() -> Vec<CompiledPattern> {
 
 // ── Ukrainian (7 patterns) ──────────────────────────────────────────────────
 
-fn builtin_uk_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_uk_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "uk_ignorui_instruktsii",
@@ -600,7 +516,7 @@ fn builtin_uk_patterns() -> Vec<CompiledPattern> {
 
 // ── Turkish (8 patterns) ────────────────────────────────────────────────────
 
-fn builtin_tr_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_tr_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "tr_onceki_talimatlari",
@@ -624,7 +540,7 @@ fn builtin_tr_patterns() -> Vec<CompiledPattern> {
 
 // ── Arabic (8 patterns) ─────────────────────────────────────────────────────
 
-fn builtin_ar_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_ar_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "ar_tajahul_taalimat",
@@ -645,7 +561,7 @@ fn builtin_ar_patterns() -> Vec<CompiledPattern> {
 
 // ── Chinese (8 patterns) ────────────────────────────────────────────────────
 
-fn builtin_zh_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_zh_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "zh_hulue_zhiling",
@@ -666,7 +582,7 @@ fn builtin_zh_patterns() -> Vec<CompiledPattern> {
 
 // ── Japanese (8 patterns) ───────────────────────────────────────────────────
 
-fn builtin_ja_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_ja_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "ja_mushi_shiji",
@@ -690,7 +606,7 @@ fn builtin_ja_patterns() -> Vec<CompiledPattern> {
 
 // ── Korean (8 patterns) ─────────────────────────────────────────────────────
 
-fn builtin_ko_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_ko_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "ko_musi_jisi",
@@ -711,7 +627,7 @@ fn builtin_ko_patterns() -> Vec<CompiledPattern> {
 
 // ── Hindi (7 patterns) ──────────────────────────────────────────────────────
 
-fn builtin_hi_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_hi_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "hi_pichhle_nirdesh",
@@ -731,7 +647,7 @@ fn builtin_hi_patterns() -> Vec<CompiledPattern> {
 
 // ── Thai (6 patterns) ───────────────────────────────────────────────────────
 
-fn builtin_th_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_th_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "th_phikhat_khamsung",
@@ -750,7 +666,7 @@ fn builtin_th_patterns() -> Vec<CompiledPattern> {
 
 // ── Vietnamese (6 patterns) ─────────────────────────────────────────────────
 
-fn builtin_vi_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_vi_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "vi_bo_qua_chi_thi",
@@ -769,7 +685,7 @@ fn builtin_vi_patterns() -> Vec<CompiledPattern> {
 
 // ── Indonesian (6 patterns) ─────────────────────────────────────────────────
 
-fn builtin_id_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_id_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "id_abaikan_instruksi",
@@ -788,7 +704,7 @@ fn builtin_id_patterns() -> Vec<CompiledPattern> {
 
 // ── Esperanto (6 patterns) ──────────────────────────────────────────────────
 
-fn builtin_eo_patterns() -> Vec<CompiledPattern> {
+pub(super) fn builtin_eo_patterns() -> Vec<CompiledPattern> {
     compile_patterns(vec![
         (
             "eo_ignoru_instrukciojn",

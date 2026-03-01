@@ -1,3 +1,5 @@
+//! Grob: multi-provider LLM routing proxy with automatic fallback and format translation.
+
 #[cfg(feature = "acme")]
 pub mod acme;
 pub mod auth;

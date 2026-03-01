@@ -89,7 +89,7 @@ impl TokenStore {
 
     /// Create an empty token store (no persistence, no OAuth).
     /// Used when the `oauth` feature is disabled.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Kept as public API for feature-gated builds
     pub fn new_empty() -> Self {
         Self {
             file_path: PathBuf::new(),
@@ -137,10 +137,7 @@ impl TokenStore {
         }
 
         {
-            let mut tokens = self
-                .tokens
-                .write()
-                .expect("Token store lock poisoned during write");
+            let mut tokens = self.tokens.write().unwrap_or_else(|e| e.into_inner());
             tokens.insert(provider_id, token);
         }
 
@@ -153,10 +150,7 @@ impl TokenStore {
 
     /// Get token for a provider
     pub fn get(&self, provider_id: &str) -> Option<OAuthToken> {
-        let tokens = self
-            .tokens
-            .read()
-            .expect("Token store lock poisoned during read");
+        let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         tokens.get(provider_id).cloned()
     }
 
@@ -167,10 +161,7 @@ impl TokenStore {
         }
 
         {
-            let mut tokens = self
-                .tokens
-                .write()
-                .expect("Token store lock poisoned during write");
+            let mut tokens = self.tokens.write().unwrap_or_else(|e| e.into_inner());
             tokens.remove(provider_id);
         }
 
@@ -183,19 +174,13 @@ impl TokenStore {
 
     /// List all provider IDs that have tokens
     pub fn list_providers(&self) -> Vec<String> {
-        let tokens = self
-            .tokens
-            .read()
-            .expect("Token store lock poisoned during read");
+        let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         tokens.keys().cloned().collect()
     }
 
     /// Get all tokens
     pub fn all(&self) -> HashMap<String, OAuthToken> {
-        let tokens = self
-            .tokens
-            .read()
-            .expect("Token store lock poisoned during read");
+        let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         tokens.clone()
     }
 
@@ -205,10 +190,7 @@ impl TokenStore {
             return Ok(()); // GrobStore handles persistence
         }
 
-        let tokens = self
-            .tokens
-            .read()
-            .expect("Token store lock poisoned during read");
+        let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         let json = serde_json::to_string_pretty(&*tokens).context("Failed to serialize tokens")?;
 
         fs::write(&self.file_path, json).context("Failed to write token file")?;

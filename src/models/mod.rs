@@ -1,3 +1,5 @@
+//! Shared data models: Anthropic request/response types, routing types.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

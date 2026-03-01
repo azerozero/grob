@@ -66,14 +66,14 @@ impl DlpSessionManager {
 
         // Fast path: read lock
         {
-            let sessions = self.sessions.read().unwrap();
+            let sessions = self.sessions.read().unwrap_or_else(|e| e.into_inner());
             if let Some(engine) = sessions.get(&session_id) {
                 return Arc::clone(engine);
             }
         }
 
         // Slow path: write lock (first request for this key)
-        let mut sessions = self.sessions.write().unwrap();
+        let mut sessions = self.sessions.write().unwrap_or_else(|e| e.into_inner());
         // Double-check after acquiring write lock
         if let Some(engine) = sessions.get(&session_id) {
             return Arc::clone(engine);

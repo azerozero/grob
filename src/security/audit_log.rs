@@ -390,7 +390,8 @@ impl AuditLog {
             .file
             .write_all(line.as_bytes())
             .context("Failed to write audit entry")?;
-        state.file.flush().context("Failed to flush audit log")?;
+        // Rely on OS buffering; per-entry flush() triggers a blocking fsync syscall
+        // that can stall the tokio runtime under load.
 
         // Update chain state
         state.size += line.len() as u64;

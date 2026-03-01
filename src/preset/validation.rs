@@ -61,7 +61,7 @@ async fn validate_provider_mapping(
     mapping: &crate::cli::ModelMapping,
     registry: &ProviderRegistry,
 ) -> MappingResult {
-    let Some(provider) = registry.get_provider(&mapping.provider) else {
+    let Some(provider) = registry.provider(&mapping.provider) else {
         return MappingResult {
             priority: mapping.priority,
             provider: mapping.provider.clone(),

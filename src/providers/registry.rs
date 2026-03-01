@@ -1,7 +1,7 @@
 use super::gemini::GeminiProvider;
 use super::{
-    error::ProviderError, AnthropicCompatibleProvider, AnthropicProvider, OpenAIProvider,
-    ProviderConfig, ProviderParams,
+    error::ProviderError, AnthropicCompatibleProvider, LlmProvider, OpenAIProvider, ProviderConfig,
+    ProviderParams,
 };
 use crate::auth::TokenStore;
 use crate::cli::{ModelConfig, TimeoutConfig};
@@ -15,10 +15,17 @@ const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 /// GitHub repository URL (used in HTTP-Referer headers)
 const REPO_URL: &str = "https://github.com/azerozero/grob";
 
+/// Shared context for building providers (timeout + auth settings).
+struct ProviderBuildContext {
+    token_store: Option<TokenStore>,
+    api_timeout: Duration,
+    connect_timeout: Duration,
+}
+
 /// Provider registry that manages all configured providers
 pub struct ProviderRegistry {
     /// Map of provider name -> provider instance
-    providers: HashMap<String, Arc<dyn AnthropicProvider>>,
+    providers: HashMap<String, Arc<dyn LlmProvider>>,
     /// Map of model name -> provider name for fast lookup
     model_to_provider: HashMap<String, String>,
 }
@@ -37,9 +44,7 @@ impl ProviderRegistry {
         config: &ProviderConfig,
         api_key: String,
         default_base_url: &str,
-        token_store: &Option<TokenStore>,
-        api_timeout: Duration,
-        connect_timeout: Duration,
+        build_ctx: &ProviderBuildContext,
     ) -> ProviderParams {
         ProviderParams {
             name: config.name.clone(),
@@ -52,9 +57,9 @@ impl ProviderRegistry {
             ),
             models: config.models.clone(),
             oauth_provider: config.oauth_provider.clone(),
-            token_store: token_store.clone(),
-            api_timeout,
-            connect_timeout,
+            token_store: build_ctx.token_store.clone(),
+            api_timeout: build_ctx.api_timeout,
+            connect_timeout: build_ctx.connect_timeout,
         }
     }
 
@@ -78,10 +83,8 @@ impl ProviderRegistry {
     fn create_provider(
         config: &ProviderConfig,
         api_key: String,
-        token_store: &Option<TokenStore>,
-        api_timeout: Duration,
-        connect_timeout: Duration,
-    ) -> Result<Box<dyn AnthropicProvider>, ProviderError> {
+        build_ctx: &ProviderBuildContext,
+    ) -> Result<Box<dyn LlmProvider>, ProviderError> {
         match config.provider_type.as_str() {
             "openai" => {
                 let headers: Vec<(String, String)> = config
@@ -90,26 +93,14 @@ impl ProviderRegistry {
                     .unwrap_or_default()
                     .into_iter()
                     .collect();
-                let params = Self::build_params(
-                    config,
-                    api_key,
-                    DEFAULT_OPENAI_BASE_URL,
-                    token_store,
-                    api_timeout,
-                    connect_timeout,
-                );
+                let params =
+                    Self::build_params(config, api_key, DEFAULT_OPENAI_BASE_URL, build_ctx);
                 Ok(Box::new(OpenAIProvider::with_headers(params, headers)))
             }
 
             "openrouter" => {
-                let params = Self::build_params(
-                    config,
-                    api_key,
-                    "https://openrouter.ai/api/v1",
-                    token_store,
-                    api_timeout,
-                    connect_timeout,
-                );
+                let params =
+                    Self::build_params(config, api_key, "https://openrouter.ai/api/v1", build_ctx);
                 Ok(Box::new(OpenAIProvider::with_headers(
                     params,
                     vec![
@@ -120,14 +111,8 @@ impl ProviderRegistry {
             }
 
             "anthropic" => {
-                let params = Self::build_params(
-                    config,
-                    api_key,
-                    "https://api.anthropic.com",
-                    token_store,
-                    api_timeout,
-                    connect_timeout,
-                );
+                let params =
+                    Self::build_params(config, api_key, "https://api.anthropic.com", build_ctx);
                 Ok(Box::new(AnthropicCompatibleProvider::new(params)))
             }
 
@@ -139,14 +124,11 @@ impl ProviderRegistry {
                     "kimi-coding" => "https://api.kimi.com/coding",
                     _ => unreachable!(),
                 };
+                let params = Self::build_params(config, api_key, base_url, build_ctx);
                 Ok(Box::new(AnthropicCompatibleProvider::named(
                     &config.provider_type,
                     base_url,
-                    api_key,
-                    config.models.clone(),
-                    token_store.clone(),
-                    api_timeout,
-                    connect_timeout,
+                    params,
                 )))
             }
 
@@ -156,16 +138,8 @@ impl ProviderRegistry {
                 } else {
                     String::new()
                 };
-                let params = Self::build_params(
-                    config,
-                    gemini_api_key,
-                    "",
-                    token_store,
-                    api_timeout,
-                    connect_timeout,
-                );
+                let mut params = Self::build_params(config, gemini_api_key, "", build_ctx);
                 // build_params sets base_url to Some("") — override with config's value
-                let mut params = params;
                 params.base_url = config.base_url.clone();
                 Ok(Box::new(GeminiProvider::new(
                     params,
@@ -176,14 +150,7 @@ impl ProviderRegistry {
             }
 
             "vertex-ai" => {
-                let mut params = Self::build_params(
-                    config,
-                    String::new(),
-                    "",
-                    token_store,
-                    api_timeout,
-                    connect_timeout,
-                );
+                let mut params = Self::build_params(config, String::new(), "", build_ctx);
                 params.base_url = config.base_url.clone();
                 params.oauth_provider = None;
                 Ok(Box::new(GeminiProvider::new(
@@ -209,8 +176,11 @@ impl ProviderRegistry {
         timeouts: &TimeoutConfig,
     ) -> Result<Self, ProviderError> {
         let mut registry = Self::new();
-        let api_timeout = Duration::from_millis(timeouts.api_timeout_ms);
-        let connect_timeout = Duration::from_millis(timeouts.connect_timeout_ms);
+        let build_ctx = ProviderBuildContext {
+            token_store,
+            api_timeout: Duration::from_millis(timeouts.api_timeout_ms),
+            connect_timeout: Duration::from_millis(timeouts.connect_timeout_ms),
+        };
 
         for config in configs {
             if !config.is_enabled() {
@@ -218,8 +188,7 @@ impl ProviderRegistry {
             }
 
             let api_key = Self::resolve_api_key(config)?;
-            let provider =
-                Self::create_provider(config, api_key, &token_store, api_timeout, connect_timeout)?;
+            let provider = Self::create_provider(config, api_key, &build_ctx)?;
 
             registry
                 .providers
@@ -238,15 +207,12 @@ impl ProviderRegistry {
     }
 
     /// Get a provider by name
-    pub fn get_provider(&self, name: &str) -> Option<Arc<dyn AnthropicProvider>> {
+    pub fn provider(&self, name: &str) -> Option<Arc<dyn LlmProvider>> {
         self.providers.get(name).cloned()
     }
 
     /// Get a provider for a specific model
-    pub fn get_provider_for_model(
-        &self,
-        model: &str,
-    ) -> Result<Arc<dyn AnthropicProvider>, ProviderError> {
+    pub fn provider_for_model(&self, model: &str) -> Result<Arc<dyn LlmProvider>, ProviderError> {
         // First, check if we have a direct model → provider mapping
         if let Some(provider_name) = self.model_to_provider.get(model) {
             if let Some(provider) = self.providers.get(provider_name) {
@@ -255,13 +221,11 @@ impl ProviderRegistry {
         }
 
         // If no direct mapping, search through all providers
-        for provider in self.providers.values() {
-            if provider.supports_model(model) {
-                return Ok(provider.clone());
-            }
-        }
-
-        Err(ProviderError::ModelNotSupported(model.to_string()))
+        self.providers
+            .values()
+            .find(|p| p.supports_model(model))
+            .cloned()
+            .ok_or_else(|| ProviderError::ModelNotSupported(model.to_string()))
     }
 
     /// List all available models
@@ -315,9 +279,9 @@ mod tests {
     }
 
     #[test]
-    fn test_get_provider_for_model_not_found() {
+    fn test_provider_for_model_not_found() {
         let registry = ProviderRegistry::new();
-        let result = registry.get_provider_for_model("gpt-4");
+        let result = registry.provider_for_model("gpt-4");
         assert!(result.is_err());
     }
 

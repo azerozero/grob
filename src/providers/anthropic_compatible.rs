@@ -5,7 +5,7 @@ use super::{
         MIN_ANTHROPIC_SIGNATURE_LENGTH, RATE_LIMIT_REQUESTS_LOW, RATE_LIMIT_TOKENS_LOW,
     },
     error::ProviderError,
-    AnthropicProvider, ProviderResponse, StreamResponse,
+    LlmProvider, ProviderResponse, StreamResponse,
 };
 use crate::auth::{OAuthConfig, TokenStore};
 use crate::models::{
@@ -47,56 +47,46 @@ fn extract_forward_headers(headers: &reqwest::header::HeaderMap) -> HashMap<Stri
     result
 }
 
+/// Rate-limit headers to track: (header_name, metric_name, warn_threshold).
+/// A threshold of `0` means no warning is emitted.
+const RATE_LIMIT_HEADERS: &[(&str, &str, u64)] = &[
+    (
+        "anthropic-ratelimit-tokens-remaining",
+        "grob_ratelimit_tokens_remaining",
+        RATE_LIMIT_TOKENS_LOW,
+    ),
+    (
+        "anthropic-ratelimit-requests-remaining",
+        "grob_ratelimit_requests_remaining",
+        RATE_LIMIT_REQUESTS_LOW,
+    ),
+    (
+        "anthropic-ratelimit-input-tokens-remaining",
+        "grob_ratelimit_input_tokens_remaining",
+        0,
+    ),
+    (
+        "anthropic-ratelimit-output-tokens-remaining",
+        "grob_ratelimit_output_tokens_remaining",
+        0,
+    ),
+];
+
 /// Parse and log rate limit headers, emit Prometheus metrics when values are low
 fn log_rate_limits(headers: &HashMap<String, String>, provider: &str) {
-    if let Some(remaining) = headers.get("anthropic-ratelimit-tokens-remaining") {
-        if let Ok(remaining) = remaining.parse::<u64>() {
-            if remaining < RATE_LIMIT_TOKENS_LOW {
-                tracing::warn!(
-                    "{} rate limit low: {} tokens remaining",
-                    provider,
-                    remaining
-                );
+    for &(header, metric, warn_threshold) in RATE_LIMIT_HEADERS {
+        if let Some(value) = headers.get(header) {
+            if let Ok(remaining) = value.parse::<u64>() {
+                if warn_threshold > 0 && remaining < warn_threshold {
+                    tracing::warn!(
+                        "{} rate limit low: {} {} remaining",
+                        provider,
+                        remaining,
+                        header.trim_start_matches("anthropic-ratelimit-"),
+                    );
+                }
+                metrics::gauge!(metric, "provider" => provider.to_string()).set(remaining as f64);
             }
-            metrics::gauge!(
-                "grob_ratelimit_tokens_remaining",
-                "provider" => provider.to_string()
-            )
-            .set(remaining as f64);
-        }
-    }
-    if let Some(remaining) = headers.get("anthropic-ratelimit-requests-remaining") {
-        if let Ok(remaining) = remaining.parse::<u64>() {
-            if remaining < RATE_LIMIT_REQUESTS_LOW {
-                tracing::warn!(
-                    "{} rate limit low: {} requests remaining",
-                    provider,
-                    remaining
-                );
-            }
-            metrics::gauge!(
-                "grob_ratelimit_requests_remaining",
-                "provider" => provider.to_string()
-            )
-            .set(remaining as f64);
-        }
-    }
-    if let Some(remaining) = headers.get("anthropic-ratelimit-input-tokens-remaining") {
-        if let Ok(remaining) = remaining.parse::<u64>() {
-            metrics::gauge!(
-                "grob_ratelimit_input_tokens_remaining",
-                "provider" => provider.to_string()
-            )
-            .set(remaining as f64);
-        }
-    }
-    if let Some(remaining) = headers.get("anthropic-ratelimit-output-tokens-remaining") {
-        if let Ok(remaining) = remaining.parse::<u64>() {
-            metrics::gauge!(
-                "grob_ratelimit_output_tokens_remaining",
-                "provider" => provider.to_string()
-            )
-            .set(remaining as f64);
         }
     }
 }
@@ -271,6 +261,8 @@ pub struct AnthropicCompatibleProvider {
     name: String,
     api_key: String,
     base_url: String,
+    /// Pre-computed messages endpoint URL (avoids format! on every request).
+    messages_url: String,
     client: Client,
     models: Vec<String>,
     /// Custom headers to add (e.g., "HTTP-Referer" for OpenRouter)
@@ -292,10 +284,13 @@ impl AnthropicCompatibleProvider {
         params: super::ProviderParams,
         custom_headers: Vec<(String, String)>,
     ) -> Self {
+        let base_url = params.base_url.unwrap_or_default();
+        let messages_url = format!("{}/v1/messages", base_url);
         Self {
             name: params.name,
             api_key: params.api_key,
-            base_url: params.base_url.unwrap_or_default(),
+            base_url,
+            messages_url,
             client: build_provider_client(params.connect_timeout),
             models: params.models,
             custom_headers,
@@ -305,7 +300,7 @@ impl AnthropicCompatibleProvider {
         }
     }
 
-    async fn get_auth_header(&self) -> Result<String, ProviderError> {
+    async fn auth_header(&self) -> Result<String, ProviderError> {
         super::auth::resolve_access_token(
             self.oauth_provider.as_deref(),
             self.token_store.as_ref(),
@@ -320,24 +315,11 @@ impl AnthropicCompatibleProvider {
     }
 
     /// Create a named Anthropic-compatible provider with a fixed base URL.
-    pub fn named(
-        name: &str,
-        base_url: &str,
-        api_key: String,
-        models: Vec<String>,
-        token_store: Option<TokenStore>,
-        api_timeout: Duration,
-        connect_timeout: Duration,
-    ) -> Self {
+    pub fn named(name: &str, base_url: &str, params: super::ProviderParams) -> Self {
         Self::new(super::ProviderParams {
             name: name.to_string(),
-            api_key,
             base_url: Some(base_url.to_string()),
-            models,
-            oauth_provider: None,
-            token_store,
-            api_timeout,
-            connect_timeout,
+            ..params
         })
     }
 
@@ -364,12 +346,14 @@ impl AnthropicCompatibleProvider {
         req_builder
     }
 
-    async fn try_send_message(
+    /// Send an HTTP request and check for error status, returning the response.
+    /// Shared between streaming and non-streaming paths.
+    async fn send_and_check(
         &self,
         url: &str,
         auth_value: &str,
         request: &AnthropicRequest,
-    ) -> Result<ProviderResponse, ProviderError> {
+    ) -> Result<reqwest::Response, ProviderError> {
         let response = self
             .build_anthropic_request(url, auth_value)
             .timeout(self.api_timeout)
@@ -393,6 +377,17 @@ impl AnthropicCompatibleProvider {
                 message: format!("{} API error: {}", self.name, error_text),
             });
         }
+
+        Ok(response)
+    }
+
+    async fn try_send_message(
+        &self,
+        url: &str,
+        auth_value: &str,
+        request: &AnthropicRequest,
+    ) -> Result<ProviderResponse, ProviderError> {
+        let response = self.send_and_check(url, auth_value, request).await?;
 
         // Log rate limit headers from non-streaming responses
         let is_anthropic = self.base_url.contains(ANTHROPIC_DOMAIN);
@@ -424,55 +419,35 @@ impl AnthropicCompatibleProvider {
         auth_value: &str,
         request: &AnthropicRequest,
     ) -> Result<reqwest::Response, ProviderError> {
-        let response = self
-            .build_anthropic_request(url, auth_value)
-            .timeout(self.api_timeout)
-            .json(request)
-            .send()
-            .await?;
+        self.send_and_check(url, auth_value, request).await
+    }
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-
-            if status == 401 && self.is_oauth() {
-                tracing::warn!(
-                    "🔄 Received 401 on streaming, OAuth token may be invalid or expired"
-                );
-            }
-
-            return Err(ProviderError::ApiError {
-                status,
-                message: format!("{} API error: {}", self.name, error_text),
-            });
+    /// Common setup for both send_message and send_message_stream:
+    /// builds URL, sanitizes request for Anthropic backends, resolves auth.
+    async fn prepare_anthropic_request(
+        &self,
+        request: &mut AnthropicRequest,
+    ) -> Result<(&str, String, bool), ProviderError> {
+        let is_anthropic = self.base_url.contains(ANTHROPIC_DOMAIN);
+        if is_anthropic {
+            sanitize_tool_use_ids(request);
+            strip_non_anthropic_thinking(request);
         }
-
-        Ok(response)
+        let auth_value = self.auth_header().await?;
+        Ok((&self.messages_url, auth_value, is_anthropic))
     }
 }
 
 #[async_trait]
-impl AnthropicProvider for AnthropicCompatibleProvider {
+impl LlmProvider for AnthropicCompatibleProvider {
     async fn send_message(
         &self,
         request: AnthropicRequest,
     ) -> Result<ProviderResponse, ProviderError> {
-        let url = format!("{}/v1/messages", self.base_url);
-
-        // Sanitize request for Anthropic targets
         let mut request = request;
-        let is_anthropic = self.base_url.contains(ANTHROPIC_DOMAIN);
-        if is_anthropic {
-            sanitize_tool_use_ids(&mut request);
-            strip_non_anthropic_thinking(&mut request);
-        }
+        let (url, auth_value, is_anthropic) = self.prepare_anthropic_request(&mut request).await?;
 
-        let auth_value = self.get_auth_header().await?;
-
-        let result = self.try_send_message(&url, &auth_value, &request).await;
+        let result = self.try_send_message(url, &auth_value, &request).await;
 
         // Fallback: if signature error, strip all signed thinking blocks and retry
         if is_anthropic {
@@ -480,7 +455,7 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
                 if message.contains("signature") {
                     tracing::warn!("🔄 Signature error from Anthropic: {}, stripping all signed thinking blocks and retrying", message);
                     strip_all_thinking_signatures(&mut request);
-                    return self.try_send_message(&url, &auth_value, &request).await;
+                    return self.try_send_message(url, &auth_value, &request).await;
                 }
             }
         }
@@ -495,11 +470,11 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
         // For Anthropic native, use their count_tokens endpoint
         if self.name == "anthropic" {
             let url = format!("{}/v1/messages/count_tokens", self.base_url);
-
-            let auth_value = self.get_auth_header().await?;
+            let auth_value = self.auth_header().await?;
 
             let response = self
                 .build_anthropic_request(&url, &auth_value)
+                .timeout(self.api_timeout)
                 .json(&request)
                 .send()
                 .await?;
@@ -509,10 +484,10 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
                 let error_text = response
                     .text()
                     .await
-                    .unwrap_or_else(|_| "Unknown error".to_string());
+                    .unwrap_or_else(|_| format!("{}: failed to read error body", self.name));
                 return Err(ProviderError::ApiError {
                     status,
-                    message: error_text,
+                    message: format!("{} count_tokens error: {}", self.name, error_text),
                 });
             }
 
@@ -529,20 +504,12 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
     ) -> Result<StreamResponse, ProviderError> {
         use futures::stream::TryStreamExt;
 
-        let url = format!("{}/v1/messages", self.base_url);
-
         let mut request = request;
-        let is_anthropic = self.base_url.contains(ANTHROPIC_DOMAIN);
-        if is_anthropic {
-            sanitize_tool_use_ids(&mut request);
-            strip_non_anthropic_thinking(&mut request);
-        }
-
-        let auth_value = self.get_auth_header().await?;
+        let (url, auth_value, is_anthropic) = self.prepare_anthropic_request(&mut request).await?;
 
         // Try request, fallback: strip all signed thinking blocks on signature error
         let response = match self
-            .try_send_stream_request(&url, &auth_value, &request)
+            .try_send_stream_request(url, &auth_value, &request)
             .await
         {
             Ok(resp) => resp,
@@ -551,7 +518,7 @@ impl AnthropicProvider for AnthropicCompatibleProvider {
             {
                 tracing::warn!("🔄 Signature error from Anthropic: {}, stripping all signed thinking blocks and retrying stream", message);
                 strip_all_thinking_signatures(&mut request);
-                self.try_send_stream_request(&url, &auth_value, &request)
+                self.try_send_stream_request(url, &auth_value, &request)
                     .await?
             }
             Err(e) => return Err(e),

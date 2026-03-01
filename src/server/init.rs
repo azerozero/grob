@@ -208,7 +208,7 @@ pub(crate) fn init_security(config: &AppConfig) -> anyhow::Result<SecurityServic
             "🛡️  Security: rate limit {}rps burst={}, body limit {}MB, headers={}, circuit_breaker={}",
             config.security.rate_limit_rps,
             config.security.rate_limit_burst,
-            config.security.max_body_size / (1024 * 1024),
+            config.security.max_body_size.value() / (1024 * 1024),
             config.security.security_headers,
             config.security.circuit_breaker,
         );

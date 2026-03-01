@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
     let oauth_client = OAuthClient::new(config, token_store);
 
     // Generate authorization URL
-    let auth_url = oauth_client.get_authorization_url();
+    let auth_url = oauth_client.authorization_url()?;
 
     println!("Step 1: Visit the following URL in your browser:");
     println!();
@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     println!("Exchanging code for tokens...");
 
     let token = oauth_client
-        .exchange_code(code, &auth_url.verifier.verifier, "anthropic-max")
+        .exchange_code(code, auth_url.verifier.verifier(), "anthropic-max")
         .await?;
 
     println!();

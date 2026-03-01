@@ -51,7 +51,7 @@ pub async fn start_foreground(
     println!("🚀 Grob v{}", env!("CARGO_PKG_VERSION"));
     println!(
         "📡 Starting server on {}",
-        crate::cli::format_bind_addr(&config.server.host, config.server.port)
+        crate::cli::format_bind_addr(&config.server.host, config.server.port.value())
     );
     println!();
 
@@ -111,6 +111,8 @@ pub fn spawn_background_service(port: Option<u16>, config: Option<String>) -> an
 
     {
         use std::os::unix::process::CommandExt;
+        // SAFETY: setsid() is async-signal-safe and called in pre_exec (after fork,
+        // before exec) where only one thread exists in the child process.
         unsafe {
             cmd.pre_exec(|| {
                 nix::libc::setsid();

@@ -67,18 +67,20 @@ pub(crate) async fn check_budget(
     model_name: &str,
 ) -> Result<(), AppError> {
     let budget_config = &inner.config.budget;
-    let global_limit = budget_config.monthly_limit_usd;
+    let global_limit = budget_config.monthly_limit_usd.value();
 
     let provider_limit = inner
         .config
         .providers
         .iter()
         .find(|p| p.name == provider_name)
-        .and_then(|p| p.budget_usd);
+        .and_then(|p| p.budget_usd.map(|b| b.value()));
 
-    let model_limit = inner.find_model(model_name).and_then(|m| m.budget_usd);
+    let model_limit = inner
+        .find_model(model_name)
+        .and_then(|m| m.budget_usd.map(|b| b.value()));
 
-    let tracker = state.spend_tracker.lock().await;
+    let tracker = state.observability.spend_tracker.lock().await;
 
     if let Err(e) = tracker.check_budget(
         provider_name,
@@ -93,10 +95,12 @@ pub(crate) async fn check_budget(
     if let Some(warning) = tracker.check_warnings(
         provider_name,
         model_name,
-        global_limit,
-        provider_limit,
-        model_limit,
-        budget_config.warn_at_percent,
+        &crate::features::token_pricing::spend::BudgetLimits {
+            global_limit,
+            provider_limit,
+            model_limit,
+            warn_at_percent: budget_config.warn_at_percent,
+        },
     ) {
         warn!("Budget warning: {}", warning);
     }
@@ -113,7 +117,7 @@ pub(crate) async fn record_spend(
     tenant_id: Option<&str>,
 ) {
     if cost > 0.0 {
-        let mut tracker = state.spend_tracker.lock().await;
+        let mut tracker = state.observability.spend_tracker.lock().await;
         if let Some(tenant) = tenant_id {
             tracker.record_tenant(tenant, provider_name, model_name, cost);
         } else {
@@ -141,7 +145,7 @@ pub(crate) async fn calculate_cost(
     output_tokens: u32,
     is_subscription: bool,
 ) -> TokenCounter {
-    let table = state.pricing_table.read().await;
+    let table = state.observability.pricing_table.read().await;
     TokenCounter::with_pricing(
         actual_model,
         input_tokens,
@@ -162,9 +166,14 @@ pub(crate) fn is_retryable(e: &crate::providers::error::ProviderError) -> bool {
     }
 }
 
+/// Base delay (ms) before the first retry.
+const BASE_RETRY_MS: u64 = 200;
+/// Exponential growth factor for successive retries (200ms → 800ms → 3200ms).
+const RETRY_BACKOFF_FACTOR: u64 = 4;
+
 /// Calculate retry delay with exponential backoff and jitter.
 pub(crate) fn retry_delay(attempt: u32) -> std::time::Duration {
-    let base_ms = 200u64 * 4u64.pow(attempt);
+    let base_ms = BASE_RETRY_MS * RETRY_BACKOFF_FACTOR.pow(attempt);
     let jitter = rand::random::<u64>() % (base_ms / 2 + 1);
     std::time::Duration::from_millis(base_ms + jitter)
 }

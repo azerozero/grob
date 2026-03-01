@@ -8,7 +8,7 @@ pub async fn cmd_restart(
     cli_config: Option<String>,
 ) -> anyhow::Result<()> {
     let was_running = if let Some(pid) =
-        instance::find_instance_pid(&config.server.host, config.server.port).await
+        instance::find_instance_pid(&config.server.host, config.server.port.value()).await
     {
         println!("Stopping existing service...");
         match stop_service(pid).await {
@@ -38,7 +38,7 @@ pub async fn cmd_restart(
 
     if detach {
         println!("Starting service in background...");
-        let port_from_config = Some(config.server.port);
+        let port_from_config = Some(config.server.port.value());
         spawn_background_service(port_from_config, cli_config)?;
         tokio::time::sleep(tokio::time::Duration::from_millis(
             PROCESS_TRANSITION_GRACE_MS,
@@ -47,7 +47,7 @@ pub async fn cmd_restart(
 
         let verb = if was_running { "restarted" } else { "started" };
         if let Some(pid) =
-            instance::find_instance_pid(&config.server.host, config.server.port).await
+            instance::find_instance_pid(&config.server.host, config.server.port.value()).await
         {
             println!("✅ Service {} successfully (PID: {})", verb, pid);
         } else {
