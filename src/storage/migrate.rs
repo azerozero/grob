@@ -123,7 +123,7 @@ mod tests {
 
         // Write legacy spend.json
         let spend = SpendData {
-            month: "2026-02".to_string(),
+            month: crate::features::token_pricing::spend::current_month(),
             total: 42.50,
             by_provider: {
                 let mut m = HashMap::new();
