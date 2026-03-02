@@ -472,6 +472,41 @@ impl DlpEngine {
     }
 }
 
+// ── Trait implementation ──
+
+impl crate::traits::DlpPipeline for DlpEngine {
+    fn sanitize_request(&self, request: &mut AnthropicRequest) {
+        self.sanitize_request(request);
+    }
+
+    fn sanitize_request_checked(
+        &self,
+        request: &mut AnthropicRequest,
+    ) -> Result<(), DlpBlockError> {
+        self.sanitize_request_checked(request)
+    }
+
+    fn sanitize_response_text<'a>(&self, text: &'a str) -> Cow<'a, str> {
+        self.sanitize_response_text(text)
+    }
+
+    fn check_response_url_exfil(&self, text: &str) -> Result<(), DlpBlockError> {
+        self.check_response_url_exfil(text)
+    }
+
+    fn scan_end_of_stream(&self, full_text: &str) {
+        self.scan_end_of_stream(full_text);
+    }
+
+    fn scan_input_enabled(&self) -> bool {
+        self.config.scan_input
+    }
+
+    fn scan_output_enabled(&self) -> bool {
+        self.config.scan_output
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

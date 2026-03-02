@@ -36,12 +36,12 @@ pub(crate) use middleware::{
 use crate::auth::TokenStore;
 use crate::cli::AppConfig;
 use crate::features::dlp::session::DlpSessionManager;
-use crate::features::token_pricing::spend::SpendTracker;
 use crate::features::token_pricing::SharedPricingTable;
-use crate::message_tracing::MessageTracer;
 use crate::providers::ProviderRegistry;
 use crate::router::Router;
-use crate::security::{AuditLog, CircuitBreakerRegistry, RateLimiter};
+use crate::security::provider_scorer::ProviderScorer;
+use crate::security::{AuditLog, RateLimiter};
+use crate::traits;
 use axum::{
     body::Body,
     extract::State,
@@ -94,9 +94,9 @@ impl ReloadableState {
 
 /// Observability-related state (metrics, tracing, spend tracking).
 pub struct ObservabilityState {
-    pub message_tracer: Arc<MessageTracer>,
+    pub message_tracer: Arc<dyn traits::Tracer>,
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
-    pub spend_tracker: tokio::sync::Mutex<SpendTracker>,
+    pub spend_tracker: tokio::sync::Mutex<Box<dyn traits::SpendTracking>>,
     pub pricing_table: SharedPricingTable,
 }
 
@@ -105,10 +105,11 @@ pub struct SecurityState {
     pub jwt_validator: Option<Arc<crate::auth::JwtValidator>>,
     pub rate_limiter: Option<Arc<RateLimiter>>,
     pub dlp_sessions: Option<Arc<DlpSessionManager>>,
-    pub circuit_breakers: Option<Arc<CircuitBreakerRegistry>>,
+    pub circuit_breakers: Option<Arc<dyn traits::ProviderAvailability>>,
     pub audit_log: Option<Arc<AuditLog>>,
     pub response_cache: Option<Arc<crate::cache::ResponseCache>>,
     pub tap_sender: Option<Arc<crate::features::tap::TapSender>>,
+    pub provider_scorer: Option<Arc<ProviderScorer>>,
 }
 
 /// Application state shared across handlers
@@ -169,6 +170,30 @@ pub async fn start_server(
 
     let (rate_limiter, circuit_breakers, audit_log, response_cache) = init_security(&config)?;
 
+    let provider_scorer = if config.security.adaptive_scoring {
+        let scorer_config = crate::security::provider_scorer::ScorerConfig {
+            latency_alpha: config.security.scoring_latency_alpha,
+            window_size: config.security.scoring_window_size,
+            decay_rate: config.security.scoring_decay_rate,
+        };
+        let scorer = Arc::new(ProviderScorer::new(scorer_config, circuit_breakers.clone()));
+        info!(
+            "📊 Adaptive provider scoring enabled (window={}, alpha={}, decay={})",
+            config.security.scoring_window_size,
+            config.security.scoring_latency_alpha,
+            config.security.scoring_decay_rate
+        );
+        Some(scorer)
+    } else {
+        None
+    };
+
+    // Coerce concrete types to trait objects for testability
+    let tracer: Arc<dyn traits::Tracer> = message_tracer;
+    let tracker: Box<dyn traits::SpendTracking> = Box::new(spend_tracker);
+    let availability: Option<Arc<dyn traits::ProviderAvailability>> =
+        circuit_breakers.map(|cb| cb as Arc<dyn traits::ProviderAvailability>);
+
     let state = Arc::new(AppState {
         inner: std::sync::RwLock::new(reloadable),
         token_store,
@@ -176,19 +201,20 @@ pub async fn start_server(
         active_requests: std::sync::atomic::AtomicU64::new(0),
         started_at: chrono::Utc::now(),
         observability: ObservabilityState {
-            message_tracer,
+            message_tracer: tracer,
             metrics_handle,
-            spend_tracker: tokio::sync::Mutex::new(spend_tracker),
+            spend_tracker: tokio::sync::Mutex::new(tracker),
             pricing_table,
         },
         security: SecurityState {
             jwt_validator,
             rate_limiter,
             dlp_sessions,
-            circuit_breakers,
+            circuit_breakers: availability,
             audit_log,
             response_cache,
             tap_sender,
+            provider_scorer,
         },
     });
 
@@ -224,6 +250,7 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
         .route("/api/config", get(config_api::get_config_json))
         .route("/api/config", post(config_api::update_config_json))
         .route("/api/config/reload", post(config_api::reload_config))
+        .route("/api/scores", get(scores_endpoint))
         .route(
             "/api/oauth/authorize",
             post(oauth_handlers::oauth_authorize),
@@ -388,6 +415,22 @@ fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
     });
 }
 
+/// Adaptive provider scores endpoint.
+async fn scores_endpoint(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    if let Some(ref scorer) = state.security.provider_scorer {
+        let scores = scorer.all_scores().await;
+        Json(serde_json::json!({
+            "adaptive_scoring": true,
+            "scores": scores
+        }))
+    } else {
+        Json(serde_json::json!({
+            "adaptive_scoring": false,
+            "scores": {}
+        }))
+    }
+}
+
 /// Health check endpoint
 async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let active = state
@@ -477,6 +520,28 @@ async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> impl IntoRespon
         metrics::gauge!("grob_budget_remaining_usd").set((budget_limit - tracker.total()).max(0.0));
     }
     drop(tracker);
+
+    // Publish adaptive scoring gauges
+    if let Some(ref scorer) = state.security.provider_scorer {
+        let details = scorer.all_score_details().await;
+        for (provider, (success_rate, latency_ewma, score)) in &details {
+            metrics::gauge!(
+                "grob_provider_score",
+                "provider" => provider.clone()
+            )
+            .set(*score);
+            metrics::gauge!(
+                "grob_provider_latency_ewma_ms",
+                "provider" => provider.clone()
+            )
+            .set(*latency_ewma);
+            metrics::gauge!(
+                "grob_provider_success_rate",
+                "provider" => provider.clone()
+            )
+            .set(*success_rate);
+        }
+    }
 
     let body = state.observability.metrics_handle.render();
     // Header and body are controlled string constants; builder cannot fail.

@@ -18,3 +18,4 @@ pub mod router;
 pub mod security;
 pub mod server;
 pub mod storage;
+pub mod traits;

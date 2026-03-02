@@ -183,6 +183,38 @@ impl MessageTracer {
     }
 }
 
+// ── Trait implementation ──
+
+impl crate::traits::Tracer for MessageTracer {
+    fn new_trace_id(&self) -> String {
+        self.new_trace_id()
+    }
+
+    fn trace_request(
+        &self,
+        id: &str,
+        request: &AnthropicRequest,
+        provider: &str,
+        route_type: &RouteType,
+        is_stream: bool,
+    ) {
+        self.trace_request(id, request, provider, route_type, is_stream);
+    }
+
+    fn trace_response(
+        &self,
+        id: &str,
+        response: &crate::providers::ProviderResponse,
+        latency_ms: u64,
+    ) {
+        self.trace_response(id, response, latency_ms);
+    }
+
+    fn trace_error(&self, id: &str, error: &str) {
+        self.trace_error(id, error);
+    }
+}
+
 /// Expand ~ to home directory
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {

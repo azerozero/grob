@@ -5,6 +5,7 @@ pub mod audit_log;
 pub mod cache;
 pub mod circuit_breaker;
 pub mod headers;
+pub mod provider_scorer;
 pub mod rate_limit;
 pub mod risk;
 

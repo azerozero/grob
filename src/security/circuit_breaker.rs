@@ -243,6 +243,27 @@ impl Default for CircuitBreakerRegistry {
     }
 }
 
+// ── Trait implementation ──
+
+#[async_trait::async_trait]
+impl crate::traits::ProviderAvailability for CircuitBreakerRegistry {
+    async fn can_execute(&self, provider: &str) -> bool {
+        self.can_execute(provider).await
+    }
+
+    async fn record_success(&self, provider: &str) {
+        self.record_success(provider).await;
+    }
+
+    async fn record_failure(&self, provider: &str) {
+        self.record_failure(provider).await;
+    }
+
+    async fn all_states(&self) -> HashMap<String, CircuitState> {
+        self.all_states().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -187,6 +187,15 @@ async fn tap_worker(mut rx: mpsc::Receiver<TapEvent>, config: TapConfig) {
     }
 }
 
+// ── Trait implementation ──
+
+#[cfg(feature = "tap")]
+impl crate::traits::EventTap for TapSender {
+    fn try_send(&self, event: TapEvent) {
+        self.try_send(event);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

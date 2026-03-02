@@ -313,6 +313,41 @@ impl SpendTracker {
     }
 }
 
+// ── Trait implementation ──
+
+impl crate::traits::SpendTracking for SpendTracker {
+    fn record(&mut self, provider: &str, model: &str, cost: f64) {
+        self.record(provider, model, cost);
+    }
+
+    fn record_tenant(&mut self, tenant: &str, provider: &str, model: &str, cost: f64) {
+        self.record_tenant(tenant, provider, model, cost);
+    }
+
+    fn check_budget(
+        &self,
+        provider: &str,
+        model: &str,
+        global_limit: f64,
+        provider_limit: Option<f64>,
+        model_limit: Option<f64>,
+    ) -> Result<(), BudgetError> {
+        self.check_budget(provider, model, global_limit, provider_limit, model_limit)
+    }
+
+    fn total(&self) -> f64 {
+        self.total()
+    }
+
+    fn save(&self) {
+        self.save();
+    }
+
+    fn check_warnings(&self, provider: &str, model: &str, limits: &BudgetLimits) -> Option<String> {
+        self.check_warnings(provider, model, limits)
+    }
+}
+
 /// Load spend data from the default path (for CLI commands, no tracker needed)
 pub fn load_spend_data() -> SpendData {
     let path = SpendTracker::default_path();

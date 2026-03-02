@@ -370,7 +370,21 @@ async fn resolve_provider(
             None
         })?;
 
-    if let Some(ref cb) = ctx.state.security.circuit_breakers {
+    // Check availability: scorer (which wraps CB) takes priority over bare CB
+    if let Some(ref scorer) = ctx.state.security.provider_scorer {
+        if !scorer.can_execute(&mapping.provider).await {
+            info!(
+                "⚡ Provider {} unavailable (scorer/CB), skipping",
+                mapping.provider
+            );
+            metrics::counter!(
+                "grob_circuit_breaker_rejected_total",
+                "provider" => mapping.provider.clone()
+            )
+            .increment(1);
+            return None;
+        }
+    } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
         if !cb.can_execute(&mapping.provider).await {
             info!("⚡ Circuit breaker open for {}, skipping", mapping.provider);
             metrics::counter!(
@@ -393,7 +407,17 @@ async fn dispatch_provider_loop(
     decision: &crate::models::RouteDecision,
     cache_key: &Option<String>,
 ) -> Result<DispatchResult, AppError> {
-    for (idx, mapping) in sorted_mappings.iter().enumerate() {
+    // Re-sort mappings by adaptive score when scorer is enabled
+    let rescored;
+    let effective_mappings: &[crate::cli::ModelMapping] =
+        if let Some(ref scorer) = ctx.state.security.provider_scorer {
+            rescored = scorer.sort_mappings(sorted_mappings.to_vec()).await;
+            &rescored
+        } else {
+            sorted_mappings
+        };
+
+    for (idx, mapping) in effective_mappings.iter().enumerate() {
         let Some(provider) = resolve_provider(ctx, mapping).await else {
             continue;
         };
@@ -406,7 +430,7 @@ async fn dispatch_provider_loop(
         )
         .await?;
 
-        log_dispatch_attempt(ctx, mapping, decision, idx, sorted_mappings.len());
+        log_dispatch_attempt(ctx, mapping, decision, idx, effective_mappings.len());
 
         let (provider_request, original_model) =
             prepare_provider_request(ctx, request, mapping, &decision.route_type);
@@ -469,7 +493,7 @@ async fn dispatch_provider_loop(
     );
     Err(AppError::ProviderError(format!(
         "All {} provider mappings failed for model: {}",
-        sorted_mappings.len(),
+        effective_mappings.len(),
         decision.model_name
     )))
 }
@@ -624,7 +648,10 @@ async fn dispatch_streaming(
 
     match provider.send_message_stream(provider_request).await {
         Ok(stream_response) => {
-            if let Some(ref cb) = ctx.state.security.circuit_breakers {
+            let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
+            if let Some(ref scorer) = ctx.state.security.provider_scorer {
+                scorer.record_success(&mapping.provider, latency_ms).await;
+            } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
                 cb.record_success(&mapping.provider).await;
             }
 
@@ -641,8 +668,9 @@ async fn dispatch_streaming(
             })
         }
         Err(e) => {
-            // Record circuit breaker failure
-            if let Some(ref cb) = ctx.state.security.circuit_breakers {
+            if let Some(ref scorer) = ctx.state.security.provider_scorer {
+                scorer.record_failure(&mapping.provider).await;
+            } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
                 cb.record_failure(&mapping.provider).await;
             }
             if let Some(ref trace_id) = ctx.trace_id {
@@ -739,7 +767,12 @@ async fn dispatch_non_streaming(
 
         match provider.send_message(req).await {
             Ok(mut response) => {
-                if let Some(ref cb) = ctx.state.security.circuit_breakers {
+                let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
+                if let Some(ref scorer) = ctx.state.security.provider_scorer {
+                    scorer
+                        .record_success(&attempt.mapping.provider, latency_ms)
+                        .await;
+                } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
                     cb.record_success(&attempt.mapping.provider).await;
                 }
                 ctx.sanitize_output(&mut response);
@@ -774,7 +807,9 @@ async fn dispatch_non_streaming(
                     continue;
                 }
 
-                if let Some(ref cb) = ctx.state.security.circuit_breakers {
+                if let Some(ref scorer) = ctx.state.security.provider_scorer {
+                    scorer.record_failure(&attempt.mapping.provider).await;
+                } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
                     cb.record_failure(&attempt.mapping.provider).await;
                 }
                 info!(

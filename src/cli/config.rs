@@ -211,6 +211,21 @@ pub struct SecurityConfig {
     /// Path to HMAC key file (only for hmac-sha256 algorithm; default: <audit_dir>/audit_hmac.key)
     #[serde(default)]
     pub audit_hmac_key_path: String,
+    /// Enable adaptive provider scoring (opt-in, default false)
+    #[serde(default)]
+    pub adaptive_scoring: bool,
+    /// EWMA alpha for latency smoothing (0.0–1.0, default 0.3)
+    #[serde(default = "default_scoring_latency_alpha")]
+    pub scoring_latency_alpha: f64,
+    /// Rolling window size for success rate calculation (default 50)
+    #[serde(default = "default_scoring_window_size")]
+    pub scoring_window_size: usize,
+    /// Decay rate per second of inactivity (default 0.001)
+    #[serde(default = "default_scoring_decay_rate")]
+    pub scoring_decay_rate: f64,
+    /// Persist scores across restarts (default false)
+    #[serde(default)]
+    pub scoring_persist: bool,
 }
 
 impl Default for SecurityConfig {
@@ -225,6 +240,11 @@ impl Default for SecurityConfig {
             audit_dir: String::new(),
             audit_signing_algorithm: String::new(),
             audit_hmac_key_path: String::new(),
+            adaptive_scoring: false,
+            scoring_latency_alpha: default_scoring_latency_alpha(),
+            scoring_window_size: default_scoring_window_size(),
+            scoring_decay_rate: default_scoring_decay_rate(),
+            scoring_persist: false,
         }
     }
 }
@@ -235,6 +255,18 @@ fn default_rate_limit_rps() -> u32 {
 
 fn default_rate_limit_burst() -> u32 {
     200
+}
+
+fn default_scoring_latency_alpha() -> f64 {
+    0.3
+}
+
+fn default_scoring_window_size() -> usize {
+    50
+}
+
+fn default_scoring_decay_rate() -> f64 {
+    0.001
 }
 
 /// LLM response cache configuration
