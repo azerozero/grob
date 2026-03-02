@@ -164,25 +164,27 @@ jobs:
 
             crane append -t "${IMAGE}:${VERSION#v}-${ARCH}" -f "layer-${ARCH}.tar"
 
-            # Set platform metadata
-            if [[ "$ARCH" == "amd64" ]]; then
-              crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
-                --platform linux/amd64 \
-                --entrypoint /usr/local/bin/${BINARY_NAME} \
-                --cmd run
-            else
-              crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
-                --platform linux/arm64 \
-                --entrypoint /usr/local/bin/${BINARY_NAME} \
-                --cmd run
-            fi
+            # Set platform metadata and OCI annotations
+            PLATFORM="linux/${ARCH}"
+            crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
+              --platform "${PLATFORM}" \
+              --entrypoint /usr/local/bin/${BINARY_NAME} \
+              --cmd run \
+              --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
+              --annotation org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+              --annotation org.opencontainers.image.version="${VERSION#v}" \
+              --annotation org.opencontainers.image.licenses="Apache-2.0"
           done
 
-          # Create multi-arch manifest list
+          # Create multi-arch manifest list with OCI annotations
           crane index append \
             -t "${IMAGE}:${VERSION#v}" \
             -m "${IMAGE}:${VERSION#v}-amd64" \
-            -m "${IMAGE}:${VERSION#v}-arm64"
+            -m "${IMAGE}:${VERSION#v}-arm64" \
+            --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
+            --annotation org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+            --annotation org.opencontainers.image.version="${VERSION#v}" \
+            --annotation org.opencontainers.image.licenses="Apache-2.0"
 
           # Tag additional versions
           MAJOR_MINOR="$(echo "${VERSION#v}" | cut -d. -f1-2)"
