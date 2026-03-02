@@ -1,6 +1,8 @@
 [workspace]
 # Don't publish to crates.io — release via git tags only
 publish = false
+# Determine versions from git tags, not the cargo registry
+git_only = true
 git_release_enable = true
 git_release_draft = false
 git_release_latest = true
@@ -8,8 +10,7 @@ git_tag_name = "v{{ version }}"
 git_tag_enable = true
 changelog_update = true
 pr_labels = ["release"]
-# Compare against latest git tag (not crates.io) for version bumping
-semver_check = false
+# Only bump on meaningful commits (feat/fix/refactor/perf)
 release_commits = "^(feat|fix|refactor|perf)"
 
 [[package]]
