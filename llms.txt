@@ -1,0 +1,56 @@
+# Grob
+
+> High-performance LLM routing proxy written in Rust. Routes requests to Anthropic, OpenAI, Gemini, DeepSeek, Ollama, and 200+ models via OpenRouter with automatic failover, format translation between Anthropic and OpenAI APIs, streaming support, tool calling, DLP scanning, spend tracking, and budget enforcement.
+
+## Guides
+
+- [Quick Start](docs/QUICKSTART.md): Install and run Grob in 30 seconds
+- [Provider Setup](docs/PROVIDERS.md): Per-provider configuration guides for all 13+ supported backends
+- [OAuth Setup](docs/OAUTH_SETUP.md): OAuth authentication for Anthropic Pro/Max and Gemini Pro subscriptions
+
+## Reference
+
+- [Configuration Reference](docs/CONFIGURATION.md): All TOML config options with defaults and examples
+- [OpenAI Compatibility](docs/openai-compatibility.md): `/v1/chat/completions` endpoint details, supported features, and limitations
+- [OpenAPI Specification](docs/openapi.yaml): Full API reference in OpenAPI 3.0 format
+- [CLI Reference](README.md#cli-reference): All CLI commands and flags
+- [Troubleshooting](docs/TROUBLESHOOTING.md): Common errors, diagnostics, and fixes
+
+## Architecture
+
+- [Architecture Overview](docs/ARCHITECTURE.md): Request flow, module layout, and key design decisions
+- [Design Principles](docs/design-principles.md): Philosophy, writing principles, and UX guidelines
+- [Gemini Integration](docs/gemini-integration.md): Gemini and Vertex AI provider specifics
+
+## Decisions
+
+- [ADR-0001: Static config](docs/decisions/0001-static-config-no-hot-reload.md): Why no hot reload
+- [ADR-0002: Custom OAuth](docs/decisions/0002-custom-oauth-no-crate.md): Why no oauth2 crate
+- [ADR-0003: Regex routing](docs/decisions/0003-regex-routing-engine.md): Why regex-based routing
+- [ADR-0004: Persistent spend](docs/decisions/0004-persistent-spend-tracking.md): Why redb for spend tracking
+- [ADR-0005: Anthropic-native trait](docs/decisions/0005-anthropic-native-provider-trait.md): Why Anthropic as the internal format
+
+## Source
+
+- [Entry point](src/main.rs): CLI argument parsing and command dispatch
+- [Library root](src/lib.rs): Module declarations
+- [Trait contracts](src/traits.rs): 7 core traits (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, etc.)
+- [Provider trait](src/providers/mod.rs): LlmProvider trait definition and provider types
+- [Router](src/router/mod.rs): Regex-based request classification and model selection
+- [Server](src/server/mod.rs): Axum HTTP server, middleware stack, and application state
+- [CLI config](src/cli/mod.rs): AppConfig and all configuration structs
+
+## Configuration
+
+- [Configuration Reference](docs/CONFIGURATION.md): All TOML options
+- [Example configs](docs/examples/): Sample configurations for common setups
+- [Presets](presets/): Built-in preset configurations (perf, medium, cheap, fast, local, gdpr)
+
+## Project
+
+- [README](README.md): Project overview, install, quick start
+- [Changelog](CHANGELOG.md): Release history
+- [License](LICENSE): AGPL-3.0-only
+- [Licensing](LICENSING.md): Dual-license tiers and commercial options
+- [CLA](CLA.md): Contributor License Agreement
+- [AI Agent Context](AGENTS.md): Project context optimized for AI coding agents
