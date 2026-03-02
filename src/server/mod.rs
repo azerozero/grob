@@ -4,11 +4,13 @@ pub(crate) mod audit;
 mod budget;
 mod config_api;
 pub(crate) mod dispatch;
+mod endpoints;
 mod error;
 pub mod fan_out;
 mod handlers;
 pub(crate) mod helpers;
 mod init;
+mod lifecycle;
 mod middleware;
 mod oauth_handlers;
 pub mod openai_compat;
@@ -43,17 +45,12 @@ use crate::security::provider_scorer::ProviderScorer;
 use crate::security::{AuditLog, RateLimiter};
 use crate::traits;
 use axum::{
-    body::Body,
-    extract::State,
-    http::StatusCode,
-    response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router as AxumRouter,
+    Router as AxumRouter,
 };
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use tower_http::limit::RequestBodyLimitLayer;
-use tracing::{error, info, warn};
+use tracing::info;
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
@@ -224,9 +221,9 @@ pub async fn start_server(
     let oauth_state = state.clone();
     let drain_state = state.clone();
 
-    spawn_oauth_callback(oauth_state);
-    bind_and_serve(&config, app, shutdown_signal).await?;
-    drain_in_flight(&drain_state).await;
+    lifecycle::spawn_oauth_callback(oauth_state);
+    lifecycle::bind_and_serve(&config, app, shutdown_signal).await?;
+    lifecycle::drain_in_flight(&drain_state).await;
 
     Ok(())
 }
@@ -243,14 +240,14 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
             post(handlers::handle_openai_chat_completions),
         )
         .route("/v1/models", get(handlers::handle_openai_models))
-        .route("/health", get(health_check))
-        .route("/live", get(liveness_check))
-        .route("/ready", get(readiness_check))
-        .route("/metrics", get(metrics_endpoint))
+        .route("/health", get(endpoints::health_check))
+        .route("/live", get(endpoints::liveness_check))
+        .route("/ready", get(endpoints::readiness_check))
+        .route("/metrics", get(endpoints::metrics_endpoint))
         .route("/api/config", get(config_api::get_config_json))
         .route("/api/config", post(config_api::update_config_json))
         .route("/api/config/reload", post(config_api::reload_config))
-        .route("/api/scores", get(scores_endpoint))
+        .route("/api/scores", get(endpoints::scores_endpoint))
         .route(
             "/api/oauth/authorize",
             post(oauth_handlers::oauth_authorize),
@@ -292,261 +289,4 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
     let app = app.layer(axum::middleware::from_fn(request_id_middleware));
 
     app.with_state(state)
-}
-
-async fn bind_and_serve(
-    config: &AppConfig,
-    app: axum::Router,
-    shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
-) -> anyhow::Result<()> {
-    let addr = crate::cli::format_bind_addr(&config.server.host, config.server.port.value());
-
-    #[cfg(feature = "tls")]
-    let tls_manual = config.server.tls.enabled
-        && !config.server.tls.cert_path.is_empty()
-        && !config.server.tls.key_path.is_empty();
-    #[cfg(not(feature = "tls"))]
-    let tls_manual = false;
-
-    #[cfg(feature = "acme")]
-    let tls_acme = config.server.tls.acme.enabled;
-    #[cfg(not(feature = "acme"))]
-    let tls_acme = false;
-
-    let tls_enabled = tls_manual || tls_acme;
-
-    #[cfg(not(feature = "tls"))]
-    if config.server.tls.enabled {
-        anyhow::bail!("TLS is enabled in config but grob was built without the `tls` feature. Rebuild with: cargo build --features tls");
-    }
-
-    #[cfg(not(feature = "acme"))]
-    if config.server.tls.acme.enabled {
-        anyhow::bail!("ACME is enabled in config but grob was built without the `acme` feature. Rebuild with: cargo build --features acme");
-    }
-
-    if !tls_enabled {
-        let listener = crate::net::bind_reuseport(&addr).await?;
-        info!("🚀 Server listening on {} (SO_REUSEPORT)", addr);
-        axum::serve(listener, app)
-            .with_graceful_shutdown(shutdown_signal)
-            .await?;
-    } else if tls_acme {
-        #[cfg(feature = "acme")]
-        {
-            let acceptor = crate::acme::build_acme_acceptor(&config.server.tls.acme)?;
-            info!("🔒 Server listening on {} (ACME TLS, SO_REUSEPORT)", addr);
-            let listener = crate::net::bind_reuseport(&addr).await?;
-            axum_server::Server::bind(addr.parse()?)
-                .acceptor(acceptor)
-                .serve(app.into_make_service())
-                .await?;
-            drop(listener);
-        }
-    } else {
-        #[cfg(feature = "tls")]
-        {
-            use axum_server::tls_rustls::RustlsConfig;
-            let rustls_config = RustlsConfig::from_pem_file(
-                &config.server.tls.cert_path,
-                &config.server.tls.key_path,
-            )
-            .await?;
-            info!("🔒 Server listening on {} (TLS, SO_REUSEPORT)", addr);
-            let std_listener = crate::net::bind_reuseport_std(&addr)?;
-            axum_server::from_tcp_rustls(std_listener, rustls_config)
-                .serve(app.into_make_service())
-                .await?;
-        }
-    }
-
-    Ok(())
-}
-
-async fn drain_in_flight(state: &Arc<AppState>) {
-    let drain_start = std::time::Instant::now();
-    let drain_timeout = std::time::Duration::from_secs(30);
-    loop {
-        let active = state
-            .active_requests
-            .load(std::sync::atomic::Ordering::Relaxed);
-        if active == 0 {
-            info!("✅ All in-flight requests drained");
-            break;
-        }
-        if drain_start.elapsed() >= drain_timeout {
-            warn!(
-                "⚠️ Drain timeout reached with {} requests still in-flight",
-                active
-            );
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-}
-
-/// Spawn the OAuth callback server (required for OpenAI Codex OAuth)
-fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
-    let port = oauth_state.snapshot().config.server.oauth_callback_port;
-    tokio::spawn(async move {
-        let oauth_callback_app = AxumRouter::new()
-            .route("/auth/callback", get(oauth_handlers::oauth_callback))
-            .with_state(oauth_state);
-
-        let oauth_addr = format!("127.0.0.1:{}", port);
-        match TcpListener::bind(&oauth_addr).await {
-            Ok(oauth_listener) => {
-                info!("🔐 OAuth callback server listening on {}", oauth_addr);
-                if let Err(e) = axum::serve(oauth_listener, oauth_callback_app).await {
-                    error!("OAuth callback server error: {}", e);
-                }
-            }
-            Err(e) => {
-                error!(
-                    "⚠️  Failed to bind OAuth callback server on {}: {}",
-                    oauth_addr, e
-                );
-                error!(
-                    "⚠️  OpenAI Codex OAuth will not work. Port {} must be available.",
-                    port
-                );
-            }
-        }
-    });
-}
-
-/// Adaptive provider scores endpoint.
-async fn scores_endpoint(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    if let Some(ref scorer) = state.security.provider_scorer {
-        let scores = scorer.all_scores().await;
-        Json(serde_json::json!({
-            "adaptive_scoring": true,
-            "scores": scores
-        }))
-    } else {
-        Json(serde_json::json!({
-            "adaptive_scoring": false,
-            "scores": {}
-        }))
-    }
-}
-
-/// Health check endpoint
-async fn health_check(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let active = state
-        .active_requests
-        .load(std::sync::atomic::Ordering::Relaxed);
-    let spend_total = {
-        let tracker = state.observability.spend_tracker.lock().await;
-        tracker.total()
-    };
-    let inner = state.snapshot();
-    let budget_limit = inner.config.budget.monthly_limit_usd.value();
-    Json(serde_json::json!({
-        "status": "ok",
-        "service": "grob",
-        "pid": std::process::id(),
-        "started_at": state.started_at.to_rfc3339(),
-        "active_requests": active,
-        "spend": {
-            "total_usd": spend_total,
-            "budget_usd": budget_limit,
-        }
-    }))
-}
-
-/// Liveness probe: process is alive, returns 200 always.
-async fn liveness_check() -> impl IntoResponse {
-    Json(serde_json::json!({"status": "alive"}))
-}
-
-/// Readiness probe: check that providers are configured and circuit breakers aren't all open.
-async fn readiness_check(State(state): State<Arc<AppState>>) -> Response {
-    let inner = state.snapshot();
-    let provider_count = inner.provider_registry.list_providers().len();
-
-    if provider_count == 0 {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(serde_json::json!({
-                "status": "not_ready",
-                "reason": "no providers configured"
-            })),
-        )
-            .into_response();
-    }
-
-    // Check if all circuit breakers are open (all providers degraded)
-    if let Some(ref cb) = state.security.circuit_breakers {
-        let states = cb.all_states().await;
-        if !states.is_empty() {
-            let all_open = states
-                .values()
-                .all(|s| *s == crate::security::CircuitState::Open);
-            if all_open {
-                return (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    Json(serde_json::json!({
-                        "status": "not_ready",
-                        "reason": "all circuit breakers open"
-                    })),
-                )
-                    .into_response();
-            }
-        }
-    }
-
-    Json(serde_json::json!({
-        "status": "ready",
-        "providers": provider_count
-    }))
-    .into_response()
-}
-
-/// Prometheus metrics endpoint
-async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let active = state
-        .active_requests
-        .load(std::sync::atomic::Ordering::Relaxed);
-    metrics::gauge!("grob_active_requests").set(active as f64);
-
-    // Publish spend/budget gauges (point-in-time snapshots → gauges are correct)
-    let inner = state.snapshot();
-    let tracker = state.observability.spend_tracker.lock().await;
-    metrics::gauge!("grob_spend_usd").set(tracker.total());
-    let budget_limit = inner.config.budget.monthly_limit_usd.value();
-    if budget_limit > 0.0 {
-        metrics::gauge!("grob_budget_limit_usd").set(budget_limit);
-        metrics::gauge!("grob_budget_remaining_usd").set((budget_limit - tracker.total()).max(0.0));
-    }
-    drop(tracker);
-
-    // Publish adaptive scoring gauges
-    if let Some(ref scorer) = state.security.provider_scorer {
-        let details = scorer.all_score_details().await;
-        for (provider, (success_rate, latency_ewma, score)) in &details {
-            metrics::gauge!(
-                "grob_provider_score",
-                "provider" => provider.clone()
-            )
-            .set(*score);
-            metrics::gauge!(
-                "grob_provider_latency_ewma_ms",
-                "provider" => provider.clone()
-            )
-            .set(*latency_ewma);
-            metrics::gauge!(
-                "grob_provider_success_rate",
-                "provider" => provider.clone()
-            )
-            .set(*success_rate);
-        }
-    }
-
-    let body = state.observability.metrics_handle.render();
-    // Header and body are controlled string constants; builder cannot fail.
-    Response::builder()
-        .header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-        .body(Body::from(body))
-        .unwrap()
 }

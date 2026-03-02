@@ -3,9 +3,11 @@
 pub mod args;
 mod config;
 mod defaults;
+mod newtypes;
 mod validation;
 
 pub use config::*;
+pub use newtypes::*;
 
 use crate::auth::jwt::AuthConfig;
 use crate::features::dlp::config::DlpConfig;
