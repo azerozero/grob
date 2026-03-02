@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0](https://github.com/azerozero/grob/compare/v0.9.0...v0.10.0) - 2026-03-02
+
+### Added
+
+- trait contracts + adaptive provider scoring
+- codebase hardening — dead code, JWT cache, handler dedup, feature flags, tests
+- wire dead code into handlers and remove #[allow(dead_code)]
+- *(dx)* add nextest, insta, tracing-test, coverage, cargo-chef
+
+### Fixed
+
+- enable git_only mode in release-plz for tag-based versioning
+- configure release-plz to bump from git tags instead of crates.io
+- use current_month() in migration test to avoid month rollover failure
+- remove invalid release_branch field from release-plz.toml
+
+### Other
+
+- split god modules and extract submodules for maintainability
+- clean code overhaul — split god modules, extract functions, add tests
+- apply cargo fmt formatting
+- release v0.9.0 ([#5](https://github.com/azerozero/grob/pull/5))
+- add develop branch workflow and auto-merge release PRs
+- enable auto-merge for release-plz PRs
+
 ## [0.9.0](https://github.com/azerozero/grob/compare/v0.1.3...v0.9.0) - 2026-02-26
 
 ### Added
