@@ -208,7 +208,6 @@ impl ResponseCache {
 }
 
 /// Synthesize an Anthropic SSE stream from a cached non-streaming response.
-#[allow(dead_code)] // public API for streaming cache hit path
 pub fn synthesize_anthropic_sse_from_cached(cached: &CachedResponse) -> Vec<u8> {
     // Parse the cached response to extract text content
     let mut output = Vec::new();
@@ -295,7 +294,6 @@ pub fn synthesize_anthropic_sse_from_cached(cached: &CachedResponse) -> Vec<u8> 
 }
 
 /// Synthesize an OpenAI SSE stream from a cached non-streaming response.
-#[allow(dead_code)] // public API for streaming cache hit path
 pub fn synthesize_openai_sse_from_cached(cached: &CachedResponse) -> Vec<u8> {
     let mut output = Vec::new();
 

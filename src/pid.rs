@@ -25,7 +25,6 @@ pub fn write_pid() -> io::Result<()> {
 
 /// Atomically write PID file (write to .tmp then rename).
 /// Prevents partial reads during hot restarts.
-#[allow(dead_code)] // available for callers that need atomic PID writes
 pub fn write_pid_atomic() -> io::Result<()> {
     let pid_file = pid_file_path();
 

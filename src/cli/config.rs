@@ -13,6 +13,8 @@ pub struct BudgetConfig {
     pub warn_at_percent: u32,
 }
 
+// NOTE: 80% gives ~6 days warning before exhaustion at constant spend rate
+// on a monthly budget, enough time for a human to react and adjust.
 fn default_warn_percent() -> u32 {
     80
 }
@@ -85,22 +87,31 @@ impl Default for SecurityConfig {
     }
 }
 
+// NOTE: 100 rps sustains ~10 concurrent Claude Code sessions (each bursting
+// ~10 req/s during tool-use loops) while protecting providers from runaway clients.
 fn default_rate_limit_rps() -> u32 {
     100
 }
 
+// NOTE: 2x sustained rate allows short tool-use bursts without 429s.
 fn default_rate_limit_burst() -> u32 {
     200
 }
 
+// NOTE: 0.3 gives ~70% weight to recent latency, ~30% to history. Standard
+// EWMA smoothing factor — higher values react faster but amplify noise.
 fn default_scoring_latency_alpha() -> f64 {
     0.3
 }
 
+// NOTE: 50-request window balances responsiveness (detects degradation within
+// ~1 min at typical traffic) vs stability (no jitter from single outliers).
 fn default_scoring_window_size() -> usize {
     50
 }
 
+// NOTE: 0.001/s means idle providers lose ~3.5% score per hour, preventing
+// stale high scores while keeping recently-active providers competitive.
 fn default_scoring_decay_rate() -> f64 {
     0.001
 }
@@ -133,16 +144,22 @@ impl Default for CacheConfig {
     }
 }
 
+// NOTE: 2000 entries at ~2 KiB avg response = ~4 MiB memory. Enough for a
+// full day of Claude Code sessions with temperature=0 (highly cacheable).
 fn default_cache_max_capacity() -> u64 {
     2000
 }
 
+// NOTE: 1 hour balances freshness (model behavior doesn't change intra-hour)
+// vs hit rate. Longer TTLs risk stale responses after provider updates.
 fn default_cache_ttl() -> u64 {
-    3600 // 1 hour
+    3600
 }
 
+// NOTE: 2 MiB covers 99%+ of LLM responses. Responses above this threshold
+// (e.g., large code generation) have low cache hit probability anyway.
 fn default_cache_max_entry_bytes() -> usize {
-    2 * 1024 * 1024 // 2 MiB
+    2 * 1024 * 1024
 }
 
 /// EU AI Act compliance configuration
@@ -225,6 +242,8 @@ pub struct ServerConfig {
     pub oauth_callback_port: u16,
 }
 
+// NOTE: 1455 is an unregistered IANA port unlikely to conflict with common
+// dev tools. Must match the redirect_uri registered with OAuth providers.
 fn default_oauth_callback_port() -> u16 {
     1455
 }
@@ -337,12 +356,16 @@ impl Default for TimeoutConfig {
     }
 }
 
+// NOTE: 10 min accommodates Claude's extended thinking (budget_tokens up to
+// 128K) which can take 5-8 min for complex reasoning tasks.
 fn default_api_timeout() -> u64 {
-    600_000 // 10 minutes
+    600_000
 }
 
+// NOTE: 10s covers slow DNS + TLS handshake on cold connections. Most
+// providers connect in <1s; this catches network-level failures early.
 fn default_connect_timeout() -> u64 {
-    10_000 // 10 seconds
+    10_000
 }
 
 /// Router configuration

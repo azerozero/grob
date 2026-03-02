@@ -78,6 +78,8 @@ pub(super) async fn bind_and_serve(
 
 pub(super) async fn drain_in_flight(state: &Arc<AppState>) {
     let drain_start = std::time::Instant::now();
+    // NOTE: 30s matches Kubernetes default terminationGracePeriodSeconds and
+    // covers the longest typical LLM streaming response (~20s for 4K tokens).
     let drain_timeout = std::time::Duration::from_secs(30);
     loop {
         let active = state

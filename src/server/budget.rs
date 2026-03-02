@@ -7,6 +7,9 @@ use tracing::warn;
 use super::{AppError, AppState, ReloadableState};
 
 /// Maximum retries per provider before falling back to the next mapping.
+/// NOTE: 2 retries (3 total attempts) balances latency vs resilience — most
+/// transient 429/5xx errors resolve within 2 exponential-backoff cycles (~1-4s),
+/// while more retries would unacceptably delay user-facing LLM responses.
 pub(crate) const MAX_RETRIES: u32 = 2;
 
 /// Data needed to record Prometheus metrics for a completed request.
@@ -167,8 +170,12 @@ pub(crate) fn is_retryable(e: &crate::providers::error::ProviderError) -> bool {
 }
 
 /// Base delay (ms) before the first retry.
+/// NOTE: 200ms is long enough for provider-side rate-limit windows to rotate,
+/// short enough to keep total retry budget under ~5s for 2 retries.
 const BASE_RETRY_MS: u64 = 200;
-/// Exponential growth factor for successive retries (200ms → 800ms → 3200ms).
+/// Exponential growth factor for successive retries (200ms -> 800ms -> 3200ms).
+/// NOTE: Factor of 4 (not 2) reduces collision probability with other clients
+/// hitting the same rate-limit window, per AWS exponential-backoff guidance.
 const RETRY_BACKOFF_FACTOR: u64 = 4;
 
 /// Calculate retry delay with exponential backoff and jitter.

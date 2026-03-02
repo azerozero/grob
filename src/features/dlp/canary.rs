@@ -4,9 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[derive(Debug, Clone)]
 pub struct CanaryToken {
     pub fake: String,
-    #[allow(dead_code)] // Stored for forensic tracking; used in audit logs
     pub canary_id: u64,
-    #[allow(dead_code)] // Stored for forensic tracking; used in audit logs
     pub family: &'static str,
 }
 

@@ -290,3 +290,12 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
 
     app.with_state(state)
 }
+
+// ── Compile-time Send + Sync assertions ──
+// Axum requires handler state to be Send + Sync + 'static.
+// These assertions catch accidental regressions at compile time.
+const _: fn() = || {
+    fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<AppState>();
+    assert_send_sync::<ReloadableState>();
+};

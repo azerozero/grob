@@ -146,7 +146,7 @@ pub(crate) struct GeminiCandidate {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // Fields populated by serde deserialization
+#[expect(dead_code, reason = "fields populated by serde deserialization")]
 pub(crate) struct GeminiUsageMetadata {
     pub prompt_token_count: Option<i32>,
     pub candidates_token_count: Option<i32>,
@@ -183,7 +183,7 @@ pub(crate) struct CodeAssistInnerRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)] // Fields populated by serde deserialization
+#[expect(dead_code, reason = "fields populated by serde deserialization")]
 pub(crate) struct CodeAssistResponse {
     pub response: GeminiResponse,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -198,7 +198,7 @@ pub(super) struct GeminiErrorResponse {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // Fields populated by serde deserialization
+#[expect(dead_code, reason = "fields populated by serde deserialization")]
 pub(super) struct GeminiError {
     pub code: u16,
     pub message: String,

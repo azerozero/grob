@@ -125,7 +125,7 @@ fn install_from_local(source: &str) -> Result<()> {
             let entry = entry?;
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-                let dest = dest_dir.join(path.file_name().unwrap());
+                let dest = dest_dir.join(path.file_name().expect("iterated path has filename"));
                 std::fs::copy(&path, &dest)?;
                 println!("  Installed: {}", dest.display());
                 count += 1;
@@ -133,7 +133,7 @@ fn install_from_local(source: &str) -> Result<()> {
         }
         println!("  {} preset(s) installed from {}", count, source);
     } else if source_path.is_file() {
-        let dest = dest_dir.join(source_path.file_name().unwrap());
+        let dest = dest_dir.join(source_path.file_name().expect("source path has filename"));
         std::fs::copy(source_path, &dest)?;
         println!("  Installed: {}", dest.display());
     } else {
@@ -180,7 +180,7 @@ fn sync_from_git(repo_url: &str) -> Result<()> {
         let entry = entry?;
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-            let dest = dest_dir.join(path.file_name().unwrap());
+            let dest = dest_dir.join(path.file_name().expect("iterated path has filename"));
             std::fs::copy(&path, &dest)?;
             count += 1;
         }
@@ -193,7 +193,7 @@ fn sync_from_git(repo_url: &str) -> Result<()> {
             let entry = entry?;
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-                let dest = dest_dir.join(path.file_name().unwrap());
+                let dest = dest_dir.join(path.file_name().expect("iterated path has filename"));
                 std::fs::copy(&path, &dest)?;
                 count += 1;
             }

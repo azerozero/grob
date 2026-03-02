@@ -35,7 +35,6 @@ pub async fn find_instance_pid(host: &str, port: u16) -> Option<u32> {
 
 /// Stop a running instance by finding its PID and sending SIGTERM.
 #[cfg(unix)]
-#[allow(dead_code)] // CLI utility for graceful shutdown; called from main binary
 pub async fn stop_instance(host: &str, port: u16) -> anyhow::Result<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;

@@ -169,7 +169,6 @@ impl SpendTracker {
     }
 
     /// Load spend for a specific tenant
-    #[allow(dead_code)] // Public API for tenant-level billing queries
     pub fn tenant_spend(&self, tenant: &str) -> SpendData {
         if let Some(ref store) = self.store {
             store.load_spend(Some(tenant))

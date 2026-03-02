@@ -145,6 +145,7 @@ dlp = []
 oauth = []
 tap = []
 compliance = []
+test-util = []
 
 [package.metadata.cargo-machete]
 # ecdsa: trait crate required for p256::ecdsa::signature::Signer bounds

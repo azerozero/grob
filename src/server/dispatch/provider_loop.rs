@@ -131,7 +131,12 @@ pub(super) async fn dispatch_provider_loop(
 
         match result {
             Ok(dispatch_result) => return Ok(dispatch_result),
-            Err(ProviderLoopAction::Continue) => continue,
+            Err(ProviderLoopAction::Continue) => {
+                // NOTE: Yield between provider attempts so other tasks (health checks,
+                // metrics scrapes) are not starved during long fallback chains.
+                tokio::task::yield_now().await;
+                continue;
+            }
         }
     }
 

@@ -7,7 +7,11 @@ pub(crate) mod types;
 // Re-export public API
 pub use stream::AnthropicToOpenAIStream;
 pub use transform::{transform_anthropic_to_openai, transform_openai_to_anthropic};
-pub use types::*;
+pub use types::{
+    OpenAIChoice, OpenAIContent, OpenAIContentPart, OpenAIFunction, OpenAIFunctionInput,
+    OpenAIImageUrl, OpenAIMessage, OpenAIRequest, OpenAIResponse, OpenAIResponseMessage,
+    OpenAIToolCall, OpenAIToolCallInput, OpenAIUsage,
+};
 
 #[cfg(test)]
 mod tests {

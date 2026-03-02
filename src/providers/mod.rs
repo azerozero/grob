@@ -1,7 +1,9 @@
 //! LLM provider trait and implementations (Anthropic, OpenAI, Gemini, etc.).
 
 pub mod anthropic_compatible;
+mod anthropic_sanitize;
 pub mod auth;
+pub(crate) mod base;
 pub mod constants;
 pub mod error;
 pub mod gemini;

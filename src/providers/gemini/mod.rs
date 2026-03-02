@@ -13,6 +13,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 use types::*;
 
+// NOTE: GeminiProvider does not use ProviderBase because it has a fundamentally
+// different auth model (Option<api_key>, HashMap headers, Vertex AI fields).
+
 /// Google Gemini provider supporting three authentication methods:
 /// 1. OAuth 2.0 (Google AI Pro/Ultra) - Uses Code Assist API
 /// 2. API Key (Google AI Studio) - Uses public Gemini API
@@ -361,13 +364,25 @@ impl GeminiProvider {
         req_builder.timeout(self.api_timeout).json(&prep.body)
     }
 
-    /// Check an error response and return a structured error with model-not-found handling.
-    fn check_error_response(
-        status: u16,
-        error_text: &str,
+    /// Checks response status and returns a structured [`ProviderError`] on failure.
+    async fn check_response(
+        response: reqwest::Response,
         model: &str,
         is_oauth: bool,
-    ) -> ProviderError {
+    ) -> Result<reqwest::Response, ProviderError> {
+        if response.status().is_success() {
+            return Ok(response);
+        }
+        let status = response.status().as_u16();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Gemini: failed to read error body".to_string());
+        Err(Self::classify_error(status, &error_text, model, is_oauth))
+    }
+
+    /// Classifies an API error with model-not-found handling.
+    fn classify_error(status: u16, error_text: &str, model: &str, is_oauth: bool) -> ProviderError {
         if status == 404 {
             let user_friendly_msg = if model.contains("gemini-3") || model.contains("preview") {
                 format!(
@@ -440,19 +455,7 @@ impl LlmProvider for GeminiProvider {
             )
             .await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Gemini: failed to read error body".to_string());
-            return Err(Self::check_error_response(
-                status,
-                &error_text,
-                &model,
-                is_oauth,
-            ));
-        }
+        let response = Self::check_response(response, &model, is_oauth).await?;
 
         if is_oauth {
             let code_assist_response: CodeAssistResponse = response.json().await?;
@@ -475,19 +478,7 @@ impl LlmProvider for GeminiProvider {
 
         let response = self.build_http_request(&prep).send().await?;
 
-        if !response.status().is_success() {
-            let status = response.status().as_u16();
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Gemini: failed to read error body".to_string());
-            return Err(Self::check_error_response(
-                status,
-                &error_text,
-                &model,
-                is_oauth,
-            ));
-        }
+        let response = Self::check_response(response, &model, is_oauth).await?;
 
         let stream = response.bytes_stream().map_err(ProviderError::HttpError);
         Ok(StreamResponse {

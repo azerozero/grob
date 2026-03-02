@@ -6,8 +6,13 @@ mod defaults;
 mod newtypes;
 mod validation;
 
-pub use config::*;
-pub use newtypes::*;
+pub use config::{
+    AcmeConfig, BudgetConfig, CacheConfig, ComplianceConfig, FanOutConfig, FanOutMode, ModelConfig,
+    ModelMapping, ModelStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,
+    RouterConfig, SecurityConfig, ServerConfig, TimeoutConfig, TlsConfig, TracingConfig,
+    UserConfig,
+};
+pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
 use crate::auth::jwt::AuthConfig;
 use crate::features::dlp::config::DlpConfig;

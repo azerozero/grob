@@ -5,17 +5,14 @@ mod transform;
 pub(crate) mod types;
 
 use super::{
-    build_provider_client, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse,
-    Usage,
+    base::ProviderBase, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse, Usage,
 };
-use crate::auth::{OAuthConfig, TokenStore};
+use crate::auth::OAuthConfig;
 use crate::models::{AnthropicRequest, CountTokensRequest, CountTokensResponse};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use bytes::Bytes;
-use reqwest::Client;
 use std::collections::HashMap;
-use std::time::Duration;
 use types::*;
 
 /// Official Codex instructions from OpenAI
@@ -23,18 +20,7 @@ const CODEX_INSTRUCTIONS: &str = include_str!("../codex_instructions.md");
 
 /// OpenAI provider implementation
 pub struct OpenAIProvider {
-    name: String,
-    api_key: String,
-    base_url: String,
-    client: Client,
-    models: Vec<String>,
-    custom_headers: Vec<(String, String)>,
-    /// OAuth provider ID (if using OAuth instead of API key)
-    oauth_provider: Option<String>,
-    /// Token store for OAuth authentication
-    token_store: Option<TokenStore>,
-    /// Per-request timeout from server config
-    api_timeout: Duration,
+    base: ProviderBase,
 }
 
 impl OpenAIProvider {
@@ -48,30 +34,8 @@ impl OpenAIProvider {
         custom_headers: Vec<(String, String)>,
     ) -> Self {
         Self {
-            name: params.name,
-            api_key: params.api_key,
-            base_url: params.base_url.unwrap_or_default(),
-            client: build_provider_client(params.connect_timeout),
-            models: params.models,
-            custom_headers,
-            oauth_provider: params.oauth_provider,
-            token_store: params.token_store,
-            api_timeout: params.api_timeout,
+            base: ProviderBase::new(params, custom_headers),
         }
-    }
-
-    async fn auth_header(&self) -> Result<String, ProviderError> {
-        super::auth::resolve_access_token(
-            self.oauth_provider.as_deref(),
-            self.token_store.as_ref(),
-            OAuthConfig::openai_codex,
-            &self.api_key,
-        )
-        .await
-    }
-
-    fn is_oauth(&self) -> bool {
-        self.oauth_provider.is_some() && self.token_store.is_some()
     }
 
     /// Extract ChatGPT account ID from JWT access token
@@ -136,10 +100,10 @@ impl OpenAIProvider {
 
     /// Determine base URL based on auth type.
     fn effective_base_url(&self) -> &str {
-        if self.is_oauth() {
+        if self.base.is_oauth() {
             "https://chatgpt.com/backend-api"
         } else {
-            &self.base_url
+            &self.base.base_url
         }
     }
 
@@ -160,6 +124,116 @@ impl OpenAIProvider {
         }
         Ok(response)
     }
+
+    /// Sends via OpenAI Responses API (Codex / ChatGPT OAuth path).
+    async fn send_responses_api(
+        &self,
+        request: &AnthropicRequest,
+        auth_value: &str,
+        base_url: &str,
+    ) -> Result<ProviderResponse, ProviderError> {
+        let responses_request =
+            transform::transform_to_responses_request(request, CODEX_INSTRUCTIONS)?;
+
+        let endpoint = if self.base.is_oauth() {
+            "/codex/responses"
+        } else {
+            "/responses"
+        };
+        let url = format!("{}{}", base_url, endpoint);
+
+        tracing::debug!(
+            "Using {} endpoint for Codex model: {}",
+            endpoint,
+            request.model
+        );
+
+        let mut req_builder = self
+            .base
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", auth_value))
+            .header("Content-Type", "application/json")
+            .header("accept", "text/event-stream");
+
+        if self.base.is_oauth() {
+            req_builder = Self::apply_oauth_headers(req_builder, auth_value, true, &self.base.name);
+        }
+
+        req_builder = self.base.apply_headers(req_builder);
+
+        let response = req_builder
+            .timeout(self.base.api_timeout)
+            .json(&responses_request)
+            .send()
+            .await?;
+
+        let response = Self::check_response(response).await?;
+        let response_text = response.text().await?;
+        tracing::debug!("Responses API response body: {}", response_text);
+
+        let content_blocks = transform::parse_sse_response(&response_text)?;
+
+        Ok(ProviderResponse {
+            id: "sse-response".to_string(),
+            r#type: "message".to_string(),
+            role: "assistant".to_string(),
+            content: content_blocks,
+            model: request.model.clone(),
+            stop_reason: Some("end_turn".to_string()),
+            stop_sequence: None,
+            usage: Usage {
+                input_tokens: 0,
+                output_tokens: 0,
+                cache_creation_input_tokens: None,
+                cache_read_input_tokens: None,
+            },
+        })
+    }
+
+    /// Sends via standard OpenAI Chat Completions API.
+    async fn send_chat_completions(
+        &self,
+        request: &AnthropicRequest,
+        auth_value: &str,
+        base_url: &str,
+    ) -> Result<ProviderResponse, ProviderError> {
+        let openai_request = transform::transform_request(request)?;
+        let url = format!("{}/chat/completions", base_url);
+
+        let mut req_builder = self
+            .base
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", auth_value))
+            .header("Content-Type", "application/json");
+
+        if self.base.is_oauth() {
+            req_builder =
+                Self::apply_oauth_headers(req_builder, auth_value, false, &self.base.name);
+        }
+
+        req_builder = self.base.apply_headers(req_builder);
+
+        let response = req_builder
+            .timeout(self.base.api_timeout)
+            .json(&openai_request)
+            .send()
+            .await?;
+
+        let response = Self::check_response(response).await?;
+        let response_text = response.text().await?;
+        tracing::debug!("OpenAI provider response body: {}", response_text);
+
+        let openai_response: OpenAIResponse =
+            serde_json::from_str(&response_text).map_err(|e| {
+                tracing::error!("Failed to parse OpenAI response: {}", e);
+                tracing::error!("Response body was: {}", response_text);
+                e
+            })?;
+
+        Ok(transform::transform_response(openai_response))
+    }
 }
 
 #[async_trait]
@@ -168,108 +242,15 @@ impl LlmProvider for OpenAIProvider {
         &self,
         request: AnthropicRequest,
     ) -> Result<ProviderResponse, ProviderError> {
-        let auth_value = self.auth_header().await?;
+        let auth_value = self.base.resolve_auth(OAuthConfig::openai_codex).await?;
         let base_url = self.effective_base_url();
 
-        // Determine endpoint: OAuth always uses Responses API, API key only for codex models
-        let use_responses_api = self.is_oauth() || Self::is_codex_model(&request.model);
-
-        if use_responses_api {
-            let responses_request =
-                transform::transform_to_responses_request(&request, CODEX_INSTRUCTIONS)?;
-
-            let endpoint = if self.is_oauth() {
-                "/codex/responses"
-            } else {
-                "/responses"
-            };
-            let url = format!("{}{}", base_url, endpoint);
-
-            tracing::debug!(
-                "Using {} endpoint for Codex model: {}",
-                endpoint,
-                request.model
-            );
-
-            let mut req_builder = self
-                .client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", auth_value))
-                .header("Content-Type", "application/json")
-                .header("accept", "text/event-stream");
-
-            if self.is_oauth() {
-                req_builder = Self::apply_oauth_headers(req_builder, &auth_value, true, &self.name);
-            }
-
-            for (key, value) in &self.custom_headers {
-                req_builder = req_builder.header(key, value);
-            }
-
-            let response = req_builder
-                .timeout(self.api_timeout)
-                .json(&responses_request)
-                .send()
-                .await?;
-
-            let response = Self::check_response(response).await?;
-            let response_text = response.text().await?;
-            tracing::debug!("Responses API response body: {}", response_text);
-
-            let content_blocks = transform::parse_sse_response(&response_text)?;
-
-            Ok(ProviderResponse {
-                id: "sse-response".to_string(),
-                r#type: "message".to_string(),
-                role: "assistant".to_string(),
-                content: content_blocks,
-                model: request.model.clone(),
-                stop_reason: Some("end_turn".to_string()),
-                stop_sequence: None,
-                usage: Usage {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_creation_input_tokens: None,
-                    cache_read_input_tokens: None,
-                },
-            })
+        if self.base.is_oauth() || Self::is_codex_model(&request.model) {
+            self.send_responses_api(&request, &auth_value, base_url)
+                .await
         } else {
-            let openai_request = transform::transform_request(&request)?;
-            let url = format!("{}/chat/completions", base_url);
-
-            let mut req_builder = self
-                .client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", auth_value))
-                .header("Content-Type", "application/json");
-
-            if self.is_oauth() {
-                req_builder =
-                    Self::apply_oauth_headers(req_builder, &auth_value, false, &self.name);
-            }
-
-            for (key, value) in &self.custom_headers {
-                req_builder = req_builder.header(key, value);
-            }
-
-            let response = req_builder
-                .timeout(self.api_timeout)
-                .json(&openai_request)
-                .send()
-                .await?;
-
-            let response = Self::check_response(response).await?;
-            let response_text = response.text().await?;
-            tracing::debug!("OpenAI provider response body: {}", response_text);
-
-            let openai_response: OpenAIResponse =
-                serde_json::from_str(&response_text).map_err(|e| {
-                    tracing::error!("Failed to parse OpenAI response: {}", e);
-                    tracing::error!("Response body was: {}", response_text);
-                    e
-                })?;
-
-            Ok(transform::transform_response(openai_response))
+            self.send_chat_completions(&request, &auth_value, base_url)
+                .await
         }
     }
 
@@ -286,7 +267,7 @@ impl LlmProvider for OpenAIProvider {
     ) -> Result<StreamResponse, ProviderError> {
         use futures::stream::TryStreamExt;
 
-        let auth_value = self.auth_header().await?;
+        let auth_value = self.base.resolve_auth(OAuthConfig::openai_codex).await?;
         let base_url = self.effective_base_url();
         let is_codex = Self::is_codex_model(&request.model);
 
@@ -308,22 +289,22 @@ impl LlmProvider for OpenAIProvider {
         };
 
         let mut req_builder = self
+            .base
             .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", auth_value))
             .header("Content-Type", "application/json")
             .header("accept", "text/event-stream");
 
-        if self.is_oauth() {
-            req_builder = Self::apply_oauth_headers(req_builder, &auth_value, is_codex, &self.name);
+        if self.base.is_oauth() {
+            req_builder =
+                Self::apply_oauth_headers(req_builder, &auth_value, is_codex, &self.base.name);
         }
 
-        for (key, value) in &self.custom_headers {
-            req_builder = req_builder.header(key, value);
-        }
+        req_builder = self.base.apply_headers(req_builder);
 
         let response = req_builder
-            .timeout(self.api_timeout)
+            .timeout(self.base.api_timeout)
             .json(&request_body)
             .send()
             .await?;
@@ -340,7 +321,7 @@ impl LlmProvider for OpenAIProvider {
         let state_for_cleanup = state.clone();
 
         let sse_stream = SseStream::new(response.bytes_stream());
-        let provider_name = self.name.clone();
+        let provider_name = self.base.name.clone();
         let model_name = request.model.clone();
 
         let transformed_stream = sse_stream
@@ -383,7 +364,8 @@ impl LlmProvider for OpenAIProvider {
             .try_filter(|bytes| futures::future::ready(!bytes.is_empty()));
 
         use crate::providers::streaming::LoggingSseStream;
-        let logging_stream = LoggingSseStream::new(finalized_stream, self.name.clone(), model_name);
+        let logging_stream =
+            LoggingSseStream::new(finalized_stream, self.base.name.clone(), model_name);
 
         Ok(StreamResponse {
             stream: Box::pin(logging_stream),
@@ -392,11 +374,11 @@ impl LlmProvider for OpenAIProvider {
     }
 
     fn supports_model(&self, model: &str) -> bool {
-        self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
+        self.base.supports_model(model)
     }
 
     fn base_url(&self) -> Option<&str> {
-        Some(&self.base_url)
+        Some(&self.base.base_url)
     }
 }
 

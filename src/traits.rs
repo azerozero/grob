@@ -149,7 +149,7 @@ pub trait ProviderAvailability: Send + Sync {
 
 // ── Test Mocks ──
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 pub mod mocks {
     use super::*;
 
