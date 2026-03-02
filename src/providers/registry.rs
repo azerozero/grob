@@ -60,6 +60,7 @@ impl ProviderRegistry {
             token_store: build_ctx.token_store.clone(),
             api_timeout: build_ctx.api_timeout,
             connect_timeout: build_ctx.connect_timeout,
+            pass_through: config.pass_through.unwrap_or(false),
         }
     }
 
@@ -304,6 +305,7 @@ mod tests {
                 headers: None,
                 budget_usd: None,
                 region: None,
+                pass_through: None,
             },
             ProviderConfig {
                 name: "provider-b".to_string(),
@@ -319,6 +321,7 @@ mod tests {
                 headers: None,
                 budget_usd: None,
                 region: None,
+                pass_through: None,
             },
         ];
 

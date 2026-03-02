@@ -34,6 +34,7 @@ pub struct GeminiProvider {
     token_store: Option<TokenStore>,
     /// Per-request timeout from server config
     api_timeout: Duration,
+    pass_through: bool,
 }
 
 /// Max retries for Gemini 429 rate-limit errors (higher than default because
@@ -85,6 +86,7 @@ impl GeminiProvider {
             oauth_provider: params.oauth_provider,
             token_store: params.token_store,
             api_timeout: params.api_timeout,
+            pass_through: params.pass_through,
         }
     }
 
@@ -495,7 +497,7 @@ impl LlmProvider for GeminiProvider {
     }
 
     fn supports_model(&self, model: &str) -> bool {
-        self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
+        self.pass_through || self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
     }
 
     fn base_url(&self) -> Option<&str> {

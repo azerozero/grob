@@ -64,10 +64,34 @@ pub(crate) fn resolve_provider_mappings(
 
         Ok(sorted)
     } else {
-        Err(AppError::ProviderError(format!(
-            "No model mapping found for model: {}",
-            decision.model_name
-        )))
+        // No explicit [[models]] config — check for pass-through providers
+        let pass_through_mappings: Vec<crate::cli::ModelMapping> = inner
+            .config
+            .providers
+            .iter()
+            .filter(|p| p.is_enabled() && p.pass_through.unwrap_or(false))
+            .enumerate()
+            .map(|(i, p)| crate::cli::ModelMapping {
+                priority: (i as u32) + 1,
+                provider: p.name.clone(),
+                actual_model: decision.model_name.clone(),
+                inject_continuation_prompt: false,
+            })
+            .collect();
+
+        if pass_through_mappings.is_empty() {
+            Err(AppError::ProviderError(format!(
+                "No model mapping found for model: {}",
+                decision.model_name
+            )))
+        } else {
+            info!(
+                "Pass-through routing '{}' to {} provider(s)",
+                decision.model_name,
+                pass_through_mappings.len()
+            );
+            Ok(pass_through_mappings)
+        }
     }
 }
 

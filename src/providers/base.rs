@@ -20,6 +20,7 @@ pub(crate) struct ProviderBase {
     pub oauth_provider: Option<String>,
     pub token_store: Option<TokenStore>,
     pub api_timeout: Duration,
+    pub pass_through: bool,
 }
 
 impl ProviderBase {
@@ -35,6 +36,7 @@ impl ProviderBase {
             oauth_provider: params.oauth_provider,
             token_store: params.token_store,
             api_timeout: params.api_timeout,
+            pass_through: params.pass_through,
         }
     }
 
@@ -45,7 +47,7 @@ impl ProviderBase {
 
     /// Checks if the provider supports the given model (case-insensitive).
     pub fn supports_model(&self, model: &str) -> bool {
-        self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
+        self.pass_through || self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
     }
 
     /// Resolves the auth token: OAuth refresh if configured, otherwise the API key.

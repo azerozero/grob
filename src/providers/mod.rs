@@ -120,6 +120,7 @@ pub struct ProviderParams {
     pub token_store: Option<TokenStore>,
     pub api_timeout: Duration,
     pub connect_timeout: Duration,
+    pub pass_through: bool,
 }
 
 /// Authentication type for providers
@@ -178,6 +179,10 @@ pub struct ProviderConfig {
     /// None defaults to "global" (no restriction)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,
+
+    /// Accepts any model name not explicitly configured in `[[models]]`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_through: Option<bool>,
 }
 
 impl ProviderConfig {

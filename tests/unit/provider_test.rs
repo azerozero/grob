@@ -23,6 +23,7 @@ mod tests {
             enabled: None,
             budget_usd: None,
             region: None,
+            pass_through: None,
         };
 
         assert!(config.is_enabled());
@@ -45,6 +46,7 @@ mod tests {
             enabled: Some(false),
             budget_usd: None,
             region: None,
+            pass_through: None,
         };
 
         assert!(!config.is_enabled());
