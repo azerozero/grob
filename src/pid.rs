@@ -63,6 +63,7 @@ pub fn cleanup_pid() -> io::Result<()> {
 /// Check if a grob process is running at the given PID.
 /// On Linux, additionally verifies via /proc that the process is actually grob
 /// (guards against stale PID files after PID reuse).
+#[cfg(unix)]
 pub fn is_process_running(pid: u32) -> bool {
     use nix::sys::signal::kill;
     use nix::unistd::Pid;
@@ -86,4 +87,19 @@ pub fn is_process_running(pid: u32) -> bool {
     }
 
     true
+}
+
+/// Checks if a process with the given PID exists via tasklist.
+#[cfg(windows)]
+pub fn is_process_running(pid: u32) -> bool {
+    match std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+        .output()
+    {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            !stdout.contains("No tasks")
+        }
+        Err(_) => false,
+    }
 }

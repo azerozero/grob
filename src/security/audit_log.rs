@@ -171,10 +171,25 @@ pub struct AuditConfig {
     pub hmac_key_path: Option<PathBuf>,
 }
 
+/// Returns the platform-appropriate default audit log directory.
+fn default_audit_dir() -> PathBuf {
+    #[cfg(unix)]
+    {
+        PathBuf::from("/var/lib/grob/audit")
+    }
+    #[cfg(windows)]
+    {
+        dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from("C:\\ProgramData"))
+            .join("grob")
+            .join("audit")
+    }
+}
+
 impl Default for AuditConfig {
     fn default() -> Self {
         Self {
-            log_dir: PathBuf::from("/var/lib/grob/audit"),
+            log_dir: default_audit_dir(),
             sign_key_path: None,
             signing_algorithm: SigningAlgorithm::default(),
             hmac_key_path: None,

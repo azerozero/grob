@@ -27,11 +27,29 @@ pub async fn poll_health(base_url: &str, max_attempts: u32, interval_ms: u64) ->
     false
 }
 
+#[cfg(unix)]
 pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
     kill(Pid::from_raw(pid as i32), Signal::SIGTERM)
         .map_err(|e| anyhow::anyhow!("Failed to stop service: {}", e))?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(
+        PROCESS_TRANSITION_GRACE_MS,
+    ))
+    .await;
+    Ok(())
+}
+
+#[cfg(windows)]
+pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
+    let output = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .output()
+        .map_err(|e| anyhow::anyhow!("Failed to run taskkill: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Failed to stop service (PID {}): {}", pid, stderr.trim());
+    }
     tokio::time::sleep(tokio::time::Duration::from_millis(
         PROCESS_TRANSITION_GRACE_MS,
     ))
@@ -109,6 +127,7 @@ pub fn spawn_background_service(port: Option<u16>, config: Option<String>) -> an
         cmd.arg("--config").arg(config);
     }
 
+    #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         // SAFETY: setsid() is async-signal-safe and called in pre_exec (after fork,
@@ -119,6 +138,12 @@ pub fn spawn_background_service(port: Option<u16>, config: Option<String>) -> an
                 Ok(())
             });
         }
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // DETACHED_PROCESS (0x08) + CREATE_NEW_PROCESS_GROUP (0x200)
+        cmd.creation_flags(0x0000_0008 | 0x0000_0200);
     }
 
     cmd.stdin(std::process::Stdio::null())

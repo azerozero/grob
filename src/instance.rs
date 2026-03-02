@@ -52,6 +52,28 @@ pub async fn stop_instance(host: &str, port: u16) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Stops a running instance by finding its PID and terminating it via taskkill.
+#[cfg(windows)]
+pub async fn stop_instance(host: &str, port: u16) -> anyhow::Result<()> {
+    let pid = find_instance_pid(host, port)
+        .await
+        .ok_or_else(|| anyhow::anyhow!("No running instance found on {}:{}", host, port))?;
+
+    let output = std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/F"])
+        .output()
+        .map_err(|e| anyhow::anyhow!("Failed to run taskkill: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("Failed to stop instance (PID {}): {}", pid, stderr.trim());
+    }
+
+    // Wait for graceful shutdown
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    Ok(())
+}
+
 /// Clean up legacy PID file if it exists.
 pub fn cleanup_legacy_pid() {
     let _ = crate::pid::cleanup_pid();

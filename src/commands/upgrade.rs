@@ -21,7 +21,26 @@ pub async fn cmd_upgrade(
         };
     println!("🔄 Upgrading Grob (old PID: {})...", old_pid);
 
-    spawn_background_service(Some(config.server.port.value()), cli_config)?;
+    // Windows lacks SO_REUSEPORT so we must stop old before spawning new (brief downtime).
+    #[cfg(windows)]
+    {
+        cmd_upgrade_windows(config, &cli_config, &base_url, old_pid).await
+    }
+    // Unix: spawn new (SO_REUSEPORT) → signal old → drain — zero downtime.
+    #[cfg(unix)]
+    {
+        cmd_upgrade_unix(config, cli_config, &base_url, old_pid).await
+    }
+}
+
+#[cfg(unix)]
+async fn cmd_upgrade_unix(
+    _config: &cli::AppConfig,
+    cli_config: Option<String>,
+    base_url: &str,
+    old_pid: u32,
+) -> anyhow::Result<()> {
+    spawn_background_service(Some(_config.server.port.value()), cli_config)?;
     println!("   Spawned new process, waiting for health...");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
@@ -51,7 +70,6 @@ pub async fn cmd_upgrade(
     };
     println!("   New process healthy (PID: {})", new_pid);
 
-    #[cfg(unix)]
     {
         use nix::sys::signal::{kill, Signal};
         use nix::unistd::Pid;
@@ -74,6 +92,45 @@ pub async fn cmd_upgrade(
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
 
+    println!("✅ Upgrade complete! New PID: {}", new_pid);
+    Ok(())
+}
+
+#[cfg(windows)]
+async fn cmd_upgrade_windows(
+    config: &cli::AppConfig,
+    cli_config: &Option<String>,
+    base_url: &str,
+    old_pid: u32,
+) -> anyhow::Result<()> {
+    // Stop old process first (no SO_REUSEPORT on Windows).
+    println!("   Stopping old process (PID: {})...", old_pid);
+    stop_service(old_pid).await?;
+
+    let drain_deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
+    loop {
+        if !pid::is_process_running(old_pid) {
+            println!("   Old process (PID: {}) exited", old_pid);
+            break;
+        }
+        if std::time::Instant::now() > drain_deadline {
+            eprintln!("   Warning: Old process still running after 35s drain timeout");
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+    }
+
+    spawn_background_service(Some(config.server.port.value()), cli_config.clone())?;
+    println!("   Spawned new process, waiting for health...");
+
+    if !poll_health(base_url, HEALTH_POLL_MAX_ATTEMPTS, HEALTH_POLL_INTERVAL_MS).await {
+        eprintln!("❌ Timeout waiting for new process to become healthy");
+        return Ok(());
+    }
+
+    let new_pid = instance::find_instance_pid(&config.server.host, config.server.port.value())
+        .await
+        .unwrap_or(0);
     println!("✅ Upgrade complete! New PID: {}", new_pid);
     Ok(())
 }

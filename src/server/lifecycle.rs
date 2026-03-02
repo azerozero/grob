@@ -38,9 +38,15 @@ pub(super) async fn bind_and_serve(
         anyhow::bail!("ACME is enabled in config but grob was built without the `acme` feature. Rebuild with: cargo build --features acme");
     }
 
+    // Label reflects the actual socket option used per platform.
+    #[cfg(unix)]
+    const REUSE_LABEL: &str = "SO_REUSEPORT";
+    #[cfg(not(unix))]
+    const REUSE_LABEL: &str = "SO_REUSEADDR";
+
     if !tls_enabled {
         let listener = crate::net::bind_reuseport(&addr).await?;
-        info!("Server listening on {} (SO_REUSEPORT)", addr);
+        info!("Server listening on {} ({})", addr, REUSE_LABEL);
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal)
             .await?;
@@ -48,7 +54,7 @@ pub(super) async fn bind_and_serve(
         #[cfg(feature = "acme")]
         {
             let acceptor = crate::acme::build_acme_acceptor(&config.server.tls.acme)?;
-            info!("Server listening on {} (ACME TLS, SO_REUSEPORT)", addr);
+            info!("Server listening on {} (ACME TLS, {})", addr, REUSE_LABEL);
             let listener = crate::net::bind_reuseport(&addr).await?;
             axum_server::Server::bind(addr.parse()?)
                 .acceptor(acceptor)
@@ -65,7 +71,7 @@ pub(super) async fn bind_and_serve(
                 &config.server.tls.key_path,
             )
             .await?;
-            info!("Server listening on {} (TLS, SO_REUSEPORT)", addr);
+            info!("Server listening on {} (TLS, {})", addr, REUSE_LABEL);
             let std_listener = crate::net::bind_reuseport_std(&addr)?;
             axum_server::from_tcp_rustls(std_listener, rustls_config)
                 .serve(app.into_make_service())
