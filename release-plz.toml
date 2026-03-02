@@ -8,6 +8,9 @@ git_tag_name = "v{{ version }}"
 git_tag_enable = true
 changelog_update = true
 pr_labels = ["release"]
+# Compare against latest git tag (not crates.io) for version bumping
+semver_check = false
+release_commits = "^(feat|fix|refactor|perf)"
 
 [[package]]
 name = "grob"
