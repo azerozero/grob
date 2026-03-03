@@ -90,6 +90,8 @@ mode = "kerberos"
                 fan_out: None, // Missing fan_out config!
                 deprecated: None,
             }],
+            #[cfg(feature = "mcp")]
+            mcp: Default::default(),
             ..test_app_config()
         };
 
@@ -144,6 +146,8 @@ mode = "kerberos"
                 }),
                 deprecated: None,
             }],
+            #[cfg(feature = "mcp")]
+            mcp: Default::default(),
             ..test_app_config()
         };
 
@@ -170,6 +174,8 @@ mode = "kerberos"
                 ..test_app_config().router
             },
             providers: vec![base_provider_config("prov1")],
+            #[cfg(feature = "mcp")]
+            mcp: Default::default(),
             ..test_app_config()
         };
 

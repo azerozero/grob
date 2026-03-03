@@ -137,5 +137,7 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         compliance: Default::default(),
         version: None,
         user: Default::default(),
+        #[cfg(feature = "mcp")]
+        mcp: Default::default(),
     }
 }

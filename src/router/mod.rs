@@ -250,6 +250,8 @@ mod tests {
             security: Default::default(),
             cache: Default::default(),
             compliance: Default::default(),
+            #[cfg(feature = "mcp")]
+            mcp: Default::default(),
         }
     }
 

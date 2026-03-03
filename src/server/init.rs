@@ -285,6 +285,40 @@ pub(crate) fn init_security(config: &AppConfig) -> anyhow::Result<SecurityServic
     Ok((rate_limiter, circuit_breakers, audit_log, response_cache))
 }
 
+/// Initializes the MCP tool matrix system if enabled.
+///
+/// Follows the same pattern as [`init_dlp`]: loads the matrix, builds the
+/// state, and optionally spawns the background bench engine.
+#[cfg(feature = "mcp")]
+pub(crate) fn init_mcp(
+    config: &AppConfig,
+    registry: &Arc<ProviderRegistry>,
+) -> Option<Arc<crate::features::mcp::McpState>> {
+    if !config.mcp.enabled {
+        return None;
+    }
+
+    let matrix = crate::features::mcp::matrix::ToolMatrix::load(&config.mcp.matrix_path);
+    info!(tool_count = matrix.tool_count(), "MCP tool matrix loaded");
+
+    let state = Arc::new(crate::features::mcp::McpState::new(
+        config.mcp.clone(),
+        matrix,
+    ));
+
+    if config.mcp.bench.enabled {
+        crate::features::mcp::bench::spawn_bench_engine(
+            config.mcp.bench.clone(),
+            &state.matrix,
+            state.scorer(),
+            state.matrix_handle(),
+            registry.clone(),
+        );
+    }
+
+    Some(state)
+}
+
 pub(crate) async fn maybe_preset_sync(config: &AppConfig) {
     if !config.presets.auto_sync {
         return;

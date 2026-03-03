@@ -16,6 +16,8 @@ pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
 use crate::auth::jwt::AuthConfig;
 use crate::features::dlp::config::DlpConfig;
+#[cfg(feature = "mcp")]
+use crate::features::mcp::config::McpConfig;
 use crate::features::tap::TapConfig;
 use crate::providers::ProviderConfig;
 use anyhow::{Context, Result};
@@ -53,6 +55,10 @@ pub struct AppConfig {
     /// EU AI Act compliance configuration
     #[serde(default)]
     pub compliance: ComplianceConfig,
+    /// MCP tool matrix configuration
+    #[cfg(feature = "mcp")]
+    #[serde(default)]
+    pub mcp: McpConfig,
     /// User-defined section preserved across preset applies
     #[serde(default)]
     pub user: UserConfig,

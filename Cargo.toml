@@ -138,13 +138,14 @@ harness = false
 required-features = ["tls"]
 
 [features]
-default = ["dlp", "oauth", "tap", "compliance"]
+default = ["dlp", "oauth", "tap", "compliance", "mcp"]
 tls = ["axum-server", "rustls", "rustls-pemfile"]
 acme = ["tls", "rustls-acme"]
 dlp = []
 oauth = []
 tap = []
 compliance = []
+mcp = []
 test-util = []
 
 [package.metadata.cargo-machete]

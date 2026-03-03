@@ -113,6 +113,8 @@ api_key = "my-secret-key"
             compliance: Default::default(),
             version: None,
             user: Default::default(),
+            #[cfg(feature = "mcp")]
+            mcp: Default::default(),
         };
 
         let router = grob::router::Router::new(config);
@@ -166,6 +168,8 @@ api_key = "my-secret-key"
             compliance: Default::default(),
             version: None,
             user: Default::default(),
+            #[cfg(feature = "mcp")]
+            mcp: Default::default(),
         };
 
         let router = grob::router::Router::new(config);

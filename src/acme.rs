@@ -57,7 +57,6 @@ pub fn build_acme_acceptor(config: &AcmeConfig) -> Result<rustls_acme::axum::Axu
     let mut acme_state = acme_cfg.state();
     let rustls_config = acme_state.default_rustls_config();
 
-    #[expect(deprecated, reason = "rustls-acme uses deprecated axum_acceptor API")]
     let acceptor = acme_state.axum_acceptor(rustls_config);
 
     // Spawn ACME event loop (handles certificate renewals)

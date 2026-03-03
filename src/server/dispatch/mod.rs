@@ -134,6 +134,12 @@ pub(crate) async fn dispatch(
     // ── Step 1: DLP input scanning ──
     scan_dlp_input(ctx, request)?;
 
+    // ── Step 1.5: MCP tool calibration ──
+    #[cfg(feature = "mcp")]
+    if let Some(ref mcp) = ctx.state.security.mcp {
+        crate::features::mcp::calibration::calibrate_tools(mcp, request);
+    }
+
     // ── Step 2: Cache key ──
     let cache_key = ctx
         .state

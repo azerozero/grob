@@ -26,6 +26,8 @@ pub(crate) use helpers::{
     format_route_type, inject_continuation_text, resolve_provider_mappings,
     sanitize_provider_response, should_inject_continuation,
 };
+#[cfg(feature = "mcp")]
+pub(crate) use init::init_mcp;
 pub(crate) use init::{
     init_auth, init_core_services, init_dlp, init_observability, init_security, maybe_preset_sync,
 };
@@ -97,7 +99,7 @@ pub struct ObservabilityState {
     pub pricing_table: SharedPricingTable,
 }
 
-/// Security-related state (auth, rate limiting, DLP, circuit breakers, audit, cache, tap).
+/// Security-related state (auth, rate limiting, DLP, circuit breakers, audit, cache, tap, MCP).
 pub struct SecurityState {
     pub jwt_validator: Option<Arc<crate::auth::JwtValidator>>,
     pub rate_limiter: Option<Arc<RateLimiter>>,
@@ -107,6 +109,8 @@ pub struct SecurityState {
     pub response_cache: Option<Arc<crate::cache::ResponseCache>>,
     pub tap_sender: Option<Arc<crate::features::tap::TapSender>>,
     pub provider_scorer: Option<Arc<ProviderScorer>>,
+    #[cfg(feature = "mcp")]
+    pub mcp: Option<Arc<crate::features::mcp::McpState>>,
 }
 
 /// Application state shared across handlers
@@ -157,6 +161,9 @@ pub async fn start_server(
     let tap_sender = crate::features::tap::init_tap(&config.tap);
     #[cfg(not(feature = "tap"))]
     let tap_sender: Option<Arc<crate::features::tap::TapSender>> = None;
+
+    #[cfg(feature = "mcp")]
+    let mcp_state = init_mcp(&config, &provider_registry);
 
     let router = Router::new(config.clone());
     let reloadable = Arc::new(ReloadableState::new(
@@ -212,6 +219,8 @@ pub async fn start_server(
             response_cache,
             tap_sender,
             provider_scorer,
+            #[cfg(feature = "mcp")]
+            mcp: mcp_state,
         },
     });
 
@@ -264,6 +273,18 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
             "/api/oauth/tokens/refresh",
             post(oauth_handlers::oauth_refresh_token),
         );
+
+    // MCP routes (conditionally compiled and enabled)
+    #[cfg(feature = "mcp")]
+    let app = if state.security.mcp.is_some() {
+        app.route("/mcp", post(crate::features::mcp::server::handle_mcp_rpc))
+            .route(
+                "/api/tool-matrix",
+                get(crate::features::mcp::server::handle_matrix_report),
+            )
+    } else {
+        app
+    };
 
     let app = app.layer(axum::middleware::from_fn_with_state(
         state.clone(),
