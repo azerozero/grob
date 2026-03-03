@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.4](https://github.com/azerozero/grob/compare/v0.12.3...v0.12.4) - 2026-03-03
+
+### Fixed
+
+- use fast-forward for develop→main sync to avoid merge commit pollution
+
+### Other
+
+- fix 11 accuracy issues (stale paths, phantom modules, version bumps)
+
 ## [0.12.3](https://github.com/azerozero/grob/compare/v0.12.2...v0.12.3) - 2026-03-03
 
 ### Fixed
