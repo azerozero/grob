@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/azerozero/grob/compare/v0.11.2...v0.12.0) - 2026-03-03
+
+### Added
+
+- add MCP tool matrix feature (calibration, scoring, bench engine)
+
+### Other
+
+- doc-forge audit — fix 9 accuracy issues, fill config gaps, update LLM layer
+- add comprehensive project documentation (Diataxis + LLM layer)
+
 ## [0.11.2](https://github.com/azerozero/grob/compare/v0.11.1...v0.11.2) - 2026-03-02
 
 ### Fixed

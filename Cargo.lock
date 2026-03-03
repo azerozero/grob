@@ -1119,7 +1119,7 @@ dependencies = [
 
 [[package]]
 name = "grob"
-version = "0.11.2"
+version = "0.12.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
