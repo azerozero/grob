@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2](https://github.com/azerozero/grob/compare/v0.12.1...v0.12.2) - 2026-03-03
+
+### Fixed
+
+- upgrade crane to v0.21.2 for --annotation support in release pipeline
+
 ## [0.12.1](https://github.com/azerozero/grob/compare/v0.12.0...v0.12.1) - 2026-03-03
 
 ### Fixed
