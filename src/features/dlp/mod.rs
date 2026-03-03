@@ -474,6 +474,7 @@ impl DlpEngine {
 
 // ── Trait implementation ──
 
+#[cfg(feature = "dlp")]
 impl crate::traits::DlpPipeline for DlpEngine {
     fn sanitize_request(&self, request: &mut AnthropicRequest) {
         self.sanitize_request(request);
