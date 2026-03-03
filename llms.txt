@@ -47,10 +47,15 @@
 - [Provider trait](src/providers/mod.rs): LlmProvider trait definition and provider types
 - [Router](src/router/mod.rs): Regex-based request classification and model selection
 - [Dispatch pipeline](src/server/dispatch/mod.rs): DLP, cache, routing, provider loop with fallback
+- [Provider loop](src/server/dispatch/provider_loop.rs): Fallback/retry logic per mapping
 - [Server](src/server/mod.rs): Axum HTTP server, middleware stack, and application state
 - [CLI config](src/cli/mod.rs): AppConfig and all configuration structs
 - [Config structs](src/cli/config.rs): ServerConfig, SecurityConfig, RouterConfig, etc.
 - [Commands](src/commands/mod.rs): CLI command implementations
+- [Storage](src/storage/mod.rs): Unified redb storage backend (GrobStore)
+- [Spend tracking](src/features/token_pricing/spend.rs): Monthly spend with budget enforcement
+- [DLP engine](src/features/dlp/mod.rs): Secret/PII scanning with Aho-Corasick
+- [MCP tool matrix](src/features/mcp/mod.rs): Tool-calling capability catalogue and scoring
 
 ## Configuration
 

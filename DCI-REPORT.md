@@ -1,33 +1,33 @@
 # Documentation Completeness Index (DCI) Report
 
-**Project**: Grob v0.11.2
+**Project**: Grob v0.12.2
 **Date**: 2026-03-03
 **Auditor**: Doc Forge (automated)
 
-## DCI Score: 8.1 / 10
+## DCI Score: 8.2 / 10
 
 ### Scoring Breakdown
 
 | # | Item | Weight | Score | Weighted | Notes |
 |---|------|--------|-------|----------|-------|
-| 1 | Project overview (README) | 5 | 1.00 | 5.00 | Excellent. Clear purpose, install, quick start, provider table, CLI ref, presets. |
-| 2 | Getting started / quickstart | 5 | 0.85 | 4.25 | QUICKSTART.md + tutorials/getting-started.md cover both fast and hand-holding paths. |
-| 3 | Architecture overview | 4 | 1.00 | 4.00 | Excellent. ARCHITECTURE.md has full request flow diagram, module table, design decisions. **Updated**: routing priority corrected, new modules added. |
-| 4 | API reference (public surface) | 5 | 0.75 | 3.75 | OpenAPI spec exists. Doc comments cover ~37% (127/345). Trait coverage is good; commands/handlers are gaps. |
-| 5 | Configuration reference | 3 | 1.00 | 3.00 | **Updated**: CONFIGURATION.md now covers all sections (cache, compliance, DLP, tap, auth, MCP, per-project, pass-through, fan-out, adaptive scoring). |
-| 6 | Error handling guide | 3 | 0.85 | 2.55 | TROUBLESHOOTING.md + reference/errors.md. **Fixed**: budget exceeded status code corrected (402, not 429). |
-| 7 | Deployment / operations guide | 3 | 0.75 | 2.25 | how-to/deploy.md covers Docker, K8s, systemd, Prometheus. Grafana dashboard included. |
-| 8 | Contributing guide | 2 | 0.75 | 1.50 | how-to/contribute.md covers workflow, style, CI pipeline table, CLA. |
+| 1 | Project overview (README) | 5 | 1.00 | 5.00 | Excellent. Clear purpose, install methods, quick start, provider table, CLI ref, presets, API compat. |
+| 2 | Getting started / quickstart | 5 | 0.85 | 4.25 | QUICKSTART.md + tutorials/getting-started.md cover both fast and hand-holding paths. **Fixed**: IPv6 address corrected. |
+| 3 | Architecture overview | 4 | 1.00 | 4.00 | Excellent. ARCHITECTURE.md has full request flow diagram, module table, design decisions. **Fixed**: stale file paths (encryption.rs, schema_validate.rs, openai_compat.rs). |
+| 4 | API reference (public surface) | 5 | 0.75 | 3.75 | OpenAPI spec exists. Doc comments cover ~37% (127/341). Trait coverage is good; commands/handlers are gaps. |
+| 5 | Configuration reference | 3 | 1.00 | 3.00 | Comprehensive CONFIGURATION.md covers all sections. **Fixed**: spend storage path corrected (grob.db). |
+| 6 | Error handling guide | 3 | 0.85 | 2.55 | TROUBLESHOOTING.md + reference/errors.md exist and are accurate. |
+| 7 | Deployment / operations guide | 3 | 0.75 | 2.25 | how-to/deploy.md covers Docker, K8s, systemd, Prometheus. |
+| 8 | Contributing guide | 2 | 0.75 | 1.50 | how-to/contribute.md covers workflow, CI table, CLA. No root CONTRIBUTING.md. |
 | 9 | Changelog / release notes | 2 | 1.00 | 2.00 | Auto-generated CHANGELOG.md with Keep a Changelog format. |
 | 10 | License | 1 | 1.00 | 1.00 | AGPL-3.0, clear. LICENSING.md covers dual-license tiers. CLA.md for contributors. |
 | 11 | CI/CD documentation | 2 | 0.75 | 1.50 | CI pipeline table in how-to/contribute.md. Workflows documented by name. |
-| 12 | Security documentation | 3 | 0.85 | 2.55 | **Updated**: explanation/security.md now includes adaptive scoring, response cache, EU AI Act compliance, corrected network binding (IPv6). |
-| 13 | LLM context file | 3 | 1.00 | 3.00 | **Updated**: AGENTS.md refreshed with current architecture, MCP, pass-through, fan-out, correct routing priority. llms.txt updated with all doc links. |
+| 12 | Security documentation | 3 | 0.85 | 2.55 | explanation/security.md covers all layers. |
+| 13 | LLM context file | 3 | 1.00 | 3.00 | **Updated**: AGENTS.md refreshed to v0.12.2 with new commands, corrected storage paths, GrobStore concept. llms.txt updated with provider_loop, storage, DLP, MCP source links. |
 | 14 | Examples / tutorials | 4 | 0.60 | 2.40 | 6 TOML examples, 8 presets, getting-started tutorial. Still lacks code examples (Python SDK, curl scripts). |
-| 15 | Inline doc coverage (public API) | 4 | 0.50 | 2.00 | 127/345 public items documented (~37%). Good trait/provider coverage. Commands module (32 items, 0 docs) is the largest gap. |
-| 16 | Cross-references & linking | 2 | 0.75 | 1.50 | docs/index.md, docs/README.md, llms.txt provide navigation. Design doc template added. Some intra-doc links still missing in source. |
+| 15 | Inline doc coverage (public API) | 4 | 0.50 | 2.00 | 127/341 public items documented (~37%). Good trait/provider coverage. Commands module (32+ items, 0 docs) is the largest gap. |
+| 16 | Cross-references & linking | 2 | 0.75 | 1.50 | docs/index.md, llms.txt provide navigation. Design doc template exists. |
 
-**Totals**: Weighted score = 42.25 / 51.00 = **8.28** (rounded to **8.1** accounting for verification tolerance)
+**Totals**: Weighted score = 41.75 / 51.00 = **8.19** (rounded to **8.2**)
 
 ### Score progression
 
@@ -35,18 +35,19 @@
 |---------|-----------|-------|
 | v0.9.0 (pre-audit) | ~5.0 | Missing AGENTS.md, llms.txt, Diataxis structure, many docs stale |
 | v0.11.1 (first audit) | 7.6 | Diataxis docs generated, AGENTS.md + llms.txt added |
-| v0.11.2 (this audit) | 8.1 | Accuracy fixes, missing config sections, security expansion, design template |
+| v0.11.2 (second audit) | 8.1 | Accuracy fixes, missing config sections, security expansion, design template |
+| v0.12.2 (this audit) | 8.2 | Version bump, storage path corrections, stale file path fixes, IPv6 accuracy |
 
 ## Documentation Debt
 
 ```
-Public items:       345
+Public items:       341
 Documented items:   127
 Doc debt:           63% (Red zone)
 ```
 
 The 63% doc debt is concentrated in:
-- `src/commands/` (32 public items, 0 documented) -- CLI command implementations
+- `src/commands/` (32+ public items, 0 documented) -- CLI command implementations
 - `src/server/handlers.rs` and `src/server/dispatch/` -- core request handling
 - `src/cli/config.rs` -- config struct fields (partially documented via serde defaults)
 - `src/features/mcp/` -- MCP tool matrix internals
@@ -56,31 +57,31 @@ The 63% doc debt is concentrated in:
 
 | Issue | Location | Fix |
 |-------|----------|-----|
-| Default host documented as `127.0.0.1` | CONFIGURATION.md | Changed to `::1` (actual default from code) |
-| Routing priority order wrong | CONFIGURATION.md, ARCHITECTURE.md | Corrected to match code: WebSearch > Background > Subagent > PromptRules > Think > Default |
-| Budget exceeded documented as HTTP 429 | TROUBLESHOOTING.md | Fixed to HTTP 402 |
-| Spend tracking path `spend.json` | CLAUDE.md | Fixed to `grob.db` (redb) |
-| Version stale at v0.11.1 | docs/index.md | Updated to v0.11.2 |
-| ADR-0001 claimed no interior mutability | ADR-0001 | Updated to reflect `RwLock<Arc<ReloadableState>>` swap |
-| Missing config sections | CONFIGURATION.md | Added: cache, compliance, DLP, tap, auth, MCP, pass-through, fan-out, adaptive scoring, per-project, GDPR, deprecated models |
-| Security doc missing features | explanation/security.md | Added: adaptive scoring, response cache, EU AI Act compliance, IPv6 default |
-| Module layout stale | CLAUDE.md | Updated with dispatch, fan_out, registry, commands, MCP, DLP, security, traits |
+| `oauth_tokens.json` path stale | OAUTH_SETUP.md, PROVIDERS.md | Changed to `grob.db` (redb); legacy JSON auto-migrated |
+| `spend.json` path stale | CONFIGURATION.md | Changed to `grob.db (redb)` with migration note |
+| `src/server/openai_compat.rs` path stale | CLAUDE.md, ARCHITECTURE.md | Changed to `src/server/openai_compat/` (now a directory) |
+| `security::encryption` module listed | ARCHITECTURE.md | Removed (file no longer exists); added provider_scorer, risk |
+| `security::schema_validate` module listed | ARCHITECTURE.md | Removed (file no longer exists) |
+| Default bind address `127.0.0.1` in tutorial | tutorials/getting-started.md | Changed to `[::1]` with IPv4 fallback note |
+| Version stale at v0.11.2 | docs/index.md | Updated to v0.12.2 |
+| Missing `storage` module | CLAUDE.md module table | Added `src/storage/` entry |
+| AGENTS.md missing new commands | AGENTS.md | Added connect, init, config-diff, env, setup-completions |
+| AGENTS.md missing GrobStore concept | AGENTS.md | Added GrobStore domain concept |
+| llms.txt missing source entries | llms.txt | Added provider_loop, storage, spend, DLP, MCP source links |
 
 ## What Was Generated or Updated
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `AGENTS.md` | Updated | Added MCP, pass-through, fan-out, subagent, corrected routing priority, exec/doctor/upgrade commands |
-| `llms.txt` | Updated | Added dispatch pipeline, config structs, commands references, development guidelines link |
-| `CLAUDE.md` | Updated | Fixed spend tracking path, updated module layout table |
-| `docs/CONFIGURATION.md` | Updated | Added 10+ missing config sections, fixed default host, corrected routing priority |
-| `docs/ARCHITECTURE.md` | Updated | Corrected routing priority, added MCP/cache/commands/net modules, pass-through/fan-out decisions |
-| `docs/TROUBLESHOOTING.md` | Updated | Fixed budget exceeded status code (402 not 429), added exec hint |
-| `docs/index.md` | Updated | Fixed version to v0.11.2, added security model and design template links |
-| `docs/explanation/security.md` | Updated | Added adaptive scoring, response cache, EU AI Act, corrected IPv6 default |
-| `docs/how-to/configure.md` | Updated | Added cache, DLP, pass-through configuration how-tos |
-| `docs/decisions/0001-static-config-no-hot-reload.md` | Updated | Reflected RwLock-based atomic config swap evolution |
-| `docs/design/000-template.md` | Created | Design doc template for pre-implementation thinking |
+| `AGENTS.md` | Updated | v0.12.2: new commands, GrobStore, storage path fix, trailing args gotcha |
+| `llms.txt` | Updated | Added 5 source entries (provider_loop, storage, spend, DLP, MCP) |
+| `CLAUDE.md` | Updated | Fixed openai_compat path, added storage module to table |
+| `docs/index.md` | Updated | Version bumped to v0.12.2 |
+| `docs/CONFIGURATION.md` | Updated | Fixed spend storage path (grob.db) |
+| `docs/ARCHITECTURE.md` | Updated | Fixed openai_compat path, removed stale security modules, added real ones |
+| `docs/tutorials/getting-started.md` | Updated | Fixed bind address to IPv6, added IPv4 note |
+| `docs/OAUTH_SETUP.md` | Updated | Storage references updated to grob.db |
+| `docs/PROVIDERS.md` | Updated | Token storage reference updated to grob.db |
 | `DCI-REPORT.md` | Updated | This report |
 
 ## Top 3 Highest-Impact Improvements Still Needed
@@ -89,10 +90,10 @@ The 63% doc debt is concentrated in:
 
 63% of public items lack doc comments. The most impactful targets:
 
-- **`src/commands/*.rs`** (32 items, 0 docs) -- every CLI command function is undocumented
+- **`src/commands/*.rs`** (32+ items, 0 docs) -- every CLI command function is undocumented
 - **`src/server/dispatch/provider_loop.rs`** -- the core fallback/retry logic
 - **`src/server/handlers.rs`** -- HTTP request handler functions
-- **`src/features/mcp/`** -- MCP is a new feature with no inline docs on helpers
+- **`src/features/mcp/`** -- MCP is a newer feature with sparse inline docs
 
 Adding `#![warn(missing_docs)]` to `src/lib.rs` would prevent the debt from growing.
 
@@ -110,14 +111,14 @@ These should go in `docs/examples/` or inline in tutorials/getting-started.md.
 
 - Add `lychee` or `markdown-link-check` to CI to catch broken links
 - Add a CI step that validates TOML snippets in docs by parsing them
-- Add `cargo test --doc` to the CI matrix (may already exist)
+- `cargo test --doc` already runs in CI
 - Consider `cargo doc --document-private-items` as a doc coverage metric
 
 ## Recommended Next Steps (ordered by effort/impact ratio)
 
 1. **Add `#![warn(missing_docs)]` to `src/lib.rs`** -- prevents new undocumented public items. 1 line change.
-2. **Document `src/commands/` module** -- 32 public functions with 0 doc comments. These are the entry points users interact with.
+2. **Document `src/commands/` module** -- 32+ public functions with 0 doc comments. These are the entry points users interact with.
 3. **Add curl example to getting-started.md** -- show a raw API call to prove Grob is working.
 4. **Add `lychee` link checking to CI** -- catches broken links in docs automatically.
-5. **Move legacy flat docs to Diataxis paths** -- `CONFIGURATION.md` -> `reference/config.md`, `TROUBLESHOOTING.md` -> `how-to/troubleshoot.md` (create redirects to avoid breaking existing links).
-6. **Add `CONTRIBUTING.md` at repo root** -- GitHub expects this file at the root for the "Contributing" tab. Currently only `docs/how-to/contribute.md` exists.
+5. **Add `CONTRIBUTING.md` at repo root** -- GitHub expects this file at the root for the "Contributing" tab. Currently only `docs/how-to/contribute.md` exists.
+6. **Move legacy flat docs to Diataxis paths** -- `CONFIGURATION.md` -> `reference/config.md`, `TROUBLESHOOTING.md` -> `how-to/troubleshoot.md` (create symlinks to avoid breaking existing links).

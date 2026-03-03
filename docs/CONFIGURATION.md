@@ -37,7 +37,7 @@ warn_at_percent = 80          # Log warning at this % of any limit (default: 80)
 
 Budget checks follow a priority order: model limit > provider limit > global limit. When a limit is reached, requests return HTTP 402 with a `budget_exceeded` error. OAuth providers cost $0 and never hit caps.
 
-Spend is tracked in `~/.grob/spend.json` and resets automatically each month.
+Spend is tracked in `~/.grob/grob.db` (redb) and resets automatically each month. Legacy `spend.json` data is auto-migrated on first run.
 
 ## Providers
 

@@ -89,9 +89,11 @@ This is equivalent to:
 
 ```bash
 grob start -d
-ANTHROPIC_BASE_URL=http://127.0.0.1:13456 claude
+ANTHROPIC_BASE_URL=http://[::1]:13456 claude
 grob stop
 ```
+
+(The default bind address is `::1`, IPv6 localhost. Use `http://127.0.0.1:13456` if your system does not support IPv6.)
 
 If you applied an OAuth preset, a browser window will open on first start for authentication. Complete the login flow and return to the terminal.
 
@@ -135,8 +137,8 @@ This shows a breakdown by provider and model for the current month.
 When you ran `grob exec -- claude`:
 
 1. Grob loaded `~/.grob/config.toml`
-2. It started an HTTP server on `127.0.0.1:13456`
-3. It set `ANTHROPIC_BASE_URL=http://127.0.0.1:13456` so Claude Code sends requests to Grob
+2. It started an HTTP server on `[::1]:13456` (IPv6 localhost)
+3. It set `ANTHROPIC_BASE_URL=http://[::1]:13456` so Claude Code sends requests to Grob
 4. For each request, Grob classified the task type (thinking, default, web search, background)
 5. It selected the best model for that task type and tried providers in priority order
 6. If a provider failed, it automatically tried the next one in the fallback chain

@@ -66,4 +66,4 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 
 ## Version
 
-Current release: **v0.11.2** -- see [CHANGELOG](../CHANGELOG.md) for history.
+Current release: **v0.12.2** -- see [CHANGELOG](../CHANGELOG.md) for history.

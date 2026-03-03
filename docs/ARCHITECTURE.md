@@ -125,7 +125,7 @@ Client
 | Module | Path | Purpose |
 |--------|------|---------|
 | `server` | `src/server/mod.rs` | Axum HTTP server, middleware stack, request handlers |
-| `server::openai_compat` | `src/server/openai_compat.rs` | OpenAI `/v1/chat/completions` request/response translation |
+| `server::openai_compat` | `src/server/openai_compat/` | OpenAI `/v1/chat/completions` request/response translation |
 | `server::oauth_handlers` | `src/server/oauth_handlers.rs` | OAuth authorization, token exchange, callback endpoints |
 | `server::fan_out` | `src/server/fan_out.rs` | Parallel multi-provider dispatch (fan-out strategy) |
 | `providers` | `src/providers/mod.rs` | Provider trait and registry |
@@ -157,9 +157,9 @@ Client
 | `security::headers` | `src/security/headers.rs` | OWASP security response headers |
 | `security::audit_log` | `src/security/audit_log.rs` | Signed audit log with ECDSA P-256 |
 | `security::cache` | `src/security/cache.rs` | Response caching (moka) |
-| `security::encryption` | `src/security/encryption.rs` | AES-256-GCM encryption for sensitive data |
-| `security::schema_validate` | `src/security/schema_validate.rs` | Request schema validation |
-| `storage` | `src/storage/mod.rs` | Embedded key-value store (redb) |
+| `security::provider_scorer` | `src/security/provider_scorer.rs` | Adaptive provider scoring (EWMA latency, success rate) |
+| `security::risk` | `src/security/risk.rs` | Risk assessment for EU AI Act compliance |
+| `storage` | `src/storage/mod.rs` | Unified redb storage backend (GrobStore) |
 | `storage::migrate` | `src/storage/migrate.rs` | Storage migrations |
 | `models` | `src/models/mod.rs` | Anthropic request/response types, route types |
 | `features::mcp` | `src/features/mcp/mod.rs` | MCP tool matrix: tool catalogue, scoring, calibration |

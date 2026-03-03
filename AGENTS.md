@@ -9,7 +9,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 - **HTTP framework**: Axum 0.7 with Tower middleware
 - **HTTP client**: reqwest 0.12 (HTTP/2, rustls)
 - **Config**: TOML (serde)
-- **Storage**: redb (embedded key-value store for tokens, spend)
+- **Storage**: redb (embedded key-value store for tokens, spend) + spend.json (legacy fallback)
 - **CLI**: clap 4 (derive mode)
 - **Allocator**: jemalloc on non-MSVC targets
 - **CI**: GitHub Actions (fmt, clippy, nextest, coverage, cargo-audit, cargo-deny, cargo-hack, cargo-machete)
@@ -18,7 +18,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Architecture
 
-Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`) formats. All requests are normalized to Anthropic's internal message format. A regex-based router classifies each request by task type (web_search, background, subagent, prompt_rule, think, default) and selects a named model. Each model maps to one or more providers ordered by priority. If the highest-priority provider fails, the request falls through to the next. Circuit breakers (5 failures = open, 30s timeout) prevent hammering degraded providers. DLP scanning runs on stream chunks using Aho-Corasick automata. Persistent spend tracking in redb enforces monthly budgets at global, per-provider, and per-model granularity.
+Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`) formats. All requests are normalized to Anthropic's internal message format. A regex-based router classifies each request by task type (web_search, background, subagent, prompt_rule, think, default) and selects a named model. Each model maps to one or more providers ordered by priority. If the highest-priority provider fails, the request falls through to the next. Circuit breakers (5 failures = open, 30s timeout) prevent hammering degraded providers. DLP scanning runs on stream chunks using Aho-Corasick automata. Persistent spend tracking in redb (`~/.grob/grob.db`) enforces monthly budgets at global, per-provider, and per-model granularity.
 
 ## Domain Concepts
 
@@ -35,6 +35,7 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 - **Spend**: Monthly cost tracking per provider/model with budget enforcement (HTTP 402 on exceed).
 - **MCP**: Model Context Protocol tool matrix -- tool-calling capability catalogue with per-provider reliability scoring.
 - **Subagent model**: A system prompt tag (`GROB-SUBAGENT-MODEL`) that overrides model selection for nested agent calls.
+- **GrobStore**: Unified redb storage backend (`~/.grob/grob.db`) for OAuth tokens and spend. Migrates from legacy JSON files on first open.
 
 ## Key Patterns
 
@@ -72,6 +73,11 @@ cargo run -- validate      # Test all providers with real API calls
 cargo run -- exec -- claude # Launch Claude Code behind proxy (auto-start/stop)
 cargo run -- doctor        # Run diagnostic checks
 cargo run -- upgrade       # Zero-downtime upgrade via SO_REUSEPORT
+cargo run -- connect       # Interactive credential setup
+cargo run -- init          # Create per-project .grob.toml
+cargo run -- config-diff   # Compare config against preset
+cargo run -- env           # Check required env vars
+cargo run -- setup-completions # Install shell completions
 
 # Presets
 cargo run -- preset list
@@ -90,7 +96,7 @@ cargo bench --bench hotpath
 
 - Default port is **13456**, not 3456. Default bind address is `::1` (IPv6 localhost).
 - Config file is `~/.grob/config.toml`. Override with `--config <path>` or `GROB_CONFIG=<path|url>`.
-- OAuth tokens stored in `~/.grob/oauth_tokens.json`. Spend and storage in `~/.grob/grob.db` (redb).
+- OAuth tokens and spend stored in `~/.grob/grob.db` (redb). Legacy spend data may also exist in `~/.grob/spend.json` (auto-migrated on first run).
 - The `models` field on `ProviderConfig` is a legacy field -- model support is determined by `[[models.mappings]]`, not by listing models on the provider.
 - `jemalloc` is not available on MSVC targets -- the `#[cfg(not(target_env = "msvc"))]` guard handles this.
 - `cargo chef` is used in the Containerfile for layer caching.
@@ -100,3 +106,4 @@ cargo bench --bench hotpath
 - Routing priority (highest to lowest): WebSearch > Background > Subagent > PromptRules > Think > Default. Auto-map runs first as a name transformation but does not change route type.
 - `grob exec -- <cmd>` is the recommended way to use Grob. It auto-starts, sets env vars, runs your tool, and auto-stops.
 - Budget exceeded returns HTTP 402, not 429. Rate limit exceeded returns 429.
+- `grob -- <cmd>` is shorthand for `grob exec -- <cmd>` (trailing args syntax).
