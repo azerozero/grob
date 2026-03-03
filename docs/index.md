@@ -58,10 +58,12 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Topic | Document |
 |-------|----------|
 | Architecture | [Architecture Overview](ARCHITECTURE.md) |
+| Security model | [Security Model](explanation/security.md) |
 | Design philosophy | [Design Principles](design-principles.md) |
 | Gemini specifics | [Gemini Integration](gemini-integration.md) |
 | Architecture decisions | [ADRs](decisions/) |
+| Design doc template | [Design Doc Template](design/000-template.md) |
 
 ## Version
 
-Current release: **v0.11.1** -- see [CHANGELOG](../CHANGELOG.md) for history.
+Current release: **v0.11.2** -- see [CHANGELOG](../CHANGELOG.md) for history.

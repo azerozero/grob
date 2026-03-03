@@ -5,21 +5,30 @@
 ## Guides
 
 - [Quick Start](docs/QUICKSTART.md): Install and run Grob in 30 seconds
+- [Getting Started](docs/tutorials/getting-started.md): Step-by-step tutorial from install to running
 - [Provider Setup](docs/PROVIDERS.md): Per-provider configuration guides for all 13+ supported backends
 - [OAuth Setup](docs/OAUTH_SETUP.md): OAuth authentication for Anthropic Pro/Max and Gemini Pro subscriptions
 
 ## Reference
 
 - [Configuration Reference](docs/CONFIGURATION.md): All TOML config options with defaults and examples
+- [CLI Reference](docs/reference/cli.md): All CLI commands and flags
 - [OpenAI Compatibility](docs/openai-compatibility.md): `/v1/chat/completions` endpoint details, supported features, and limitations
 - [OpenAPI Specification](docs/openapi.yaml): Full API reference in OpenAPI 3.0 format
-- [CLI Reference](README.md#cli-reference): All CLI commands and flags
+- [Error Reference](docs/reference/errors.md): HTTP status codes and error types
 - [Troubleshooting](docs/TROUBLESHOOTING.md): Common errors, diagnostics, and fixes
+
+## How-to
+
+- [How to Configure Grob](docs/how-to/configure.md): Budgets, fallbacks, routing rules, tracing
+- [How to Deploy Grob](docs/how-to/deploy.md): Container, Kubernetes, systemd deployment
+- [How to Contribute](docs/how-to/contribute.md): Development workflow, code style, CI
 
 ## Architecture
 
 - [Architecture Overview](docs/ARCHITECTURE.md): Request flow, module layout, and key design decisions
 - [Design Principles](docs/design-principles.md): Philosophy, writing principles, and UX guidelines
+- [Security Model](docs/explanation/security.md): Threat model, defense layers, TLS, audit logging
 - [Gemini Integration](docs/gemini-integration.md): Gemini and Vertex AI provider specifics
 
 ## Decisions
@@ -34,17 +43,20 @@
 
 - [Entry point](src/main.rs): CLI argument parsing and command dispatch
 - [Library root](src/lib.rs): Module declarations
-- [Trait contracts](src/traits.rs): 7 core traits (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, etc.)
+- [Trait contracts](src/traits.rs): 7+ core traits (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, etc.)
 - [Provider trait](src/providers/mod.rs): LlmProvider trait definition and provider types
 - [Router](src/router/mod.rs): Regex-based request classification and model selection
+- [Dispatch pipeline](src/server/dispatch/mod.rs): DLP, cache, routing, provider loop with fallback
 - [Server](src/server/mod.rs): Axum HTTP server, middleware stack, and application state
 - [CLI config](src/cli/mod.rs): AppConfig and all configuration structs
+- [Config structs](src/cli/config.rs): ServerConfig, SecurityConfig, RouterConfig, etc.
+- [Commands](src/commands/mod.rs): CLI command implementations
 
 ## Configuration
 
 - [Configuration Reference](docs/CONFIGURATION.md): All TOML options
 - [Example configs](docs/examples/): Sample configurations for common setups
-- [Presets](presets/): Built-in preset configurations (perf, medium, cheap, fast, local, gdpr)
+- [Presets](presets/): Built-in preset configurations (perf, medium, cheap, fast, local, gdpr, eu-ai-act)
 
 ## Project
 
@@ -54,3 +66,4 @@
 - [Licensing](LICENSING.md): Dual-license tiers and commercial options
 - [CLA](CLA.md): Contributor License Agreement
 - [AI Agent Context](AGENTS.md): Project context optimized for AI coding agents
+- [Development Guidelines](CLAUDE.md): Code style, doc comment conventions, module layout

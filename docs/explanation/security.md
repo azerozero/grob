@@ -89,10 +89,31 @@ Grob supports native TLS via rustls (no OpenSSL dependency):
 
 For most deployments, running behind a reverse proxy (nginx, Caddy, Traefik) that handles TLS is recommended over native TLS.
 
+## Adaptive provider scoring
+
+When `adaptive_scoring = true`, Grob ranks providers by a composite score combining success rate, latency (EWMA-smoothed), and recency. Scores decay over time to prevent stale rankings from masking degraded providers. The scoring window, decay rate, and latency alpha are configurable. Scores can optionally be persisted across restarts.
+
+This feature is opt-in because it changes the provider selection order within a priority level, which may have cost implications.
+
+## Response cache
+
+When `[cache] enabled = true`, Grob caches responses for deterministic requests (temperature=0). Cache keys are computed from the tenant ID, model, messages, and tools. The cache uses moka (concurrent, TTL-evicting) with configurable capacity and TTL. Cache hits bypass the entire provider pipeline, returning instantly with `x-grob-cache: hit`. Only non-streaming requests are cached.
+
+## EU AI Act compliance
+
+The `[compliance]` section enables features required by the EU AI Act:
+
+- **Transparency headers**: `X-AI-Provider`, `X-AI-Model`, `X-AI-Generated`, `X-Grob-Audit-Id` on every response (Article 50)
+- **Audit enrichment**: Model name and token counts recorded in audit entries (Article 12)
+- **Risk classification**: Requests scored by DLP trigger count, block status, injection detection, and PII presence (Article 14)
+- **Escalation**: High-risk events dispatched to a configured webhook for human review
+
+The `eu-ai-act` preset enables all compliance features in one command.
+
 ## Network binding
 
-By default, Grob binds to `127.0.0.1:13456` (localhost only). In container mode (`grob run`), it binds to `0.0.0.0`. The bind address should match the deployment scenario:
+By default, Grob binds to `[::1]:13456` (IPv6 localhost only). In container mode (`grob run`), it binds to `0.0.0.0`. The bind address should match the deployment scenario:
 
-- **Local workstation**: `127.0.0.1` (default) -- only local processes can connect
+- **Local workstation**: `::1` (default) -- only local processes can connect (IPv6). Use `127.0.0.1` for IPv4-only environments.
 - **Container**: `0.0.0.0` -- accessible from outside the container (use network policies)
 - **Shared server**: Use `api_key` or JWT authentication when binding to non-localhost addresses

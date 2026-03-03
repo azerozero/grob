@@ -53,12 +53,15 @@ Client (Claude Code, Aider, curl, ...)
 |                                                                  |
 |  Determines route type and target model:                         |
 |                                                                  |
-|  1. Prompt rules     -- regex match on user message content      |
-|  2. Auto-map regex   -- maps known model families (e.g. claude-) |
-|  3. Task classifier  -- thinking / web_search / background       |
-|  4. Default model    -- fallback from [router] config            |
+|  0. Auto-map regex   -- transform model name (e.g. claude-*)    |
+|  1. WebSearch        -- web_search tool detected (highest)       |
+|  2. Background       -- model matches background_regex           |
+|  3. Subagent         -- GROB-SUBAGENT-MODEL tag in system prompt |
+|  4. Prompt rules     -- regex match on user message content      |
+|  5. Think            -- thinking/reasoning enabled               |
+|  6. Default model    -- fallback from [router] config            |
 |                                                                  |
-|  Output: RouteDecision { model, route_type, provider_mappings }  |
+|  Output: RouteDecision { model, route_type, matched_prompt }     |
 |                                                                  |
 +------------------------------------------------------------------+
   |
@@ -159,13 +162,19 @@ Client
 | `storage` | `src/storage/mod.rs` | Embedded key-value store (redb) |
 | `storage::migrate` | `src/storage/migrate.rs` | Storage migrations |
 | `models` | `src/models/mod.rs` | Anthropic request/response types, route types |
+| `features::mcp` | `src/features/mcp/mod.rs` | MCP tool matrix: tool catalogue, scoring, calibration |
+| `features::mcp::bench` | `src/features/mcp/bench/` | Continuous tool-calling benchmark engine |
+| `features::mcp::server` | `src/features/mcp/server/` | JSON-RPC MCP endpoints |
+| `cache` | `src/cache/mod.rs` | Response cache (moka) for deterministic requests |
 | `message_tracing` | `src/message_tracing/mod.rs` | Request/response trace logging (JSONL) |
 | `pid` | `src/pid.rs` | PID file management for daemon mode |
 | `instance` | `src/instance.rs` | Multi-instance coordination |
+| `commands` | `src/commands/mod.rs` | CLI command implementations (start, stop, exec, doctor, etc.) |
+| `net` | `src/net.rs` | Network binding with SO_REUSEPORT for zero-downtime upgrades |
 
 ## Key design decisions
 
-**Config is static at runtime.** The server loads TOML config on startup. The `/api/config/reload` endpoint atomically swaps the in-memory config (router, provider registry, model index) without restarting the process. In-flight requests continue using the old config snapshot.
+**Config is static at runtime.** The server loads TOML config on startup. The `/api/config/reload` endpoint atomically swaps the in-memory config (`ReloadableState`: router, provider registry, model index) without restarting the process. In-flight requests continue using the old config snapshot via `Arc` cloning.
 
 **Provider abstraction.** All providers implement the same trait. The proxy normalizes everything to Anthropic's internal message format, then translates outbound to each provider's wire format.
 
@@ -178,3 +187,9 @@ Client
 **Security middleware stack.** All security features are toggled via the `[security]` TOML section: `rate_limit_rps`, `rate_limit_burst`, `max_body_size`, `security_headers`, `circuit_breaker`, `audit_dir`. Set `enabled = false` to disable the entire security layer. Each request gets a `X-Request-Id` (UUID v4 if not provided) for tracing across logs.
 
 **jemalloc allocator.** On non-MSVC targets, jemalloc replaces the system allocator for roughly 20% better throughput under load.
+
+**Pass-through provider mode.** Providers with `pass_through = true` accept any model name not explicitly listed in `[[models]]`, forwarding it as-is to the upstream API. This enables wildcard model routing for providers like OpenRouter.
+
+**Fan-out strategy.** Models can use `strategy = "fan_out"` to dispatch requests to multiple providers in parallel, selecting the fastest response, the best quality (via a judge model), or a weighted composite. Fan-out runs alongside the standard fallback strategy.
+
+**MCP tool matrix.** A static TOML catalogue of tool-calling capabilities per provider, augmented by a continuous bench engine that tests tool reliability. The router can calibrate tool lists per request based on the selected provider's scores.

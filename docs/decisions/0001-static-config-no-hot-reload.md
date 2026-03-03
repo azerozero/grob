@@ -34,4 +34,5 @@ Chosen option: "Static config, restart to apply changes", because it eliminates 
 
 ### Confirmation
 
-The `AppState` struct holds config in an `Arc<Config>` with no interior mutability. Any attempt to mutate config at runtime would be a compile error.
+The `AppState` struct holds reloadable config behind an `RwLock<Arc<ReloadableState>>`. The `/api/config/reload` endpoint atomically swaps the inner `Arc`, so in-flight requests continue using the old snapshot while new requests get the updated config. This is a controlled relaxation of the original "no hot reload" decision -- config changes still require an explicit action (API call or restart), not file watching.
+<!-- NEEDS-REVIEW: The original ADR stated no interior mutability, but ReloadableState swap was added later. This ADR could be updated to ADR-0001a to document the evolution. -->

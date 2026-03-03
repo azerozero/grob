@@ -112,6 +112,44 @@ model = "claude-opus-thinking"
 
 Project config merges with the global config, overriding matching keys.
 
+## Enable response caching
+
+Cache deterministic responses (temperature=0) to reduce provider costs and latency:
+
+```toml
+[cache]
+enabled = true
+max_capacity = 2000      # Number of cached entries
+ttl_secs = 3600          # Cache TTL (1 hour)
+```
+
+Cached responses include an `x-grob-cache: hit` header. Only non-streaming, temperature=0 requests are cached.
+
+## Enable DLP scanning
+
+Scan requests and responses for secrets and PII:
+
+```toml
+[dlp]
+scan_input = true        # Scan outgoing requests
+scan_output = true       # Scan incoming responses
+block_on_match = false   # Block (true) or just log (false) matches
+```
+
+## Enable pass-through mode
+
+Allow a provider to accept any model name, forwarding it as-is without explicit `[[models]]` configuration:
+
+```toml
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+api_key = "$OPENROUTER_API_KEY"
+pass_through = true         # Accept any model name
+```
+
+With pass-through enabled, you can request any model available on that provider without adding a `[[models.mappings]]` entry.
+
 ## Full reference
 
 See [Configuration Reference](../CONFIGURATION.md) for every option with defaults and types.

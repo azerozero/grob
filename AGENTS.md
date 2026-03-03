@@ -4,7 +4,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Stack
 
-- **Language**: Rust 2021 edition (~29K LOC)
+- **Language**: Rust 2021 edition (~32K LOC)
 - **Runtime**: Tokio async
 - **HTTP framework**: Axum 0.7 with Tower middleware
 - **HTTP client**: reqwest 0.12 (HTTP/2, rustls)
@@ -18,30 +18,35 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Architecture
 
-Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`) formats. All requests are normalized to Anthropic's internal message format. A regex-based router classifies each request by task type (thinking, web_search, background, default) and selects a named model. Each model maps to one or more providers ordered by priority. If the highest-priority provider fails, the request falls through to the next. Circuit breakers (5 failures = open, 30s timeout) prevent hammering degraded providers. DLP scanning runs on stream chunks using Aho-Corasick automata. Persistent spend tracking in redb enforces monthly budgets at global, per-provider, and per-model granularity.
+Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`) formats. All requests are normalized to Anthropic's internal message format. A regex-based router classifies each request by task type (web_search, background, subagent, prompt_rule, think, default) and selects a named model. Each model maps to one or more providers ordered by priority. If the highest-priority provider fails, the request falls through to the next. Circuit breakers (5 failures = open, 30s timeout) prevent hammering degraded providers. DLP scanning runs on stream chunks using Aho-Corasick automata. Persistent spend tracking in redb enforces monthly budgets at global, per-provider, and per-model granularity.
 
 ## Domain Concepts
 
 - **Provider**: An LLM API backend (Anthropic, OpenAI, Gemini, OpenRouter, Ollama, etc.). Each implements the `LlmProvider` trait.
 - **Model**: A named routing target with a priority-ordered fallback chain of provider mappings. Not a single LLM model -- a Grob "model" is a logical slot (e.g., "default", "claude-opus-thinking").
 - **Mapping**: A `(provider, actual_model, priority)` tuple. Priority 1 is tried first.
-- **Route type**: The classification of a request: `Default`, `Think`, `WebSearch`, `Background`, `PromptRule`, `AutoMap`.
+- **Route type**: The classification of a request: `WebSearch`, `Background`, `PromptRule`, `Think`, `Default`, `AutoMap`.
 - **Preset**: A pre-built config (providers + models + router) that can be applied in one command.
 - **Circuit breaker**: Per-provider state machine (Closed/Open/HalfOpen) that prevents cascading failures.
-- **Pass-through**: A provider mode that accepts any model name not explicitly configured, forwarding it as-is.
+- **Pass-through**: A provider mode (`pass_through = true`) that accepts any model name not explicitly configured, forwarding it as-is.
+- **Fan-out**: A model strategy that dispatches to multiple providers in parallel (fastest, best_quality, or weighted selection).
 - **DLP**: Data Loss Prevention -- scans requests/responses for secrets, PII, and canary tokens.
 - **Tap**: Webhook event emission for external monitoring.
 - **Spend**: Monthly cost tracking per provider/model with budget enforcement (HTTP 402 on exceed).
+- **MCP**: Model Context Protocol tool matrix -- tool-calling capability catalogue with per-provider reliability scoring.
+- **Subagent model**: A system prompt tag (`GROB-SUBAGENT-MODEL`) that overrides model selection for nested agent calls.
 
 ## Key Patterns
 
-- **Config is static at runtime**: Loaded once from TOML into `Arc`. No hot-reload. Restart to apply changes. `/api/config/reload` swaps the config atomically for in-memory updates.
-- **Trait-driven dispatch**: 7 traits in `src/traits.rs` (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, Tracer, AuditWriter, EventTap, ProviderAvailability) enable testing via mock implementations.
-- **Feature flags**: `dlp`, `oauth`, `tap`, `compliance` -- all default-on. Disable at compile time for smaller binaries.
+- **Config is static at runtime**: Loaded once from TOML into `Arc`. `/api/config/reload` swaps config atomically without restart. In-flight requests continue on old snapshot.
+- **Trait-driven dispatch**: 7+ traits in `src/traits.rs` (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, Tracer, AuditWriter, EventTap, ProviderAvailability) enable testing via mock implementations.
+- **Feature flags**: `dlp`, `oauth`, `tap`, `compliance`, `mcp` -- all default-on. Disable at compile time for smaller binaries.
 - **Error types**: `ProviderError` (thiserror) for provider failures, `AppError` for HTTP responses, `anyhow` for CLI/startup.
 - **Streaming-first**: SSE streaming is the primary path. DLP scanning is chunk-based, not buffered.
 - **Environment variable expansion**: API keys in TOML support `$ENV_VAR` syntax resolved at startup.
 - **All providers normalize to Anthropic format**: OpenAI, Gemini, etc. requests are translated to/from Anthropic Messages internally.
+- **Default host is IPv6**: `::1` (not `127.0.0.1`). Container mode uses `0.0.0.0`.
+- **Per-project config overlay**: `.grob.toml` in project root merges with global config (router, budget, preset overrides).
 
 ## Commands
 
@@ -64,6 +69,9 @@ cargo run -- start -d      # Start in background (daemon)
 cargo run -- stop          # Stop
 cargo run -- status        # Health check + spend summary
 cargo run -- validate      # Test all providers with real API calls
+cargo run -- exec -- claude # Launch Claude Code behind proxy (auto-start/stop)
+cargo run -- doctor        # Run diagnostic checks
+cargo run -- upgrade       # Zero-downtime upgrade via SO_REUSEPORT
 
 # Presets
 cargo run -- preset list
@@ -80,12 +88,15 @@ cargo bench --bench hotpath
 
 ## Gotchas
 
-- Default port is **13456**, not 3456. Bind address is `127.0.0.1` by default (IPv4 only in recent versions).
+- Default port is **13456**, not 3456. Default bind address is `::1` (IPv6 localhost).
 - Config file is `~/.grob/config.toml`. Override with `--config <path>` or `GROB_CONFIG=<path|url>`.
-- OAuth tokens stored in `~/.grob/oauth_tokens.json` (not in redb). Token store in redb is for different auth state.
+- OAuth tokens stored in `~/.grob/oauth_tokens.json`. Spend and storage in `~/.grob/grob.db` (redb).
 - The `models` field on `ProviderConfig` is a legacy field -- model support is determined by `[[models.mappings]]`, not by listing models on the provider.
 - `jemalloc` is not available on MSVC targets -- the `#[cfg(not(target_env = "msvc"))]` guard handles this.
-- `cargo chef` is used in the Containerfile for layer caching -- the `time` crate needs a `cargo update --precise` workaround in the build.
+- `cargo chef` is used in the Containerfile for layer caching.
 - The OpenAI compat endpoint translates everything to Anthropic format internally, so features like `response_format` (JSON mode) are not supported.
 - Presets live in `presets/*.toml` (shipped with the binary) and user presets in `~/.grob/presets/`.
-- Feature flags are all on by default. To build without DLP: `cargo build --no-default-features --features oauth,tap,compliance`.
+- Feature flags are all on by default. To build without DLP: `cargo build --no-default-features --features oauth,tap,compliance,mcp`.
+- Routing priority (highest to lowest): WebSearch > Background > Subagent > PromptRules > Think > Default. Auto-map runs first as a name transformation but does not change route type.
+- `grob exec -- <cmd>` is the recommended way to use Grob. It auto-starts, sets env vars, runs your tool, and auto-stops.
+- Budget exceeded returns HTTP 402, not 429. Rate limit exceeded returns 429.

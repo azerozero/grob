@@ -10,21 +10,32 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 - **Provider abstraction**: All providers implement the `LlmProvider` trait (`src/providers/mod.rs`).
 - **Routing**: Regex-based prompt rules in `src/router/mod.rs` classify requests into task types (thinking, web_search, background, default).
 - **OAuth**: Custom implementation (no `oauth2` crate) with PKCE in `src/auth/oauth.rs`.
-- **Spend tracking**: Persistent monthly spend in `~/.grob/spend.json` with budget enforcement.
+- **Spend tracking**: Persistent monthly spend in redb (`~/.grob/grob.db`) with budget enforcement.
 
 ### Module Layout
 
 | Module | Purpose |
 |--------|---------|
-| `src/server/mod.rs` | Axum HTTP server, request handlers |
+| `src/server/mod.rs` | Axum HTTP server, middleware stack, application state |
+| `src/server/dispatch/mod.rs` | Core dispatch pipeline: DLP, cache, route, provider loop |
 | `src/server/openai_compat.rs` | OpenAI `/v1/chat/completions` translation |
 | `src/server/oauth_handlers.rs` | OAuth API endpoints |
+| `src/server/fan_out.rs` | Parallel multi-provider dispatch (fan-out strategy) |
 | `src/providers/` | Provider implementations (Anthropic, OpenAI, Gemini, etc.) |
+| `src/providers/registry.rs` | Provider registration and model lookup |
 | `src/router/mod.rs` | Request routing engine |
 | `src/cli/mod.rs` | Config structs and CLI argument parsing |
-| `src/auth/` | OAuth client and token store |
+| `src/cli/args.rs` | CLI command definitions (clap derive) |
+| `src/cli/config.rs` | All config struct definitions |
+| `src/commands/` | CLI command implementations (start, stop, exec, doctor, etc.) |
+| `src/auth/` | OAuth client, token store, JWT validation |
 | `src/features/token_pricing/` | Pricing, spend tracking, budget enforcement |
-| `src/preset.rs` | Preset management system |
+| `src/features/dlp/` | DLP engine (secret scanning, PII, canary tokens) |
+| `src/features/mcp/` | MCP tool matrix, bench engine, JSON-RPC server |
+| `src/features/tap/` | Webhook tap (event emission) |
+| `src/security/` | Circuit breakers, rate limiting, audit log, headers, scoring |
+| `src/traits.rs` | Core trait contracts (7+ traits for dispatch pipeline) |
+| `src/preset/` | Preset management system |
 
 ## Documentation Standards
 

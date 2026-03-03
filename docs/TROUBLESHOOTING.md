@@ -30,7 +30,7 @@ grob stop
 grob start -d
 ```
 
-If you changed the host/port in config, make sure your client points to the right address. The default is `[::1]:13456` (IPv6 localhost).
+If you changed the host/port in config, make sure your client points to the right address. The default is `[::1]:13456` (IPv6 localhost). Use `grob exec` instead of setting `ANTHROPIC_BASE_URL` manually to avoid host/port mismatches.
 
 ---
 
@@ -73,7 +73,7 @@ If you changed the host/port in config, make sure your client points to the righ
 
 ## Budget exceeded
 
-**Symptom:** HTTP 429 response with `"Budget exceeded"`.
+**Symptom:** HTTP 402 response with `"Budget exceeded"`.
 
 **Cause:** Monthly spend has reached the configured limit.
 
