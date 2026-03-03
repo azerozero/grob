@@ -144,7 +144,7 @@ jobs:
 
       - name: Install crane
         run: |
-          VERSION=0.20.2
+          VERSION=0.21.2
           curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
             | tar xz -C /usr/local/bin crane
 
@@ -165,9 +165,8 @@ jobs:
             crane append -t "${IMAGE}:${VERSION#v}-${ARCH}" -f "layer-${ARCH}.tar"
 
             # Set platform metadata and OCI annotations
-            PLATFORM="linux/${ARCH}"
             crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
-              --platform "${PLATFORM}" \
+              --set-platform "linux/${ARCH}" \
               --entrypoint /usr/local/bin/${BINARY_NAME} \
               --cmd run \
               --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
@@ -176,11 +175,14 @@ jobs:
               --annotation org.opencontainers.image.licenses="Apache-2.0"
           done
 
-          # Create multi-arch manifest list with OCI annotations
+          # Create multi-arch manifest list
           crane index append \
             -t "${IMAGE}:${VERSION#v}" \
             -m "${IMAGE}:${VERSION#v}-amd64" \
-            -m "${IMAGE}:${VERSION#v}-arm64" \
+            -m "${IMAGE}:${VERSION#v}-arm64"
+
+          # Add OCI annotations to the index
+          crane mutate "${IMAGE}:${VERSION#v}" \
             --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
             --annotation org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
             --annotation org.opencontainers.image.version="${VERSION#v}" \
