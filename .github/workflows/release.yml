@@ -176,17 +176,12 @@ jobs:
           done
 
           # Create multi-arch manifest list
+          # NOTE: crane does not yet support annotations on index manifests,
+          # but per-arch images above carry the OCI annotations.
           crane index append \
             -t "${IMAGE}:${VERSION#v}" \
             -m "${IMAGE}:${VERSION#v}-amd64" \
             -m "${IMAGE}:${VERSION#v}-arm64"
-
-          # Add OCI annotations to the index
-          crane mutate "${IMAGE}:${VERSION#v}" \
-            --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
-            --annotation org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
-            --annotation org.opencontainers.image.version="${VERSION#v}" \
-            --annotation org.opencontainers.image.licenses="Apache-2.0"
 
           # Tag additional versions
           MAJOR_MINOR="$(echo "${VERSION#v}" | cut -d. -f1-2)"
