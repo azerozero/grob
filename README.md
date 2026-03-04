@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/azerozero/grob/actions/workflows/ci.yml/badge.svg)](https://github.com/azerozero/grob/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/azerozero/grob)](https://github.com/azerozero/grob/releases)
-[![License: ELv2](https://img.shields.io/badge/License-ELv2-blue.svg)](https://www.elastic.co/licensing/elastic-license)
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
 Grob sits between your AI coding assistant and your LLM providers. It routes requests to the right provider, falls back automatically when one is unavailable, and translates between Anthropic and OpenAI API formats.
 
