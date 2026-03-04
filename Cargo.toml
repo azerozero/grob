@@ -146,6 +146,7 @@ oauth = []
 tap = []
 compliance = []
 mcp = []
+harness = []
 test-util = []
 
 [package.metadata.cargo-machete]

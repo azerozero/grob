@@ -116,6 +116,10 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Doctor => commands::doctor::cmd_doctor(&config, &config_source).await,
         Commands::Upgrade => commands::upgrade::cmd_upgrade(&config, cli_args.config).await?,
+        #[cfg(feature = "harness")]
+        Commands::Harness { action } => {
+            commands::harness::cmd_harness(&config, action).await?;
+        }
     }
 
     Ok(())

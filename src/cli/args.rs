@@ -107,6 +107,51 @@ pub enum Commands {
     /// Uses SO_REUSEPORT to run both old and new processes on the same port.
     /// The new process binds → passes health check → old process receives SIGUSR1 → drains.
     Upgrade,
+    /// Record & replay sandwich testing harness
+    #[cfg(feature = "harness")]
+    Harness {
+        #[command(subcommand)]
+        action: HarnessAction,
+    },
+}
+
+/// Harness subcommands: record live traffic or replay from a tape file.
+#[cfg(feature = "harness")]
+#[derive(Subcommand)]
+pub enum HarnessAction {
+    /// Record HTTP traffic to a tape file (Ctrl+C to stop)
+    Record {
+        /// Output tape file path (.tape.jsonl)
+        #[arg(short, long)]
+        output: String,
+    },
+    /// Replay recorded traffic through grob with a mock backend
+    Replay {
+        /// Path to the tape file to replay
+        #[arg(short, long)]
+        tape: std::path::PathBuf,
+        /// Grob target URL
+        #[arg(short = 'u', long, default_value = "http://[::1]:13456")]
+        target: String,
+        /// Maximum concurrent requests
+        #[arg(short, long, default_value = "10")]
+        concurrency: usize,
+        /// Target queries per second (0 = unlimited)
+        #[arg(short, long, default_value = "0")]
+        qps: f64,
+        /// Mock backend port (0 = ephemeral)
+        #[arg(long, default_value = "0")]
+        mock_port: u16,
+        /// Mock backend simulated latency in ms
+        #[arg(long, default_value = "50")]
+        mock_latency_ms: u64,
+        /// Fraction of mock responses that return errors (0.0–1.0)
+        #[arg(long, default_value = "0.0")]
+        error_rate: f64,
+        /// Maximum duration in seconds (0 = no limit)
+        #[arg(long, default_value = "0")]
+        duration: u64,
+    },
 }
 
 #[derive(Subcommand)]

@@ -309,6 +309,27 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
     ));
     let app = app.layer(axum::middleware::from_fn(request_id_middleware));
 
+    // Tape recorder layer: outermost to capture raw HTTP before any transformation.
+    #[cfg(feature = "harness")]
+    let app = {
+        if let Ok(tape_path) = std::env::var("GROB_HARNESS_RECORD") {
+            match futures::executor::block_on(crate::features::harness::TapeWriter::new(
+                std::path::Path::new(&tape_path),
+            )) {
+                Ok(writer) => {
+                    info!(path = %tape_path, "Tape recorder enabled");
+                    app.layer(crate::features::harness::TapeRecorderLayer::new(writer))
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to open tape file, recording disabled");
+                    app
+                }
+            }
+        } else {
+            app
+        }
+    };
+
     app.with_state(state)
 }
 

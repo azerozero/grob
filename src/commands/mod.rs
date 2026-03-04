@@ -7,6 +7,8 @@ pub mod connect;
 pub mod doctor;
 pub mod env;
 pub mod exec;
+#[cfg(feature = "harness")]
+pub mod harness;
 pub mod init;
 pub mod model;
 pub mod preset;
