@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0](https://github.com/azerozero/grob/compare/v0.12.4...v0.13.0) - 2026-03-04
+
+### Added
+
+- add record & replay sandwich testing harness
+
+### Fixed
+
+- correct license badge from ELv2 to AGPL-3.0
+
 ## [0.12.4](https://github.com/azerozero/grob/compare/v0.12.3...v0.12.4) - 2026-03-03
 
 ### Fixed
