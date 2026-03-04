@@ -21,6 +21,7 @@ impl Default for CanaryGenerator {
 }
 
 impl CanaryGenerator {
+    /// Creates a generator with a monotonic counter starting at one.
     pub fn new() -> Self {
         Self {
             counter: AtomicU64::new(1),

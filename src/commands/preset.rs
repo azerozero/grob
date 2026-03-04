@@ -1,5 +1,6 @@
 use crate::{cli, preset};
 
+/// Lists all available presets with their source and active status.
 pub async fn cmd_preset_list(config: &cli::AppConfig) {
     println!("📦 Available Presets");
     println!();
@@ -20,12 +21,14 @@ pub async fn cmd_preset_list(config: &cli::AppConfig) {
     }
 }
 
+/// Prints detailed information about a named preset.
 pub fn cmd_preset_info(name: &str) {
     if let Err(e) = preset::print_preset_info(name) {
         eprintln!("❌ {}", e);
     }
 }
 
+/// Installs presets from a local path or remote URL source.
 pub async fn cmd_preset_install(source: &str) {
     println!("📥 Installing presets from {}...", source);
     match preset::install_from_source(source).await {
@@ -34,6 +37,7 @@ pub async fn cmd_preset_install(source: &str) {
     }
 }
 
+/// Applies a named preset to the local config file with credential setup.
 pub fn cmd_preset_apply(name: &str, config_source: &cli::ConfigSource) -> anyhow::Result<()> {
     let file_path = match config_source {
         cli::ConfigSource::File(p) => p.clone(),
@@ -58,6 +62,7 @@ pub fn cmd_preset_apply(name: &str, config_source: &cli::ConfigSource) -> anyhow
     Ok(())
 }
 
+/// Exports the current config file as a reusable named preset.
 pub fn cmd_preset_export(name: &str, config_source: &cli::ConfigSource) -> anyhow::Result<()> {
     let file_path = match config_source {
         cli::ConfigSource::File(p) => p.clone(),
@@ -74,6 +79,7 @@ pub fn cmd_preset_export(name: &str, config_source: &cli::ConfigSource) -> anyho
     Ok(())
 }
 
+/// Synchronizes presets from the configured remote sync URL.
 pub async fn cmd_preset_sync(config: &cli::AppConfig) {
     if let Some(ref url) = config.presets.sync_url {
         println!("🔄 Syncing presets from {}...", url);

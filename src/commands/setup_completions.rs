@@ -1,6 +1,7 @@
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
 
+/// Detects the current shell and installs completion scripts automatically.
 pub fn cmd_setup_completions<C: CommandFactory>() -> anyhow::Result<()> {
     let shell_str = std::env::var("SHELL").unwrap_or_default();
     let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());

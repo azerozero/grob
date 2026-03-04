@@ -1,6 +1,7 @@
 use clap::CommandFactory;
 use clap_complete::{generate, Shell};
 
+/// Prints shell completion script for the specified shell to stdout.
 pub fn cmd_completions<C: CommandFactory>(shell: Shell) {
     let mut cmd = C::command();
     generate(shell, &mut cmd, "grob", &mut std::io::stdout());

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 
+/// Binds the server socket and serves with optional TLS and graceful shutdown.
 pub(super) async fn bind_and_serve(
     config: &AppConfig,
     app: axum::Router,
@@ -82,6 +83,7 @@ pub(super) async fn bind_and_serve(
     Ok(())
 }
 
+/// Waits for all active requests to complete or times out after 30 seconds.
 pub(super) async fn drain_in_flight(state: &Arc<AppState>) {
     let drain_start = std::time::Instant::now();
     // NOTE: 30s matches Kubernetes default terminationGracePeriodSeconds and

@@ -1,5 +1,6 @@
 use crate::{cli, cli::Port, server};
 
+/// Starts the server in container mode with optional host and port overrides.
 pub async fn cmd_run(
     mut config: cli::AppConfig,
     config_source: cli::ConfigSource,

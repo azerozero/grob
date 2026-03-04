@@ -39,6 +39,7 @@ pub struct ProviderResponse {
     pub usage: Usage,
 }
 
+/// Tracks input and output token counts for a provider response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Usage {
     pub input_tokens: u32,

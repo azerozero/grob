@@ -1,5 +1,6 @@
 use crate::{cli, features, providers};
 
+/// Displays current month spend breakdown by provider and model.
 pub fn cmd_spend(config: &cli::AppConfig) {
     let spend = features::token_pricing::spend::load_spend_data();
     let budget = &config.budget;

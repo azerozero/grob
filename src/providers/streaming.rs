@@ -61,6 +61,7 @@ pub struct SseStream<S> {
 }
 
 impl<S> SseStream<S> {
+    /// Wraps an inner byte stream for SSE event parsing.
     pub fn new(stream: S) -> Self {
         Self {
             inner: stream,
@@ -179,6 +180,7 @@ pub struct LoggingSseStream<S> {
 }
 
 impl<S> LoggingSseStream<S> {
+    /// Wraps a stream to track usage metrics and log final statistics.
     pub fn new(stream: S, provider_name: String, model_name: String) -> Self {
         Self {
             inner: stream,

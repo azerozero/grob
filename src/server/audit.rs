@@ -16,6 +16,7 @@ pub struct AuditEntryBuilder {
 }
 
 impl AuditEntryBuilder {
+    /// Creates a builder with required audit fields populated.
     pub fn new(
         tenant_id: &str,
         action: crate::security::audit_log::AuditEvent,
@@ -37,27 +38,32 @@ impl AuditEntryBuilder {
         }
     }
 
+    /// Sets the DLP rules triggered during the request.
     pub fn dlp_rules(mut self, rules: Vec<String>) -> Self {
         self.dlp_rules = rules;
         self
     }
 
+    /// Sets the model name for EU AI Act audit compliance.
     pub fn model(mut self, model: impl Into<String>) -> Self {
         self.model_name = Some(model.into());
         self
     }
 
+    /// Sets input and output token counts for audit logging.
     pub fn tokens(mut self, input: u32, output: u32) -> Self {
         self.input_tokens = Some(input);
         self.output_tokens = Some(output);
         self
     }
 
+    /// Sets the risk level classification for the audit entry.
     pub fn risk(mut self, level: crate::security::audit_log::RiskLevel) -> Self {
         self.risk_level = Some(level);
         self
     }
 
+    /// Consumes the builder and produces a finalized [`AuditEntry`].
     pub fn build(self) -> crate::security::audit_log::AuditEntry {
         use crate::security::audit_log::{AuditEntry, Classification};
         AuditEntry {

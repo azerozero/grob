@@ -163,7 +163,77 @@ actual_model = "mistralai/devstral-2512"
 priority = 2
 ```
 
-## API compatibility
+## Features
+
+### Multi-provider fallback
+
+Each model maps to a priority-ordered provider chain. If the primary returns a 5xx, 429, or times out, Grob retries the next provider with exponential backoff -- no client-side changes needed. Circuit breakers prevent cascading failures by temporarily removing unhealthy providers.
+
+### DLP (Data Loss Prevention)
+
+Built-in secret scanning (API keys, tokens, credentials), PII detection (emails, phone numbers, names), canary token injection, prompt injection detection, and URL exfiltration blocking. All configurable per-rule with `redact`, `block`, or `warn` actions.
+
+```toml
+[dlp]
+enabled = true
+secrets = "redact"    # Scan for API keys, tokens, credentials
+pii = "warn"          # Detect emails, phone numbers
+names = "pseudonymize" # Replace real names with consistent pseudonyms
+```
+
+### MCP tool matrix
+
+Grob evaluates which LLM providers handle which tools best. A background bench engine periodically probes providers with standardized test cases and builds a scoring matrix. The MCP JSON-RPC server exposes tool routing recommendations.
+
+### Fan-out (multi-provider racing)
+
+Send the same request to multiple providers in parallel and pick the fastest, cheapest, or best-quality response (scored by a judge model).
+
+```toml
+[[models]]
+name = "best-answer"
+strategy = "fan_out"
+
+[models.fan_out]
+mode = "fastest"   # or "best_quality", "weighted"
+```
+
+### Spend tracking and budgets
+
+Persistent monthly spend tracking per provider and model (stored in redb). Set hard caps to prevent bill shock:
+
+```toml
+[budget]
+monthly_limit_usd = 100.0
+warn_at_percent = 80
+```
+
+### OpenAI compatibility
+
+Both `/v1/messages` (Anthropic) and `/v1/chat/completions` (OpenAI) are fully supported with streaming and tool calling. Any OpenAI-compatible client (Aider, OpenCode, Kilo, Continue) works out of the box.
+
+### Record & replay testing (harness)
+
+Capture live HTTP traffic, then replay it through Grob with a mock backend to stress-test the full pipeline. Feature-gated (`--features harness`).
+
+```bash
+GROB_HARNESS_RECORD=session.tape.jsonl grob start   # Record
+grob harness replay --tape session.tape.jsonl --concurrency 100  # Replay
+```
+
+### Also included
+
+- **Rate limiting** -- Per-tenant token bucket with configurable RPS and burst
+- **Signed audit log** -- ECDSA-P256 or HMAC-SHA256 signed entries for compliance (EU AI Act Article 12)
+- **Adaptive provider scoring** -- EWMA latency + rolling success rate to rank providers dynamically
+- **Response caching** -- Automatic dedup for temperature=0 requests (saves tokens and latency)
+- **Native TLS + ACME** -- Built-in HTTPS with optional Let's Encrypt auto-certificates
+- **Zero-downtime upgrades** -- SO_REUSEPORT + graceful drain for hot restarts
+- **OAuth PKCE** -- Browser-based login for Anthropic Max and Gemini Pro subscriptions
+- **Prometheus metrics** -- `/metrics` endpoint with request/latency/spend counters
+- **Prompt-based routing** -- Regex rules to route specific prompts to specialized models
+
+## API examples
 
 Grob exposes two endpoints:
 
@@ -172,7 +242,46 @@ Grob exposes two endpoints:
 | `/v1/messages` | Anthropic | Yes | Yes |
 | `/v1/chat/completions` | OpenAI | Yes | Yes |
 
-All requests are translated to Anthropic format internally, then routed to the appropriate provider.
+### Anthropic format (curl)
+
+```bash
+curl -X POST http://127.0.0.1:13456/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: any-key" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 1024,
+    "messages": [{"role": "user", "content": "What is 2+2?"}]
+  }'
+```
+
+### OpenAI format (curl)
+
+```bash
+curl -X POST http://127.0.0.1:13456/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer any-key" \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "messages": [{"role": "user", "content": "What is 2+2?"}]
+  }'
+```
+
+### Streaming
+
+```bash
+curl -X POST http://127.0.0.1:13456/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: any-key" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 1024,
+    "stream": true,
+    "messages": [{"role": "user", "content": "Write a haiku about proxies"}]
+  }'
+```
 
 ## CLI reference
 
@@ -185,7 +294,11 @@ grob spend                Show current month's spend breakdown
 grob run                  Run in container mode (0.0.0.0, JSON logs, no PID)
 grob model                Show configured models and routing
 grob validate             Test all providers with real API calls
+grob exec -- <cmd>        Launch a command behind the Grob proxy (auto start/stop)
 grob preset <subcommand>  Manage presets (list, info, apply, export, install, sync)
+grob doctor               Run diagnostic checks on installation
+grob connect [provider]   Set up provider credentials interactively
+grob env                  Check required environment variables
 ```
 
 ## Container
@@ -202,10 +315,14 @@ The binary bundles TLS certificates via rustls, so no OS layer is needed.
 
 | Document | Description |
 |----------|-------------|
+| [Getting Started](docs/tutorials/getting-started.md) | Step-by-step tutorial |
 | [Configuration Reference](docs/CONFIGURATION.md) | All config options |
 | [Provider Setup](docs/PROVIDERS.md) | Per-provider setup guides |
 | [OAuth Setup](docs/OAUTH_SETUP.md) | OAuth for Anthropic, Gemini |
 | [OpenAI Compatibility](docs/openai-compatibility.md) | `/v1/chat/completions` details |
+| [Security](docs/explanation/security.md) | DLP, rate limiting, audit, circuit breakers |
+| [Architecture](docs/ARCHITECTURE.md) | Module layout and design decisions |
+| [CLI Reference](docs/reference/cli.md) | Full command documentation |
 | [Design Principles](docs/design-principles.md) | Grob's design philosophy |
 
 ## License

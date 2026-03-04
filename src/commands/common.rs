@@ -1,9 +1,13 @@
 use std::process::Command;
 
+/// Grace period in milliseconds after stopping a process before continuing.
 pub const PROCESS_TRANSITION_GRACE_MS: u64 = 500;
+/// Interval in milliseconds between consecutive health poll attempts.
 pub const HEALTH_POLL_INTERVAL_MS: u64 = 100;
+/// Maximum number of health poll attempts before declaring failure.
 pub const HEALTH_POLL_MAX_ATTEMPTS: u32 = 50; // 50 * 100ms = 5s max
 
+/// Checks whether the Grob service at the given URL is healthy.
 pub async fn is_grob_healthy(base_url: &str) -> bool {
     let url = format!("{}/health", base_url);
     match reqwest::Client::new()
@@ -17,6 +21,7 @@ pub async fn is_grob_healthy(base_url: &str) -> bool {
     }
 }
 
+/// Polls the health endpoint repeatedly until success or exhaustion.
 pub async fn poll_health(base_url: &str, max_attempts: u32, interval_ms: u64) -> bool {
     for _ in 0..max_attempts {
         if is_grob_healthy(base_url).await {
@@ -27,6 +32,7 @@ pub async fn poll_health(base_url: &str, max_attempts: u32, interval_ms: u64) ->
     false
 }
 
+/// Sends SIGTERM to the given process and waits for the grace period.
 #[cfg(unix)]
 pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     use nix::sys::signal::{kill, Signal};
@@ -40,6 +46,7 @@ pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Terminates the given process via `taskkill` and waits for the grace period.
 #[cfg(windows)]
 pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     let output = std::process::Command::new("taskkill")
@@ -57,6 +64,7 @@ pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Starts the Grob server in the foreground with signal handling.
 pub async fn start_foreground(
     config: crate::cli::AppConfig,
     config_source: crate::cli::ConfigSource,
@@ -115,6 +123,7 @@ pub async fn start_foreground(
     result
 }
 
+/// Spawns the Grob server as a detached background process.
 pub fn spawn_background_service(port: Option<u16>, config: Option<String>) -> anyhow::Result<()> {
     let exe_path = std::env::current_exe()?;
     let mut cmd = Command::new(&exe_path);

@@ -154,7 +154,7 @@ fn apply_config(
     Ok(())
 }
 
-/// Spawn the background hot-reload loop.
+/// Spawns a background task that polls and applies signed config updates.
 pub fn spawn_hot_reload(
     settings: SignedConfigSettings,
     hot_config: SharedHotConfig,

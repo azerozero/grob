@@ -370,6 +370,7 @@ pub fn load_spend_data() -> SpendData {
     }
 }
 
+/// Returns the current year-month as a "YYYY-MM" string.
 pub fn current_month() -> String {
     chrono::Local::now().format("%Y-%m").to_string()
 }

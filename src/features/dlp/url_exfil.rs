@@ -52,6 +52,7 @@ pub struct UrlExfilScanner {
 }
 
 impl UrlExfilScanner {
+    /// Creates a scanner with domain lists and a fast byte pre-filter.
     pub fn new(config: UrlExfilConfig, hot_config: SharedHotConfig) -> Self {
         let mut prefix_bytes = [false; 256];
         prefix_bytes[b'!' as usize] = true; // md image

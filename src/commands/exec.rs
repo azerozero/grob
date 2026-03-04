@@ -1,6 +1,7 @@
 use super::common::*;
 use crate::{cli, instance};
 
+/// Runs a command with Grob as the LLM proxy, auto-starting if needed.
 pub async fn cmd_exec(
     config: &cli::AppConfig,
     port: Option<u16>,

@@ -236,12 +236,13 @@ pub async fn oauth_list_tokens(
     Ok(Json(token_infos))
 }
 
-/// Delete OAuth token
+/// Payload for deleting a stored OAuth token by provider.
 #[derive(Debug, Deserialize)]
 pub struct DeleteTokenRequest {
     pub provider_id: String,
 }
 
+/// Deletes an OAuth token for the specified provider.
 pub async fn oauth_delete_token(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeleteTokenRequest>,

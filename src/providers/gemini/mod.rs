@@ -50,6 +50,7 @@ struct PreparedRequest {
 }
 
 impl GeminiProvider {
+    /// Creates a Gemini provider with custom headers and optional Vertex AI fields.
     pub fn new(
         params: super::ProviderParams,
         custom_headers: HashMap<String, String>,

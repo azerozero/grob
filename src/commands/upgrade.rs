@@ -1,6 +1,7 @@
 use super::common::*;
 use crate::{cli, instance, pid};
 
+/// Performs a zero-downtime upgrade by replacing the running instance.
 pub async fn cmd_upgrade(
     config: &cli::AppConfig,
     cli_config: Option<String>,

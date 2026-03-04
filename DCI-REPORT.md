@@ -1,33 +1,33 @@
 # Documentation Completeness Index (DCI) Report
 
-**Project**: Grob v0.12.2
-**Date**: 2026-03-03
+**Project**: Grob v0.12.4
+**Date**: 2026-03-04
 **Auditor**: Doc Forge (automated)
 
-## DCI Score: 8.2 / 10
+## DCI Score: 8.1 / 10
 
 ### Scoring Breakdown
 
 | # | Item | Weight | Score | Weighted | Notes |
 |---|------|--------|-------|----------|-------|
 | 1 | Project overview (README) | 5 | 1.00 | 5.00 | Excellent. Clear purpose, install methods, quick start, provider table, CLI ref, presets, API compat. |
-| 2 | Getting started / quickstart | 5 | 0.85 | 4.25 | QUICKSTART.md + tutorials/getting-started.md cover both fast and hand-holding paths. **Fixed**: IPv6 address corrected. |
-| 3 | Architecture overview | 4 | 1.00 | 4.00 | Excellent. ARCHITECTURE.md has full request flow diagram, module table, design decisions. **Fixed**: stale file paths (encryption.rs, schema_validate.rs, openai_compat.rs). |
-| 4 | API reference (public surface) | 5 | 0.75 | 3.75 | OpenAPI spec exists. Doc comments cover ~37% (127/341). Trait coverage is good; commands/handlers are gaps. |
-| 5 | Configuration reference | 3 | 1.00 | 3.00 | Comprehensive CONFIGURATION.md covers all sections. **Fixed**: spend storage path corrected (grob.db). |
+| 2 | Getting started / quickstart | 5 | 0.85 | 4.25 | QUICKSTART.md + tutorials/getting-started.md cover both fast and hand-holding paths. |
+| 3 | Architecture overview | 4 | 1.00 | 4.00 | ARCHITECTURE.md has full request flow diagram, module table, design decisions. **Fixed**: stale provider paths (openai.rs, gemini.rs, preset.rs), added harness module. |
+| 4 | API reference (public surface) | 5 | 0.65 | 3.25 | OpenAPI spec exists. Doc comments cover ~28% (147/522). Coverage regression: codebase grew from 341 to 522 public items but only 20 new items were documented. |
+| 5 | Configuration reference | 3 | 1.00 | 3.00 | Comprehensive CONFIGURATION.md covers all sections. |
 | 6 | Error handling guide | 3 | 0.85 | 2.55 | TROUBLESHOOTING.md + reference/errors.md exist and are accurate. |
 | 7 | Deployment / operations guide | 3 | 0.75 | 2.25 | how-to/deploy.md covers Docker, K8s, systemd, Prometheus. |
 | 8 | Contributing guide | 2 | 0.75 | 1.50 | how-to/contribute.md covers workflow, CI table, CLA. No root CONTRIBUTING.md. |
 | 9 | Changelog / release notes | 2 | 1.00 | 2.00 | Auto-generated CHANGELOG.md with Keep a Changelog format. |
-| 10 | License | 1 | 1.00 | 1.00 | AGPL-3.0, clear. LICENSING.md covers dual-license tiers. CLA.md for contributors. |
+| 10 | License | 1 | 0.90 | 0.90 | AGPL-3.0, clear. LICENSING.md covers dual-license tiers. **Note**: OCI annotation in release.yml incorrectly says Apache-2.0. |
 | 11 | CI/CD documentation | 2 | 0.75 | 1.50 | CI pipeline table in how-to/contribute.md. Workflows documented by name. |
 | 12 | Security documentation | 3 | 0.85 | 2.55 | explanation/security.md covers all layers. |
-| 13 | LLM context file | 3 | 1.00 | 3.00 | **Updated**: AGENTS.md refreshed to v0.12.2 with new commands, corrected storage paths, GrobStore concept. llms.txt updated with provider_loop, storage, DLP, MCP source links. |
+| 13 | LLM context file | 3 | 1.00 | 3.00 | **Updated**: AGENTS.md refreshed to v0.12.4 with harness feature, LOC count, feature flag update. llms.txt updated with harness source link. |
 | 14 | Examples / tutorials | 4 | 0.60 | 2.40 | 6 TOML examples, 8 presets, getting-started tutorial. Still lacks code examples (Python SDK, curl scripts). |
-| 15 | Inline doc coverage (public API) | 4 | 0.50 | 2.00 | 127/341 public items documented (~37%). Good trait/provider coverage. Commands module (32+ items, 0 docs) is the largest gap. |
+| 15 | Inline doc coverage (public API) | 4 | 0.40 | 1.60 | 147/522 public items documented (~28%). Regression from 37% due to codebase growth without proportional doc additions. Commands (2/106), cli (8/72), models (2/36) are largest gaps. |
 | 16 | Cross-references & linking | 2 | 0.75 | 1.50 | docs/index.md, llms.txt provide navigation. Design doc template exists. |
 
-**Totals**: Weighted score = 41.75 / 51.00 = **8.19** (rounded to **8.2**)
+**Totals**: Weighted score = 41.25 / 51.00 = **8.09** (rounded to **8.1**)
 
 ### Score progression
 
@@ -36,66 +36,73 @@
 | v0.9.0 (pre-audit) | ~5.0 | Missing AGENTS.md, llms.txt, Diataxis structure, many docs stale |
 | v0.11.1 (first audit) | 7.6 | Diataxis docs generated, AGENTS.md + llms.txt added |
 | v0.11.2 (second audit) | 8.1 | Accuracy fixes, missing config sections, security expansion, design template |
-| v0.12.2 (this audit) | 8.2 | Version bump, storage path corrections, stale file path fixes, IPv6 accuracy |
+| v0.12.2 (third audit) | 8.2 | Version bump, storage path corrections, stale file path fixes, IPv6 accuracy |
+| v0.12.4 (this audit) | 8.1 | Score decreased due to inline doc coverage regression (codebase grew 53% in public items without proportional documentation). Fixed stale paths and added new harness feature documentation. |
 
 ## Documentation Debt
 
 ```
-Public items:       341
-Documented items:   127
-Doc debt:           63% (Red zone)
+Public items:       522
+Documented items:   147
+Doc debt:           72% (Red zone -- worsened from 63%)
 ```
 
-The 63% doc debt is concentrated in:
-- `src/commands/` (32+ public items, 0 documented) -- CLI command implementations
-- `src/server/handlers.rs` and `src/server/dispatch/` -- core request handling
-- `src/cli/config.rs` -- config struct fields (partially documented via serde defaults)
-- `src/features/mcp/` -- MCP tool matrix internals
-- `src/security/` -- security module helpers
+### Per-module breakdown
+
+| Module | Documented / Total | Coverage |
+|--------|--------------------|----------|
+| `src/commands/` | 2 / 106 | 2% |
+| `src/cli/` | 8 / 72 | 11% |
+| `src/security/` | 24 / 76 | 32% |
+| `src/providers/` | 18 / 74 | 24% |
+| `src/server/` | 27 / 74 | 36% |
+| `src/features/` | 46 / 151 | 30% |
+| `src/auth/` | 4 / 36 | 11% |
+| `src/models/` | 2 / 36 | 6% |
+| `src/preset/` | 36 / 50 | 72% |
+| `src/cache/` | 6 / 14 | 43% |
+| `src/storage/` | 4 / 6 | 67% |
+| `src/router/` | 0 / 4 | 0% |
+| `src/message_tracing/` | 2 / 2 | 100% |
 
 ## Accuracy Issues Found and Fixed
 
 | Issue | Location | Fix |
 |-------|----------|-----|
-| `oauth_tokens.json` path stale | OAUTH_SETUP.md, PROVIDERS.md | Changed to `grob.db` (redb); legacy JSON auto-migrated |
-| `spend.json` path stale | CONFIGURATION.md | Changed to `grob.db (redb)` with migration note |
-| `src/server/openai_compat.rs` path stale | CLAUDE.md, ARCHITECTURE.md | Changed to `src/server/openai_compat/` (now a directory) |
-| `security::encryption` module listed | ARCHITECTURE.md | Removed (file no longer exists); added provider_scorer, risk |
-| `security::schema_validate` module listed | ARCHITECTURE.md | Removed (file no longer exists) |
-| Default bind address `127.0.0.1` in tutorial | tutorials/getting-started.md | Changed to `[::1]` with IPv4 fallback note |
-| Version stale at v0.11.2 | docs/index.md | Updated to v0.12.2 |
-| Missing `storage` module | CLAUDE.md module table | Added `src/storage/` entry |
-| AGENTS.md missing new commands | AGENTS.md | Added connect, init, config-diff, env, setup-completions |
-| AGENTS.md missing GrobStore concept | AGENTS.md | Added GrobStore domain concept |
-| llms.txt missing source entries | llms.txt | Added provider_loop, storage, spend, DLP, MCP source links |
+| `src/providers/openai.rs` path stale | ARCHITECTURE.md | Changed to `src/providers/openai/mod.rs` (now a directory with submodules) |
+| `src/providers/gemini.rs` path stale | ARCHITECTURE.md | Changed to `src/providers/gemini/mod.rs` (now a directory with submodules) |
+| `src/preset.rs` path stale | ARCHITECTURE.md | Changed to `src/preset/mod.rs` (now a directory) |
+| Version stale at v0.12.2 | docs/index.md | Updated to v0.12.4 |
+| Harness feature undocumented | AGENTS.md, llms.txt, CLAUDE.md, ARCHITECTURE.md, reference/cli.md | Added harness to all docs |
+| Config reload description inaccurate | CLAUDE.md | Fixed: `/api/config/reload` does atomic swap without restart |
+| Missing `harness` feature flag | AGENTS.md | Added to feature flags description, noted opt-in nature |
+| OCI license annotation wrong | `.github/workflows/release.yml` | **Not fixed** (code bug, not doc bug): says `Apache-2.0`, should be `AGPL-3.0-only` |
 
 ## What Was Generated or Updated
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `AGENTS.md` | Updated | v0.12.2: new commands, GrobStore, storage path fix, trailing args gotcha |
-| `llms.txt` | Updated | Added 5 source entries (provider_loop, storage, spend, DLP, MCP) |
-| `CLAUDE.md` | Updated | Fixed openai_compat path, added storage module to table |
-| `docs/index.md` | Updated | Version bumped to v0.12.2 |
-| `docs/CONFIGURATION.md` | Updated | Fixed spend storage path (grob.db) |
-| `docs/ARCHITECTURE.md` | Updated | Fixed openai_compat path, removed stale security modules, added real ones |
-| `docs/tutorials/getting-started.md` | Updated | Fixed bind address to IPv6, added IPv4 note |
-| `docs/OAUTH_SETUP.md` | Updated | Storage references updated to grob.db |
-| `docs/PROVIDERS.md` | Updated | Token storage reference updated to grob.db |
+| `AGENTS.md` | Updated | v0.12.4: added harness domain concept, harness commands, harness gotcha, LOC update (~33K), feature flag update |
+| `llms.txt` | Updated | Added harness source link |
+| `CLAUDE.md` | Updated | Added harness module to table, fixed config reload description |
+| `docs/index.md` | Updated | Version bumped to v0.12.4 |
+| `docs/ARCHITECTURE.md` | Updated | Fixed 3 stale module paths (openai, gemini, preset), added harness module |
+| `docs/reference/cli.md` | Updated | Added full `grob harness` command documentation with all flags |
 | `DCI-REPORT.md` | Updated | This report |
 
 ## Top 3 Highest-Impact Improvements Still Needed
 
-### 1. Inline doc comment coverage (Impact: High, Effort: Medium)
+### 1. Inline doc comment coverage (Impact: Critical, Effort: Medium)
 
-63% of public items lack doc comments. The most impactful targets:
+Doc coverage has regressed from 37% to 28% as the codebase grew. The 72% doc debt is concentrated in:
 
-- **`src/commands/*.rs`** (32+ items, 0 docs) -- every CLI command function is undocumented
-- **`src/server/dispatch/provider_loop.rs`** -- the core fallback/retry logic
-- **`src/server/handlers.rs`** -- HTTP request handler functions
-- **`src/features/mcp/`** -- MCP is a newer feature with sparse inline docs
+- **`src/commands/*.rs`** (2/106 documented) -- every CLI command function is essentially undocumented
+- **`src/models/mod.rs`** (2/36) -- core Anthropic request/response types lack docs
+- **`src/cli/config.rs`** (8/72) -- config struct fields are poorly documented
+- **`src/auth/`** (4/36) -- OAuth/JWT internals
+- **`src/router/mod.rs`** (0/4) -- not a single documented public item
 
-Adding `#![warn(missing_docs)]` to `src/lib.rs` would prevent the debt from growing.
+Adding `#![warn(missing_docs)]` to `src/lib.rs` would prevent the debt from growing further.
 
 ### 2. Working code examples (Impact: High, Effort: Low)
 
@@ -107,18 +114,16 @@ The documentation has config examples but no runnable code:
 
 These should go in `docs/examples/` or inline in tutorials/getting-started.md.
 
-### 3. Automated doc validation in CI (Impact: Medium, Effort: Low)
+### 3. Fix OCI license annotation (Impact: Medium, Effort: Trivial)
 
-- Add `lychee` or `markdown-link-check` to CI to catch broken links
-- Add a CI step that validates TOML snippets in docs by parsing them
-- `cargo test --doc` already runs in CI
-- Consider `cargo doc --document-private-items` as a doc coverage metric
+The release workflow (`.github/workflows/release.yml` line 175) annotates container images with `org.opencontainers.image.licenses="Apache-2.0"` but the actual license is AGPL-3.0-only. This is a one-line fix.
 
 ## Recommended Next Steps (ordered by effort/impact ratio)
 
-1. **Add `#![warn(missing_docs)]` to `src/lib.rs`** -- prevents new undocumented public items. 1 line change.
-2. **Document `src/commands/` module** -- 32+ public functions with 0 doc comments. These are the entry points users interact with.
-3. **Add curl example to getting-started.md** -- show a raw API call to prove Grob is working.
-4. **Add `lychee` link checking to CI** -- catches broken links in docs automatically.
-5. **Add `CONTRIBUTING.md` at repo root** -- GitHub expects this file at the root for the "Contributing" tab. Currently only `docs/how-to/contribute.md` exists.
-6. **Move legacy flat docs to Diataxis paths** -- `CONFIGURATION.md` -> `reference/config.md`, `TROUBLESHOOTING.md` -> `how-to/troubleshoot.md` (create symlinks to avoid breaking existing links).
+1. **Fix OCI license annotation** -- 1 line change in `.github/workflows/release.yml` (Apache-2.0 -> AGPL-3.0-only).
+2. **Add `#![warn(missing_docs)]` to `src/lib.rs`** -- prevents new undocumented public items. 1 line change.
+3. **Document `src/commands/` module** -- 106 public items with 2 docs. These are the entry points users interact with.
+4. **Document `src/models/mod.rs`** -- 36 public types that every developer interacts with, only 2 documented.
+5. **Add curl example to getting-started.md** -- show a raw API call to prove Grob is working.
+6. **Add `lychee` link checking to CI** -- catches broken links in docs automatically.
+7. **Add `CONTRIBUTING.md` at repo root** -- GitHub expects this file at the root for the "Contributing" tab.

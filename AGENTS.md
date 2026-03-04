@@ -4,7 +4,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Stack
 
-- **Language**: Rust 2021 edition (~32K LOC)
+- **Language**: Rust 2021 edition (~33K LOC)
 - **Runtime**: Tokio async
 - **HTTP framework**: Axum 0.7 with Tower middleware
 - **HTTP client**: reqwest 0.12 (HTTP/2, rustls)
@@ -36,12 +36,13 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 - **MCP**: Model Context Protocol tool matrix -- tool-calling capability catalogue with per-provider reliability scoring.
 - **Subagent model**: A system prompt tag (`GROB-SUBAGENT-MODEL`) that overrides model selection for nested agent calls.
 - **GrobStore**: Unified redb storage backend (`~/.grob/grob.db`) for OAuth tokens and spend. Migrates from legacy JSON files on first open.
+- **Harness**: Record & replay sandwich testing. Captures raw HTTP traffic as `.tape.jsonl` files, then replays through grob with a mock backend to exercise the full pipeline (DLP, routing, cache, streaming, etc.).
 
 ## Key Patterns
 
 - **Config is static at runtime**: Loaded once from TOML into `Arc`. `/api/config/reload` swaps config atomically without restart. In-flight requests continue on old snapshot.
 - **Trait-driven dispatch**: 7+ traits in `src/traits.rs` (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, Tracer, AuditWriter, EventTap, ProviderAvailability) enable testing via mock implementations.
-- **Feature flags**: `dlp`, `oauth`, `tap`, `compliance`, `mcp` -- all default-on. Disable at compile time for smaller binaries.
+- **Feature flags**: `dlp`, `oauth`, `tap`, `compliance`, `mcp` -- all default-on. `harness` is opt-in (compile with `--features harness`). Disable features at compile time for smaller binaries.
 - **Error types**: `ProviderError` (thiserror) for provider failures, `AppError` for HTTP responses, `anyhow` for CLI/startup.
 - **Streaming-first**: SSE streaming is the primary path. DLP scanning is chunk-based, not buffered.
 - **Environment variable expansion**: API keys in TOML support `$ENV_VAR` syntax resolved at startup.
@@ -79,6 +80,10 @@ cargo run -- config-diff   # Compare config against preset
 cargo run -- env           # Check required env vars
 cargo run -- setup-completions # Install shell completions
 
+# Harness (record & replay testing, requires --features harness)
+cargo run --features harness -- harness record -o traffic.tape.jsonl
+cargo run --features harness -- harness replay -t traffic.tape.jsonl
+
 # Presets
 cargo run -- preset list
 cargo run -- preset apply medium
@@ -107,3 +112,4 @@ cargo bench --bench hotpath
 - `grob exec -- <cmd>` is the recommended way to use Grob. It auto-starts, sets env vars, runs your tool, and auto-stops.
 - Budget exceeded returns HTTP 402, not 429. Rate limit exceeded returns 429.
 - `grob -- <cmd>` is shorthand for `grob exec -- <cmd>` (trailing args syntax).
+- The `harness` feature flag is opt-in (not in `default`). Build with `cargo build --features harness` to enable `grob harness record/replay`. Set `GROB_HARNESS_RECORD=<path>` to enable the tape recorder middleware at runtime.

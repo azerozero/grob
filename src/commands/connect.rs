@@ -1,5 +1,6 @@
 use crate::{cli, preset};
 
+/// Launches interactive credential setup for one or all providers.
 pub fn cmd_connect(
     config: &cli::AppConfig,
     config_source: &cli::ConfigSource,

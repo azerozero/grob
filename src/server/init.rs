@@ -17,6 +17,7 @@ pub(crate) type SecurityServices = (
     Option<Arc<crate::cache::ResponseCache>>,
 );
 
+/// Initializes storage, token store, and provider registry.
 pub(crate) async fn init_core_services(
     config: &AppConfig,
 ) -> anyhow::Result<(Arc<GrobStore>, TokenStore, Arc<ProviderRegistry>)> {
@@ -87,6 +88,7 @@ pub(crate) async fn init_core_services(
     Ok((grob_store, token_store, provider_registry))
 }
 
+/// Initializes tracing, spend tracker, pricing table, and Prometheus.
 pub(crate) async fn init_observability(
     config: &AppConfig,
     grob_store: &Arc<GrobStore>,
@@ -116,6 +118,7 @@ pub(crate) async fn init_observability(
     Ok((message_tracer, spend_tracker, pricing_table, metrics_handle))
 }
 
+/// Initializes the DLP session manager and optional hot-reload loop.
 pub(crate) fn init_dlp(config: &AppConfig) -> Option<Arc<DlpSessionManager>> {
     #[cfg(feature = "dlp")]
     {
@@ -153,6 +156,7 @@ pub(crate) fn init_dlp(config: &AppConfig) -> Option<Arc<DlpSessionManager>> {
     }
 }
 
+/// Initializes JWT validation and spawns the JWKS refresh loop.
 pub(crate) async fn init_auth(
     config: &AppConfig,
 ) -> anyhow::Result<Option<Arc<crate::auth::JwtValidator>>> {
@@ -197,6 +201,7 @@ pub(crate) async fn init_auth(
     Ok(Some(validator))
 }
 
+/// Initializes rate limiter, circuit breakers, audit log, and cache.
 pub(crate) fn init_security(config: &AppConfig) -> anyhow::Result<SecurityServices> {
     let security_enabled = config.security.enabled;
     let rate_limiter = if security_enabled {
@@ -319,6 +324,7 @@ pub(crate) fn init_mcp(
     Some(state)
 }
 
+/// Performs initial preset sync and spawns background sync if configured.
 pub(crate) async fn maybe_preset_sync(config: &AppConfig) {
     if !config.presets.auto_sync {
         return;

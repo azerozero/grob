@@ -141,3 +141,36 @@ grob completions fish > ~/.config/fish/completions/grob.fish
 ### `grob setup-completions`
 
 Automatically install shell completions for the current shell (detects zsh, bash, or fish).
+
+### `grob harness` (requires `--features harness`)
+
+Record & replay sandwich testing harness. Requires building with the `harness` feature flag.
+
+| Subcommand | Description |
+|------------|-------------|
+| `grob harness record -o <path>` | Prints instructions for recording traffic via `GROB_HARNESS_RECORD` env var |
+| `grob harness replay -t <tape>` | Replay recorded traffic through grob with a mock backend |
+
+Replay flags:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-t, --tape <PATH>` | (required) | Path to `.tape.jsonl` file |
+| `-u, --target <URL>` | `http://[::1]:13456` | Grob target URL |
+| `-c, --concurrency <N>` | `10` | Maximum concurrent requests |
+| `-q, --qps <N>` | `0` (unlimited) | Target queries per second |
+| `--mock-port <PORT>` | `0` (ephemeral) | Mock backend port |
+| `--mock-latency-ms <MS>` | `50` | Simulated latency |
+| `--error-rate <RATE>` | `0.0` | Fraction of mock errors (0.0-1.0) |
+| `--duration <SECS>` | `0` (no limit) | Maximum replay duration |
+
+```bash
+# Build with harness feature
+cargo build --features harness
+
+# Record traffic
+GROB_HARNESS_RECORD=traffic.tape.jsonl grob start
+
+# Replay against a running grob instance
+grob harness replay -t traffic.tape.jsonl -c 20 --qps 50
+```

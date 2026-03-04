@@ -183,6 +183,7 @@ pub struct CircuitBreakerRegistry {
 }
 
 impl CircuitBreakerRegistry {
+    /// Creates a registry with default circuit breaker thresholds.
     pub fn new() -> Self {
         Self::with_config(CircuitBreakerConfig::default())
     }

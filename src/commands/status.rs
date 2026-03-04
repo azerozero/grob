@@ -1,5 +1,6 @@
 use crate::{cli, features, instance, preset, providers};
 
+/// Prints service status, router config, providers, models, and spend.
 pub async fn cmd_status(config: &cli::AppConfig) -> anyhow::Result<()> {
     let (running, pid_info) = if let Some(pid) =
         instance::find_instance_pid(&config.server.host, config.server.port.value()).await

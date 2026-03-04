@@ -63,6 +63,7 @@ pub struct AnthropicToOpenAIStream {
 }
 
 impl AnthropicToOpenAIStream {
+    /// Creates a stream translator for the given model name.
     pub fn new(model: String) -> Self {
         Self {
             id: format!("chatcmpl-{}", uuid::Uuid::new_v4()),

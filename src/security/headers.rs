@@ -29,11 +29,13 @@ pub struct SecurityHeadersConfig {
     pub xss_protection: bool,
 }
 
+/// X-Frame-Options policy for clickjacking protection.
 #[derive(Debug, Clone)]
 pub enum FrameOption {
     Deny,
 }
 
+/// Controls how much referrer information is sent with requests.
 #[derive(Debug, Clone)]
 pub enum ReferrerPolicy {
     NoReferrer,
@@ -59,6 +61,7 @@ impl Default for SecurityHeadersConfig {
 
 /// Security headers for API mode (minimal, no CSP needed for API)
 impl SecurityHeadersConfig {
+    /// Returns a minimal security headers config suitable for API endpoints.
     pub fn api_mode() -> Self {
         Self {
             hsts_enabled: true,

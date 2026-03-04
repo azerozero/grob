@@ -26,6 +26,7 @@ impl<S> TapStream<S>
 where
     S: Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send,
 {
+    /// Wraps an inner stream to duplicate chunks to the tap channel.
     pub fn new(inner: S, sender: Arc<TapSender>, request_id: String) -> Self {
         Self {
             inner,

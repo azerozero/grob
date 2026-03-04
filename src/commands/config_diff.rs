@@ -1,5 +1,6 @@
 use crate::{cli, preset};
 
+/// Displays a section-level diff between local config and a preset.
 pub fn cmd_config_diff(
     config: &cli::AppConfig,
     config_source: &cli::ConfigSource,

@@ -76,6 +76,7 @@ impl<S> DlpStream<S>
 where
     S: Stream<Item = Result<Bytes, crate::providers::error::ProviderError>> + Send,
 {
+    /// Wraps an inner stream to apply DLP scanning on each chunk.
     pub fn new(inner: S, engine: Arc<DlpEngine>) -> Self {
         Self {
             inner,

@@ -1,5 +1,6 @@
 use crate::{cli, preset};
 
+/// Validates the configuration by testing each model with real API calls.
 pub async fn cmd_validate(config: &cli::AppConfig) -> anyhow::Result<()> {
     println!("🔍 Validating configuration...");
     println!();

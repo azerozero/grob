@@ -29,6 +29,7 @@ impl OpenAIProvider {
         model.to_lowercase().contains("codex")
     }
 
+    /// Creates an OpenAI provider with custom HTTP headers.
     pub fn with_headers(
         params: super::ProviderParams,
         custom_headers: Vec<(String, String)>,

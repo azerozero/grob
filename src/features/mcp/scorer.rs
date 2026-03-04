@@ -8,7 +8,7 @@ use super::matrix::{RUNTIME_BLEND_WEIGHT, STATIC_BLEND_WEIGHT};
 use std::collections::HashMap;
 use std::time::Instant;
 
-/// Six tool-calling benchmark metrics.
+/// Benchmark metrics for evaluating tool-calling quality per provider.
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
 pub enum ToolMetric {
     /// Model selects the correct tool from the list.

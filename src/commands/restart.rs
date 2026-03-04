@@ -1,6 +1,7 @@
 use super::common::*;
 use crate::{cli, instance};
 
+/// Stops any running instance and restarts the Grob service.
 pub async fn cmd_restart(
     config: cli::AppConfig,
     config_source: cli::ConfigSource,

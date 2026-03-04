@@ -17,6 +17,7 @@ pub struct NameAnonymizer {
 }
 
 impl NameAnonymizer {
+    /// Creates an anonymizer with HMAC-derived pseudonyms for each rule.
     pub fn new(rules: &[NameRule]) -> Self {
         let secret_key = Self::derive_key();
         Self::build(rules, &secret_key)
@@ -71,6 +72,7 @@ impl NameAnonymizer {
         }
     }
 
+    /// Returns true when no name rules are configured.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()

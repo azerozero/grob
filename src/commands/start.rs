@@ -1,6 +1,7 @@
 use super::common::*;
 use crate::{cli, cli::Port, instance};
 
+/// Starts the Grob service in foreground or detached background mode.
 pub async fn cmd_start(
     config: cli::AppConfig,
     config_source: cli::ConfigSource,

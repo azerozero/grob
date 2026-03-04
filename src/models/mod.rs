@@ -55,6 +55,7 @@ pub enum SystemPrompt {
 }
 
 impl SystemPrompt {
+    /// Converts the system prompt to a single plain-text string.
     pub fn to_text(&self) -> String {
         match self {
             SystemPrompt::Text(text) => text.clone(),
@@ -115,6 +116,7 @@ pub enum ToolResultBlock {
     Unknown(serde_json::Value),
 }
 
+/// Recognized content block types within tool results.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum KnownToolResultBlock {
@@ -179,6 +181,7 @@ pub enum KnownContentBlock {
 
 // Convenience constructors for ContentBlock
 impl ContentBlock {
+    /// Creates a text content block with optional cache control.
     pub fn text(text: String, cache_control: Option<serde_json::Value>) -> Self {
         ContentBlock::Known(KnownContentBlock::Text {
             text,
@@ -186,14 +189,17 @@ impl ContentBlock {
         })
     }
 
+    /// Creates an image content block from the given source.
     pub fn image(source: ImageSource) -> Self {
         ContentBlock::Known(KnownContentBlock::Image { source })
     }
 
+    /// Creates a tool-use content block with the given parameters.
     pub fn tool_use(id: String, name: String, input: serde_json::Value) -> Self {
         ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input })
     }
 
+    /// Creates a thinking content block from raw JSON.
     pub fn thinking(raw: serde_json::Value) -> Self {
         ContentBlock::Known(KnownContentBlock::Thinking { raw })
     }
@@ -273,14 +279,14 @@ pub struct CountTokensResponse {
     pub input_tokens: u32,
 }
 
-/// Model pattern → default max output tokens.
-/// Order matters: first match wins (checked with `starts_with` then `contains`).
+/// Prefix-matched model patterns mapped to default max output tokens.
 const MODEL_MAX_TOKENS_PREFIX: &[(&str, u32)] = &[
     ("o1", 32_768), // OpenAI reasoning models (o-series): up to 100k, conservative 32k
     ("o3", 32_768),
     ("o4", 32_768),
 ];
 
+/// Substring-matched model patterns mapped to default max output tokens.
 const MODEL_MAX_TOKENS_CONTAINS: &[(&str, u32)] = &[
     ("gpt-4.1", 32_768),         // OpenAI GPT-4.1 family
     ("gpt-4o", 16_384),          // OpenAI GPT-4o family
@@ -302,6 +308,7 @@ const MODEL_MAX_TOKENS_CONTAINS: &[(&str, u32)] = &[
     ("codex", 16_384),           // Codex
 ];
 
+/// Fallback max output tokens when no model pattern matches.
 const DEFAULT_MAX_TOKENS: u32 = 8_192;
 
 /// Returns a sensible default max_tokens for a given model when the client

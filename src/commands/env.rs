@@ -1,5 +1,6 @@
 use crate::{cli, providers};
 
+/// Lists environment variable status for each configured provider.
 pub fn cmd_env(config: &cli::AppConfig) {
     println!("🔑 Environment Variables");
     println!();

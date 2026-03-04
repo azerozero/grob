@@ -130,13 +130,13 @@ Client
 | `server::fan_out` | `src/server/fan_out.rs` | Parallel multi-provider dispatch (fan-out strategy) |
 | `providers` | `src/providers/mod.rs` | Provider trait and registry |
 | `providers::anthropic_compatible` | `src/providers/anthropic_compatible.rs` | Anthropic API provider (native passthrough) |
-| `providers::openai` | `src/providers/openai.rs` | OpenAI API provider |
-| `providers::gemini` | `src/providers/gemini.rs` | Gemini API provider |
+| `providers::openai` | `src/providers/openai/mod.rs` | OpenAI API provider (with streaming, transform, types submodules) |
+| `providers::gemini` | `src/providers/gemini/mod.rs` | Gemini API provider (with retry, transform, types submodules) |
 | `providers::streaming` | `src/providers/streaming.rs` | SSE stream parsing and forwarding |
 | `providers::registry` | `src/providers/registry.rs` | Provider registration and model lookup |
 | `router` | `src/router/mod.rs` | Request routing engine (regex rules, task classification) |
 | `cli` | `src/cli/mod.rs` | Config structs (AppConfig, ServerConfig, etc.) and CLI parsing |
-| `preset` | `src/preset.rs` | Preset management (list, apply, export, sync, validate) |
+| `preset` | `src/preset/mod.rs` | Preset management (list, apply, export, sync, validate) |
 | `auth` | `src/auth/mod.rs` | Auth module aggregator |
 | `auth::oauth` | `src/auth/oauth.rs` | OAuth client with PKCE |
 | `auth::token_store` | `src/auth/token_store.rs` | Persistent OAuth token storage (redb-backed) |
@@ -165,6 +165,7 @@ Client
 | `features::mcp` | `src/features/mcp/mod.rs` | MCP tool matrix: tool catalogue, scoring, calibration |
 | `features::mcp::bench` | `src/features/mcp/bench/` | Continuous tool-calling benchmark engine |
 | `features::mcp::server` | `src/features/mcp/server/` | JSON-RPC MCP endpoints |
+| `features::harness` | `src/features/harness/mod.rs` | Record & replay sandwich testing harness (tape, mock backend, driver) |
 | `cache` | `src/cache/mod.rs` | Response cache (moka) for deterministic requests |
 | `message_tracing` | `src/message_tracing/mod.rs` | Request/response trace logging (JSONL) |
 | `pid` | `src/pid.rs` | PID file management for daemon mode |

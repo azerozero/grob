@@ -51,6 +51,7 @@ pub(crate) fn apply_transparency_headers(
     headers.insert("x-ai-generated", HeaderValue::from_static("true"));
 }
 
+/// Returns true when EU AI Act transparency headers should be added.
 pub(crate) fn should_apply_transparency(config: &crate::cli::AppConfig) -> bool {
     config.compliance.enabled && config.compliance.transparency_headers
 }
@@ -64,6 +65,7 @@ pub(crate) fn extract_api_credential(headers: &HeaderMap) -> Option<&str> {
         .or_else(|| headers.get("x-api-key").and_then(|v| v.to_str().ok()))
 }
 
+/// Builds a 401 JSON error response with the given message.
 pub(crate) fn auth_error_response(message: &str) -> Response {
     let body = Json(serde_json::json!({
         "error": {

@@ -239,6 +239,7 @@ fn lang_enabled(languages: &[String], code: &str) -> bool {
 }
 
 impl InjectionDetector {
+    /// Compiles multilingual patterns and builds the normalization caches.
     pub fn new(config: PromptInjectionConfig, hot_config: SharedHotConfig) -> Self {
         let mut patterns = Vec::new();
 

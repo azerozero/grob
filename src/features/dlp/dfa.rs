@@ -42,6 +42,7 @@ pub struct SecretScanner {
 }
 
 impl SecretScanner {
+    /// Compiles secret rules and custom prefixes into a scanner.
     pub fn new(secrets: &[SecretRule], custom_prefixes: &[CustomPrefixRule]) -> Self {
         let mut patterns = Vec::new();
         let mut rules = Vec::new();

@@ -78,6 +78,7 @@ pub struct RateLimiter {
 }
 
 impl RateLimiter {
+    /// Creates a rate limiter and spawns a background cleanup task.
     pub fn new(config: RateLimitConfig) -> Self {
         let buckets = Arc::new(RwLock::new(HashMap::new()));
         let cleanup_interval = Duration::from_secs(300); // 5 minutes

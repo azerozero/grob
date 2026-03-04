@@ -121,6 +121,7 @@ impl Default for PiiConfig {
     }
 }
 
+/// Action to take when PII (credit cards, IBAN) is detected.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PiiAction {
@@ -132,6 +133,7 @@ fn default_pii_action() -> PiiAction {
     PiiAction::Redact
 }
 
+/// Action to take when a secret pattern is matched.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SecretAction {
@@ -144,6 +146,7 @@ fn default_action_canary() -> SecretAction {
     SecretAction::Canary
 }
 
+/// Action to take when a configured name is detected.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum NameAction {
@@ -156,6 +159,7 @@ fn default_action_pseudonym() -> NameAction {
     NameAction::Pseudonym
 }
 
+/// Action to take when high-entropy content is detected.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EntropyAction {

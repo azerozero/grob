@@ -30,6 +30,7 @@ impl Default for SprtDetector {
 }
 
 impl SprtDetector {
+    /// Creates a detector with default SPRT parameters and thresholds.
     pub fn new() -> Self {
         let alpha = 0.01_f32; // false positive rate
         let beta = 0.01_f32; // false negative rate

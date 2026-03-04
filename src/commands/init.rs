@@ -1,3 +1,4 @@
+/// Creates a `.grob.toml` project overlay in the current directory.
 pub fn cmd_init() -> anyhow::Result<()> {
     let target = std::env::current_dir()?.join(".grob.toml");
     if target.exists() {

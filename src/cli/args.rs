@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
+/// Top-level CLI definition with subcommands and global options.
 #[derive(Parser)]
 #[command(name = "grob")]
 #[command(version)]
@@ -20,6 +21,7 @@ pub struct Cli {
     pub trailing_cmd: Vec<String>,
 }
 
+/// Available CLI subcommands for managing the Grob service.
 #[derive(Subcommand)]
 pub enum Commands {
     /// Start the router service
@@ -154,6 +156,7 @@ pub enum HarnessAction {
     },
 }
 
+/// Subcommands for managing configuration presets.
 #[derive(Subcommand)]
 pub enum PresetAction {
     /// List available presets

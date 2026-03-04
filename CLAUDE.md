@@ -6,7 +6,7 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 
 ### Key Architectural Decisions
 
-- **Config is static at runtime**: The server loads TOML config on startup and does not reload until restart. The `/api/config` endpoints exist for programmatic access but require a server restart to take effect.
+- **Config is static at runtime**: The server loads TOML config on startup. The `/api/config/reload` endpoint atomically swaps reloadable state (router, provider registry, model index) without restart. In-flight requests continue on the old snapshot.
 - **Provider abstraction**: All providers implement the `LlmProvider` trait (`src/providers/mod.rs`).
 - **Routing**: Regex-based prompt rules in `src/router/mod.rs` classify requests into task types (thinking, web_search, background, default).
 - **OAuth**: Custom implementation (no `oauth2` crate) with PKCE in `src/auth/oauth.rs`.
@@ -33,6 +33,7 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/features/dlp/` | DLP engine (secret scanning, PII, canary tokens) |
 | `src/features/mcp/` | MCP tool matrix, bench engine, JSON-RPC server |
 | `src/features/tap/` | Webhook tap (event emission) |
+| `src/features/harness/` | Record & replay sandwich testing (opt-in `harness` feature) |
 | `src/security/` | Circuit breakers, rate limiting, audit log, headers, scoring |
 | `src/traits.rs` | Core trait contracts (7+ traits for dispatch pipeline) |
 | `src/storage/` | Unified redb storage backend (GrobStore) |

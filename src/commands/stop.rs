@@ -1,6 +1,7 @@
 use super::common::*;
 use crate::{cli, instance};
 
+/// Stops the running Grob service by PID and cleans up stale state.
 pub async fn cmd_stop(config: &cli::AppConfig) -> anyhow::Result<()> {
     println!("Stopping Grob...");
     if let Some(pid) =

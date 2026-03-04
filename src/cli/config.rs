@@ -418,6 +418,7 @@ pub enum ModelStrategy {
 }
 
 impl ModelStrategy {
+    /// Returns the strategy name as a static string slice.
     pub fn label(&self) -> &'static str {
         match self {
             ModelStrategy::Fallback => "fallback",

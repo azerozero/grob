@@ -50,14 +50,17 @@ impl PKCEVerifier {
         }
     }
 
+    /// Returns a reference to the PKCE code verifier string.
     pub fn verifier(&self) -> &str {
         &self.verifier
     }
 
+    /// Returns a reference to the PKCE code challenge string.
     pub fn challenge(&self) -> &str {
         &self.challenge
     }
 
+    /// Consumes the struct and returns the owned verifier string.
     pub fn into_verifier(self) -> String {
         self.verifier
     }

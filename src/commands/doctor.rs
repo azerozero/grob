@@ -1,6 +1,7 @@
 use super::common::is_grob_healthy;
 use crate::{cli, storage};
 
+/// Runs diagnostic checks on config, providers, storage, and service health.
 pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSource) {
     println!("🩺 Grob Doctor — Diagnostic Checks");
     println!("   Version: {}", env!("CARGO_PKG_VERSION"));

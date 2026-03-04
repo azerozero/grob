@@ -100,10 +100,12 @@ pub struct AnthropicCompatibleProvider {
 }
 
 impl AnthropicCompatibleProvider {
+    /// Creates a provider with default headers from the given parameters.
     pub fn new(params: super::ProviderParams) -> Self {
         Self::with_headers(params, Vec::new())
     }
 
+    /// Creates a provider with custom HTTP headers added to every request.
     pub fn with_headers(
         params: super::ProviderParams,
         custom_headers: Vec<(String, String)>,

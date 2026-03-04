@@ -1,5 +1,6 @@
 use crate::cli;
 
+/// Prints the configured router models and enabled providers.
 pub fn cmd_model(config: &cli::AppConfig) {
     println!("📊 Model Configuration");
     println!();
