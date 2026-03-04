@@ -210,14 +210,36 @@ jobs:
           cat *.sha256 >> ../CHECKSUMS.md
           echo '```' >> ../CHECKSUMS.md
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ needs.validate.outputs.version }}
-          draft: false
-          prerelease: ${{ contains(needs.validate.outputs.version, '-') }}
-          generate_release_notes: true
-          append_body: true
-          body_path: CHECKSUMS.md
-          files: |
-            artifacts/*.tar.gz
-            artifacts/*.sha256
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+
+          # Create the release if release-plz hasn't done it yet
+          if ! gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            PRERELEASE=""
+            if [[ "$VERSION" == *-* ]]; then
+              PRERELEASE="--prerelease"
+            fi
+            gh release create "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$VERSION" \
+              --generate-notes \
+              --notes-file CHECKSUMS.md \
+              $PRERELEASE
+          else
+            # Append checksums to existing release body
+            EXISTING_BODY="$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json body -q .body)"
+            CHECKSUMS="$(cat CHECKSUMS.md)"
+            gh release edit "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" \
+              --notes "${EXISTING_BODY}
+          ${CHECKSUMS}"
+          fi
+
+          # Upload binary artifacts
+          gh release upload "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber \
+            artifacts/*.tar.gz artifacts/*.sha256
