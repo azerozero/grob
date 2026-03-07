@@ -64,7 +64,7 @@ Presets configure providers, models, and fallback chains in one command.
 |--------|-------|---------|------|
 | **perf** | Opus 4.6 (Anthropic) | Sonnet 4.6 (Anthropic) | Max subscription |
 | **medium** | Opus 4.6 (Anthropic) | Kimi K2.5 (OpenRouter) | Max sub + ~$0.30/M |
-| **cheap** | DeepSeek R1 (OpenRouter) | Gemini Flash (OpenRouter) | ~$0.15/M |
+| **cheap** | DeepSeek R1 (OpenRouter) | GLM-5 (z.ai) | ~$0.15/M |
 | **local** | Opus 4.6 (Anthropic) | Qwen 2.5 Coder (Ollama) | Max sub + free |
 
 ```bash
@@ -134,6 +134,7 @@ See [Configuration Reference](docs/CONFIGURATION.md) for all options.
 | **z.ai** | `z.ai` | API key | Anthropic-compatible provider |
 | **MiniMax** | `minimax` | API key | Anthropic-compatible provider |
 | **Kimi Coding** | `kimi-coding` | API key | Anthropic-compatible provider |
+| **Zenmux** | `zenmux` | API key | Anthropic-compatible provider |
 
 Any OpenAI-compatible API works with `provider_type = "openai"` and a custom `base_url`.
 

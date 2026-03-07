@@ -60,7 +60,7 @@ Presets are pre-built configurations that set up providers, models, and routing 
 |--------|-----------------|----------|----------------------|
 | `perf` | Anthropic (Opus + Sonnet) | Anthropic | Subscription only |
 | `medium` | Anthropic OAuth | OpenRouter | Subscription + ~$10-100 |
-| `cheap` | DeepSeek R1 (OpenRouter) | Gemini Flash | ~$0.15/M tokens |
+| `cheap` | DeepSeek R1 (OpenRouter) | GLM-5 (z.ai) | ~$0.15/M tokens |
 | `local` | Anthropic OAuth | Ollama (local) | Subscription + free |
 
 Apply the `medium` preset:

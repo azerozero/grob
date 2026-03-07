@@ -25,7 +25,7 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 - **Provider**: An LLM API backend (Anthropic, OpenAI, Gemini, OpenRouter, Ollama, etc.). Each implements the `LlmProvider` trait.
 - **Model**: A named routing target with a priority-ordered fallback chain of provider mappings. Not a single LLM model -- a Grob "model" is a logical slot (e.g., "default", "claude-opus-thinking").
 - **Mapping**: A `(provider, actual_model, priority)` tuple. Priority 1 is tried first.
-- **Route type**: The classification of a request: `WebSearch`, `Background`, `PromptRule`, `Think`, `Default`, `AutoMap`.
+- **Route type**: The classification of a request: `WebSearch`, `Background`, `PromptRule`, `Think`, `Default`. Auto-map is a name transformation step, not a route type.
 - **Preset**: A pre-built config (providers + models + router) that can be applied in one command.
 - **Circuit breaker**: Per-provider state machine (Closed/Open/HalfOpen) that prevents cascading failures.
 - **Pass-through**: A provider mode (`pass_through = true`) that accepts any model name not explicitly configured, forwarding it as-is.

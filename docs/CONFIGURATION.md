@@ -72,6 +72,7 @@ When `pass_through = true`, the provider accepts any model name that does not ma
 | `z.ai` | z.ai | Anthropic Messages |
 | `minimax` | MiniMax | Anthropic Messages |
 | `kimi-coding` | Kimi | Anthropic Messages |
+| `zenmux` | Zenmux | Anthropic Messages |
 
 ### Environment variable expansion
 

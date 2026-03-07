@@ -24,6 +24,7 @@ Grob supports three categories of providers:
 | z.ai | `z.ai` | API key | Anthropic-compatible |
 | MiniMax | `minimax` | API key | Anthropic-compatible |
 | Kimi Coding | `kimi-coding` | API key | Anthropic-compatible |
+| Zenmux | `zenmux` | API key | Anthropic-compatible |
 
 ---
 
