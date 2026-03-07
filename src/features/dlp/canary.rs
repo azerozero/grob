@@ -3,8 +3,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// A generated canary token (syntactically valid fake).
 #[derive(Debug, Clone)]
 pub struct CanaryToken {
+    /// Syntactically valid fake token string.
     pub fake: String,
+    /// Unique monotonic identifier for tracking.
     pub canary_id: u64,
+    /// Token family (e.g. "github", "aws", "jwt").
     pub family: &'static str,
 }
 

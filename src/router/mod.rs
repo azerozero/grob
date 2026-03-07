@@ -1,6 +1,8 @@
 //! Request routing engine with regex-based prompt rules and task-type classification.
 
+/// Message content extraction for routing decisions.
 mod message;
+/// Regex compilation and capture-group utilities.
 mod rules;
 
 use crate::cli::AppConfig;
@@ -12,8 +14,11 @@ use tracing::{debug, info};
 /// Compiled prompt rule with pre-compiled regex
 #[derive(Clone)]
 pub struct CompiledPromptRule {
+    /// Pre-compiled regex pattern for matching user prompts.
     pub regex: Regex,
+    /// Target model name (may contain capture-group references).
     pub model: String,
+    /// Whether to strip the matched text from the prompt.
     pub strip_match: bool,
     /// True if model contains capture group references ($1, $name, etc.)
     pub is_dynamic: bool,

@@ -1,7 +1,10 @@
 //! Authentication: JWT validation, OAuth flows, and token storage.
 
+/// JWT validation and claims extraction.
 pub mod jwt;
+/// OAuth PKCE flows for Anthropic, OpenAI, and Gemini.
 pub mod oauth;
+/// Persistent token storage for OAuth credentials.
 pub mod token_store;
 
 pub use jwt::{GrobClaims, JwtValidator};

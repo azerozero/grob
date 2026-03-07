@@ -1,18 +1,23 @@
 //! Axum HTTP server, application state, and request handlers.
 
+/// Audit logging subsystem for compliance and observability.
 pub(crate) mod audit;
 mod budget;
 mod config_api;
+/// Core dispatch pipeline: DLP, cache, route, provider loop.
 pub(crate) mod dispatch;
 mod endpoints;
 mod error;
+/// Parallel multi-provider dispatch (fan-out strategy).
 pub mod fan_out;
 mod handlers;
+/// Shared helper utilities for routing, sanitization, and injection.
 pub(crate) mod helpers;
 mod init;
 mod lifecycle;
 mod middleware;
 mod oauth_handlers;
+/// OpenAI `/v1/chat/completions` compatibility translation layer.
 pub mod openai_compat;
 
 pub use audit::AuditEntryBuilder;
@@ -56,8 +61,11 @@ use tracing::info;
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
+    /// Active application configuration snapshot.
     pub config: AppConfig,
+    /// Request routing engine for task-type classification.
     pub router: Router,
+    /// Registry of all configured LLM providers.
     pub provider_registry: Arc<ProviderRegistry>,
     /// Pre-computed index: lowercase model name → index into config.models (O(1) lookup)
     pub model_index: std::collections::HashMap<String, usize>,
@@ -93,22 +101,35 @@ impl ReloadableState {
 
 /// Observability-related state (metrics, tracing, spend tracking).
 pub struct ObservabilityState {
+    /// Distributed tracing implementation for request spans.
     pub message_tracer: Arc<dyn traits::Tracer>,
+    /// Prometheus metrics exporter handle for `/metrics` endpoint.
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
+    /// Persistent monthly spend tracker with budget enforcement.
     pub spend_tracker: tokio::sync::Mutex<Box<dyn traits::SpendTracking>>,
+    /// Shared token pricing table for cost calculation.
     pub pricing_table: SharedPricingTable,
 }
 
 /// Security-related state (auth, rate limiting, DLP, circuit breakers, audit, cache, tap, MCP).
 pub struct SecurityState {
+    /// JWT token validator for OAuth-authenticated requests.
     pub jwt_validator: Option<Arc<crate::auth::JwtValidator>>,
+    /// Per-client rate limiter for request throttling.
     pub rate_limiter: Option<Arc<RateLimiter>>,
+    /// DLP session manager for secret scanning and PII redaction.
     pub dlp_sessions: Option<Arc<DlpSessionManager>>,
+    /// Circuit breakers tracking provider availability.
     pub circuit_breakers: Option<Arc<dyn traits::ProviderAvailability>>,
+    /// Append-only audit log for compliance recording.
     pub audit_log: Option<Arc<AuditLog>>,
+    /// LRU response cache for deterministic requests.
     pub response_cache: Option<Arc<crate::cache::ResponseCache>>,
+    /// Webhook tap sender for event emission.
     pub tap_sender: Option<Arc<crate::features::tap::TapSender>>,
+    /// Adaptive provider scorer for latency-aware routing.
     pub provider_scorer: Option<Arc<ProviderScorer>>,
+    /// MCP tool matrix and JSON-RPC server state.
     #[cfg(feature = "mcp")]
     pub mcp: Option<Arc<crate::features::mcp::McpState>>,
 }
@@ -120,7 +141,9 @@ pub struct AppState {
 
     /// Persistent state - NOT reloaded
     pub token_store: TokenStore,
+    /// Identifies how the configuration was loaded (file, env, CLI).
     pub config_source: crate::cli::ConfigSource,
+    /// Counter of currently in-flight requests for graceful drain.
     pub active_requests: std::sync::atomic::AtomicU64,
     /// Server start time (for health/upgrade coordination)
     pub started_at: chrono::DateTime<chrono::Utc>,

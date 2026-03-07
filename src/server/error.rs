@@ -7,10 +7,15 @@ use axum::{
 /// Application error types — all variants carry a user-facing message string.
 #[derive(Debug)]
 pub enum AppError {
+    /// Indicates no matching route or model for the request.
     RoutingError(String),
+    /// Indicates a malformed or invalid request payload.
     ParseError(String),
+    /// Indicates an upstream provider returned an error.
     ProviderError(String),
+    /// Indicates the monthly spend budget has been exceeded.
     BudgetExceeded(String),
+    /// Indicates the DLP pipeline blocked the request.
     DlpBlocked(String),
 }
 

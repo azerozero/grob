@@ -17,10 +17,14 @@ pub(crate) const RPC_INTERNAL_ERROR: i32 = -32603;
 /// JSON-RPC 2.0 request envelope.
 #[derive(Debug, Clone, Deserialize)]
 pub struct JsonRpcRequest {
+    /// Protocol version, always `"2.0"`.
     pub jsonrpc: String,
+    /// RPC method name (e.g. `"tool_matrix/query"`).
     pub method: String,
+    /// Method parameters, defaults to `null` if absent.
     #[serde(default)]
     pub params: serde_json::Value,
+    /// Caller-assigned request identifier for correlation.
     pub id: serde_json::Value,
 }
 
@@ -33,8 +37,11 @@ impl std::fmt::Display for JsonRpcRequest {
 /// JSON-RPC 2.0 success response.
 #[derive(Debug, Clone, Serialize)]
 pub struct JsonRpcResponse {
+    /// Protocol version, always `"2.0"`.
     pub jsonrpc: &'static str,
+    /// Successful method return value.
     pub result: serde_json::Value,
+    /// Request identifier echoed back to the caller.
     pub id: serde_json::Value,
 }
 
@@ -47,15 +54,20 @@ impl std::fmt::Display for JsonRpcResponse {
 /// JSON-RPC 2.0 error response.
 #[derive(Debug, Clone, Serialize)]
 pub struct JsonRpcError {
+    /// Protocol version, always `"2.0"`.
     pub jsonrpc: &'static str,
+    /// Structured error object with code and message.
     pub error: RpcError,
+    /// Request identifier echoed back to the caller.
     pub id: serde_json::Value,
 }
 
 /// JSON-RPC error object.
 #[derive(Debug, Clone, Serialize)]
 pub struct RpcError {
+    /// Numeric error code per the JSON-RPC 2.0 specification.
     pub code: i32,
+    /// Human-readable error description.
     pub message: String,
 }
 
@@ -131,7 +143,9 @@ impl std::error::Error for RpcError {}
 /// Parameters for `tool_matrix/query`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct QueryParams {
+    /// Tool name to look up in the matrix.
     pub tool: String,
+    /// Optional provider filter to narrow the query.
     pub provider: Option<String>,
 }
 
@@ -144,7 +158,9 @@ impl std::fmt::Display for QueryParams {
 /// Parameters for `tool_matrix/bench`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct BenchParams {
+    /// Subset of tools to benchmark; benchmarks all if `None`.
     pub tools: Option<Vec<String>>,
+    /// Subset of providers to benchmark; benchmarks all if `None`.
     pub providers: Option<Vec<String>>,
 }
 
@@ -159,8 +175,11 @@ impl std::fmt::Display for BenchParams {
 /// Parameters for `tool_matrix/calibrate`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CalibrateParams {
+    /// Tool name to calibrate.
     pub tool: String,
+    /// Provider whose score is being overridden.
     pub provider: String,
+    /// New capability score between 0.0 and 1.0.
     pub score: f64,
 }
 
@@ -177,8 +196,11 @@ impl std::fmt::Display for CalibrateParams {
 /// MCP `tools/list` response entry.
 #[derive(Debug, Clone, Serialize)]
 pub struct McpToolInfo {
+    /// Unique tool identifier exposed to MCP clients.
     pub name: String,
+    /// Human-readable summary of the tool's purpose.
     pub description: String,
+    /// JSON Schema describing the tool's expected input.
     #[serde(rename = "inputSchema")]
     pub input_schema: serde_json::Value,
 }

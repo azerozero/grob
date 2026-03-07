@@ -1,15 +1,24 @@
 //! LLM provider trait and implementations (Anthropic, OpenAI, Gemini, etc.).
 
+/// Anthropic-compatible provider implementation for native Anthropic API.
 pub mod anthropic_compatible;
 mod anthropic_sanitize;
+/// Authentication helpers for provider API key and OAuth resolution.
 pub mod auth;
 pub(crate) mod base;
+/// Shared constants (timeouts, header names, default URLs).
 pub mod constants;
+/// Provider error types and conversions.
 pub mod error;
+/// Google Gemini provider implementation.
 pub mod gemini;
+/// Shared helper functions for request/response transformation.
 pub mod helpers;
+/// OpenAI provider implementation with format translation.
 pub mod openai;
+/// Provider registry for model lookup and provider resolution.
 pub mod registry;
+/// SSE streaming utilities shared across providers.
 pub mod streaming;
 
 use crate::auth::TokenStore;
@@ -29,23 +38,35 @@ use std::time::Duration;
 /// Provider response that maintains Anthropic API compatibility
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderResponse {
+    /// Unique identifier for the response message.
     pub id: String,
+    /// Object type, always `"message"` for Anthropic-compatible responses.
     pub r#type: String,
+    /// Role of the responder, typically `"assistant"`.
     pub role: String,
+    /// Ordered list of content blocks in the response.
     pub content: Vec<ContentBlock>,
+    /// Model identifier that generated the response.
     pub model: String,
+    /// Reason the model stopped generating (e.g., `"end_turn"`, `"max_tokens"`).
     pub stop_reason: Option<String>,
+    /// Custom stop sequence that triggered generation to halt, if any.
     pub stop_sequence: Option<String>,
+    /// Token usage statistics for the request/response cycle.
     pub usage: Usage,
 }
 
 /// Tracks input and output token counts for a provider response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Usage {
+    /// Number of tokens in the input prompt.
     pub input_tokens: u32,
+    /// Number of tokens generated in the output.
     pub output_tokens: u32,
+    /// Tokens written to the prompt cache on this request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_creation_input_tokens: Option<u32>,
+    /// Tokens read from the prompt cache on this request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_read_input_tokens: Option<u32>,
 }
@@ -113,14 +134,23 @@ pub trait LlmProvider: Send + Sync {
 
 /// Common parameters shared across all provider constructors.
 pub struct ProviderParams {
+    /// Human-readable provider name from configuration.
     pub name: String,
+    /// API key for authenticating requests.
     pub api_key: String,
+    /// Custom base URL override for the provider endpoint.
     pub base_url: Option<String>,
+    /// List of model identifiers this provider serves.
     pub models: Vec<String>,
+    /// OAuth provider ID for token-based authentication.
     pub oauth_provider: Option<String>,
+    /// Shared token store for OAuth credential retrieval.
     pub token_store: Option<TokenStore>,
+    /// Maximum duration to wait for a complete API response.
     pub api_timeout: Duration,
+    /// Maximum duration to wait for TCP connection establishment.
     pub connect_timeout: Duration,
+    /// Accepts any model name not listed in configured models.
     pub pass_through: bool,
 }
 
@@ -139,7 +169,9 @@ pub enum AuthType {
 /// Provider configuration from TOML
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderConfig {
+    /// Unique provider name used in routing and logging.
     pub name: String,
+    /// Provider backend type (e.g., `"anthropic"`, `"openai"`, `"gemini"`).
     pub provider_type: String,
 
     /// Authentication type (default: api_key)
@@ -163,13 +195,16 @@ pub struct ProviderConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub location: Option<String>,
 
+    /// Custom base URL override for the provider API endpoint.
     pub base_url: Option<String>,
 
     /// Custom HTTP headers (e.g., {"X-Novita-Source": "grob"})
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<HashMap<String, String>>,
 
+    /// List of model identifiers this provider supports.
     pub models: Vec<String>,
+    /// Whether this provider is enabled; defaults to `true` when absent.
     pub enabled: Option<bool>,
 
     /// Per-provider monthly budget in USD (optional, overrides global)
@@ -187,6 +222,7 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
+    /// Returns `true` if the provider is enabled (defaults to `true`).
     pub fn is_enabled(&self) -> bool {
         self.enabled.unwrap_or(true)
     }

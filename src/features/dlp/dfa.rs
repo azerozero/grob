@@ -4,7 +4,9 @@ use super::config::{CustomPrefixRule, SecretAction, SecretRule};
 /// A match found by the DFA scanner.
 #[derive(Debug, Clone)]
 pub struct SecretMatch {
+    /// Byte offset where the match begins.
     pub start: usize,
+    /// Byte offset where the match ends (exclusive).
     pub end: usize,
     /// Index into the scanner's rule list (avoids String clone on hot path).
     pub rule_idx: usize,
@@ -15,7 +17,9 @@ pub struct SecretMatch {
 /// DLP event emitted on detection.
 #[derive(Debug, Clone)]
 pub struct DlpEvent {
+    /// Name of the secret rule that triggered the event.
     pub rule_name: String,
+    /// Action taken (canary, redact, or log).
     pub action: String,
 }
 

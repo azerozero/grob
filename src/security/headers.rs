@@ -32,13 +32,16 @@ pub struct SecurityHeadersConfig {
 /// X-Frame-Options policy for clickjacking protection.
 #[derive(Debug, Clone)]
 pub enum FrameOption {
+    /// Prevents the page from being displayed in any frame.
     Deny,
 }
 
 /// Controls how much referrer information is sent with requests.
 #[derive(Debug, Clone)]
 pub enum ReferrerPolicy {
+    /// Omits the Referer header entirely.
     NoReferrer,
+    /// Sends origin only on cross-origin requests.
     StrictOriginWhenCrossOrigin,
 }
 

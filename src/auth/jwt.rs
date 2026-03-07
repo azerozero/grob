@@ -33,10 +33,13 @@ impl GrobClaims {
 /// Authentication error types
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
+    /// No bearer token was provided in the request.
     #[error("Missing or invalid Authorization header")]
     MissingToken,
+    /// Token signature or structure is invalid.
     #[error("Invalid JWT: {0}")]
     InvalidToken(String),
+    /// Token has passed its expiration time.
     #[error("Token expired")]
     Expired,
 }

@@ -8,6 +8,7 @@ use clap_complete::Shell;
 #[command(before_help = concat!("Grob v", env!("CARGO_PKG_VERSION")))]
 #[command(about = "High-performance LLM routing proxy\n\nQuick start:\n  grob exec -- claude     Launch Claude Code through Grob\n  grob exec -- aider      Launch Aider through Grob\n  grob start -d           Start Grob in background\n  grob status             Show service status and models", long_about = None)]
 pub struct Cli {
+    /// Subcommand to execute (defaults to `exec` with trailing args)
     #[command(subcommand)]
     pub command: Option<Commands>,
 
@@ -16,7 +17,7 @@ pub struct Cli {
     #[arg(short, long, env = "GROB_CONFIG")]
     pub config: Option<String>,
 
-    /// Shorthand: grob -- <cmd> is equivalent to grob exec -- <cmd>
+    /// Shorthand: `grob -- <cmd>` is equivalent to `grob exec -- <cmd>`.
     #[arg(last = true)]
     pub trailing_cmd: Vec<String>,
 }
@@ -26,8 +27,10 @@ pub struct Cli {
 pub enum Commands {
     /// Start the router service
     Start {
+        /// Override the listening port
         #[arg(short, long)]
         port: Option<u16>,
+        /// Run as a background daemon
         #[arg(short = 'd', long)]
         detach: bool,
     },
@@ -35,6 +38,7 @@ pub enum Commands {
     Stop,
     /// Restart the router service
     Restart {
+        /// Run as a background daemon after restart
         #[arg(short = 'd', long)]
         detach: bool,
     },
@@ -48,17 +52,22 @@ pub enum Commands {
     Validate,
     /// Manage presets (list, apply, export, install, sync)
     Preset {
+        /// Preset management subcommand
         #[command(subcommand)]
         action: PresetAction,
     },
     /// Run in container mode (foreground, 0.0.0.0, JSON logs, graceful shutdown, no PID file)
     Run {
+        /// Override the listening port (env: GROB_PORT)
         #[arg(short, long, env = "GROB_PORT")]
         port: Option<u16>,
+        /// Override the bind host address (env: GROB_HOST)
         #[arg(long, env = "GROB_HOST")]
         host: Option<String>,
+        /// Override the log level (env: GROB_LOG_LEVEL)
         #[arg(long, env = "GROB_LOG_LEVEL")]
         log_level: Option<String>,
+        /// Emit structured JSON logs instead of human-readable
         #[arg(long, env = "GROB_JSON_LOGS")]
         json_logs: bool,
     },
@@ -74,10 +83,13 @@ pub enum Commands {
         long_about = "Launch a command behind the Grob proxy.\n\nAutomatically starts Grob if not running, sets ANTHROPIC_BASE_URL and\nOPENAI_BASE_URL environment variables, runs your command, and stops\nGrob when the command exits (unless --no-stop is set).\n\nExamples:\n  grob exec -- claude           # Run Claude Code through Grob\n  grob exec -- opencode          # Run OpenCode through Grob\n  grob launch -- aider           # 'launch' is an alias for 'exec'\n  grob exec --no-stop -- my-tool # Keep Grob running after exit"
     )]
     Exec {
+        /// Override the listening port
         #[arg(short, long)]
         port: Option<u16>,
+        /// Keep Grob running after the child command exits
         #[arg(long)]
         no_stop: bool,
+        /// Command and arguments to execute behind the proxy
         #[arg(last = true, required = true)]
         cmd: Vec<String>,
     },
@@ -86,6 +98,7 @@ pub enum Commands {
     /// Output completions for the given shell to stdout.
     /// Example: grob completions zsh > ~/.zfunc/_grob
     Completions {
+        /// Target shell for completion script output
         #[arg(value_enum)]
         shell: Shell,
     },
@@ -97,11 +110,17 @@ pub enum Commands {
     ///
     /// Without arguments, checks all providers. With a provider name,
     /// sets up credentials for that specific provider only.
-    Connect { provider: Option<String> },
+    Connect {
+        /// Specific provider name to configure (all if omitted)
+        provider: Option<String>,
+    },
     /// Initialize a per-project .grob.toml in the current directory
     Init,
     /// Compare local config against a preset or remote config
-    ConfigDiff { target: Option<String> },
+    ConfigDiff {
+        /// Preset name or URL to compare against current config
+        target: Option<String>,
+    },
     /// Run diagnostic checks on your Grob installation
     Doctor,
     /// Zero-downtime upgrade: spawn new process, wait for health, signal old to drain
@@ -112,6 +131,7 @@ pub enum Commands {
     /// Record & replay sandwich testing harness
     #[cfg(feature = "harness")]
     Harness {
+        /// Harness subcommand (record or replay)
         #[command(subcommand)]
         action: HarnessAction,
     },
@@ -162,13 +182,25 @@ pub enum PresetAction {
     /// List available presets
     List,
     /// Show detailed info about a preset (providers, models, env vars)
-    Info { name: String },
+    Info {
+        /// Preset name to inspect
+        name: String,
+    },
     /// Install presets from a git repo or local path
-    Install { source: String },
+    Install {
+        /// Git repo URL or local directory path
+        source: String,
+    },
     /// Apply a preset to config (backs up current config)
-    Apply { name: String },
+    Apply {
+        /// Preset name to apply
+        name: String,
+    },
     /// Export current config as a reusable preset
-    Export { name: String },
+    Export {
+        /// Name for the exported preset
+        name: String,
+    },
     /// Sync presets from configured git repo
     Sync,
 }

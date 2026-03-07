@@ -26,10 +26,14 @@ const BUILTIN_FAST: &str = include_str!("../../presets/fast.toml");
 const BUILTIN_GDPR: &str = include_str!("../../presets/gdpr.toml");
 const BUILTIN_EU_AI_ACT: &str = include_str!("../../presets/eu-ai-act.toml");
 
+/// Metadata for a builtin or installed preset.
 #[derive(Debug)]
 pub struct PresetInfo {
+    /// Short unique preset identifier.
     pub name: String,
+    /// Human-readable summary of the preset.
     pub description: String,
+    /// True if shipped with the binary, false if user-installed.
     pub is_builtin: bool,
 }
 
@@ -360,7 +364,7 @@ fn ensure_server_defaults(config_table: &mut toml::map::Map<String, toml::Value>
 }
 
 /// Apply a preset to the config file.
-/// Keeps [server] and [presets] sections, replaces [router] + [[providers]] + [[models]].
+/// Keeps `[server]` and `[presets]` sections, replaces `[router]` + `[[providers]]` + `[[models]]`.
 pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
     let preset_content = preset_content(name)?;
 
@@ -465,7 +469,7 @@ pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Export current config as a preset (strips [server], replaces API keys with env vars)
+/// Exports current config as a preset (strips `[server]`, replaces API keys with env vars).
 pub fn export_preset(name: &str, config_path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config: {}", config_path.display()))?;

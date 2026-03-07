@@ -4,10 +4,13 @@ use serde::{Deserialize, Serialize};
 /// Top-level DLP configuration, mapped from `[dlp]` in TOML.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct DlpConfig {
+    /// Enables the DLP pipeline globally.
     #[serde(default)]
     pub enabled: bool,
+    /// Scans inbound prompts for secrets and PII.
     #[serde(default = "default_true")]
     pub scan_input: bool,
+    /// Scans model responses for secrets and PII.
     #[serde(default = "default_true")]
     pub scan_output: bool,
     /// If non-empty, load and merge additional rules from this TOML file.
@@ -16,12 +19,16 @@ pub struct DlpConfig {
     /// Disable all built-in secret detection rules (only use user-defined rules).
     #[serde(default)]
     pub no_builtins: bool,
+    /// User-defined secret detection rules (Gitleaks-style patterns).
     #[serde(default)]
     pub secrets: Vec<SecretRule>,
+    /// Custom prefix-based token rules for vendor-specific secrets.
     #[serde(default)]
     pub custom_prefixes: Vec<CustomPrefixRule>,
+    /// Name anonymization rules for PII name redaction.
     #[serde(default)]
     pub names: Vec<NameRule>,
+    /// High-entropy string detection settings.
     #[serde(default)]
     pub entropy: EntropyConfig,
     /// PII detection configuration (credit cards, IBAN, BIC).
@@ -50,9 +57,13 @@ fn default_true() -> bool {
 /// Gitleaks-style secret pattern rule.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SecretRule {
+    /// Human-readable identifier for this rule (e.g. `"github_token"`).
     pub name: String,
+    /// Literal prefix that triggers pattern evaluation (e.g. `"ghp_"`).
     pub prefix: String,
+    /// Regex pattern to match the full secret value.
     pub pattern: String,
+    /// Remediation action on match. Defaults to `Canary`.
     #[serde(default = "default_action_canary")]
     pub action: SecretAction,
 }
@@ -60,9 +71,13 @@ pub struct SecretRule {
 /// Custom prefix rule for user-specific tokens (e.g. vault tokens).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CustomPrefixRule {
+    /// Human-readable identifier for this prefix rule.
     pub name: String,
+    /// Literal prefix that identifies the token type.
     pub prefix: String,
+    /// Expected total length of the token including prefix.
     pub length: usize,
+    /// Remediation action on match. Defaults to `Canary`.
     #[serde(default = "default_action_canary")]
     pub action: SecretAction,
 }
@@ -70,7 +85,9 @@ pub struct CustomPrefixRule {
 /// Name anonymization rule.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NameRule {
+    /// Exact name or term to detect and anonymize.
     pub term: String,
+    /// Remediation action on match. Defaults to `Pseudonym`.
     #[serde(default = "default_action_pseudonym")]
     pub action: NameAction,
 }
@@ -78,8 +95,10 @@ pub struct NameRule {
 /// Async entropy detection config.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct EntropyConfig {
+    /// Enables high-entropy string scanning.
     #[serde(default)]
     pub enabled: bool,
+    /// Action on high-entropy detection. Defaults to `Log`.
     #[serde(default = "default_action_log")]
     pub action: EntropyAction,
 }
@@ -125,7 +144,9 @@ impl Default for PiiConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PiiAction {
+    /// Replaces detected PII with a redaction placeholder.
     Redact,
+    /// Logs the detection without modifying the content.
     Log,
 }
 
@@ -137,8 +158,11 @@ fn default_pii_action() -> PiiAction {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum SecretAction {
+    /// Replaces the secret with a canary token for leak tracing.
     Canary,
+    /// Replaces the secret with a redaction placeholder.
     Redact,
+    /// Logs the detection without modifying the content.
     Log,
 }
 
@@ -150,8 +174,11 @@ fn default_action_canary() -> SecretAction {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum NameAction {
+    /// Replaces the name with a consistent pseudonym.
     Pseudonym,
+    /// Replaces the name with a redaction placeholder.
     Redact,
+    /// Logs the detection without modifying the content.
     Log,
 }
 
@@ -163,7 +190,9 @@ fn default_action_pseudonym() -> NameAction {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum EntropyAction {
+    /// Logs the high-entropy detection silently.
     Log,
+    /// Emits an alert event for high-entropy content.
     Alert,
 }
 
@@ -175,9 +204,12 @@ fn default_action_log() -> EntropyAction {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DlpAction {
+    /// Strips or masks the offending content in-place.
     Redact,
+    /// Logs the finding without altering the request. Default variant.
     #[default]
     Log,
+    /// Rejects the entire request with an error response.
     Block,
 }
 
@@ -195,37 +227,52 @@ impl std::fmt::Display for DlpAction {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DomainMatchMode {
+    /// Matches only when the domain equals the entry exactly.
     Exact,
+    /// Matches when the domain ends with the entry. Default variant.
     #[default]
     Suffix,
+    /// Matches using glob wildcard patterns (e.g. `*.example.com`).
     Glob,
 }
 
 /// URL exfiltration scanner configuration (anti-EchoLeak CVE-2025-32711).
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UrlExfilConfig {
+    /// Enables URL exfiltration scanning.
     #[serde(default)]
     pub enabled: bool,
+    /// Remediation action on exfiltration detection. Defaults to `Log`.
     #[serde(default)]
     pub action: DlpAction,
+    /// Scans Markdown image tags (`![](url)`) for data exfiltration.
     #[serde(default = "default_true")]
     pub scan_markdown_images: bool,
+    /// Scans Markdown link tags (`[text](url)`) for data exfiltration.
     #[serde(default = "default_true")]
     pub scan_markdown_links: bool,
+    /// Scans bare URLs outside Markdown syntax.
     #[serde(default = "default_true")]
     pub scan_raw_urls: bool,
+    /// Flags URLs whose query string exceeds `max_query_length`.
     #[serde(default = "default_true")]
     pub flag_long_query_params: bool,
+    /// Flags URLs containing base64-encoded segments in the path.
     #[serde(default = "default_true")]
     pub flag_base64_in_path: bool,
+    /// Flags `data:` URIs that may embed exfiltrated content.
     #[serde(default = "default_true")]
     pub flag_data_uris: bool,
+    /// Byte threshold for flagging long query parameters. Defaults to 200.
     #[serde(default = "default_max_query_length")]
     pub max_query_length: usize,
+    /// Domains exempt from exfiltration checks.
     #[serde(default)]
     pub whitelist_domains: Vec<String>,
+    /// Domains always flagged regardless of content.
     #[serde(default)]
     pub blacklist_domains: Vec<String>,
+    /// Strategy for matching entries in domain lists.
     #[serde(default)]
     pub domain_match_mode: DomainMatchMode,
 }
@@ -256,15 +303,19 @@ impl Default for UrlExfilConfig {
 /// Prompt injection detector configuration.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PromptInjectionConfig {
+    /// Enables prompt injection detection.
     #[serde(default)]
     pub enabled: bool,
+    /// Remediation action on injection detection. Defaults to `Log`.
     #[serde(default)]
     pub action: DlpAction,
     /// Disable built-in injection patterns (only use custom_patterns).
     #[serde(default)]
     pub no_builtins: bool,
+    /// User-defined regex patterns for injection detection.
     #[serde(default)]
     pub custom_patterns: Vec<String>,
+    /// Languages to scan for injection; `["all"]` covers all 28.
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,
 }
@@ -288,6 +339,7 @@ impl Default for PromptInjectionConfig {
 /// Signed config hot-reload settings for domain lists and injection patterns.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SignedConfigSettings {
+    /// Enables signed config hot-reload polling.
     #[serde(default)]
     pub enabled: bool,
     /// File path or URL to the signed config TOML.

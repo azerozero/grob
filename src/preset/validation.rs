@@ -11,28 +11,39 @@ use crate::providers::ProviderRegistry;
 /// Result of validating a single provider/model mapping
 #[derive(Debug)]
 pub struct MappingResult {
+    /// Priority rank for fallback ordering.
     pub priority: u32,
+    /// Provider name used for this mapping.
     pub provider: String,
+    /// Actual model identifier sent to the provider.
     pub actual_model: String,
+    /// Whether the validation request succeeded.
     pub ok: bool,
+    /// Human-readable result detail or error message.
     pub detail: String,
 }
 
 /// Result of validating a router model (with all its fallback mappings)
 #[derive(Debug)]
 pub struct ModelValidation {
+    /// Router model name being validated.
     pub model_name: String,
+    /// Router role (e.g. "default", "think", "background").
     pub role: String,
+    /// Validation results for each provider mapping.
     pub mappings: Vec<MappingResult>,
 }
 
 impl ModelValidation {
+    /// Returns the number of healthy (passing) mappings.
     pub fn healthy_count(&self) -> usize {
         self.mappings.iter().filter(|m| m.ok).count()
     }
+    /// Returns true if every mapping passed validation.
     pub fn all_ok(&self) -> bool {
         !self.mappings.is_empty() && self.mappings.iter().all(|m| m.ok)
     }
+    /// Returns true if at least one mapping passed validation.
     pub fn any_ok(&self) -> bool {
         self.mappings.iter().any(|m| m.ok)
     }

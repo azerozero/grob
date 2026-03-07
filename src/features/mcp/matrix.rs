@@ -24,10 +24,13 @@ pub struct ProviderToolCapability {
 /// Schema definition for a tool's expected input.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ToolSchema {
+    /// JSON Schema type (typically "object").
     #[serde(default)]
     pub r#type: String,
+    /// Property definitions for the tool input.
     #[serde(default)]
     pub properties: HashMap<String, serde_json::Value>,
+    /// Names of required input properties.
     #[serde(default)]
     pub required: Vec<String>,
 }

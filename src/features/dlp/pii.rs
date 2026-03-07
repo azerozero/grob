@@ -12,8 +12,11 @@ static BIC_REGEX: LazyLock<Regex> =
 /// Type of PII detected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PiiType {
+    /// Payment card number (Visa, Mastercard, Amex, etc.).
     CreditCard,
+    /// International Bank Account Number.
     Iban,
+    /// Bank Identifier Code (SWIFT).
     Bic,
 }
 
@@ -30,8 +33,11 @@ impl std::fmt::Display for PiiType {
 /// A single PII detection event.
 #[derive(Debug, Clone)]
 pub struct PiiDetection {
+    /// Category of PII that was detected.
     pub pii_type: PiiType,
+    /// Byte offset where the match begins.
     pub start: usize,
+    /// Byte offset where the match ends (exclusive).
     pub end: usize,
 }
 

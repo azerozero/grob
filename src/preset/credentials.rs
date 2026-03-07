@@ -17,9 +17,13 @@ enum ProviderAuth {
 /// Status of a provider's credentials
 #[derive(Debug)]
 pub struct CredentialStatus {
+    /// Name of the provider being checked.
     pub provider_name: String,
+    /// Provider type (e.g. "anthropic", "openai").
     pub provider_type: String,
+    /// Whether valid credentials were found.
     pub ok: bool,
+    /// Human-readable status or error detail.
     pub detail: String,
 }
 

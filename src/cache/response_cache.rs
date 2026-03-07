@@ -25,10 +25,15 @@ pub struct CachedResponse {
 /// Cache statistics
 #[derive(Debug, Clone, Default)]
 pub struct CacheStats {
+    /// Number of cache hits.
     pub hits: u64,
+    /// Number of cache misses.
     pub misses: u64,
+    /// Number of entries evicted by capacity or TTL.
     pub evictions: u64,
+    /// Number of entries skipped due to size limit.
     pub skipped_too_large: u64,
+    /// Current number of entries in the cache.
     pub entry_count: u64,
 }
 

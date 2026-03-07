@@ -63,7 +63,7 @@ impl AuditEntryBuilder {
         self
     }
 
-    /// Consumes the builder and produces a finalized [`AuditEntry`].
+    /// Consumes the builder and produces a finalized audit entry.
     pub fn build(self) -> crate::security::audit_log::AuditEntry {
         use crate::security::audit_log::{AuditEntry, Classification};
         AuditEntry {

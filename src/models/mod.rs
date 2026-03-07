@@ -6,27 +6,40 @@ use std::collections::HashMap;
 /// Anthropic API request format
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AnthropicRequest {
+    /// Target model identifier (e.g. "claude-sonnet-4-20250514").
     pub model: String,
+    /// Ordered conversation messages between user and assistant.
     pub messages: Vec<Message>,
+    /// Maximum number of output tokens to generate.
     pub max_tokens: u32,
+    /// Extended thinking / reasoning configuration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<ThinkingConfig>,
+    /// Sampling temperature (0.0 = deterministic, 1.0 = creative).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// Nucleus sampling probability cutoff.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    /// Top-k sampling: considers only the k most likely tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_k: Option<u32>,
+    /// Custom stop sequences that halt generation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_sequences: Option<Vec<String>>,
+    /// Enables server-sent event streaming when true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    /// Arbitrary key-value metadata attached to the request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<HashMap<String, serde_json::Value>>,
+    /// System prompt prepended to the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemPrompt>,
+    /// Tool definitions available for function calling.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
+    /// Controls which tool the model should use, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
 }
@@ -34,7 +47,9 @@ pub struct AnthropicRequest {
 /// Message in the conversation
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Message {
+    /// Participant role: "user", "assistant", or "system".
     pub role: String,
+    /// Payload of the message (plain text or structured blocks).
     pub content: MessageContent,
 }
 
@@ -42,7 +57,9 @@ pub struct Message {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum MessageContent {
+    /// Plain text content as a single string.
     Text(String),
+    /// Structured array of typed content blocks.
     Blocks(Vec<ContentBlock>),
 }
 
@@ -50,7 +67,9 @@ pub enum MessageContent {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum SystemPrompt {
+    /// Plain text system prompt.
     Text(String),
+    /// Array of typed system blocks with optional cache control.
     Blocks(Vec<SystemBlock>),
 }
 
@@ -71,8 +90,11 @@ impl SystemPrompt {
 /// System message block
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SystemBlock {
+    /// Block type identifier (typically "text").
     pub r#type: String,
+    /// Text content of the system block.
     pub text: String,
+    /// Cache control directives for prompt caching.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_control: Option<serde_json::Value>,
 }
@@ -81,7 +103,9 @@ pub struct SystemBlock {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ToolResultContent {
+    /// Plain text tool output.
     Text(String),
+    /// Structured blocks (text, images) from tool execution.
     Blocks(Vec<ToolResultBlock>),
 }
 
@@ -112,7 +136,9 @@ impl std::fmt::Display for ToolResultContent {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ToolResultBlock {
+    /// Recognized block type (text or image).
     Known(KnownToolResultBlock),
+    /// Unrecognized block type preserved as raw JSON passthrough.
     Unknown(serde_json::Value),
 }
 
@@ -120,10 +146,18 @@ pub enum ToolResultBlock {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum KnownToolResultBlock {
+    /// Plain text output from a tool invocation.
     #[serde(rename = "text")]
-    Text { text: String },
+    Text {
+        /// The text content returned by the tool.
+        text: String,
+    },
+    /// Image output from a tool invocation.
     #[serde(rename = "image")]
-    Image { source: ImageSource },
+    Image {
+        /// Image data source (base64 or URL).
+        source: ImageSource,
+    },
 }
 
 /// Content block for multimodal messages.
@@ -148,32 +182,49 @@ pub enum ContentBlock {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
 pub enum KnownContentBlock {
+    /// Plain text content block with optional cache control.
     #[serde(rename = "text")]
     Text {
+        /// The text content of the block.
         text: String,
+        /// Cache control directives for prompt caching.
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<serde_json::Value>,
     },
+    /// Inline image content block.
     #[serde(rename = "image")]
-    Image { source: ImageSource },
+    Image {
+        /// Image data source (base64 or URL).
+        source: ImageSource,
+    },
+    /// Model-initiated tool invocation block.
     #[serde(rename = "tool_use")]
     ToolUse {
+        /// Unique identifier for this tool use (referenced by tool_result).
         id: String,
+        /// Name of the tool being invoked.
         name: String,
+        /// JSON input arguments passed to the tool.
         input: serde_json::Value,
     },
+    /// Result returned from a tool invocation.
     #[serde(rename = "tool_result")]
     ToolResult {
+        /// Identifier of the tool_use block this result corresponds to.
         tool_use_id: String,
+        /// Content returned by the tool (text or structured blocks).
         content: ToolResultContent,
+        /// Indicates the tool invocation ended in an error.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         is_error: bool,
+        /// Cache control directives for prompt caching.
         #[serde(skip_serializing_if = "Option::is_none")]
         cache_control: Option<serde_json::Value>,
     },
     /// Thinking block - stored as raw JSON to preserve exact signature.
     #[serde(rename = "thinking")]
     Thinking {
+        /// Raw JSON preserving the full thinking block structure.
         #[serde(flatten)]
         raw: serde_json::Value,
     },
@@ -232,11 +283,15 @@ impl ContentBlock {
 /// Image source for vision API
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ImageSource {
-    pub r#type: String, // "base64" or "url"
+    /// Source type: "base64" for inline data or "url" for remote.
+    pub r#type: String,
+    /// MIME type of the image (e.g. "image/png").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
+    /// Base64-encoded image data (when type is "base64").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<String>,
+    /// Remote URL of the image (when type is "url").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
 }
@@ -244,12 +299,16 @@ pub struct ImageSource {
 /// Tool definition for function calling
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Tool {
+    /// Tool type (e.g. "function", "computer_20250124").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
+    /// Unique name identifying the tool.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Human-readable description of what the tool does.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// JSON Schema defining the expected input parameters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub input_schema: Option<serde_json::Value>,
 }
@@ -257,7 +316,9 @@ pub struct Tool {
 /// Thinking/reasoning configuration for Plan Mode
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ThinkingConfig {
-    pub r#type: String, // "enabled" or "disabled"
+    /// Thinking mode: "enabled" or "disabled".
+    pub r#type: String,
+    /// Maximum tokens allocated for the thinking phase.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<u32>,
 }
@@ -265,10 +326,14 @@ pub struct ThinkingConfig {
 /// Request for counting tokens
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CountTokensRequest {
+    /// Model to use for tokenization.
     pub model: String,
+    /// Conversation messages to count tokens for.
     pub messages: Vec<Message>,
+    /// Optional system prompt included in the token count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system: Option<SystemPrompt>,
+    /// Optional tool definitions included in the token count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<Tool>>,
 }
@@ -276,6 +341,7 @@ pub struct CountTokensRequest {
 /// Response for token counting
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CountTokensResponse {
+    /// Total number of input tokens counted.
     pub input_tokens: u32,
 }
 
@@ -384,18 +450,26 @@ mod tests {
 /// Router decision result
 #[derive(Debug, Clone)]
 pub struct RouteDecision {
+    /// Resolved model name to dispatch the request to.
     pub model_name: String,
+    /// Classification of how the route was determined.
     pub route_type: RouteType,
+    /// Prompt-rule pattern that matched, if any.
     pub matched_prompt: Option<String>,
 }
 
 /// Type of routing decision
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteType {
+    /// Routed to a web-search-capable model.
     WebSearch,
+    /// Matched an explicit regex prompt rule from config.
     PromptRule,
+    /// Routed to a model with extended thinking enabled.
     Think,
+    /// Routed to a low-cost model for background tasks.
     Background,
+    /// Fell through to the default model.
     Default,
 }
 

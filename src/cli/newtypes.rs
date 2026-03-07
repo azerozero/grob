@@ -153,7 +153,9 @@ impl<'de> Deserialize<'de> for BodySizeLimit {
 /// Where the configuration comes from: local file or remote URL
 #[derive(Debug, Clone)]
 pub enum ConfigSource {
+    /// Local filesystem path to a TOML config file
     File(PathBuf),
+    /// Remote HTTP(S) URL pointing to a TOML config file
     Url(String),
 }
 

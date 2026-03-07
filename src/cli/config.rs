@@ -224,17 +224,24 @@ fn default_auto_sync() -> bool {
 /// Server configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ServerConfig {
+    /// Listening port (default: 13456)
     #[serde(default)]
     pub port: Port,
+    /// Bind host address (default: "::1")
     #[serde(default = "default_host")]
     pub host: String,
+    /// Optional API key for authenticating incoming requests
     pub api_key: Option<String>,
+    /// Log verbosity level (default: "info")
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    /// HTTP client timeout settings
     #[serde(default)]
     pub timeouts: TimeoutConfig,
+    /// Request/response tracing configuration
     #[serde(default)]
     pub tracing: TracingConfig,
+    /// TLS/HTTPS termination settings
     #[serde(default)]
     pub tls: TlsConfig,
     /// Port for the OAuth callback server (default: 1455)
@@ -297,7 +304,7 @@ pub struct AcmeConfig {
     /// Domain names to obtain certificates for
     #[serde(default)]
     pub domains: Vec<String>,
-    /// Contact email addresses for Let's Encrypt (e.g. ["admin@example.com"])
+    /// Contact email addresses for Let's Encrypt (e.g. `["admin@example.com"]`).
     #[serde(default)]
     pub contacts: Vec<String>,
     /// Cache directory for certificates (default: ~/.grob/certs/)
@@ -311,8 +318,10 @@ pub struct AcmeConfig {
 /// Message tracing configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TracingConfig {
+    /// Enable request/response tracing to file
     #[serde(default)]
     pub enabled: bool,
+    /// File path for trace output (default: ~/.grob/trace.jsonl)
     #[serde(default = "default_tracing_path")]
     pub path: String,
     /// Omit system prompt from traces (default: true, since system prompts are huge)
@@ -341,8 +350,10 @@ fn default_true() -> bool {
 /// Timeout configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TimeoutConfig {
+    /// Total API request timeout in milliseconds (default: 600000)
     #[serde(default = "default_api_timeout")]
     pub api_timeout_ms: u64,
+    /// TCP connection timeout in milliseconds (default: 10000)
     #[serde(default = "default_connect_timeout")]
     pub connect_timeout_ms: u64,
 }
@@ -371,9 +382,13 @@ fn default_connect_timeout() -> u64 {
 /// Router configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RouterConfig {
+    /// Default model for unclassified requests
     pub default: String,
+    /// Model for background/low-priority tasks
     pub background: Option<String>,
+    /// Model for extended-thinking requests
     pub think: Option<String>,
+    /// Model for web-search-enabled requests
     pub websearch: Option<String>,
     /// Regex pattern for auto-mapping models (e.g., "^claude-").
     /// If empty/null, defaults to Claude models only.
@@ -396,7 +411,7 @@ pub struct RouterConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PromptRule {
     /// Regex pattern to match against user prompt content.
-    /// Can include capture groups: (pattern) or named: (?P<name>pattern)
+    /// Can include capture groups: `(pattern)` or named: `(?P<name>pattern)`.
     pub pattern: String,
     /// Model to route to when pattern matches.
     /// Can reference capture groups: $1, $name, ${1}, ${name}, or mixed like "prefix-$1"
@@ -509,10 +524,15 @@ pub struct ProjectConfig {
 /// Router overlay for per-project config
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct ProjectRouterOverlay {
+    /// Override for the default model
     pub default: Option<String>,
+    /// Override for the thinking model
     pub think: Option<String>,
+    /// Override for the background model
     pub background: Option<String>,
+    /// Override for the web-search model
     pub websearch: Option<String>,
+    /// Additional prompt-based routing rules (prepended to global rules)
     #[serde(default)]
     pub prompt_rules: Vec<PromptRule>,
 }

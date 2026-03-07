@@ -328,6 +328,7 @@ pub fn pricing(model: &str) -> Option<&'static ModelPricing> {
 
 /// Token cost calculator
 pub struct TokenCounter {
+    /// Estimated cost in USD for the processed tokens.
     pub estimated_cost_usd: f64,
 }
 

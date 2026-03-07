@@ -69,26 +69,37 @@ impl PKCEVerifier {
 /// Authorization URL with PKCE
 #[derive(Debug, Clone)]
 pub struct AuthorizationUrl {
+    /// Full authorization URL to open in the browser.
     pub url: String,
+    /// PKCE verifier to use during code exchange.
     pub verifier: PKCEVerifier,
 }
 
 /// Detected OAuth provider type based on client_id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OAuthProviderType {
+    /// Anthropic Claude (Pro/Max) OAuth provider.
     Anthropic,
+    /// OpenAI (Codex CLI) OAuth provider.
     OpenAI,
+    /// Google Gemini OAuth provider.
     Gemini,
 }
 
 /// OAuth provider configuration
 #[derive(Debug, Clone)]
 pub struct OAuthConfig {
+    /// OAuth client identifier.
     pub client_id: String,
-    pub client_secret: Option<String>, // Some providers require client_secret (e.g., Google)
+    /// Client secret (required by some providers, e.g. Google).
+    pub client_secret: Option<String>,
+    /// Authorization endpoint URL.
     pub auth_url: String,
+    /// Token exchange endpoint URL.
     pub token_url: String,
+    /// Redirect URI registered with the OAuth provider.
     pub redirect_uri: String,
+    /// OAuth scopes requested during authorization.
     pub scopes: Vec<String>,
 }
 
@@ -156,9 +167,9 @@ impl OAuthConfig {
     ///
     /// Note: This uses Google's official Gemini CLI OAuth app credentials.
     /// The client_id and client_secret are public (as documented in Google's official CLI).
-    /// See: https://github.com/google-gemini/gemini-cli
+    /// See: <https://github.com/google-gemini/gemini-cli>
     /// "It's ok to save this in git because this is an installed application"
-    /// https://developers.google.com/identity/protocols/oauth2#installed
+    /// <https://developers.google.com/identity/protocols/oauth2#installed>
     pub fn gemini() -> Self {
         // Uses Google's official Gemini CLI public OAuth credentials by default.
         // See: https://github.com/google-gemini/gemini-cli

@@ -1,18 +1,31 @@
 //! Data Loss Prevention engine: PII redaction, secret scanning, prompt injection detection.
 
+/// Built-in secret detection rules shipped with the engine.
 pub mod builtins;
+/// Canary token generation for watermarking redacted secrets.
 pub mod canary;
+/// Configuration structs for all DLP subsystems.
 pub mod config;
+/// DFA-based secret scanner with prefix-gated matching.
 pub mod dfa;
+/// Hot-reloadable runtime config for domain lists and patterns.
 pub mod hot_config;
 mod injection_patterns;
+/// Name anonymization with reversible pseudonym mapping.
 pub mod names;
+/// PII detection for credit cards, IBANs, and BICs.
 pub mod pii;
+/// Prompt injection detection and blocking.
 pub mod prompt_injection;
+/// Per-session DLP state for multi-turn conversations.
 pub mod session;
+/// Cryptographically signed DLP config verification.
 pub mod signed_config;
+/// Sequential Probability Ratio Test for entropy-based leak detection.
 pub mod sprt;
+/// Streaming DLP support for SSE delta processing.
 pub mod stream;
+/// URL exfiltration detection and prevention (anti-EchoLeak).
 pub mod url_exfil;
 
 use crate::models::{
@@ -25,7 +38,9 @@ use std::sync::Arc;
 /// Error returned when DLP blocks a request or response.
 #[derive(Debug)]
 pub enum DlpBlockError {
+    /// Indicates one or more prompt injection attempts were detected.
     InjectionBlocked(Vec<prompt_injection::InjectionDetection>),
+    /// Indicates one or more URL exfiltration attempts were detected.
     UrlExfilBlocked(Vec<url_exfil::UrlExfilDetection>),
 }
 
@@ -58,14 +73,23 @@ impl std::fmt::Display for DlpBlockError {
 
 /// Central DLP engine combining all detection and replacement components.
 pub struct DlpEngine {
+    /// Resolved DLP configuration used to build all sub-scanners.
     pub config: DlpConfig,
+    /// DFA-based scanner for secret patterns (API keys, tokens, PEM blocks).
     pub scanner: dfa::SecretScanner,
+    /// Reversible name anonymizer mapping real names to pseudonyms.
     pub anonymizer: names::NameAnonymizer,
+    /// Shared canary token generator for watermarking redacted secrets.
     pub canary_gen: Arc<canary::CanaryGenerator>,
+    /// SPRT entropy detector, active only when entropy scanning is enabled.
     pub sprt: Option<sprt::SprtDetector>,
+    /// PII scanner for credit cards, IBANs, and BICs with checksum validation.
     pub pii_scanner: Option<pii::PiiScanner>,
+    /// URL exfiltration scanner, active only when url_exfil is enabled.
     pub url_exfil_scanner: Option<url_exfil::UrlExfilScanner>,
+    /// Prompt injection detector, active only when injection scanning is enabled.
     pub injection_detector: Option<prompt_injection::InjectionDetector>,
+    /// Shared hot-reloadable config for domain lists and injection patterns.
     pub hot_config: hot_config::SharedHotConfig,
 }
 

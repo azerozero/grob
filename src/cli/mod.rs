@@ -1,5 +1,6 @@
 //! CLI configuration, argument parsing, and validation.
 
+/// CLI argument parsing and subcommand definitions.
 pub mod args;
 mod config;
 mod defaults;
@@ -30,23 +31,33 @@ pub struct AppConfig {
     /// Config schema version (for forward compatibility)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// HTTP server settings (port, host, TLS, timeouts)
     #[serde(default)]
     pub server: ServerConfig,
+    /// Request routing rules and model assignments
     pub router: RouterConfig,
+    /// Configured LLM provider backends
     #[serde(default)]
     pub providers: Vec<ProviderConfig>,
+    /// Model definitions with provider mappings
     #[serde(default)]
     pub models: Vec<ModelConfig>,
+    /// Preset management and sync settings
     #[serde(default)]
     pub presets: PresetConfig,
+    /// Monthly spend budget and warning thresholds
     #[serde(default)]
     pub budget: BudgetConfig,
+    /// Data loss prevention pipeline settings
     #[serde(default)]
     pub dlp: DlpConfig,
+    /// Authentication and authorization configuration
     #[serde(default)]
     pub auth: AuthConfig,
+    /// Webhook event tap configuration
     #[serde(default)]
     pub tap: TapConfig,
+    /// Security middleware settings (rate limits, circuit breaker)
     #[serde(default)]
     pub security: SecurityConfig,
     /// LLM response cache configuration

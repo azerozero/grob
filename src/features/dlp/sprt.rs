@@ -1,9 +1,13 @@
 /// Entropy alert from SPRT async scan.
 #[derive(Debug, Clone)]
 pub struct EntropyAlert {
+    /// Byte offset where the suspicious token begins.
     pub start: usize,
+    /// Byte offset where the suspicious token ends (exclusive).
     pub end: usize,
+    /// Shannon entropy of the token (bits per byte).
     pub entropy: f32,
+    /// Truncated snippet of the high-entropy token.
     pub text_snippet: String,
 }
 

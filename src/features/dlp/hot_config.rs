@@ -8,9 +8,13 @@ pub type SharedHotConfig = Arc<RwLock<HotConfig>>;
 
 /// Live-reloadable DLP configuration (domain lists + injection patterns).
 pub struct HotConfig {
+    /// Allowed domains; if non-empty, only these pass.
     pub url_whitelist: Vec<DomainMatcher>,
+    /// Blocked domains checked when whitelist is empty.
     pub url_blacklist: Vec<DomainMatcher>,
+    /// Hot-loaded custom injection regex patterns.
     pub injection_custom_patterns: Vec<Regex>,
+    /// Timestamp of the last successful reload.
     pub last_loaded: DateTime<Utc>,
     /// SHA-256 of the source content; skip reload if unchanged.
     pub source_hash: String,
@@ -30,13 +34,16 @@ impl Default for HotConfig {
 
 /// Matches a hostname against a domain pattern.
 pub struct DomainMatcher {
+    /// Original domain pattern string from config.
     pub raw: String,
+    /// Matching strategy (exact, suffix, or glob).
     pub mode: DomainMatchMode,
     /// Pre-compiled regex for glob mode.
     glob_re: Option<Regex>,
 }
 
 impl DomainMatcher {
+    /// Creates a matcher, compiling a glob regex when needed.
     pub fn new(pattern: &str, mode: &DomainMatchMode) -> Self {
         let glob_re = if *mode == DomainMatchMode::Glob {
             // Convert glob pattern to regex: *.example.com → ^.*\.example\.com$

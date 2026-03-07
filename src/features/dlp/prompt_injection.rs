@@ -17,9 +17,13 @@ use unicode_normalization::UnicodeNormalization;
 /// A detected prompt injection attempt.
 #[derive(Debug, Clone)]
 pub struct InjectionDetection {
+    /// Name of the pattern rule that matched.
     pub pattern_name: String,
+    /// Verbatim text fragment captured by the pattern.
     pub matched_text: String,
+    /// Byte offset where the match begins.
     pub start: usize,
+    /// Byte offset where the match ends (exclusive).
     pub end: usize,
 }
 
@@ -35,8 +39,11 @@ impl std::fmt::Display for InjectionDetection {
 
 /// Result of prompt injection scanning.
 pub enum InjectionResult {
+    /// No injection patterns detected.
     Clean,
+    /// Injection detected and logged; request not blocked.
     Logged,
+    /// Injection detected; request blocked with details.
     Blocked(Vec<InjectionDetection>),
 }
 

@@ -9,15 +9,20 @@ use std::path::PathBuf;
 
 /// Budget limit parameters for warning checks.
 pub struct BudgetLimits {
+    /// Maximum monthly spend in USD across all providers.
     pub global_limit: f64,
+    /// Optional per-provider monthly spend cap in USD.
     pub provider_limit: Option<f64>,
+    /// Optional per-model monthly spend cap in USD.
     pub model_limit: Option<f64>,
+    /// Percentage threshold at which to emit warnings.
     pub warn_at_percent: u32,
 }
 
 /// Budget check error
 #[derive(Debug, Clone)]
 pub struct BudgetError {
+    /// Human-readable budget exceeded message.
     pub message: String,
 }
 

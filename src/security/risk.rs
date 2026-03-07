@@ -6,9 +6,13 @@ use crate::security::audit_log::RiskLevel;
 
 /// DLP/security outcome for a single request, used as input to risk classification.
 pub struct SecurityOutcome {
+    /// Number of DLP rules triggered by the request.
     pub dlp_rules_triggered: usize,
+    /// Indicates the request was blocked by DLP.
     pub was_blocked: bool,
+    /// Indicates a prompt injection was detected.
     pub had_injection: bool,
+    /// Indicates personally identifiable information was found.
     pub had_pii: bool,
 }
 
@@ -27,11 +31,17 @@ pub fn assess_risk(outcome: &SecurityOutcome) -> RiskLevel {
 
 /// Context for a risk escalation event.
 pub struct EscalationEvent<'a> {
+    /// Assessed risk level for the event.
     pub risk: RiskLevel,
+    /// Minimum risk level that triggers escalation.
     pub threshold: RiskLevel,
+    /// Optional webhook URL for external notification.
     pub webhook_url: &'a Option<String>,
+    /// Unique identifier for the originating event.
     pub event_id: &'a str,
+    /// Tenant that generated the event.
     pub tenant_id: &'a str,
+    /// Model name involved in the event.
     pub model: &'a str,
 }
 

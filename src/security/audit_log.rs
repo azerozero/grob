@@ -48,7 +48,9 @@ impl SigningAlgorithm {
 
 /// Signing material: holds the key for the configured algorithm
 pub enum SigningMaterial {
+    /// ECDSA P-256 signing key (asymmetric).
     Ecdsa(SigningKey),
+    /// HMAC-SHA256 symmetric key (32 bytes).
     Hmac([u8; 32]),
 }
 
@@ -138,9 +140,13 @@ pub struct AuditEntry {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RiskLevel {
+    /// Minimal risk, no intervention needed.
     Low,
+    /// Moderate risk, may warrant monitoring.
     Medium,
+    /// Elevated risk, requires attention.
     High,
+    /// Severe risk, immediate action required.
     Critical,
 }
 

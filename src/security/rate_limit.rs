@@ -63,7 +63,9 @@ impl TokenBucket {
 /// Rate limiter key (tenant_id or IP fallback)
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum RateLimitKey {
+    /// Keyed by tenant identifier.
     Tenant(String),
+    /// Keyed by source IP address (fallback).
     Ip(String),
 }
 

@@ -19,9 +19,13 @@ static BASE64_SEGMENT_RE: LazyLock<Regex> =
 /// Detection detail for a suspicious URL.
 #[derive(Debug, Clone)]
 pub struct UrlExfilDetection {
+    /// Full or truncated URL that triggered detection.
     pub url: String,
+    /// Human-readable reason for flagging (e.g. "md_image_suspicious_domain").
     pub reason: String,
+    /// Byte offset where the match begins.
     pub start: usize,
+    /// Byte offset where the match ends (exclusive).
     pub end: usize,
 }
 

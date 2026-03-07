@@ -1,5 +1,6 @@
 //! TAP (request/response tapping) for observability and debugging.
 
+/// Streaming tap utilities for SSE event interception.
 pub mod stream;
 
 use bytes::Bytes;
@@ -42,17 +43,29 @@ fn default_true() -> bool {
 
 /// Events sent through the tap channel
 pub enum TapEvent {
-    /// A new request is starting
+    /// A new request is starting.
     Request {
+        /// Unique identifier for the request.
         request_id: String,
+        /// Tenant that initiated the request, if known.
         tenant_id: Option<String>,
+        /// Model name targeted by the request.
         model: String,
+        /// Serialized request body.
         body: String,
     },
-    /// A chunk of streaming data
-    StreamChunk { request_id: String, data: Bytes },
-    /// The stream has ended
-    StreamEnd { request_id: String },
+    /// A chunk of streaming data.
+    StreamChunk {
+        /// Unique identifier for the owning request.
+        request_id: String,
+        /// Raw SSE chunk bytes.
+        data: Bytes,
+    },
+    /// The stream has ended.
+    StreamEnd {
+        /// Unique identifier for the completed request.
+        request_id: String,
+    },
 }
 
 /// Non-blocking sender for tap events.

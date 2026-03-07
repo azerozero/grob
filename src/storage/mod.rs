@@ -1,5 +1,6 @@
 //! Persistent storage layer using redb (embedded key-value store).
 
+/// JSON-to-redb migration logic for legacy spend and token files.
 pub mod migrate;
 
 use crate::auth::token_store::OAuthToken;

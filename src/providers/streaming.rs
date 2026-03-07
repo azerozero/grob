@@ -9,7 +9,9 @@ use std::task::{Context, Poll};
 /// SSE event from provider
 #[derive(Debug, Clone)]
 pub struct SseEvent {
+    /// Optional event type (e.g. "message_start", "content_block_delta").
     pub event: Option<String>,
+    /// JSON payload of the event.
     pub data: String,
 }
 
