@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::models::{AnthropicRequest, MessageContent};
+use crate::models::{CanonicalRequest, MessageContent};
 use crate::providers::error::ProviderError;
 use crate::providers::{ContentBlock, KnownContentBlock, ProviderResponse, Usage};
 
@@ -11,7 +11,7 @@ use crate::providers::{ContentBlock, KnownContentBlock, ProviderResponse, Usage}
 /// - `image` blocks → `image_url` content parts with data URI encoding
 /// - `thinking` blocks → dropped (OpenAI doesn't support this)
 pub(crate) fn transform_request(
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
 ) -> Result<OpenAIRequest, ProviderError> {
     let mut openai_messages = Vec::new();
 
@@ -57,6 +57,8 @@ pub(crate) fn transform_request(
         None
     };
 
+    let ext = &request.extensions;
+
     Ok(OpenAIRequest {
         model: request.model.clone(),
         messages: openai_messages,
@@ -68,6 +70,17 @@ pub(crate) fn transform_request(
         stream_options,
         tools,
         tool_choice: transform_tool_choice(request),
+        // Restore provider-specific fields from extensions
+        response_format: ext.response_format.clone(),
+        reasoning_effort: ext.reasoning_effort.clone(),
+        seed: ext.seed,
+        frequency_penalty: ext.frequency_penalty,
+        presence_penalty: ext.presence_penalty,
+        parallel_tool_calls: ext.parallel_tool_calls,
+        user: ext.user.clone(),
+        logprobs: ext.logprobs,
+        top_logprobs: ext.top_logprobs,
+        service_tier: ext.service_tier.clone(),
     })
 }
 
@@ -200,7 +213,7 @@ fn extract_content_parts(blocks: &[ContentBlock]) -> Vec<OpenAIContentPart> {
 }
 
 /// Transform Anthropic tool definitions to OpenAI format.
-fn transform_tools(request: &AnthropicRequest) -> Option<Vec<OpenAITool>> {
+fn transform_tools(request: &CanonicalRequest) -> Option<Vec<OpenAITool>> {
     request.tools.as_ref().map(|anthropic_tools| {
         anthropic_tools
             .iter()
@@ -219,7 +232,7 @@ fn transform_tools(request: &AnthropicRequest) -> Option<Vec<OpenAITool>> {
 }
 
 /// Transform Anthropic tool_choice to OpenAI format.
-fn transform_tool_choice(request: &AnthropicRequest) -> Option<serde_json::Value> {
+fn transform_tool_choice(request: &CanonicalRequest) -> Option<serde_json::Value> {
     request.tool_choice.as_ref().and_then(|tc| {
         let tc_type = tc.get("type").and_then(|v| v.as_str()).unwrap_or("");
         match tc_type {
@@ -396,7 +409,7 @@ fn extract_codex_output_block(item: &serde_json::Value) -> Option<ContentBlock> 
 
 /// Transform Anthropic request to OpenAI Responses API format.
 pub(crate) fn transform_to_responses_request(
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
     codex_instructions: &str,
 ) -> Result<OpenAIResponsesRequest, ProviderError> {
     let instructions = codex_instructions.to_string();

@@ -50,7 +50,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AnthropicRequest"
+              $ref: "#/components/schemas/CanonicalRequest"
       responses:
         "200":
           description: Successful response (buffered or SSE stream)
@@ -97,7 +97,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/AnthropicRequest"
+              $ref: "#/components/schemas/CanonicalRequest"
       responses:
         "200":
           description: Token count estimate
@@ -643,7 +643,7 @@ components:
         format: uuid
 
   schemas:
-    AnthropicRequest:
+    CanonicalRequest:
       type: object
       required: [model, messages, max_tokens]
       properties:

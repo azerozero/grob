@@ -1,5 +1,5 @@
 use grob::models::{
-    AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt,
+    CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt,
 };
 use serde_json::{json, Value};
 
@@ -31,7 +31,7 @@ fn test_cache_control_serialization_round_trip() {
     });
 
     // First deserialization
-    let deserialized: AnthropicRequest = serde_json::from_value(original_request.clone()).unwrap();
+    let deserialized: CanonicalRequest = serde_json::from_value(original_request.clone()).unwrap();
 
     // Serialize back to JSON
     let reserialized = serde_json::to_value(&deserialized).unwrap();
@@ -126,7 +126,7 @@ fn test_multiple_content_blocks_mixed_caching() {
         ]
     });
 
-    let deserialized: AnthropicRequest = serde_json::from_value(request).unwrap();
+    let deserialized: CanonicalRequest = serde_json::from_value(request).unwrap();
 
     match &deserialized.messages[0].content {
         MessageContent::Blocks(blocks) => {
@@ -201,7 +201,7 @@ fn test_cache_control_with_complex_nested_structure() {
         ]
     });
 
-    let deserialized: AnthropicRequest = serde_json::from_value(request).unwrap();
+    let deserialized: CanonicalRequest = serde_json::from_value(request).unwrap();
 
     match &deserialized.messages[0].content {
         MessageContent::Blocks(blocks) => match &blocks[0] {
@@ -259,7 +259,7 @@ fn test_image_blocks_dont_have_cache_control() {
         ]
     });
 
-    let deserialized: AnthropicRequest = serde_json::from_value(request).unwrap();
+    let deserialized: CanonicalRequest = serde_json::from_value(request).unwrap();
 
     match &deserialized.messages[0].content {
         MessageContent::Blocks(blocks) => {
@@ -333,7 +333,7 @@ fn test_tool_use_and_tool_result_blocks_ignore_cache_control() {
         ]
     });
 
-    let deserialized: AnthropicRequest = serde_json::from_value(request).unwrap();
+    let deserialized: CanonicalRequest = serde_json::from_value(request).unwrap();
 
     match &deserialized.messages[0].content {
         MessageContent::Blocks(blocks) => {
@@ -408,7 +408,7 @@ fn test_system_prompt_blocks_mixed_with_messages() {
         ]
     });
 
-    let deserialized: AnthropicRequest = serde_json::from_value(request).unwrap();
+    let deserialized: CanonicalRequest = serde_json::from_value(request).unwrap();
 
     // Check system blocks
     if let Some(system) = &deserialized.system {
@@ -461,7 +461,7 @@ fn test_empty_cache_control_object() {
         ]
     });
 
-    let deserialized: AnthropicRequest = serde_json::from_value(request).unwrap();
+    let deserialized: CanonicalRequest = serde_json::from_value(request).unwrap();
 
     match &deserialized.messages[0].content {
         MessageContent::Blocks(blocks) => match &blocks[0] {
@@ -502,7 +502,7 @@ fn test_cache_control_backward_compatibility() {
         ]
     });
 
-    let deserialized: AnthropicRequest = serde_json::from_value(request_without_cache).unwrap();
+    let deserialized: CanonicalRequest = serde_json::from_value(request_without_cache).unwrap();
 
     // Should work without any issues
     match &deserialized.messages[0].content {

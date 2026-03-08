@@ -4,10 +4,10 @@
 //! non-streaming responses, including cache key computation.
 
 use grob::cache::{CachedResponse, ResponseCache};
-use grob::models::{AnthropicRequest, Message, MessageContent};
+use grob::models::{CanonicalRequest, Message, MessageContent};
 
-fn test_request(model: &str, text: &str) -> AnthropicRequest {
-    AnthropicRequest {
+fn test_request(model: &str, text: &str) -> CanonicalRequest {
+    CanonicalRequest {
         model: model.to_string(),
         messages: vec![Message {
             role: "user".to_string(),
@@ -24,6 +24,7 @@ fn test_request(model: &str, text: &str) -> AnthropicRequest {
         system: None,
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     }
 }
 

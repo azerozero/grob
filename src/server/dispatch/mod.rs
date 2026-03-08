@@ -9,7 +9,7 @@ mod telemetry;
 
 use crate::cli::ModelStrategy;
 use crate::features::dlp::DlpEngine;
-use crate::models::AnthropicRequest;
+use crate::models::CanonicalRequest;
 use crate::providers::ProviderResponse;
 use axum::http::HeaderMap;
 use bytes::Bytes;
@@ -56,7 +56,7 @@ struct AuditEntry<'a> {
 
 impl DispatchContext<'_> {
     /// Run DLP input sanitization if enabled.
-    fn sanitize_input(&self, request: &mut AnthropicRequest) {
+    fn sanitize_input(&self, request: &mut CanonicalRequest) {
         if let Some(ref dlp_engine) = self.dlp {
             if dlp_engine.config.scan_input {
                 dlp_engine.sanitize_request(request);
@@ -129,7 +129,7 @@ pub(crate) enum DispatchResult {
 /// response format (OpenAI or Anthropic native).
 pub(crate) async fn dispatch(
     ctx: &DispatchContext<'_>,
-    request: &mut AnthropicRequest,
+    request: &mut CanonicalRequest,
 ) -> Result<DispatchResult, AppError> {
     // ── Step 1: DLP input scanning ──
     scan_dlp_input(ctx, request)?;
@@ -216,7 +216,7 @@ async fn check_cache(
 /// DLP input scanning with risk assessment and audit logging.
 fn scan_dlp_input(
     ctx: &DispatchContext<'_>,
-    request: &mut AnthropicRequest,
+    request: &mut CanonicalRequest,
 ) -> Result<(), AppError> {
     let Some(ref dlp_engine) = ctx.dlp else {
         return Ok(());
@@ -269,7 +269,7 @@ fn scan_dlp_input(
 /// Handle fan-out strategy (dispatch to multiple providers in parallel).
 async fn dispatch_fan_out(
     ctx: &DispatchContext<'_>,
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
     sorted_mappings: &[crate::cli::ModelMapping],
     fan_out_config: &crate::cli::FanOutConfig,
     decision: &crate::models::RouteDecision,

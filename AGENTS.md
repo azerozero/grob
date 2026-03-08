@@ -4,7 +4,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Stack
 
-- **Language**: Rust 2021 edition (~33K LOC, 478 public items, 35% doc coverage)
+- **Language**: Rust 2021 edition (~33.6K LOC, ~512 public items, 100% doc coverage)
 - **Runtime**: Tokio async
 - **HTTP framework**: Axum 0.7 with Tower middleware
 - **HTTP client**: reqwest 0.12 (HTTP/2, rustls)
@@ -18,7 +18,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Architecture
 
-Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`) formats. All requests are normalized to Anthropic's internal message format. A regex-based router classifies each request by task type (web_search, background, subagent, prompt_rule, think, default) and selects a named model. Each model maps to one or more providers ordered by priority. If the highest-priority provider fails, the request falls through to the next. Circuit breakers (5 failures = open, 30s timeout) prevent hammering degraded providers. DLP scanning runs on stream chunks using Aho-Corasick automata. Persistent spend tracking in redb (`~/.grob/grob.db`) enforces monthly budgets at global, per-provider, and per-model granularity.
+Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`) formats. All requests are normalized to a canonical internal message format (the `CanonicalRequest` type). OpenAI-specific extension fields (response_format, reasoning_effort, seed, etc.) are captured in `RequestExtensions` for lossless roundtrips. A regex-based router classifies each request by task type (web_search, background, subagent, prompt_rule, think, default) and selects a named model. Each model maps to one or more providers ordered by priority. If the highest-priority provider fails, the request falls through to the next. Circuit breakers (5 failures = open, 30s timeout) prevent hammering degraded providers. DLP scanning runs on stream chunks using Aho-Corasick automata. Persistent spend tracking in redb (`~/.grob/grob.db`) enforces monthly budgets at global, per-provider, and per-model granularity.
 
 ## Domain Concepts
 
@@ -46,7 +46,7 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 - **Error types**: `ProviderError` (thiserror) for provider failures, `AppError` for HTTP responses, `anyhow` for CLI/startup.
 - **Streaming-first**: SSE streaming is the primary path. DLP scanning is chunk-based, not buffered.
 - **Environment variable expansion**: API keys in TOML support `$ENV_VAR` syntax resolved at startup.
-- **All providers normalize to Anthropic format**: OpenAI, Gemini, etc. requests are translated to/from Anthropic Messages internally.
+- **All providers normalize to canonical format**: OpenAI, Gemini, etc. requests are translated to/from the `CanonicalRequest` type (structurally Anthropic Messages format). Provider-specific fields are preserved in `RequestExtensions` for lossless roundtrips.
 - **Default host is IPv6**: `::1` (not `127.0.0.1`). Container mode uses `0.0.0.0`.
 - **Per-project config overlay**: `.grob.toml` in project root merges with global config (router, budget, preset overrides).
 
@@ -105,11 +105,13 @@ cargo bench --bench hotpath
 - The `models` field on `ProviderConfig` is a legacy field -- model support is determined by `[[models.mappings]]`, not by listing models on the provider.
 - `jemalloc` is not available on MSVC targets -- the `#[cfg(not(target_env = "msvc"))]` guard handles this.
 - `cargo chef` is used in the Containerfile for layer caching.
-- The OpenAI compat endpoint translates everything to Anthropic format internally, so features like `response_format` (JSON mode) are not supported.
+- The OpenAI compat endpoint translates to canonical format internally. Extension fields (response_format, reasoning_effort, seed, logprobs, etc.) are captured for lossless roundtrip but may not be enforced by Anthropic backends.
 - Presets live in `presets/*.toml` (shipped with the binary) and user presets in `~/.grob/presets/`.
 - Feature flags are all on by default. To build without DLP: `cargo build --no-default-features --features oauth,tap,compliance,mcp`.
+- Anthropic beta features (`anthropic-beta` header) include prompt-caching-scope, interleaved-thinking, fine-grained-tool-streaming, and oauth. Client-provided beta features are merged with server defaults (no duplicates).
 - Routing priority (highest to lowest): WebSearch > Background > Subagent > PromptRules > Think > Default. Auto-map runs first as a name transformation but does not change route type.
 - `grob exec -- <cmd>` is the recommended way to use Grob. It auto-starts, sets env vars, runs your tool, and auto-stops.
+- `grob preset apply <name> --reload` applies a preset and hot-reloads the running server in one step.
 - Budget exceeded returns HTTP 402, not 429. Rate limit exceeded returns 429.
 - `grob -- <cmd>` is shorthand for `grob exec -- <cmd>` (trailing args syntax).
 - The `harness` feature flag is opt-in (not in `default`). Build with `cargo build --features harness` to enable `grob harness record/replay`. Set `GROB_HARNESS_RECORD=<path>` to enable the tape recorder middleware at runtime.

@@ -1,5 +1,5 @@
 use crate::models::{
-    self, AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt, Tool,
+    self, CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt, Tool,
     ToolResultContent,
 };
 use crate::providers::ProviderResponse;
@@ -31,8 +31,8 @@ fn parse_data_uri_image(url: &str) -> Option<ContentBlock> {
     }))
 }
 
-/// Convert OpenAI content to Anthropic MessageContent
-pub(crate) fn openai_content_to_anthropic(content: Option<OpenAIContent>) -> MessageContent {
+/// Converts OpenAI content to canonical MessageContent.
+pub(crate) fn openai_content_to_canonical(content: Option<OpenAIContent>) -> MessageContent {
     match content {
         Some(OpenAIContent::String(text)) => MessageContent::Text(text),
         Some(OpenAIContent::Parts(parts)) => {
@@ -170,10 +170,10 @@ fn convert_tool_choice(tc: &serde_json::Value) -> Option<serde_json::Value> {
     }
 }
 
-/// Transform OpenAI request to Anthropic format
-pub fn transform_openai_to_anthropic(
+/// Transforms an OpenAI request into a [`CanonicalRequest`].
+pub fn transform_openai_to_canonical(
     openai_req: OpenAIRequest,
-) -> Result<AnthropicRequest, String> {
+) -> Result<CanonicalRequest, String> {
     let mut messages = Vec::with_capacity(openai_req.messages.len());
     let mut system_prompt: Option<SystemPrompt> = None;
 
@@ -187,7 +187,7 @@ pub fn transform_openai_to_anthropic(
             "user" => {
                 messages.push(crate::models::Message {
                     role: "user".to_string(),
-                    content: openai_content_to_anthropic(msg.content),
+                    content: openai_content_to_canonical(msg.content),
                 });
             }
             "assistant" => {
@@ -230,7 +230,21 @@ pub fn transform_openai_to_anthropic(
         .max_tokens
         .unwrap_or_else(|| models::default_max_tokens(&openai_req.model));
 
-    Ok(AnthropicRequest {
+    let extensions = crate::models::extensions::RequestExtensions {
+        response_format: openai_req.response_format,
+        reasoning_effort: openai_req.reasoning_effort,
+        seed: openai_req.seed,
+        frequency_penalty: openai_req.frequency_penalty,
+        presence_penalty: openai_req.presence_penalty,
+        parallel_tool_calls: openai_req.parallel_tool_calls,
+        user: openai_req.user,
+        logprobs: openai_req.logprobs,
+        top_logprobs: openai_req.top_logprobs,
+        service_tier: openai_req.service_tier,
+        ..Default::default()
+    };
+
+    Ok(CanonicalRequest {
         model: openai_req.model,
         messages,
         max_tokens,
@@ -247,11 +261,12 @@ pub fn transform_openai_to_anthropic(
             .tool_choice
             .as_ref()
             .and_then(convert_tool_choice),
+        extensions,
     })
 }
 
-/// Transform Anthropic response to OpenAI format
-pub fn transform_anthropic_to_openai(
+/// Transforms a [`ProviderResponse`] into an OpenAI-compatible response.
+pub fn transform_canonical_to_openai(
     anthropic_resp: ProviderResponse,
     model: String,
 ) -> OpenAIResponse {

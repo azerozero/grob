@@ -112,7 +112,7 @@ impl ResponseCache {
         Some(hex::encode(hasher.finalize()))
     }
 
-    /// Compute a cache key directly from an AnthropicRequest.
+    /// Compute a cache key directly from an CanonicalRequest.
     ///
     /// Streams each request field (tenant, model, messages, system, tools, max_tokens)
     /// through a SHA-256 hasher via `Sha256Writer`, separated by `|` delimiters.
@@ -121,7 +121,7 @@ impl ResponseCache {
     /// requests (temperature != 0).
     pub fn compute_key_from_request(
         tenant_id: &str,
-        request: &crate::models::AnthropicRequest,
+        request: &crate::models::CanonicalRequest,
     ) -> Option<String> {
         use std::io::Write as _;
 

@@ -1,10 +1,10 @@
 //! Test fixtures for Claude Code Mux
 
-use grob::models::{AnthropicRequest, Message, MessageContent, ThinkingConfig};
+use grob::models::{CanonicalRequest, Message, MessageContent, ThinkingConfig};
 
 /// Creates a simple Anthropic request for testing
-pub fn create_test_request(model: &str, text: &str) -> AnthropicRequest {
-    AnthropicRequest {
+pub fn create_test_request(model: &str, text: &str) -> CanonicalRequest {
+    CanonicalRequest {
         model: model.to_string(),
         messages: vec![Message {
             role: "user".to_string(),
@@ -21,12 +21,13 @@ pub fn create_test_request(model: &str, text: &str) -> AnthropicRequest {
         system: None,
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     }
 }
 
 /// Creates an Anthropic request with thinking enabled (Plan Mode)
-pub fn create_thinking_request(model: &str, text: &str) -> AnthropicRequest {
-    AnthropicRequest {
+pub fn create_thinking_request(model: &str, text: &str) -> CanonicalRequest {
+    CanonicalRequest {
         model: model.to_string(),
         messages: vec![Message {
             role: "user".to_string(),
@@ -46,14 +47,15 @@ pub fn create_thinking_request(model: &str, text: &str) -> AnthropicRequest {
         system: None,
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     }
 }
 
 /// Creates a request with web_search tool
-pub fn create_websearch_request(model: &str, text: &str) -> AnthropicRequest {
+pub fn create_websearch_request(model: &str, text: &str) -> CanonicalRequest {
     use grob::models::Tool;
 
-    AnthropicRequest {
+    CanonicalRequest {
         model: model.to_string(),
         messages: vec![Message {
             role: "user".to_string(),
@@ -78,6 +80,7 @@ pub fn create_websearch_request(model: &str, text: &str) -> AnthropicRequest {
             })),
         }]),
         tool_choice: None,
+        extensions: Default::default(),
     }
 }
 

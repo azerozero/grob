@@ -2,7 +2,7 @@
 
 Grob exposes a `/v1/chat/completions` endpoint for tools that speak the OpenAI API format (Aider, Cline, Continue, etc.).
 
-All requests are translated to Anthropic format internally, routed through the same provider/fallback logic, then translated back.
+All requests are translated to Grob's canonical format internally, routed through the same provider/fallback logic, then translated back. Provider-specific extension fields are preserved for lossless roundtrips.
 
 ## Endpoint
 
@@ -16,16 +16,17 @@ All requests are translated to Anthropic format internally, routed through the s
 - Image inputs (base64 and URL)
 - Streaming (`stream: true`) with SSE
 - Tool/function calling (translated to Anthropic tool_use format)
+- `tool_choice` (`auto`, `none`, `required`, named function)
 - Parameters: `temperature`, `top_p`, `stop`, `max_tokens`
+- Extension fields preserved for lossless roundtrip: `response_format`, `reasoning_effort`, `seed`, `frequency_penalty`, `presence_penalty`, `parallel_tool_calls`, `user`, `logprobs`, `top_logprobs`, `service_tier`
 
 ## Limitations
 
 | Feature | Status |
 |---------|--------|
-| `response_format` (JSON mode) | Not supported |
-| `n` (multiple completions) | Not supported |
-| `logprobs` | Not supported |
-| `tool_choice` | Not yet supported |
+| `n` (multiple completions) | Not supported (always 1 choice) |
+| `response_format` (JSON mode) | Captured but not enforced by Anthropic backend |
+| `logprobs` | Captured but not returned by Anthropic backend |
 
 ## Request format
 

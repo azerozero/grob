@@ -6,7 +6,7 @@ pub(crate) mod types;
 
 // Re-export public API
 pub use stream::AnthropicToOpenAIStream;
-pub use transform::{transform_anthropic_to_openai, transform_openai_to_anthropic};
+pub use transform::{transform_canonical_to_openai, transform_openai_to_canonical};
 pub use types::{
     OpenAIChoice, OpenAIContent, OpenAIContentPart, OpenAIFunction, OpenAIFunctionInput,
     OpenAIImageUrl, OpenAIMessage, OpenAIRequest, OpenAIResponse, OpenAIResponseMessage,
@@ -48,6 +48,16 @@ mod tests {
             stream: None,
             tools: None,
             tool_choice: None,
+            response_format: None,
+            reasoning_effort: None,
+            seed: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            parallel_tool_calls: None,
+            user: None,
+            logprobs: None,
+            top_logprobs: None,
+            service_tier: None,
         }
     }
 
@@ -72,7 +82,7 @@ mod tests {
             },
         ]);
 
-        let result = transform_openai_to_anthropic(req).unwrap();
+        let result = transform_openai_to_canonical(req).unwrap();
 
         // System message should be extracted into the system field
         match &result.system {
@@ -113,7 +123,7 @@ mod tests {
             },
         ]);
 
-        let result = transform_openai_to_anthropic(req).unwrap();
+        let result = transform_openai_to_canonical(req).unwrap();
 
         // The assistant message should have blocks (text + tool_use)
         assert_eq!(result.messages.len(), 2);
@@ -158,7 +168,7 @@ mod tests {
             }),
         ]);
 
-        let openai_resp = transform_anthropic_to_openai(resp, "claude-3".to_string());
+        let openai_resp = transform_canonical_to_openai(resp, "claude-3".to_string());
 
         assert_eq!(openai_resp.choices.len(), 1);
         let choice = &openai_resp.choices[0];
@@ -184,74 +194,50 @@ mod tests {
 
     #[test]
     fn test_temperature_passthrough() {
-        let req = OpenAIRequest {
-            model: "claude-3".to_string(),
-            messages: vec![OpenAIMessage {
-                role: "user".to_string(),
-                content: Some(OpenAIContent::String("Hi".to_string())),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            }],
-            max_tokens: Some(100),
-            temperature: Some(0.7),
-            top_p: None,
-            stop: None,
-            stream: None,
-            tools: None,
-            tool_choice: None,
-        };
+        let mut req = simple_openai_request(vec![OpenAIMessage {
+            role: "user".to_string(),
+            content: Some(OpenAIContent::String("Hi".to_string())),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }]);
+        req.max_tokens = Some(100);
+        req.temperature = Some(0.7);
 
-        let result = transform_openai_to_anthropic(req).unwrap();
+        let result = transform_openai_to_canonical(req).unwrap();
         assert_eq!(result.temperature, Some(0.7));
     }
 
     #[test]
     fn test_stop_sequences_conversion() {
-        let req = OpenAIRequest {
-            model: "claude-3".to_string(),
-            messages: vec![OpenAIMessage {
-                role: "user".to_string(),
-                content: Some(OpenAIContent::String("Hi".to_string())),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            }],
-            max_tokens: Some(100),
-            temperature: None,
-            top_p: None,
-            stop: Some(vec!["STOP".to_string(), "END".to_string()]),
-            stream: None,
-            tools: None,
-            tool_choice: None,
-        };
+        let mut req = simple_openai_request(vec![OpenAIMessage {
+            role: "user".to_string(),
+            content: Some(OpenAIContent::String("Hi".to_string())),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }]);
+        req.max_tokens = Some(100);
+        req.stop = Some(vec!["STOP".to_string(), "END".to_string()]);
 
-        let result = transform_openai_to_anthropic(req).unwrap();
+        let result = transform_openai_to_canonical(req).unwrap();
         let stop_seqs = result.stop_sequences.expect("Expected stop_sequences");
         assert_eq!(stop_seqs, vec!["STOP", "END"]);
     }
 
     #[test]
     fn test_streaming_flag_passthrough() {
-        let req = OpenAIRequest {
-            model: "claude-3".to_string(),
-            messages: vec![OpenAIMessage {
-                role: "user".to_string(),
-                content: Some(OpenAIContent::String("Hi".to_string())),
-                name: None,
-                tool_calls: None,
-                tool_call_id: None,
-            }],
-            max_tokens: Some(100),
-            temperature: None,
-            top_p: None,
-            stop: None,
-            stream: Some(true),
-            tools: None,
-            tool_choice: None,
-        };
+        let mut req = simple_openai_request(vec![OpenAIMessage {
+            role: "user".to_string(),
+            content: Some(OpenAIContent::String("Hi".to_string())),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }]);
+        req.max_tokens = Some(100);
+        req.stream = Some(true);
 
-        let result = transform_openai_to_anthropic(req).unwrap();
+        let result = transform_openai_to_canonical(req).unwrap();
         assert_eq!(result.stream, Some(true));
     }
 
@@ -259,7 +245,7 @@ mod tests {
     fn test_empty_messages_returns_empty() {
         let req = simple_openai_request(vec![]);
 
-        let result = transform_openai_to_anthropic(req).unwrap();
+        let result = transform_openai_to_canonical(req).unwrap();
         assert!(result.messages.is_empty());
         assert!(result.system.is_none());
     }
@@ -284,7 +270,7 @@ mod tests {
             tool_call_id: None,
         }]);
 
-        let result = transform_openai_to_anthropic(req).unwrap();
+        let result = transform_openai_to_canonical(req).unwrap();
         assert_eq!(result.messages.len(), 1);
 
         match &result.messages[0].content {

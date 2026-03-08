@@ -93,7 +93,7 @@ Manage presets.
 |------------|-------------|
 | `grob preset list` | Show available presets (built-in + user) |
 | `grob preset info <name>` | Show providers, models, and required env vars |
-| `grob preset apply <name>` | Apply a preset (backs up current config to `.bak`) |
+| `grob preset apply <name> [-r\|--reload]` | Apply a preset (backs up current config to `.bak`). With `--reload`, hot-reloads the running server after applying. |
 | `grob preset export <name>` | Save current config as a reusable preset |
 | `grob preset install <source>` | Install presets from a git repo or local path |
 | `grob preset sync` | Sync presets from configured remote |

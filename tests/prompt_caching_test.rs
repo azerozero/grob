@@ -1,5 +1,5 @@
 use grob::models::{
-    AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt,
+    CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt,
 };
 use serde_json::json;
 
@@ -35,7 +35,7 @@ fn test_prompt_caching_preservation() {
     });
 
     // Deserialize the request
-    let anthropic_request: AnthropicRequest = serde_json::from_value(request_with_caching).unwrap();
+    let anthropic_request: CanonicalRequest = serde_json::from_value(request_with_caching).unwrap();
 
     // Verify system caching is preserved
     if let Some(system) = &anthropic_request.system {

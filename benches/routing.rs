@@ -41,8 +41,8 @@ fn make_router() -> Router {
     })
 }
 
-fn make_request(model: &str, text: &str) -> AnthropicRequest {
-    AnthropicRequest {
+fn make_request(model: &str, text: &str) -> CanonicalRequest {
+    CanonicalRequest {
         model: model.to_string(),
         messages: vec![Message {
             role: "user".to_string(),
@@ -59,6 +59,7 @@ fn make_request(model: &str, text: &str) -> AnthropicRequest {
         system: None,
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     }
 }
 

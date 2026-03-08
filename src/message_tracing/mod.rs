@@ -3,7 +3,7 @@
 //! Logs full request/response messages to a JSONL file for debugging purposes.
 
 use crate::cli::TracingConfig;
-use crate::models::{AnthropicRequest, RouteType};
+use crate::models::{CanonicalRequest, RouteType};
 use crate::providers::ProviderResponse;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -102,7 +102,7 @@ impl MessageTracer {
     pub fn trace_request(
         &self,
         id: &str,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         provider: &str,
         route_type: &RouteType,
         is_stream: bool,
@@ -193,7 +193,7 @@ impl crate::traits::Tracer for MessageTracer {
     fn trace_request(
         &self,
         id: &str,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         provider: &str,
         route_type: &RouteType,
         is_stream: bool,

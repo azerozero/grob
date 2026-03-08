@@ -2,7 +2,7 @@
 
 mod tests {
     use grob::cli::{AppConfig, RouterConfig, ServerConfig};
-    use grob::models::{AnthropicRequest, Message, MessageContent, RouteType, ThinkingConfig};
+    use grob::models::{CanonicalRequest, Message, MessageContent, RouteType, ThinkingConfig};
     use grob::router::Router;
 
     fn create_test_config() -> AppConfig {
@@ -36,8 +36,8 @@ mod tests {
         }
     }
 
-    fn create_simple_request(text: &str) -> AnthropicRequest {
-        AnthropicRequest {
+    fn create_simple_request(text: &str) -> CanonicalRequest {
+        CanonicalRequest {
             model: "claude-opus-4".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -54,6 +54,7 @@ mod tests {
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         }
     }
 

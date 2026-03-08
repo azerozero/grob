@@ -1,4 +1,4 @@
-use crate::models::AnthropicRequest;
+use crate::models::CanonicalRequest;
 use axum::{
     body::Body,
     extract::State,
@@ -86,8 +86,14 @@ pub(crate) async fn handle_openai_chat_completions(
         .map(|mgr| mgr.engine_for(session_key));
 
     // Transform OpenAI → Anthropic format
-    let mut anthropic_request = openai_compat::transform_openai_to_anthropic(openai_request)
+    let mut anthropic_request = openai_compat::transform_openai_to_canonical(openai_request)
         .map_err(|e| AppError::ParseError(format!("Failed to transform OpenAI request: {}", e)))?;
+
+    // Forward client beta features to Anthropic providers
+    anthropic_request.extensions.client_beta = headers
+        .get("anthropic-beta")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
 
     let ctx = dispatch::DispatchContext {
         state: &state,
@@ -140,7 +146,7 @@ pub(crate) async fn handle_openai_chat_completions(
             ..
         } => {
             let openai_response =
-                openai_compat::transform_anthropic_to_openai(anthropic_response, model.clone());
+                openai_compat::transform_canonical_to_openai(anthropic_response, model.clone());
             let transparency = transparency_enabled.then_some((
                 provider.as_str(),
                 actual_model.as_str(),
@@ -155,7 +161,7 @@ pub(crate) async fn handle_openai_chat_completions(
 
         dispatch::DispatchResult::FanOut { response } => {
             let openai_response =
-                openai_compat::transform_anthropic_to_openai(response, model.clone());
+                openai_compat::transform_canonical_to_openai(response, model.clone());
             Ok(Json(openai_response).into_response())
         }
     }
@@ -219,10 +225,16 @@ pub(crate) async fn handle_messages(
         }
     }
 
-    let mut request: AnthropicRequest = serde_json::from_value(request_json).map_err(|e| {
+    let mut request: CanonicalRequest = serde_json::from_value(request_json).map_err(|e| {
         tracing::error!("❌ Failed to parse request: {}", e);
         AppError::ParseError(format!("Invalid request format: {}", e))
     })?;
+
+    // Forward client beta features to Anthropic providers
+    request.extensions.client_beta = headers
+        .get("anthropic-beta")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
 
     let is_streaming = request.stream == Some(true);
 
@@ -317,7 +329,7 @@ pub(crate) async fn handle_count_tokens(
     let inner = state.snapshot();
 
     // Build a lightweight routing request from the JSON without cloning the full body.
-    let mut routing_request = AnthropicRequest {
+    let mut routing_request = CanonicalRequest {
         model: model.to_string(),
         messages: Vec::new(),
         max_tokens: 1024,
@@ -331,6 +343,7 @@ pub(crate) async fn handle_count_tokens(
         stop_sequences: None,
         stream: None,
         metadata: None,
+        extensions: Default::default(),
     };
     let decision = inner
         .router

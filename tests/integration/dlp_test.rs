@@ -22,7 +22,7 @@ fn test_dlp_blocks_prompt_injection() {
     let engine = DlpEngine::from_config(config).expect("DLP should initialize");
 
     // Known injection pattern: "Ignore previous instructions"
-    let mut request = grob::models::AnthropicRequest {
+    let mut request = grob::models::CanonicalRequest {
         model: "test-model".to_string(),
         messages: vec![grob::models::Message {
             role: "user".to_string(),
@@ -41,6 +41,7 @@ fn test_dlp_blocks_prompt_injection() {
         system: None,
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     };
 
     let result = engine.sanitize_request_checked(&mut request);
@@ -73,7 +74,7 @@ fn test_dlp_passes_clean_input() {
 
     let engine = DlpEngine::from_config(config).expect("DLP should initialize");
 
-    let mut request = grob::models::AnthropicRequest {
+    let mut request = grob::models::CanonicalRequest {
         model: "test-model".to_string(),
         messages: vec![grob::models::Message {
             role: "user".to_string(),
@@ -92,6 +93,7 @@ fn test_dlp_passes_clean_input() {
         system: None,
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     };
 
     let result = engine.sanitize_request_checked(&mut request);

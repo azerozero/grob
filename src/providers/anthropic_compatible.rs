@@ -8,7 +8,7 @@ use super::{
     LlmProvider, ProviderResponse, StreamResponse,
 };
 use crate::auth::OAuthConfig;
-use crate::models::{AnthropicRequest, CountTokensRequest, CountTokensResponse};
+use crate::models::{CanonicalRequest, CountTokensRequest, CountTokensResponse};
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -90,6 +90,21 @@ use super::anthropic_sanitize::{
     sanitize_tool_use_ids, strip_all_thinking_signatures, strip_non_anthropic_thinking,
 };
 
+/// Merges server-default beta features with client-provided ones, deduplicating.
+fn merge_beta_features(client: Option<&str>) -> String {
+    let Some(client) = client else {
+        return ANTHROPIC_BETA_FEATURES.to_string();
+    };
+    let mut features: Vec<&str> = ANTHROPIC_BETA_FEATURES.split(',').collect();
+    for feat in client.split(',') {
+        let feat = feat.trim();
+        if !feat.is_empty() && !features.contains(&feat) {
+            features.push(feat);
+        }
+    }
+    features.join(",")
+}
+
 /// Generic Anthropic-compatible provider.
 /// Works with: Anthropic, OpenRouter, z.ai, Minimax, etc.
 /// Any provider that accepts Anthropic Messages API format.
@@ -125,18 +140,22 @@ impl AnthropicCompatibleProvider {
     }
 
     /// Build a pre-configured request with Anthropic headers and auth.
-    fn build_anthropic_request(&self, url: &str, auth_value: &str) -> reqwest::RequestBuilder {
+    fn build_anthropic_request(
+        &self,
+        url: &str,
+        auth_value: &str,
+        client_beta: Option<&str>,
+    ) -> reqwest::RequestBuilder {
         let mut req_builder = self
             .base
             .client
             .post(url)
             .header("anthropic-version", ANTHROPIC_API_VERSION)
-            .header("Content-Type", "application/json");
+            .header("Content-Type", "application/json")
+            .header("anthropic-beta", merge_beta_features(client_beta));
 
         if self.base.is_oauth() {
-            req_builder = req_builder
-                .header("Authorization", format!("Bearer {}", auth_value))
-                .header("anthropic-beta", ANTHROPIC_BETA_FEATURES);
+            req_builder = req_builder.header("Authorization", format!("Bearer {}", auth_value));
         } else {
             req_builder = req_builder.header("x-api-key", auth_value);
         }
@@ -150,10 +169,10 @@ impl AnthropicCompatibleProvider {
         &self,
         url: &str,
         auth_value: &str,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
     ) -> Result<reqwest::Response, ProviderError> {
         let response = self
-            .build_anthropic_request(url, auth_value)
+            .build_anthropic_request(url, auth_value, request.extensions.client_beta.as_deref())
             .timeout(self.base.api_timeout)
             .json(request)
             .send()
@@ -183,7 +202,7 @@ impl AnthropicCompatibleProvider {
         &self,
         url: &str,
         auth_value: &str,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
     ) -> Result<ProviderResponse, ProviderError> {
         let response = self.send_and_check(url, auth_value, request).await?;
 
@@ -215,7 +234,7 @@ impl AnthropicCompatibleProvider {
         &self,
         url: &str,
         auth_value: &str,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
     ) -> Result<reqwest::Response, ProviderError> {
         self.send_and_check(url, auth_value, request).await
     }
@@ -224,7 +243,7 @@ impl AnthropicCompatibleProvider {
     /// builds URL, sanitizes request for Anthropic backends, resolves auth.
     async fn prepare_anthropic_request(
         &self,
-        request: &mut AnthropicRequest,
+        request: &mut CanonicalRequest,
     ) -> Result<(&str, String, bool), ProviderError> {
         let is_anthropic = self.base.base_url.contains(ANTHROPIC_DOMAIN);
         if is_anthropic {
@@ -240,7 +259,7 @@ impl AnthropicCompatibleProvider {
 impl LlmProvider for AnthropicCompatibleProvider {
     async fn send_message(
         &self,
-        request: AnthropicRequest,
+        request: CanonicalRequest,
     ) -> Result<ProviderResponse, ProviderError> {
         let mut request = request;
         let (url, auth_value, is_anthropic) = self.prepare_anthropic_request(&mut request).await?;
@@ -271,7 +290,7 @@ impl LlmProvider for AnthropicCompatibleProvider {
             let auth_value = self.base.resolve_auth(OAuthConfig::anthropic).await?;
 
             let response = self
-                .build_anthropic_request(&url, &auth_value)
+                .build_anthropic_request(&url, &auth_value, None)
                 .timeout(self.base.api_timeout)
                 .json(&request)
                 .send()
@@ -298,7 +317,7 @@ impl LlmProvider for AnthropicCompatibleProvider {
 
     async fn send_message_stream(
         &self,
-        request: AnthropicRequest,
+        request: CanonicalRequest,
     ) -> Result<StreamResponse, ProviderError> {
         use futures::stream::TryStreamExt;
 

@@ -8,7 +8,7 @@ use super::{
     base::ProviderBase, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse, Usage,
 };
 use crate::auth::OAuthConfig;
-use crate::models::{AnthropicRequest, CountTokensRequest, CountTokensResponse};
+use crate::models::{CanonicalRequest, CountTokensRequest, CountTokensResponse};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use bytes::Bytes;
@@ -129,7 +129,7 @@ impl OpenAIProvider {
     /// Sends via OpenAI Responses API (Codex / ChatGPT OAuth path).
     async fn send_responses_api(
         &self,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         auth_value: &str,
         base_url: &str,
     ) -> Result<ProviderResponse, ProviderError> {
@@ -195,7 +195,7 @@ impl OpenAIProvider {
     /// Sends via standard OpenAI Chat Completions API.
     async fn send_chat_completions(
         &self,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         auth_value: &str,
         base_url: &str,
     ) -> Result<ProviderResponse, ProviderError> {
@@ -241,7 +241,7 @@ impl OpenAIProvider {
 impl LlmProvider for OpenAIProvider {
     async fn send_message(
         &self,
-        request: AnthropicRequest,
+        request: CanonicalRequest,
     ) -> Result<ProviderResponse, ProviderError> {
         let auth_value = self.base.resolve_auth(OAuthConfig::openai_codex).await?;
         let base_url = self.effective_base_url();
@@ -264,7 +264,7 @@ impl LlmProvider for OpenAIProvider {
 
     async fn send_message_stream(
         &self,
-        request: AnthropicRequest,
+        request: CanonicalRequest,
     ) -> Result<StreamResponse, ProviderError> {
         use futures::stream::TryStreamExt;
 

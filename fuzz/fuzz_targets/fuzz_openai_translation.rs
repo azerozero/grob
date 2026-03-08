@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 
-use grob::server::openai_compat::{OpenAIRequest, transform_openai_to_anthropic};
+use grob::server::openai_compat::{OpenAIRequest, transform_openai_to_canonical};
 
 fuzz_target!(|data: &[u8]| {
     // Try to parse arbitrary bytes as JSON, then as an OpenAI request
@@ -20,5 +20,5 @@ fuzz_target!(|data: &[u8]| {
 
     // Feed through the translation layer.
     // This should not panic regardless of the content of the request.
-    let _ = transform_openai_to_anthropic(openai_req);
+    let _ = transform_openai_to_canonical(openai_req);
 });

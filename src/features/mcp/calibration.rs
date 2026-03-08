@@ -4,7 +4,7 @@
 //! based on the tool matrix scores and routing configuration.
 
 use super::McpState;
-use crate::models::AnthropicRequest;
+use crate::models::CanonicalRequest;
 
 /// Score assigned to tools not found in the matrix.
 ///
@@ -18,7 +18,7 @@ const UNKNOWN_TOOL_SCORE: f64 = 0.0;
 /// dispatch pipeline. Only active when `routing.filter_low_score_tools` is
 /// enabled in the MCP config. Uses static scores only to avoid async overhead
 /// on the hot path.
-pub fn calibrate_tools(mcp: &McpState, request: &mut AnthropicRequest) {
+pub fn calibrate_tools(mcp: &McpState, request: &mut CanonicalRequest) {
     if !mcp.config.routing.filter_low_score_tools {
         return;
     }
@@ -123,7 +123,7 @@ mod tests {
         McpState::new(config, ToolMatrix::from_entries(entries))
     }
 
-    fn make_request(tool_names: &[&str]) -> AnthropicRequest {
+    fn make_request(tool_names: &[&str]) -> CanonicalRequest {
         let tools: Vec<Tool> = tool_names
             .iter()
             .map(|name| Tool {
@@ -134,7 +134,7 @@ mod tests {
             })
             .collect();
 
-        AnthropicRequest {
+        CanonicalRequest {
             model: "test".to_string(),
             messages: vec![],
             max_tokens: 1024,
@@ -148,6 +148,7 @@ mod tests {
             system: None,
             tools: Some(tools),
             tool_choice: None,
+            extensions: Default::default(),
         }
     }
 

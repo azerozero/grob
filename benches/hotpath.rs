@@ -13,7 +13,7 @@ use grob::providers::streaming::parse_sse_events;
 
 // ── Helpers ────────────────────────────────────────────────────
 
-fn make_request(model: &str, n_messages: usize) -> AnthropicRequest {
+fn make_request(model: &str, n_messages: usize) -> CanonicalRequest {
     let messages: Vec<Message> = (0..n_messages)
         .map(|i| Message {
             role: if i % 2 == 0 { "user" } else { "assistant" }.to_string(),
@@ -25,7 +25,7 @@ fn make_request(model: &str, n_messages: usize) -> AnthropicRequest {
         })
         .collect();
 
-    AnthropicRequest {
+    CanonicalRequest {
         model: model.to_string(),
         messages,
         max_tokens: 4096,
@@ -41,14 +41,15 @@ fn make_request(model: &str, n_messages: usize) -> AnthropicRequest {
         )),
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     }
 }
 
-fn make_large_request() -> AnthropicRequest {
+fn make_large_request() -> CanonicalRequest {
     make_request("claude-sonnet-4-6", 20)
 }
 
-fn make_small_request() -> AnthropicRequest {
+fn make_small_request() -> CanonicalRequest {
     make_request("claude-sonnet-4-6", 2)
 }
 
@@ -84,14 +85,14 @@ fn make_provider_response() -> grob::providers::ProviderResponse {
 fn bench_serde_json(c: &mut Criterion) {
     let mut group = c.benchmark_group("serde_json");
 
-    // Parse: Value -> AnthropicRequest (from_value)
+    // Parse: Value -> CanonicalRequest (from_value)
     let req = make_small_request();
     let json_value = serde_json::to_value(&req).unwrap();
 
     group.bench_function("from_value_small_2msg", |b| {
         b.iter(|| {
             let v = json_value.clone();
-            black_box(serde_json::from_value::<AnthropicRequest>(v).unwrap())
+            black_box(serde_json::from_value::<CanonicalRequest>(v).unwrap())
         })
     });
 
@@ -101,7 +102,7 @@ fn bench_serde_json(c: &mut Criterion) {
     group.bench_function("from_value_large_20msg", |b| {
         b.iter(|| {
             let v = json_value_large.clone();
-            black_box(serde_json::from_value::<AnthropicRequest>(v).unwrap())
+            black_box(serde_json::from_value::<CanonicalRequest>(v).unwrap())
         })
     });
 

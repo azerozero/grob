@@ -6,7 +6,7 @@ pub(crate) mod types;
 
 use super::{build_provider_client, LlmProvider, ProviderError, ProviderResponse, StreamResponse};
 use crate::auth::{OAuthConfig, TokenStore};
-use crate::models::AnthropicRequest;
+use crate::models::CanonicalRequest;
 use async_trait::async_trait;
 use reqwest::Client;
 use std::collections::HashMap;
@@ -179,7 +179,7 @@ impl GeminiProvider {
     /// Prepare request data shared between streaming and non-streaming paths.
     async fn prepare_request(
         &self,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
         let supports_tools = self.supports_tools(&request.model);
@@ -198,7 +198,7 @@ impl GeminiProvider {
     /// Build a Code Assist API request for OAuth-authenticated access.
     async fn prepare_oauth_request(
         &self,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         gemini_request: GeminiRequest,
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
@@ -266,7 +266,7 @@ impl GeminiProvider {
     /// Build a Vertex AI request (project_id + location based URL).
     fn prepare_vertex_request(
         &self,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         gemini_request: GeminiRequest,
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
@@ -294,7 +294,7 @@ impl GeminiProvider {
     /// Build a public Gemini API request (API key based URL).
     fn prepare_apikey_request(
         &self,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         gemini_request: GeminiRequest,
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
@@ -424,7 +424,7 @@ impl GeminiProvider {
 impl LlmProvider for GeminiProvider {
     async fn send_message(
         &self,
-        request: AnthropicRequest,
+        request: CanonicalRequest,
     ) -> Result<ProviderResponse, ProviderError> {
         let model = request.model.clone();
         let prep = self.prepare_request(&request, false).await?;
@@ -471,7 +471,7 @@ impl LlmProvider for GeminiProvider {
 
     async fn send_message_stream(
         &self,
-        request: AnthropicRequest,
+        request: CanonicalRequest,
     ) -> Result<StreamResponse, ProviderError> {
         use futures::TryStreamExt;
 

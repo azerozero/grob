@@ -6,7 +6,7 @@ pub mod test_cases;
 use crate::features::mcp::config::BenchConfig;
 use crate::features::mcp::matrix::{RuntimeScores, ToolMatrix, ToolScore};
 use crate::features::mcp::scorer::ToolScorer;
-use crate::models::{AnthropicRequest, Message, MessageContent};
+use crate::models::{CanonicalRequest, Message, MessageContent};
 use crate::providers::ProviderRegistry;
 
 /// Max output tokens for bench requests.
@@ -119,7 +119,7 @@ async fn run_bench_cycle(
                         .forced_tool
                         .map(|name| serde_json::json!({"type": "tool", "name": name}));
 
-                    let request = AnthropicRequest {
+                    let request = CanonicalRequest {
                         model: String::new(), // Provider will use its default
                         messages,
                         max_tokens: BENCH_MAX_TOKENS,
@@ -135,6 +135,7 @@ async fn run_bench_cycle(
                         )),
                         tools: Some(test_case.tools.clone()),
                         tool_choice,
+                        extensions: Default::default(),
                     };
 
                     // Send request with timeout

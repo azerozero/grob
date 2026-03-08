@@ -1,11 +1,19 @@
-//! Shared data models: Anthropic request/response types, routing types.
+//! Shared data models: canonical request/response types, routing types.
 
+/// Provider-specific request extensions for lossless roundtrips.
+pub mod extensions;
+
+use extensions::RequestExtensions;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// Anthropic API request format
+/// Provider-agnostic request format used throughout the dispatch pipeline.
+///
+/// Inbound requests (Anthropic native or OpenAI-compatible) are normalised
+/// into this struct. Provider-specific fields that do not map to a canonical
+/// field are preserved in [`extensions`].
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct AnthropicRequest {
+pub struct CanonicalRequest {
     /// Target model identifier (e.g. "claude-sonnet-4-20250514").
     pub model: String,
     /// Ordered conversation messages between user and assistant.
@@ -42,6 +50,9 @@ pub struct AnthropicRequest {
     /// Controls which tool the model should use, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+    /// Provider-specific extension fields (not serialized to JSON body).
+    #[serde(skip)]
+    pub extensions: RequestExtensions,
 }
 
 /// Message in the conversation

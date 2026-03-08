@@ -44,6 +44,7 @@
 - [Entry point](src/main.rs): CLI argument parsing and command dispatch
 - [Library root](src/lib.rs): Module declarations
 - [Trait contracts](src/traits.rs): 7+ core traits (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, etc.)
+- [Request extensions](src/models/extensions.rs): Provider-specific fields for lossless OpenAI roundtrips
 - [Provider trait](src/providers/mod.rs): LlmProvider trait definition and provider types
 - [Router](src/router/mod.rs): Regex-based request classification and model selection
 - [Dispatch pipeline](src/server/dispatch/mod.rs): DLP, cache, routing, provider loop with fallback

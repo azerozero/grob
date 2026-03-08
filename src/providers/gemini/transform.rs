@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::models::{AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent};
+use crate::models::{CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent};
 use crate::providers::{ProviderError, ProviderResponse, Usage};
 use std::collections::HashMap;
 
@@ -141,7 +141,7 @@ pub(super) fn convert_tool_config(tc: &serde_json::Value) -> Option<GeminiToolCo
 
 /// Transform Anthropic request to Gemini format
 pub(super) fn transform_request(
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
     supports_tools: bool,
 ) -> Result<GeminiRequest, ProviderError> {
     let system_instruction = request

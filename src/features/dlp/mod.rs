@@ -29,7 +29,7 @@ pub mod stream;
 pub mod url_exfil;
 
 use crate::models::{
-    AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt,
+    CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent, SystemPrompt,
 };
 use config::DlpConfig;
 use std::borrow::Cow;
@@ -177,7 +177,7 @@ impl DlpEngine {
 
     /// Sanitize an outgoing request (prompt → LLM).
     /// Caller must check `config.scan_input` before calling.
-    pub fn sanitize_request(&self, request: &mut AnthropicRequest) {
+    pub fn sanitize_request(&self, request: &mut CanonicalRequest) {
         // Sanitize system prompt
         if let Some(ref mut system) = request.system {
             match system {
@@ -221,7 +221,7 @@ impl DlpEngine {
     /// Returns `Err(DlpBlockError)` if prompt injection is detected with `action: block`.
     pub fn sanitize_request_checked(
         &self,
-        request: &mut AnthropicRequest,
+        request: &mut CanonicalRequest,
     ) -> Result<(), DlpBlockError> {
         // Stage 0: Prompt injection detection (before name anonymization)
         if let Some(ref detector) = self.injection_detector {
@@ -243,7 +243,7 @@ impl DlpEngine {
     }
 
     /// Extract all text content from a request for scanning.
-    fn extract_request_text(request: &AnthropicRequest) -> Vec<&str> {
+    fn extract_request_text(request: &CanonicalRequest) -> Vec<&str> {
         let mut texts = Vec::new();
         if let Some(ref system) = request.system {
             match system {
@@ -500,13 +500,13 @@ impl DlpEngine {
 
 #[cfg(feature = "dlp")]
 impl crate::traits::DlpPipeline for DlpEngine {
-    fn sanitize_request(&self, request: &mut AnthropicRequest) {
+    fn sanitize_request(&self, request: &mut CanonicalRequest) {
         self.sanitize_request(request);
     }
 
     fn sanitize_request_checked(
         &self,
-        request: &mut AnthropicRequest,
+        request: &mut CanonicalRequest,
     ) -> Result<(), DlpBlockError> {
         self.sanitize_request_checked(request)
     }

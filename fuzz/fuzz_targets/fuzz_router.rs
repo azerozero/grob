@@ -3,7 +3,7 @@
 use libfuzzer_sys::fuzz_target;
 
 use grob::cli::{AppConfig, RouterConfig, PromptRule, ServerConfig};
-use grob::models::{AnthropicRequest, Message, MessageContent};
+use grob::models::{CanonicalRequest, Message, MessageContent};
 use grob::router::Router;
 
 /// Build a minimal AppConfig with several prompt_rules containing various regex patterns.
@@ -75,8 +75,8 @@ fuzz_target!(|data: &[u8]| {
     let config = make_config();
     let router = Router::new(config);
 
-    // Build a minimal AnthropicRequest with the fuzzed text as the user message
-    let mut request = AnthropicRequest {
+    // Build a minimal CanonicalRequest with the fuzzed text as the user message
+    let mut request = CanonicalRequest {
         model: "claude-sonnet-4-20250514".to_string(),
         messages: vec![Message {
             role: "user".to_string(),
@@ -93,6 +93,7 @@ fuzz_target!(|data: &[u8]| {
         system: None,
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     };
 
     // Route the request - should never panic

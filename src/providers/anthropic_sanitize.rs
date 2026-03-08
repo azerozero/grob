@@ -1,7 +1,7 @@
 //! Anthropic request sanitization: thinking block signature handling and tool ID normalization.
 
 use super::constants::MIN_ANTHROPIC_SIGNATURE_LENGTH;
-use crate::models::{AnthropicRequest, ContentBlock, KnownContentBlock, MessageContent};
+use crate::models::{CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent};
 
 // Thinking block signature handling for Anthropic
 //
@@ -33,7 +33,7 @@ fn looks_like_anthropic_signature(sig: &str) -> bool {
 
 /// Proactive: strip thinking blocks that don't look like they came from Anthropic.
 /// Keeps unsigned blocks and blocks with valid-looking Anthropic signatures.
-pub(super) fn strip_non_anthropic_thinking(request: &mut AnthropicRequest) {
+pub(super) fn strip_non_anthropic_thinking(request: &mut CanonicalRequest) {
     let mut stripped_count = 0;
 
     for message in &mut request.messages {
@@ -70,7 +70,7 @@ pub(super) fn strip_non_anthropic_thinking(request: &mut AnthropicRequest) {
 
 /// Fallback: strip all signatures from thinking blocks, converting them to unsigned.
 /// Used when Anthropic rejects a signature the heuristic thought was valid.
-pub(super) fn strip_all_thinking_signatures(request: &mut AnthropicRequest) {
+pub(super) fn strip_all_thinking_signatures(request: &mut CanonicalRequest) {
     let mut stripped_count = 0;
 
     for message in &mut request.messages {
@@ -95,7 +95,7 @@ pub(super) fn strip_all_thinking_signatures(request: &mut AnthropicRequest) {
     }
 }
 
-fn remove_empty_messages(request: &mut AnthropicRequest) {
+fn remove_empty_messages(request: &mut CanonicalRequest) {
     request.messages.retain(|msg| match &msg.content {
         MessageContent::Text(t) => !t.is_empty(),
         MessageContent::Blocks(b) => !b.is_empty(),
@@ -105,7 +105,7 @@ fn remove_empty_messages(request: &mut AnthropicRequest) {
 /// Sanitize tool_use.id and tool_use_id fields to match Anthropic's pattern requirement.
 /// Anthropic requires tool IDs to match: ^[a-zA-Z0-9_-]+
 /// Non-Anthropic providers may generate IDs with invalid characters.
-pub(super) fn sanitize_tool_use_ids(request: &mut AnthropicRequest) {
+pub(super) fn sanitize_tool_use_ids(request: &mut CanonicalRequest) {
     let mut sanitized_count = 0;
 
     for message in &mut request.messages {

@@ -23,7 +23,7 @@ pub mod streaming;
 
 use crate::auth::TokenStore;
 use crate::models::{
-    AnthropicRequest, ContentBlock, CountTokensRequest, CountTokensResponse, KnownContentBlock,
+    CanonicalRequest, ContentBlock, CountTokensRequest, CountTokensResponse, KnownContentBlock,
 };
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -105,14 +105,14 @@ pub trait LlmProvider: Send + Sync {
     /// Must transform to/from Anthropic format as needed
     async fn send_message(
         &self,
-        request: AnthropicRequest,
+        request: CanonicalRequest,
     ) -> Result<ProviderResponse, ProviderError>;
 
     /// Send a streaming message request to the provider
     /// Returns a stream of raw bytes (SSE format) along with headers to forward
     async fn send_message_stream(
         &self,
-        request: AnthropicRequest,
+        request: CanonicalRequest,
     ) -> Result<StreamResponse, ProviderError>;
 
     /// Count tokens for a request

@@ -66,7 +66,7 @@ pub(super) async fn resolve_provider(
 /// Provider loop with fallback and per-provider retry.
 pub(super) async fn dispatch_provider_loop(
     ctx: &DispatchContext<'_>,
-    request: &mut crate::models::AnthropicRequest,
+    request: &mut crate::models::CanonicalRequest,
     sorted_mappings: &[crate::cli::ModelMapping],
     decision: &crate::models::RouteDecision,
     cache_key: &Option<String>,
@@ -199,10 +199,10 @@ fn log_dispatch_attempt(
 /// Clone the request, substitute the actual model, run DLP, and optionally inject continuation.
 fn prepare_provider_request(
     ctx: &DispatchContext<'_>,
-    request: &crate::models::AnthropicRequest,
+    request: &crate::models::CanonicalRequest,
     mapping: &crate::cli::ModelMapping,
     route_type: &RouteType,
-) -> (crate::models::AnthropicRequest, String) {
+) -> (crate::models::CanonicalRequest, String) {
     let mut provider_request = request.clone();
     let original_model = provider_request.model.clone();
     provider_request.model = mapping.actual_model.clone();
@@ -226,7 +226,7 @@ fn prepare_provider_request(
 /// Backward-compat fallback: try direct model->provider lookup from the registry.
 async fn try_direct_provider_lookup(
     ctx: &DispatchContext<'_>,
-    request: &crate::models::AnthropicRequest,
+    request: &crate::models::CanonicalRequest,
     model_name: &str,
 ) -> Result<Option<DispatchResult>, AppError> {
     let Ok(provider) = ctx.inner.provider_registry.provider_for_model(model_name) else {
@@ -305,7 +305,7 @@ enum ProviderLoopAction {
 /// Handle the streaming path for a single provider attempt.
 async fn dispatch_streaming(
     ctx: &DispatchContext<'_>,
-    provider_request: crate::models::AnthropicRequest,
+    provider_request: crate::models::CanonicalRequest,
     provider: &dyn crate::providers::LlmProvider,
     mapping: &crate::cli::ModelMapping,
 ) -> Result<DispatchResult, ProviderLoopAction> {
@@ -409,7 +409,7 @@ struct ProviderAttempt<'a> {
 /// Handle the non-streaming path with retry for a single provider.
 async fn dispatch_non_streaming(
     ctx: &DispatchContext<'_>,
-    provider_request: crate::models::AnthropicRequest,
+    provider_request: crate::models::CanonicalRequest,
     provider: &dyn crate::providers::LlmProvider,
     attempt: &ProviderAttempt<'_>,
 ) -> Result<DispatchResult, ProviderLoopAction> {

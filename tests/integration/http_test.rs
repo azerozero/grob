@@ -118,7 +118,7 @@ api_key = "my-secret-key"
         };
 
         let router = grob::router::Router::new(config);
-        let mut req = grob::models::AnthropicRequest {
+        let mut req = grob::models::CanonicalRequest {
             model: "claude-3-5-sonnet".to_string(),
             messages: vec![grob::models::Message {
                 role: "user".to_string(),
@@ -135,6 +135,7 @@ api_key = "my-secret-key"
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
         let decision = router.route(&mut req).unwrap();
         // auto_map_regex matches "claude-*", so it should route to the default model
@@ -173,7 +174,7 @@ api_key = "my-secret-key"
         };
 
         let router = grob::router::Router::new(config);
-        let mut req = grob::models::AnthropicRequest {
+        let mut req = grob::models::CanonicalRequest {
             model: "gpt-4o".to_string(),
             messages: vec![grob::models::Message {
                 role: "user".to_string(),
@@ -190,6 +191,7 @@ api_key = "my-secret-key"
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
         let decision = router.route(&mut req).unwrap();
         // "gpt-4o" doesn't match "^claude-", so it passes through as-is

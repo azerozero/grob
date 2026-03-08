@@ -6,7 +6,7 @@ mod message;
 mod rules;
 
 use crate::cli::AppConfig;
-use crate::models::{AnthropicRequest, RouteDecision, RouteType};
+use crate::models::{CanonicalRequest, RouteDecision, RouteType};
 use anyhow::Result;
 use regex::Regex;
 use tracing::{debug, info};
@@ -95,7 +95,7 @@ impl Router {
     /// 4. Prompt Rules - regex pattern matching on user prompt (after background for cost savings)
     /// 5. Think - Plan Mode / reasoning enabled
     /// 6. Default - auto-mapped or original model name
-    pub fn route(&self, request: &mut AnthropicRequest) -> Result<RouteDecision> {
+    pub fn route(&self, request: &mut CanonicalRequest) -> Result<RouteDecision> {
         // Save original model for background task detection
         let original_model = request.model.clone();
 
@@ -182,7 +182,7 @@ impl Router {
 
     /// Check if request has web_search tool (tool-based detection)
     /// Following claude-code-router pattern: checks if tools array contains web_search type
-    fn has_web_search_tool(&self, request: &AnthropicRequest) -> bool {
+    fn has_web_search_tool(&self, request: &CanonicalRequest) -> bool {
         if let Some(ref tools) = request.tools {
             tools.iter().any(|tool| {
                 tool.r#type
@@ -196,7 +196,7 @@ impl Router {
     }
 
     /// Check if request is Plan Mode by detecting thinking field
-    fn is_plan_mode(&self, request: &AnthropicRequest) -> bool {
+    fn is_plan_mode(&self, request: &CanonicalRequest) -> bool {
         request
             .thinking
             .as_ref()
@@ -218,7 +218,7 @@ impl Router {
 // ── Trait implementation ──
 
 impl crate::traits::RequestRouter for Router {
-    fn route(&self, request: &mut AnthropicRequest) -> Result<RouteDecision> {
+    fn route(&self, request: &mut CanonicalRequest) -> Result<RouteDecision> {
         self.route(request)
     }
 }
@@ -260,8 +260,8 @@ mod tests {
         }
     }
 
-    fn create_simple_request(text: &str) -> AnthropicRequest {
-        AnthropicRequest {
+    fn create_simple_request(text: &str) -> CanonicalRequest {
+        CanonicalRequest {
             model: "claude-opus-4".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -278,6 +278,7 @@ mod tests {
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         }
     }
 
@@ -599,7 +600,7 @@ mod tests {
         // 1. User: "OPUS write me a test suite"
         // 2. Assistant: [tool_use: Read]
         // 3. User: [tool_result: file contents]
-        let mut request = AnthropicRequest {
+        let mut request = CanonicalRequest {
             model: "claude-opus-4".to_string(),
             messages: vec![
                 // Turn-starting user message with prompt phrase
@@ -642,6 +643,7 @@ mod tests {
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -667,7 +669,7 @@ mod tests {
         // Simulate two turns:
         // Turn 1: User: "OPUS write me tests" → Assistant: "Here are the tests..."
         // Turn 2: User: "Now add documentation" (no OPUS)
-        let mut request = AnthropicRequest {
+        let mut request = CanonicalRequest {
             model: "claude-opus-4".to_string(),
             messages: vec![
                 // Turn 1: User with OPUS
@@ -697,6 +699,7 @@ mod tests {
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
 
         let decision = router.route(&mut request).unwrap();
@@ -720,7 +723,7 @@ mod tests {
         }];
         let router = Router::new(config);
 
-        let mut request = AnthropicRequest {
+        let mut request = CanonicalRequest {
             model: "claude-opus-4".to_string(),
             messages: vec![
                 // Turn-starting message with [OPUS] tag
@@ -763,6 +766,7 @@ mod tests {
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
 
         let decision = router.route(&mut request).unwrap();

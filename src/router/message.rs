@@ -1,4 +1,4 @@
-use crate::models::{AnthropicRequest, MessageContent};
+use crate::models::{CanonicalRequest, MessageContent};
 use regex::Regex;
 use tracing::debug;
 
@@ -6,7 +6,7 @@ use super::Router;
 
 impl Router {
     /// Extract the text content from the last user message
-    pub(super) fn extract_last_user_message(&self, request: &AnthropicRequest) -> Option<String> {
+    pub(super) fn extract_last_user_message(&self, request: &CanonicalRequest) -> Option<String> {
         // Find the last user message
         let last_user = request.messages.iter().rev().find(|m| m.role == "user")?;
 
@@ -41,7 +41,7 @@ impl Router {
     /// A "turn" starts when:
     /// 1. The conversation begins, OR
     /// 2. After an assistant message that has no tool_use (i.e., the previous turn ended)
-    pub(super) fn find_turn_start_index(&self, request: &AnthropicRequest) -> usize {
+    pub(super) fn find_turn_start_index(&self, request: &CanonicalRequest) -> usize {
         use crate::models::ContentBlock;
 
         debug!(
@@ -87,7 +87,7 @@ impl Router {
     /// even when the model makes tool calls and the last user message is just tool results.
     pub(super) fn extract_turn_starting_user_message(
         &self,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
     ) -> Option<String> {
         let turn_start_idx = self.find_turn_start_index(request);
 
@@ -140,7 +140,7 @@ impl Router {
     /// Strip the matched phrase from the turn-starting user message
     pub(super) fn strip_match_from_turn_starting_message(
         &self,
-        request: &mut AnthropicRequest,
+        request: &mut CanonicalRequest,
         regex: &Regex,
     ) {
         let turn_start_idx = self.find_turn_start_index(request);
@@ -175,7 +175,7 @@ impl Router {
     }
 
     /// Strip the matched phrase from the last user message (fallback for edge cases)
-    fn strip_match_from_last_user_message(&self, request: &mut AnthropicRequest, regex: &Regex) {
+    fn strip_match_from_last_user_message(&self, request: &mut CanonicalRequest, regex: &Regex) {
         let last_user = request.messages.iter_mut().rev().find(|m| m.role == "user");
 
         if let Some(msg) = last_user {

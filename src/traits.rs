@@ -4,7 +4,7 @@
 //! event tapping, and provider availability. Concrete types implement these traits
 //! in their own modules; state types can consume them as trait objects for testability.
 
-use crate::models::{AnthropicRequest, RouteType};
+use crate::models::{CanonicalRequest, RouteType};
 use crate::providers::ProviderResponse;
 use crate::security::circuit_breaker::CircuitState;
 use anyhow::Result;
@@ -17,12 +17,12 @@ use std::collections::HashMap;
 #[cfg(feature = "dlp")]
 pub trait DlpPipeline: Send + Sync {
     /// Sanitizes an outgoing request (non-blocking, best-effort).
-    fn sanitize_request(&self, request: &mut AnthropicRequest);
+    fn sanitize_request(&self, request: &mut CanonicalRequest);
 
     /// Sanitizes a request and returns an error if blocked.
     fn sanitize_request_checked(
         &self,
-        request: &mut AnthropicRequest,
+        request: &mut CanonicalRequest,
     ) -> std::result::Result<(), crate::features::dlp::DlpBlockError>;
 
     /// Sanitizes response text (de-anonymize + secret scan).
@@ -49,7 +49,7 @@ pub trait DlpPipeline: Send + Sync {
 /// Routes requests to model names based on rules.
 pub trait RequestRouter: Send + Sync {
     /// Routes a request and returns a routing decision.
-    fn route(&self, request: &mut AnthropicRequest) -> Result<crate::models::RouteDecision>;
+    fn route(&self, request: &mut CanonicalRequest) -> Result<crate::models::RouteDecision>;
 }
 
 // ── Tracer ──
@@ -63,7 +63,7 @@ pub trait Tracer: Send + Sync {
     fn trace_request(
         &self,
         id: &str,
-        request: &AnthropicRequest,
+        request: &CanonicalRequest,
         provider: &str,
         route_type: &RouteType,
         is_stream: bool,
@@ -159,7 +159,7 @@ pub mod mocks {
     }
 
     impl RequestRouter for MockRouter {
-        fn route(&self, _request: &mut AnthropicRequest) -> Result<crate::models::RouteDecision> {
+        fn route(&self, _request: &mut CanonicalRequest) -> Result<crate::models::RouteDecision> {
             Ok(crate::models::RouteDecision {
                 model_name: self.model_name.clone(),
                 route_type: RouteType::Default,
@@ -179,7 +179,7 @@ pub mod mocks {
         fn trace_request(
             &self,
             _id: &str,
-            _request: &AnthropicRequest,
+            _request: &CanonicalRequest,
             _provider: &str,
             _route_type: &RouteType,
             _is_stream: bool,

@@ -1,4 +1,4 @@
-use crate::models::{AnthropicRequest, ContentBlock, MessageContent, SystemPrompt};
+use crate::models::{CanonicalRequest, ContentBlock, MessageContent, SystemPrompt};
 use regex::Regex;
 use std::sync::LazyLock;
 use tracing::debug;
@@ -50,7 +50,7 @@ impl Router {
     /// Returns (model_name, matched_text) if a rule matches, None otherwise.
     pub(super) fn match_prompt_rule(
         &self,
-        request: &mut AnthropicRequest,
+        request: &mut CanonicalRequest,
     ) -> Option<(String, String)> {
         if self.prompt_rules.is_empty() {
             return None;
@@ -138,7 +138,7 @@ impl Router {
     /// Extract subagent model from system prompt tag.
     /// Checks for <GROB-SUBAGENT-MODEL>model-name</GROB-SUBAGENT-MODEL> in system[1].text
     /// and removes the tag after extraction.
-    pub(super) fn extract_subagent_model(&self, request: &mut AnthropicRequest) -> Option<String> {
+    pub(super) fn extract_subagent_model(&self, request: &mut CanonicalRequest) -> Option<String> {
         let system = request.system.as_mut()?;
 
         if let SystemPrompt::Blocks(blocks) = system {

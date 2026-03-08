@@ -1,5 +1,5 @@
 use crate::cli::{FanOutConfig, FanOutMode, ModelMapping};
-use crate::models::AnthropicRequest;
+use crate::models::CanonicalRequest;
 use crate::providers::error::ProviderError;
 use crate::providers::{ProviderRegistry, ProviderResponse};
 use std::sync::Arc;
@@ -18,7 +18,7 @@ struct FanOutResult {
 /// Dispatches the same request to N providers in parallel, then selects the
 /// best response according to the configured mode.
 pub async fn handle_fan_out(
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
     mappings: &[ModelMapping],
     fan_out_config: &FanOutConfig,
     registry: &Arc<ProviderRegistry>,
@@ -46,7 +46,7 @@ pub async fn handle_fan_out(
 /// Fastest mode: race all providers, return first success.
 /// Other requests are dropped (cancelled) when the first one completes.
 async fn fan_out_fastest(
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
     mappings: &[ModelMapping],
     registry: &Arc<ProviderRegistry>,
 ) -> Result<(ProviderResponse, Vec<(String, String)>), ProviderError> {
@@ -109,7 +109,7 @@ async fn fan_out_fastest(
 
 /// Best quality mode: wait for all responses, then use a judge model to pick the best.
 async fn fan_out_best_quality(
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
     mappings: &[ModelMapping],
     fan_out_config: &FanOutConfig,
     registry: &Arc<ProviderRegistry>,
@@ -162,7 +162,7 @@ async fn fan_out_best_quality(
         .collect();
 
     if let Ok(judge_provider) = registry.provider_for_model(judge_model) {
-        let judge_request = AnthropicRequest {
+        let judge_request = CanonicalRequest {
             model: judge_model.to_string(),
             messages: vec![crate::models::Message {
                 role: "user".to_string(),
@@ -223,7 +223,7 @@ async fn fan_out_best_quality(
 
 /// Weighted mode: wait for all responses, score by latency/cost/length.
 async fn fan_out_weighted(
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
     mappings: &[ModelMapping],
     registry: &Arc<ProviderRegistry>,
 ) -> Result<(ProviderResponse, Vec<(String, String)>), ProviderError> {
@@ -269,7 +269,7 @@ fn weighted_score(result: &FanOutResult) -> f64 {
 
 /// Send request to all providers in parallel and collect successful results.
 async fn fan_out_all(
-    request: &AnthropicRequest,
+    request: &CanonicalRequest,
     mappings: &[ModelMapping],
     registry: &Arc<ProviderRegistry>,
 ) -> Vec<FanOutResult> {

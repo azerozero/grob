@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::auth::TokenStore;
 use crate::cli::AppConfig;
-use crate::models::{AnthropicRequest, Message, MessageContent};
+use crate::models::{CanonicalRequest, Message, MessageContent};
 use crate::providers::ProviderRegistry;
 
 /// Result of validating a single provider/model mapping
@@ -187,8 +187,8 @@ pub async fn validate_config(
 }
 
 /// Create a minimal test request (max_tokens=1, single short message).
-fn make_test_request(model: &str) -> AnthropicRequest {
-    AnthropicRequest {
+fn make_test_request(model: &str) -> CanonicalRequest {
+    CanonicalRequest {
         model: model.to_string(),
         messages: vec![Message {
             role: "user".to_string(),
@@ -205,6 +205,7 @@ fn make_test_request(model: &str) -> AnthropicRequest {
         system: None,
         tools: None,
         tool_choice: None,
+        extensions: Default::default(),
     }
 }
 

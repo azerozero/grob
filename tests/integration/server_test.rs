@@ -146,7 +146,7 @@ mod tests {
         };
         let engine = DlpEngine::from_config(config).unwrap();
 
-        let mut request = AnthropicRequest {
+        let mut request = CanonicalRequest {
             model: "claude-opus-4".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -163,6 +163,7 @@ mod tests {
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
 
         engine.sanitize_request(&mut request);
@@ -192,7 +193,7 @@ mod tests {
         };
         let engine = DlpEngine::from_config(config).unwrap();
 
-        let mut request = AnthropicRequest {
+        let mut request = CanonicalRequest {
             model: "claude-opus-4".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -211,6 +212,7 @@ mod tests {
             )),
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
 
         engine.sanitize_request(&mut request);
@@ -417,7 +419,7 @@ mod tests {
     #[test]
     fn test_routing_think_mode() {
         let router = test_router();
-        let mut req = AnthropicRequest {
+        let mut req = CanonicalRequest {
             model: "claude-opus-4".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -437,6 +439,7 @@ mod tests {
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
         let decision = router.route(&mut req).unwrap();
         assert_eq!(decision.route_type, RouteType::Think);
@@ -446,7 +449,7 @@ mod tests {
     #[test]
     fn test_routing_websearch_priority_over_think() {
         let router = test_router();
-        let mut req = AnthropicRequest {
+        let mut req = CanonicalRequest {
             model: "claude-sonnet-4".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -471,6 +474,7 @@ mod tests {
                 input_schema: None,
             }]),
             tool_choice: None,
+            extensions: Default::default(),
         };
         let decision = router.route(&mut req).unwrap();
         assert_eq!(decision.route_type, RouteType::WebSearch);
@@ -479,7 +483,7 @@ mod tests {
     #[test]
     fn test_routing_background_haiku() {
         let router = test_router();
-        let mut req = AnthropicRequest {
+        let mut req = CanonicalRequest {
             model: "claude-3-5-haiku-20241022".to_string(),
             messages: vec![Message {
                 role: "user".to_string(),
@@ -496,6 +500,7 @@ mod tests {
             system: None,
             tools: None,
             tool_choice: None,
+            extensions: Default::default(),
         };
         let decision = router.route(&mut req).unwrap();
         assert_eq!(decision.route_type, RouteType::Background);
