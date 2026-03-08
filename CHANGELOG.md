@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2](https://github.com/azerozero/grob/compare/v0.13.1...v0.13.2) - 2026-03-08
+
+### Fixed
+
+- let Release workflow be sole creator of GitHub Releases
+
+### Other
+
+- remove obsolete examples/oauth_login.rs
+- add doc coverage gate to CI and pre-push hook
+
 ## [0.13.1](https://github.com/azerozero/grob/compare/v0.13.0...v0.13.1) - 2026-03-08
 
 ### Fixed
