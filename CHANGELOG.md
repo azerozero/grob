@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0](https://github.com/azerozero/grob/compare/v0.14.1...v0.15.0) - 2026-03-08
+
+### Other
+
+- rename AnthropicRequest → CanonicalRequest + add RequestExtensions
+
 ## [0.14.1](https://github.com/azerozero/grob/compare/v0.14.0...v0.14.1) - 2026-03-08
 
 ### Fixed
