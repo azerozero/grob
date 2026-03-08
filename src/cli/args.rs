@@ -195,6 +195,9 @@ pub enum PresetAction {
     Apply {
         /// Preset name to apply
         name: String,
+        /// Hot-reload the running server after applying
+        #[arg(short, long)]
+        reload: bool,
     },
     /// Export current config as a reusable preset
     Export {

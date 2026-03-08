@@ -38,7 +38,12 @@ pub async fn cmd_preset_install(source: &str) {
 }
 
 /// Applies a named preset to the local config file with credential setup.
-pub fn cmd_preset_apply(name: &str, config_source: &cli::ConfigSource) -> anyhow::Result<()> {
+pub async fn cmd_preset_apply(
+    name: &str,
+    config_source: &cli::ConfigSource,
+    config: &cli::AppConfig,
+    reload: bool,
+) -> anyhow::Result<()> {
     let file_path = match config_source {
         cli::ConfigSource::File(p) => p.clone(),
         cli::ConfigSource::Url(_) => {
@@ -55,11 +60,47 @@ pub fn cmd_preset_apply(name: &str, config_source: &cli::ConfigSource) -> anyhow
             }
             println!();
             println!("✅ Preset '{}' applied successfully", name);
-            println!("   Run: grob start -d");
+
+            if reload {
+                reload_running_server(config).await;
+            } else {
+                println!("   Run: grob start -d");
+            }
         }
         Err(e) => eprintln!("❌ Failed to apply preset: {}", e),
     }
     Ok(())
+}
+
+/// Sends a config reload request to a running grob server.
+async fn reload_running_server(config: &cli::AppConfig) {
+    let host = &config.server.host;
+    let port: u16 = config.server.port.into();
+
+    if !crate::instance::is_instance_running(host, port).await {
+        println!("   No running instance found, skipping reload");
+        println!("   Run: grob start -d");
+        return;
+    }
+
+    let url = format!("{}/api/config/reload", cli::format_base_url(host, port));
+
+    match reqwest::Client::new()
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            println!("🔄 Config reloaded on running server");
+        }
+        Ok(resp) => {
+            eprintln!("⚠️  Reload returned {}", resp.status());
+        }
+        Err(e) => {
+            eprintln!("⚠️  Reload failed: {}", e);
+        }
+    }
 }
 
 /// Exports the current config file as a reusable named preset.

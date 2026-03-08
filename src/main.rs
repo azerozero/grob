@@ -93,8 +93,8 @@ async fn main() -> anyhow::Result<()> {
             PresetAction::List => commands::preset::cmd_preset_list(&config).await,
             PresetAction::Info { name } => commands::preset::cmd_preset_info(&name),
             PresetAction::Install { source } => commands::preset::cmd_preset_install(&source).await,
-            PresetAction::Apply { name } => {
-                commands::preset::cmd_preset_apply(&name, &config_source)?;
+            PresetAction::Apply { name, reload } => {
+                commands::preset::cmd_preset_apply(&name, &config_source, &config, reload).await?;
             }
             PresetAction::Export { name } => {
                 commands::preset::cmd_preset_export(&name, &config_source)?;
