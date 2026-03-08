@@ -3,9 +3,9 @@
 publish = false
 # Determine versions from git tags, not the cargo registry
 git_only = true
-git_release_enable = true
-git_release_draft = false
-git_release_latest = true
+# GitHub Release is created by the Release workflow (not release-plz)
+# to avoid immutable release conflicts when uploading binaries.
+git_release_enable = false
 git_tag_name = "v{{ version }}"
 git_tag_enable = true
 changelog_update = true

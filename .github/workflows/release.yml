@@ -210,43 +210,23 @@ jobs:
           cat *.sha256 >> ../CHECKSUMS.md
           echo '```' >> ../CHECKSUMS.md
 
-      - name: Upload assets to release
+      - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
 
-          # Create the release if release-plz hasn't done it yet
-          if ! gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            PRERELEASE=""
-            if [[ "$VERSION" == *-* ]]; then
-              PRERELEASE="--prerelease"
-            fi
-            gh release create "$VERSION" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "$VERSION" \
-              --generate-notes \
-              --notes-file CHECKSUMS.md \
-              --draft \
-              $PRERELEASE
-          else
-            # Convert to draft so assets can be uploaded (avoids immutable release error)
-            gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft
-
-            # Append checksums to existing release body
-            EXISTING_BODY="$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json body -q .body)"
-            CHECKSUMS="$(cat CHECKSUMS.md)"
-            gh release edit "$VERSION" \
-              --repo "$GITHUB_REPOSITORY" \
-              --notes "${EXISTING_BODY}
-          ${CHECKSUMS}"
+          PRERELEASE=""
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE="--prerelease"
           fi
 
-          # Upload binary artifacts
-          gh release upload "$VERSION" \
+          # Release workflow is the sole creator of GitHub Releases.
+          # release-plz only creates the tag (git_release_enable = false).
+          gh release create "$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
-            --clobber \
+            --title "$VERSION" \
+            --generate-notes \
+            --notes-file CHECKSUMS.md \
+            $PRERELEASE \
             artifacts/*.tar.gz artifacts/*.sha256
-
-          # Publish the release (converts from draft to public)
-          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
