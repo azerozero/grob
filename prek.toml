@@ -74,6 +74,17 @@ types = ["toml"]
 pass_filenames = false
 stages = ["pre-push"]
 
+# Doc coverage — no undocumented public items
+[[repos.hooks]]
+id = "cargo-doc-coverage"
+name = "cargo doc coverage"
+language = "system"
+entry = "sh"
+args = ["-c", "RUSTDOCFLAGS='-W missing-docs' cargo doc --no-deps 2>&1 | grep -q 'warning: missing documentation' && { echo 'ERROR: undocumented public items found'; RUSTDOCFLAGS='-W missing-docs' cargo doc --no-deps 2>&1 | grep 'warning: missing documentation' | head -20; exit 1; } || true"]
+types = ["rust"]
+pass_filenames = false
+stages = ["pre-push"]
+
 # Security audit — known vulnerabilities
 [[repos.hooks]]
 id = "cargo-audit"

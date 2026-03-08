@@ -120,6 +120,28 @@ jobs:
       - uses: taiki-e/install-action@cargo-hack
       - run: cargo hack check --feature-powerset --no-dev-deps
 
+  docs:
+    name: Doc Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: docs
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Check missing doc comments
+        env:
+          RUSTDOCFLAGS: "-W missing-docs"
+        run: |
+          WARNINGS=$(cargo doc --no-deps 2>&1 | grep "^warning: missing documentation" | wc -l)
+          if [ "$WARNINGS" -gt 0 ]; then
+            echo "::error::Found $WARNINGS undocumented public items"
+            cargo doc --no-deps 2>&1 | grep "^warning: missing documentation" -A2
+            exit 1
+          fi
+          echo "All public items are documented"
+
   machete:
     name: Unused Dependencies
     runs-on: ubuntu-latest
