@@ -227,8 +227,12 @@ jobs:
               --title "$VERSION" \
               --generate-notes \
               --notes-file CHECKSUMS.md \
+              --draft \
               $PRERELEASE
           else
+            # Convert to draft so assets can be uploaded (avoids immutable release error)
+            gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft
+
             # Append checksums to existing release body
             EXISTING_BODY="$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json body -q .body)"
             CHECKSUMS="$(cat CHECKSUMS.md)"
@@ -243,3 +247,6 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --clobber \
             artifacts/*.tar.gz artifacts/*.sha256
+
+          # Publish the release (converts from draft to public)
+          gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" --draft=false
