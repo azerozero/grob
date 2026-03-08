@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1](https://github.com/azerozero/grob/compare/v0.13.0...v0.13.1) - 2026-03-08
+
+### Fixed
+
+- convert release to draft before asset upload to avoid immutable error
+
+### Other
+
+- add doc comments to all 430 undocumented public items
+- add capabilities inventory and fix 3 accuracy issues
+- update DCI report to v0.13.0 (score 8.4/10)
+- add ~100 doc comments, curl examples, feature highlights, fix OCI license
+
 ## [0.13.0](https://github.com/azerozero/grob/compare/v0.12.4...v0.13.0) - 2026-03-04
 
 ### Added
