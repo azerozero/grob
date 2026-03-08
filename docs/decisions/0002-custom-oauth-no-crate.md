@@ -34,4 +34,4 @@ Chosen option: "Custom implementation with PKCE", because our needs are narrow (
 
 ### Confirmation
 
-The OAuth flow is tested end-to-end in `examples/oauth_login.rs`. PKCE verifier uses `rand` with `OsRng` for cryptographic randomness.
+The OAuth flow is tested end-to-end via `grob connect`. PKCE verifier uses `rand` with `OsRng` for cryptographic randomness.

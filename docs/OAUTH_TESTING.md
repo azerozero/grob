@@ -2,54 +2,13 @@
 
 This guide shows how to test the OAuth authentication flow for Claude Pro/Max.
 
-## Quick Test (CLI Example)
-
-### 1. Build the project
+## Quick Test (CLI)
 
 ```bash
-cargo build --examples
+grob connect anthropic
 ```
 
-### 2. Run OAuth login example
-
-```bash
-cargo run --example oauth_login
-```
-
-This will:
-1. Generate an authorization URL
-2. Prompt you to visit the URL and authorize
-3. Ask for the authorization code
-4. Exchange code for access/refresh tokens
-5. Save tokens to `~/.grob/oauth_tokens.json`
-
-### Example Output
-
-```
-🔐 Claude Max OAuth Authentication
-
-This will authenticate your Claude Pro/Max account
-and save the OAuth token for use with grob.
-
-Step 1: Visit the following URL in your browser:
-
-  https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e...
-
-Step 2: After authorizing, you'll receive a code.
-
-Enter the authorization code here: abc123def456#state789
-
-Exchanging code for tokens...
-
-✅ Authentication successful!
-
-Token details:
-  Provider ID: anthropic-max
-  Expires at: 2025-11-18T16:30:00+00:00
-
-Your OAuth token has been saved to:
-  ~/.grob/oauth_tokens.json
-```
+This will open your browser, complete the OAuth PKCE flow, and save the token to the redb store (`~/.grob/grob.db`).
 
 ## Testing with API Endpoints
 
