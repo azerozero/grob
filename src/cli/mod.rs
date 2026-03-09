@@ -153,6 +153,9 @@ impl AppConfig {
                 if let Some(env_var) = api_key.strip_prefix('$') {
                     if let Ok(value) = std::env::var(env_var) {
                         provider.api_key = Some(value);
+                    } else if std::env::var("GROB_MOCK_BACKEND").is_ok() {
+                        // Mock backend mode: use placeholder key.
+                        provider.api_key = Some("mock-key".to_string());
                     } else {
                         anyhow::bail!(
                             "Environment variable ${} not set for provider '{}'\n\n\

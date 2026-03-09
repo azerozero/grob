@@ -103,6 +103,7 @@ rustls-pemfile = { version = "2", optional = true }
 
 # ACME / Let's Encrypt auto-certificates (optional, requires tls feature)
 rustls-acme = { version = "0.12", features = ["axum"], optional = true }
+regex-syntax = "0.8.10"
 
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
 [target.'cfg(not(target_env = "msvc"))'.dependencies]

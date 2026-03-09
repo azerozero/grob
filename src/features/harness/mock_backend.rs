@@ -53,6 +53,7 @@ impl MockBackend {
         let index = build_response_index(tape);
         let fallback: Vec<TapeResponse> = tape.iter().filter_map(|e| e.response.clone()).collect();
 
+        let bind_port = config.port;
         let state = Arc::new(MockState {
             index,
             fallback,
@@ -65,7 +66,7 @@ impl MockBackend {
             .route("/v1/chat/completions", post(handle_mock))
             .with_state(state);
 
-        let listener = TcpListener::bind(("127.0.0.1", state_port(&app))).await?;
+        let listener = TcpListener::bind(("127.0.0.1", bind_port)).await?;
         let port = listener.local_addr()?.port();
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -114,14 +115,6 @@ struct MockState {
     fallback: Vec<TapeResponse>,
     fallback_cursor: AtomicUsize,
     config: MockConfig,
-}
-
-/// Extracts port from config embedded in router state (helper for bind).
-fn state_port(app: &Router) -> u16 {
-    // NOTE: We extract the port from the state stored in the router.
-    // Since we cannot easily access it, use 0 (ephemeral) always from caller.
-    let _ = app;
-    0
 }
 
 /// Handles a mock provider request: match by fingerprint, return recorded response.

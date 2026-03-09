@@ -1,5 +1,6 @@
 use super::canary::CanaryGenerator;
 use super::config::{CustomPrefixRule, SecretAction, SecretRule};
+use std::sync::OnceLock;
 
 /// A match found by the DFA scanner.
 #[derive(Debug, Clone)]
@@ -33,12 +34,17 @@ pub(crate) struct ScannerRule {
 
 /// Compiled regex-based secret scanner with fast-path prefix pre-filter.
 ///
+/// Construction validates pattern syntax cheaply via `regex_syntax::parse`
+/// and defers full DFA compilation to the first `scan()` call (via `OnceLock`).
+///
 /// The scanner extracts unique first bytes from all known prefixes. If none of
 /// those bytes appear in the input text, regex matching is skipped entirely.
 /// This eliminates ~95% of chunks in typical LLM streaming workloads.
 pub struct SecretScanner {
-    /// Individual compiled regexes for match extraction.
-    regexes: Vec<regex::Regex>,
+    /// Pattern strings for lazy individual regex compilation.
+    patterns: Vec<String>,
+    /// Lazily compiled individual regexes for match position extraction.
+    regexes: Vec<OnceLock<regex::Regex>>,
     pub(crate) rules: Vec<ScannerRule>,
     /// Unique first bytes of all known prefixes — used as O(1) pre-filter.
     /// If text contains none of these bytes, no regex scan is needed.
@@ -46,68 +52,61 @@ pub struct SecretScanner {
 }
 
 impl SecretScanner {
-    /// Compiles secret rules and custom prefixes into a scanner.
+    /// Constructs a scanner by validating pattern syntax (no DFA compilation).
+    ///
+    /// Uses `regex_syntax::parse` for fast AST-only validation. Full DFA
+    /// compilation is deferred to the first `scan()` call via `OnceLock`.
     pub fn new(secrets: &[SecretRule], custom_prefixes: &[CustomPrefixRule]) -> Self {
         let mut patterns = Vec::new();
         let mut rules = Vec::new();
         let mut prefix_bytes = [false; 256];
 
         for rule in secrets {
-            match regex::Regex::new(&rule.pattern) {
-                Ok(_) => {
-                    patterns.push(rule.pattern.clone());
-                    if let Some(&b) = rule.prefix.as_bytes().first() {
-                        prefix_bytes[b as usize] = true;
-                    }
-                    rules.push(ScannerRule {
-                        name: rule.name.clone(),
-                        action: rule.action.clone(),
-                        family: guess_family(&rule.prefix),
-                    });
+            if regex_syntax::parse(&rule.pattern).is_ok() {
+                patterns.push(rule.pattern.clone());
+                if let Some(&b) = rule.prefix.as_bytes().first() {
+                    prefix_bytes[b as usize] = true;
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "DLP: skipping secret rule '{}' — invalid regex '{}': {}",
-                        rule.name,
-                        rule.pattern,
-                        e
-                    );
-                }
+                rules.push(ScannerRule {
+                    name: rule.name.clone(),
+                    action: rule.action.clone(),
+                    family: guess_family(&rule.prefix),
+                });
+            } else {
+                tracing::warn!(
+                    "DLP: skipping secret rule '{}' — invalid regex '{}'",
+                    rule.name,
+                    rule.pattern,
+                );
             }
         }
 
         for cp in custom_prefixes {
             let remaining = cp.length.saturating_sub(cp.prefix.len());
             let pattern = format!("{}[A-Za-z0-9]{{{}}}", regex::escape(&cp.prefix), remaining);
-            match regex::Regex::new(&pattern) {
-                Ok(_) => {
-                    patterns.push(pattern);
-                    if let Some(&b) = cp.prefix.as_bytes().first() {
-                        prefix_bytes[b as usize] = true;
-                    }
-                    rules.push(ScannerRule {
-                        name: cp.name.clone(),
-                        action: cp.action.clone(),
-                        family: "generic",
-                    });
+            if regex_syntax::parse(&pattern).is_ok() {
+                patterns.push(pattern);
+                if let Some(&b) = cp.prefix.as_bytes().first() {
+                    prefix_bytes[b as usize] = true;
                 }
-                Err(e) => {
-                    tracing::warn!(
-                        "DLP: skipping custom prefix rule '{}' — invalid pattern '{}': {}",
-                        cp.name,
-                        pattern,
-                        e
-                    );
-                }
+                rules.push(ScannerRule {
+                    name: cp.name.clone(),
+                    action: cp.action.clone(),
+                    family: "generic",
+                });
+            } else {
+                tracing::warn!(
+                    "DLP: skipping custom prefix rule '{}' — invalid pattern '{}'",
+                    cp.name,
+                    pattern,
+                );
             }
         }
 
-        let regexes = patterns
-            .iter()
-            .map(|p| regex::Regex::new(p).expect("pre-validated regex"))
-            .collect();
+        let regexes = (0..patterns.len()).map(|_| OnceLock::new()).collect();
 
         Self {
+            patterns,
             regexes,
             rules,
             prefix_bytes,
@@ -133,13 +132,15 @@ impl SecretScanner {
     }
 
     /// Returns the length of the longest pattern *string* (not max match length).
-    /// For cross-chunk window sizing, prefer using the known max match length from rule config.
     pub fn max_pattern_str_len(&self) -> usize {
-        self.regexes
-            .iter()
-            .map(|r| r.as_str().len())
-            .max()
-            .unwrap_or(0)
+        self.patterns.iter().map(|p| p.len()).max().unwrap_or(0)
+    }
+
+    /// Returns the compiled regex for a given rule index, compiling it lazily.
+    #[inline]
+    fn get_regex(&self, idx: usize) -> &regex::Regex {
+        self.regexes[idx]
+            .get_or_init(|| regex::Regex::new(&self.patterns[idx]).expect("pre-validated regex"))
     }
 
     /// Scan text and return all matches with positions.
@@ -151,7 +152,8 @@ impl SecretScanner {
 
         let mut matches = Vec::new();
 
-        for (idx, regex) in self.regexes.iter().enumerate() {
+        for idx in 0..self.rules.len() {
+            let regex = self.get_regex(idx);
             for mat in regex.find_iter(text) {
                 matches.push(SecretMatch {
                     start: mat.start(),

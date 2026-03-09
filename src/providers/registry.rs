@@ -40,21 +40,28 @@ impl ProviderRegistry {
     }
 
     /// Build standard ProviderParams from a config entry.
+    ///
+    /// When `GROB_MOCK_BACKEND` is set, overrides the base URL so all
+    /// providers route traffic to the harness mock backend.
     fn build_params(
         config: &ProviderConfig,
         api_key: String,
         default_base_url: &str,
         build_ctx: &ProviderBuildContext,
     ) -> ProviderParams {
+        let base_url = if let Ok(mock_url) = std::env::var("GROB_MOCK_BACKEND") {
+            mock_url
+        } else {
+            config
+                .base_url
+                .clone()
+                .unwrap_or_else(|| default_base_url.to_string())
+        };
+
         ProviderParams {
             name: config.name.clone(),
             api_key,
-            base_url: Some(
-                config
-                    .base_url
-                    .clone()
-                    .unwrap_or_else(|| default_base_url.to_string()),
-            ),
+            base_url: Some(base_url),
             models: config.models.clone(),
             oauth_provider: config.oauth_provider.clone(),
             token_store: build_ctx.token_store.clone(),
