@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2](https://github.com/azerozero/grob/compare/v0.15.1...v0.15.2) - 2026-03-09
+
+### Other
+
+- optimize router (-34%) and DLP pre-filter (-78% clean text)
+
 ## [0.15.1](https://github.com/azerozero/grob/compare/v0.15.0...v0.15.1) - 2026-03-09
 
 ### Added
