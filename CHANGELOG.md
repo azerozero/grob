@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.3](https://github.com/azerozero/grob/compare/v0.15.2...v0.15.3) - 2026-03-09
+
+### Other
+
+- AutoMapper + memchr2 background pre-filter for router (-40%)
+
 ## [0.15.2](https://github.com/azerozero/grob/compare/v0.15.1...v0.15.2) - 2026-03-09
 
 ### Other
