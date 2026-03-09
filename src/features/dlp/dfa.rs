@@ -1,5 +1,6 @@
 use super::canary::CanaryGenerator;
 use super::config::{CustomPrefixRule, SecretAction, SecretRule};
+use aho_corasick::AhoCorasick;
 use std::sync::OnceLock;
 
 /// A match found by the DFA scanner.
@@ -32,14 +33,16 @@ pub(crate) struct ScannerRule {
     pub family: &'static str,
 }
 
-/// Compiled regex-based secret scanner with fast-path prefix pre-filter.
+/// Compiled regex-based secret scanner with two-level prefix pre-filter.
 ///
 /// Construction validates pattern syntax cheaply via `regex_syntax::parse`
 /// and defers full DFA compilation to the first `scan()` call (via `OnceLock`).
 ///
-/// The scanner extracts unique first bytes from all known prefixes. If none of
-/// those bytes appear in the input text, regex matching is skipped entirely.
-/// This eliminates ~95% of chunks in typical LLM streaming workloads.
+/// Pre-filter uses two levels for high selectivity:
+/// 1. **Byte filter** — O(n) scan for first bytes of known prefixes (rejects ~90%)
+/// 2. **AC prefix filter** — Aho-Corasick automaton on full prefix strings (rejects ~99%)
+///
+/// Only when both levels pass does the scanner invoke regex matching.
 pub struct SecretScanner {
     /// Pattern strings for lazy individual regex compilation.
     patterns: Vec<String>,
@@ -49,6 +52,10 @@ pub struct SecretScanner {
     /// Unique first bytes of all known prefixes — used as O(1) pre-filter.
     /// If text contains none of these bytes, no regex scan is needed.
     prefix_bytes: [bool; 256],
+    /// Full prefix strings for Aho-Corasick confirmation filter.
+    prefix_strings: Vec<String>,
+    /// Lazily compiled Aho-Corasick automaton on prefix strings.
+    prefix_ac: OnceLock<AhoCorasick>,
 }
 
 impl SecretScanner {
@@ -60,6 +67,7 @@ impl SecretScanner {
         let mut patterns = Vec::new();
         let mut rules = Vec::new();
         let mut prefix_bytes = [false; 256];
+        let mut prefix_strings = Vec::new();
 
         for rule in secrets {
             if regex_syntax::parse(&rule.pattern).is_ok() {
@@ -67,6 +75,7 @@ impl SecretScanner {
                 if let Some(&b) = rule.prefix.as_bytes().first() {
                     prefix_bytes[b as usize] = true;
                 }
+                prefix_strings.push(rule.prefix.clone());
                 rules.push(ScannerRule {
                     name: rule.name.clone(),
                     action: rule.action.clone(),
@@ -89,6 +98,7 @@ impl SecretScanner {
                 if let Some(&b) = cp.prefix.as_bytes().first() {
                     prefix_bytes[b as usize] = true;
                 }
+                prefix_strings.push(cp.prefix.clone());
                 rules.push(ScannerRule {
                     name: cp.name.clone(),
                     action: cp.action.clone(),
@@ -110,6 +120,8 @@ impl SecretScanner {
             regexes,
             rules,
             prefix_bytes,
+            prefix_strings,
+            prefix_ac: OnceLock::new(),
         }
     }
 
@@ -119,16 +131,38 @@ impl SecretScanner {
         self.rules.is_empty()
     }
 
-    /// Fast O(n) pre-filter: checks if text contains any byte that could start
-    /// a known secret prefix. Returns false if no prefix byte is found → skip regex.
+    /// Two-level O(n) pre-filter for secret detection.
+    ///
+    /// Level 1: single-byte lookup rejects text without any prefix start byte.
+    /// Level 2 (short texts only): Aho-Corasick confirms a full prefix string
+    /// exists. This avoids running 24+ regexes on clean text where a common
+    /// letter (e, s, p) happened to match a prefix start byte.
+    ///
+    /// For long texts (>512 bytes), the AC scan cost approaches the regex scan
+    /// cost, so we skip level 2 and let `scan()` run directly.
     #[inline]
     pub fn might_contain_secret(&self, text: &str) -> bool {
         if self.rules.is_empty() {
             return false;
         }
-        text.as_bytes()
+        // Level 1: fast byte-level reject
+        if !text
+            .as_bytes()
             .iter()
             .any(|&b| self.prefix_bytes[b as usize])
+        {
+            return false;
+        }
+        // Level 2: AC confirmation for short texts (avoids 24+ regex scans)
+        if text.len() <= 512 {
+            let ac = self.prefix_ac.get_or_init(|| {
+                AhoCorasick::builder()
+                    .build(&self.prefix_strings)
+                    .expect("prefix strings are valid AC patterns")
+            });
+            return ac.find(text).is_some();
+        }
+        true
     }
 
     /// Returns the length of the longest pattern *string* (not max match length).

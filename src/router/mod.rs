@@ -96,20 +96,7 @@ impl Router {
     /// 5. Think - Plan Mode / reasoning enabled
     /// 6. Default - auto-mapped or original model name
     pub fn route(&self, request: &mut CanonicalRequest) -> Result<RouteDecision> {
-        // Save original model for background task detection
-        let original_model = request.model.clone();
-
-        // 0. Auto-mapping (model name transformation FIRST)
-        // Transform model name if it matches auto_map_regex
-        if let Some(ref regex) = self.auto_map_regex {
-            if regex.is_match(&request.model) {
-                let old = request.model.clone();
-                request.model = self.config.router.default.clone();
-                debug!("🔀 Auto-mapped model '{}' → '{}'", old, request.model);
-            }
-        }
-
-        // 1. WebSearch (HIGHEST PRIORITY - tool-based detection)
+        // 1. WebSearch (HIGHEST PRIORITY - tool-based detection, no model name needed)
         if let Some(ref websearch_model) = self.config.router.websearch {
             if self.has_web_search_tool(request) {
                 debug!("🔍 Routing to websearch model (web_search tool detected)");
@@ -121,10 +108,9 @@ impl Router {
             }
         }
 
-        // 2. Background tasks (check against ORIGINAL model name, before auto-mapping)
-        // Checked early to prevent expensive models being used for background tasks
+        // 2. Background tasks (checked BEFORE auto-mapping to avoid cloning original model)
         if let Some(ref background_model) = self.config.router.background {
-            if self.is_background_task(&original_model) {
+            if self.is_background_task(&request.model) {
                 debug!("🔄 Routing to background model");
                 return Ok(RouteDecision {
                     model_name: background_model.clone(),
@@ -134,7 +120,18 @@ impl Router {
             }
         }
 
-        // 3. Subagent Model (system prompt tag)
+        // 3. Auto-mapping (model name transformation, after background check)
+        if let Some(ref regex) = self.auto_map_regex {
+            if regex.is_match(&request.model) {
+                debug!(
+                    "🔀 Auto-mapped model '{}' → '{}'",
+                    request.model, self.config.router.default
+                );
+                request.model.clone_from(&self.config.router.default);
+            }
+        }
+
+        // 4. Subagent Model (system prompt tag)
         if let Some(model) = self.extract_subagent_model(request) {
             debug!(
                 "🤖 Routing to subagent model (GROB-SUBAGENT-MODEL tag): {}",
@@ -147,8 +144,7 @@ impl Router {
             });
         }
 
-        // 4. Prompt Rules (pattern matching on user prompt)
-        // NOTE: Checked AFTER background to ensure background tasks use cheaper models
+        // 5. Prompt Rules (pattern matching on user prompt)
         if let Some((model, matched_text)) = self.match_prompt_rule(request) {
             debug!("📝 Routing to model via prompt rule match: {}", model);
             return Ok(RouteDecision {
@@ -158,7 +154,7 @@ impl Router {
             });
         }
 
-        // 5. Think mode (Plan Mode / Reasoning)
+        // 6. Think mode (Plan Mode / Reasoning)
         if let Some(ref think_model) = self.config.router.think {
             if self.is_plan_mode(request) {
                 debug!("🧠 Routing to think model (Plan Mode detected)");
@@ -170,8 +166,7 @@ impl Router {
             }
         }
 
-        // 6. Default fallback
-        // Use the transformed model name (from auto-mapping) or original if no mapping
+        // 7. Default fallback
         debug!("✅ Using model: {}", request.model);
         Ok(RouteDecision {
             model_name: request.model.clone(),
