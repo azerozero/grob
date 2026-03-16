@@ -324,21 +324,24 @@ pub fn print_preset_info(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Merge preset sections (router, providers, models) into config, preserving [user].
+/// Merge preset sections (router, providers, models, security, compliance, dlp) into config, preserving [user].
 fn merge_preset_into_config(
     config_table: &mut toml::map::Map<String, toml::Value>,
     preset_table: &toml::map::Map<String, toml::Value>,
 ) {
     let user_section = config_table.get("user").cloned();
 
-    if let Some(router) = preset_table.get("router") {
-        config_table.insert("router".to_string(), router.clone());
-    }
-    if let Some(providers) = preset_table.get("providers") {
-        config_table.insert("providers".to_string(), providers.clone());
-    }
-    if let Some(models) = preset_table.get("models") {
-        config_table.insert("models".to_string(), models.clone());
+    for section in &[
+        "router",
+        "providers",
+        "models",
+        "security",
+        "compliance",
+        "dlp",
+    ] {
+        if let Some(value) = preset_table.get(*section) {
+            config_table.insert(section.to_string(), value.clone());
+        }
     }
 
     if let Some(user) = user_section {
@@ -466,6 +469,52 @@ pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Merges only compliance sections from a preset without replacing router/providers/models.
+///
+/// Overlays `[security]`, `[compliance]`, `[dlp]` from the named preset onto the
+/// existing config. Router flags `gdpr` and `region` are merged without
+/// replacing model assignments.
+pub fn overlay_compliance(name: &str, config_path: &Path) -> Result<()> {
+    let content = preset_content(name)?;
+    let preset: toml::Value = toml::from_str(&content)
+        .with_context(|| format!("Failed to parse compliance preset '{}'", name))?;
+    let existing = std::fs::read_to_string(config_path)
+        .with_context(|| format!("Failed to read config: {}", config_path.display()))?;
+    let mut config: toml::Value = toml::from_str(&existing)
+        .with_context(|| format!("Failed to parse config: {}", config_path.display()))?;
+
+    let config_table = config
+        .as_table_mut()
+        .context("Config is not a TOML table")?;
+    let preset_table = preset.as_table().context("Preset is not a TOML table")?;
+
+    // Merge compliance sections only
+    for section in &["security", "compliance", "dlp"] {
+        if let Some(value) = preset_table.get(*section) {
+            config_table.insert(section.to_string(), value.clone());
+        }
+    }
+
+    // Merge router flags (gdpr, region) without replacing model assignments
+    if let Some(new_router) = preset_table.get("router").and_then(|r| r.as_table()) {
+        let existing_router = config_table
+            .entry("router".to_string())
+            .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+        if let Some(router_table) = existing_router.as_table_mut() {
+            for (k, v) in new_router {
+                if matches!(k.as_str(), "gdpr" | "region") {
+                    router_table.insert(k.clone(), v.clone());
+                }
+            }
+        }
+    }
+
+    let output = toml::to_string_pretty(&config).context("Failed to serialize config")?;
+    std::fs::write(config_path, &output)
+        .with_context(|| format!("Failed to write config: {}", config_path.display()))?;
     Ok(())
 }
 

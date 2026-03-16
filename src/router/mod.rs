@@ -1,5 +1,7 @@
 //! Request routing engine with regex-based prompt rules and task-type classification.
 
+/// Provider type inference from model name prefixes.
+pub mod inference;
 /// Message content extraction for routing decisions.
 mod message;
 /// Regex compilation and capture-group utilities.

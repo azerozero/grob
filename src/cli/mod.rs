@@ -76,6 +76,11 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
+    /// Returns `true` if the config file does not exist (first-run scenario).
+    pub fn needs_first_run(path: &Path) -> bool {
+        !path.exists()
+    }
+
     /// Get default config file path
     /// Returns ~/.grob/config.toml (cross-platform)
     pub fn default_path() -> Result<PathBuf> {

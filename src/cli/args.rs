@@ -121,6 +121,8 @@ pub enum Commands {
         /// Preset name or URL to compare against current config
         target: Option<String>,
     },
+    /// Interactive setup wizard (auto-triggered on first run)
+    Setup,
     /// Run diagnostic checks on your Grob installation
     Doctor,
     /// Zero-downtime upgrade: spawn new process, wait for health, signal old to drain

@@ -27,6 +27,8 @@ pub mod preset;
 pub mod restart;
 /// Starts the server in foreground (non-daemonized) mode.
 pub mod run;
+/// Interactive first-run setup wizard.
+pub mod setup;
 /// Installs shell completion scripts to standard locations.
 pub mod setup_completions;
 /// Displays cumulative spend, budget status, and cost breakdowns.

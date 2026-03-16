@@ -52,13 +52,14 @@ oauth_provider = "anthropic-max"
 enabled = true
 models = []
 
-# Ollama local (OpenAI-compatible API)
+# Ollama local (OpenAI-compatible API, pass-through for unconfigured models)
 [[providers]]
 name = "ollama"
 provider_type = "openai"
 api_key = "ollama"
 base_url = "http://localhost:11434/v1"
 enabled = true
+pass_through = true
 models = []
 
 # --- Models ---

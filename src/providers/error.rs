@@ -11,8 +11,8 @@ pub enum ProviderError {
     #[error("JSON serialization failed: {0}")]
     SerializationError(#[from] serde_json::Error),
 
-    /// Requested model is not supported by the provider.
-    #[error("Model not supported by provider: {0}")]
+    /// Requested model is not configured in any provider.
+    #[error("Model '{0}' is not configured. Add a [[models]] entry or set pass_through = true on a provider.")]
     ModelNotSupported(String),
 
     /// Upstream provider returned a non-success HTTP status.

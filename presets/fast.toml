@@ -60,12 +60,13 @@ api_key = "$GEMINI_API_KEY"
 enabled = true
 models = []
 
-# OpenRouter — universal fallback for any model
+# OpenRouter — universal fallback, pass-through for unconfigured models
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"
 api_key = "$OPENROUTER_API_KEY"
 enabled = true
+pass_through = true
 models = []
 
 # ── Models ───────────────────────────────────────────────

@@ -12,7 +12,7 @@ use tracing::{debug, error};
 
 use super::{
     apply_transparency_headers, dispatch, extract_api_credential, extract_client_ip, openai_compat,
-    should_apply_transparency, AppError, AppState, RequestId,
+    responses_compat, should_apply_transparency, AppError, AppState, RequestId,
 };
 
 /// Drop guard that decrements the active request counter
@@ -163,6 +163,117 @@ pub(crate) async fn handle_openai_chat_completions(
             let openai_response =
                 openai_compat::transform_canonical_to_openai(response, model.clone());
             Ok(Json(openai_response).into_response())
+        }
+    }
+}
+
+/// Handle /v1/responses requests (OpenAI Responses API — used by Codex CLI)
+/// Supports both streaming (named SSE events) and non-streaming responses.
+pub(crate) async fn handle_responses(
+    State(state): State<Arc<AppState>>,
+    claims: Option<axum::Extension<crate::auth::GrobClaims>>,
+    axum::Extension(request_id): axum::Extension<RequestId>,
+    headers: HeaderMap,
+    Json(responses_request): Json<responses_compat::ResponsesRequest>,
+) -> Result<Response, AppError> {
+    let _guard = ActiveRequestGuard::new(&state);
+    let model = responses_request.model.clone();
+    let is_streaming = responses_request.stream == Some(true);
+    let tenant_id = claims.as_ref().map(|c| c.tenant_id().to_string());
+    let peer_ip = extract_client_ip(&headers);
+
+    let inner = state.snapshot();
+    let session_key = tenant_id
+        .as_deref()
+        .or_else(|| extract_api_credential(&headers));
+    let dlp = state
+        .security
+        .dlp_sessions
+        .as_ref()
+        .map(|mgr| mgr.engine_for(session_key));
+
+    // Transform Responses → canonical format
+    let mut canonical_request =
+        responses_compat::transform_responses_to_canonical(responses_request).map_err(|e| {
+            AppError::ParseError(format!("Failed to transform Responses request: {}", e))
+        })?;
+
+    // Forward client beta features to Anthropic providers
+    canonical_request.extensions.client_beta = headers
+        .get("anthropic-beta")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let ctx = dispatch::DispatchContext {
+        state: &state,
+        inner: &inner,
+        dlp: &dlp,
+        model: model.clone(),
+        is_streaming,
+        tenant_id,
+        peer_ip,
+        req_id: &request_id.0,
+        start_time: std::time::Instant::now(),
+        headers: &headers,
+        trace_id: None,
+    };
+
+    let transparency_enabled = should_apply_transparency(&inner.config);
+
+    match dispatch::dispatch(&ctx, &mut canonical_request).await? {
+        dispatch::DispatchResult::CacheHit(resp) => Ok(resp),
+
+        dispatch::DispatchResult::Streaming {
+            stream,
+            provider,
+            actual_model,
+            ..
+        } => {
+            let mut transformer = responses_compat::AnthropicToResponsesStream::new(model.clone());
+            let mapped = stream
+                .map_ok(move |bytes| transformer.transform_bytes(&bytes))
+                .try_filter(|b| futures::future::ready(!b.is_empty()));
+            let body = Body::from_stream(mapped.map_err(|e| std::io::Error::other(e.to_string())));
+            let mut response = build_sse_response()
+                .body(body)
+                .map_err(|e| AppError::ProviderError(format!("response builder: {}", e)))?;
+            if transparency_enabled {
+                apply_transparency_headers(
+                    response.headers_mut(),
+                    &provider,
+                    &actual_model,
+                    &request_id.0,
+                );
+            }
+            Ok(response)
+        }
+
+        dispatch::DispatchResult::Complete {
+            response: canonical_response,
+            provider,
+            actual_model,
+            ..
+        } => {
+            let responses_response = responses_compat::transform_canonical_to_responses(
+                canonical_response,
+                model.clone(),
+            );
+            let transparency = transparency_enabled.then_some((
+                provider.as_str(),
+                actual_model.as_str(),
+                request_id.0.as_str(),
+            ));
+            let body = serde_json::to_vec(&responses_response).unwrap_or_else(|e| {
+                tracing::warn!("Failed to serialize Responses response: {}", e);
+                Vec::new()
+            });
+            build_json_response(body, transparency)
+        }
+
+        dispatch::DispatchResult::FanOut { response } => {
+            let responses_response =
+                responses_compat::transform_canonical_to_responses(response, model.clone());
+            Ok(Json(responses_response).into_response())
         }
     }
 }

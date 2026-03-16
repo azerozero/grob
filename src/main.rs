@@ -8,6 +8,7 @@
 static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 
 use clap::Parser;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
@@ -42,6 +43,38 @@ async fn main() -> anyhow::Result<()> {
             cli::AppConfig::default_path().unwrap_or_else(|_| PathBuf::from("config/default.toml")),
         ),
     };
+
+    // First-run setup wizard: trigger on `grob setup` or when config doesn't exist
+    // for start/exec commands (interactive TTY only).
+    let needs_wizard = matches!(command, Commands::Setup)
+        || (matches!(command, Commands::Start { .. } | Commands::Exec { .. })
+            && matches!(&config_source, cli::ConfigSource::File(p) if cli::AppConfig::needs_first_run(p))
+            && std::io::stdin().is_terminal());
+
+    if needs_wizard {
+        let config_path = match &config_source {
+            cli::ConfigSource::File(p) => p.clone(),
+            cli::ConfigSource::Url(_) => cli::AppConfig::default_path()
+                .unwrap_or_else(|_| PathBuf::from("config/default.toml")),
+        };
+        let completed = commands::setup::run_setup_wizard(&config_path)?;
+        if !completed {
+            return Ok(());
+        }
+    }
+
+    // Fail fast if config still absent after wizard opportunity (non-TTY or wizard skipped).
+    if matches!(&config_source, cli::ConfigSource::File(p) if cli::AppConfig::needs_first_run(p))
+        && matches!(
+            command,
+            Commands::Start { .. } | Commands::Run { .. } | Commands::Exec { .. }
+        )
+    {
+        eprintln!("No configuration found.");
+        eprintln!("  Run 'grob setup' interactively or create ~/.grob/config.toml");
+        eprintln!("  Quick start: grob preset apply perf");
+        std::process::exit(1);
+    }
 
     let mut config = cli::AppConfig::from_source(&config_source).await?;
     config = cli::merge_project_config(config);
@@ -113,6 +146,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Init => commands::init::cmd_init()?,
         Commands::ConfigDiff { target } => {
             commands::config_diff::cmd_config_diff(&config, &config_source, target)?;
+        }
+        Commands::Setup => {
+            // Already handled above; if we reach here, wizard already ran.
         }
         Commands::Doctor => commands::doctor::cmd_doctor(&config, &config_source).await,
         Commands::Upgrade => commands::upgrade::cmd_upgrade(&config, cli_args.config).await?,

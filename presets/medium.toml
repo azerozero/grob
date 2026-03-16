@@ -41,12 +41,13 @@ oauth_provider = "anthropic-max"
 enabled = true
 models = []
 
-# OpenRouter (modeles performants pas chers)
+# OpenRouter (modeles performants pas chers + pass-through)
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"
 api_key = "$OPENROUTER_API_KEY"
 enabled = true
+pass_through = true
 models = []
 
 # --- Models ---

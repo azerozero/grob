@@ -34,6 +34,9 @@ pub async fn cmd_exec(
             .args(args)
             .env("ANTHROPIC_BASE_URL", &base_url)
             .env("OPENAI_BASE_URL", format!("{}/v1", base_url))
+            // Forge CLI uses ANTHROPIC_URL/OPENAI_URL (template appends /messages or /chat/completions)
+            .env("ANTHROPIC_URL", format!("{}/v1", base_url))
+            .env("OPENAI_URL", format!("{}/v1", base_url))
             .status()
             .await;
 

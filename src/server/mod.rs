@@ -19,6 +19,8 @@ mod middleware;
 mod oauth_handlers;
 /// OpenAI `/v1/chat/completions` compatibility translation layer.
 pub mod openai_compat;
+/// OpenAI Responses API (`/v1/responses`) compatibility translation layer.
+pub mod responses_compat;
 
 pub use audit::AuditEntryBuilder;
 pub(crate) use audit::{log_audit, AuditCompliance, AuditParams};
@@ -271,6 +273,7 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
             "/v1/chat/completions",
             post(handlers::handle_openai_chat_completions),
         )
+        .route("/v1/responses", post(handlers::handle_responses))
         .route("/v1/models", get(handlers::handle_openai_models))
         .route("/health", get(endpoints::health_check))
         .route("/live", get(endpoints::liveness_check))

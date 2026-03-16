@@ -1,5 +1,20 @@
 use super::common::*;
+use crate::providers::AuthType;
 use crate::{cli, cli::Port, instance};
+
+/// Deprecated or upgradable model hints shown at startup.
+const MODEL_HINTS: &[(&str, &str)] = &[
+    ("claude-3-5-sonnet-20241022", "Upgrade: claude-sonnet-4-6"),
+    (
+        "claude-3-5-haiku-20241022",
+        "Upgrade: claude-haiku-4-5-20251001",
+    ),
+    ("gpt-4o", "Upgrade: gpt-5.4"),
+    ("gemini-2.0-flash", "Upgrade: gemini-3-flash"),
+    ("gemini-1.5-pro", "Upgrade: gemini-3-pro"),
+    ("deepseek-v2", "Upgrade: deepseek-v3"),
+    ("mistral-medium-latest", "Consider: mistral-large-latest"),
+];
 
 /// Starts the Grob service in foreground or detached background mode.
 pub async fn cmd_start(
@@ -9,6 +24,8 @@ pub async fn cmd_start(
     detach: bool,
     cli_config: Option<String>,
 ) -> anyhow::Result<()> {
+    print_startup_warnings(&config);
+
     let effective_port = port.unwrap_or(config.server.port.value());
 
     if detach {
@@ -71,4 +88,51 @@ pub async fn cmd_start(
 
     start_foreground(config, config_source).await?;
     Ok(())
+}
+
+/// Prints model upgrade hints and missing credential warnings at startup.
+fn print_startup_warnings(config: &cli::AppConfig) {
+    // Model hints
+    let mut hints = Vec::new();
+    for model in &config.models {
+        for mapping in &model.mappings {
+            for (old, hint) in MODEL_HINTS {
+                if mapping.actual_model == *old {
+                    hints.push(format!("  {} — {}", old, hint));
+                }
+            }
+        }
+    }
+    if !hints.is_empty() {
+        eprintln!("Model hints:");
+        for h in &hints {
+            eprintln!("{}", h);
+        }
+        eprintln!();
+    }
+
+    // Missing credentials
+    let mut missing = Vec::new();
+    for provider in &config.providers {
+        if provider.enabled == Some(false) {
+            continue;
+        }
+        if provider.auth_type == AuthType::OAuth {
+            continue;
+        }
+        if let Some(ref key) = provider.api_key {
+            if let Some(var) = key.strip_prefix('$') {
+                if std::env::var(var).is_err() {
+                    missing.push(format!("  {} needs ${} (not set)", provider.name, var));
+                }
+            }
+        }
+    }
+    if !missing.is_empty() {
+        eprintln!("Missing credentials:");
+        for m in &missing {
+            eprintln!("{}", m);
+        }
+        eprintln!();
+    }
 }

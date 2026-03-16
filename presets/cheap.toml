@@ -69,12 +69,13 @@ api_key = "$KIMI_API_KEY"
 enabled = true
 models = []
 
-# OpenRouter — universal fallback, pay-per-use
+# OpenRouter — universal fallback, pass-through for unconfigured models
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"
 api_key = "$OPENROUTER_API_KEY"
 enabled = true
+pass_through = true
 models = []
 
 # ── Models ───────────────────────────────────────────────

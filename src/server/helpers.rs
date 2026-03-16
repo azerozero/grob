@@ -65,11 +65,37 @@ pub(crate) fn resolve_provider_mappings(
         Ok(sorted)
     } else {
         // No explicit [[models]] config — check for pass-through providers
-        let pass_through_mappings: Vec<crate::cli::ModelMapping> = inner
+        let all_pass_through: Vec<&crate::providers::ProviderConfig> = inner
             .config
             .providers
             .iter()
             .filter(|p| p.is_enabled() && p.pass_through.unwrap_or(false))
+            .collect();
+
+        // Smart filtering: prefer providers whose type matches the inferred model family
+        let inferred = crate::router::inference::infer_provider_type(&decision.model_name);
+        let filtered: Vec<&crate::providers::ProviderConfig> = if let Some(inf) = inferred {
+            let matched: Vec<_> = all_pass_through
+                .iter()
+                .filter(|p| {
+                    p.provider_type == inf
+                        || (inf == "openai" && p.provider_type == "openrouter")
+                        || (inf == "anthropic" && p.provider_type == "openrouter")
+                        || (inf == "gemini" && p.provider_type == "openrouter")
+                })
+                .copied()
+                .collect();
+            if matched.is_empty() {
+                all_pass_through
+            } else {
+                matched
+            }
+        } else {
+            all_pass_through
+        };
+
+        let pass_through_mappings: Vec<crate::cli::ModelMapping> = filtered
+            .iter()
             .enumerate()
             .map(|(i, p)| crate::cli::ModelMapping {
                 priority: (i as u32) + 1,
@@ -80,15 +106,16 @@ pub(crate) fn resolve_provider_mappings(
             .collect();
 
         if pass_through_mappings.is_empty() {
-            Err(AppError::ProviderError(format!(
-                "No model mapping found for model: {}",
+            Err(AppError::RoutingError(format!(
+                "Model '{}' is not configured. Add a [[models]] entry in config.toml or set pass_through = true on a provider.",
                 decision.model_name
             )))
         } else {
             info!(
-                "Pass-through routing '{}' to {} provider(s)",
+                "Pass-through routing '{}' to {} provider(s) (inferred: {:?})",
                 decision.model_name,
-                pass_through_mappings.len()
+                pass_through_mappings.len(),
+                inferred,
             );
             Ok(pass_through_mappings)
         }
