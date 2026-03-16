@@ -80,7 +80,7 @@ redb = "2"
 moka = { version = "0.12", features = ["future", "sync"] }
 
 # JWT Auth
-jsonwebtoken = "9"
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 
 # Security (HDS/PCI/SecNumCloud compliance)
 p256 = { version = "0.13", features = ["ecdsa"] }  # ECDSA P-256 for audit signing
