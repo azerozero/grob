@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1](https://github.com/azerozero/grob/compare/v0.16.0...v0.16.1) - 2026-03-16
+
+### Fixed
+
+- *(security)* upgrade aws-lc-sys 0.37→0.38 and jsonwebtoken 9→10
+
 ## [0.16.0](https://github.com/azerozero/grob/compare/v0.15.3...v0.16.0) - 2026-03-16
 
 ### Added
