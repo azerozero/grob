@@ -14,6 +14,9 @@ fn create_audit_log(temp_dir: &TempDir) -> AuditLog {
         sign_key_path: None,
         signing_algorithm: SigningAlgorithm::default(),
         hmac_key_path: None,
+        batch_size: 1,
+        flush_interval_ms: 5000,
+        include_merkle_proof: false,
     })
     .expect("Should create audit log")
 }

@@ -83,8 +83,9 @@ moka = { version = "0.12", features = ["future", "sync"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 
 # Security (HDS/PCI/SecNumCloud compliance)
-p256 = { version = "0.13", features = ["ecdsa"] }  # ECDSA P-256 for audit signing
-ecdsa = "0.16"                                      # ECDSA traits
+p256 = { version = "0.13", features = ["ecdsa"] }   # ECDSA P-256 for audit signing
+ecdsa = "0.16"                                       # ECDSA traits
+ed25519-dalek = { version = "2", features = ["rand_core"] }  # Ed25519 for audit signing
 tower = "0.5"                                       # Rate limiting middleware
 tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
 unicode-normalization = "0.1"                       # Homoglyph attack prevention

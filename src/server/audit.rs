@@ -85,6 +85,10 @@ impl AuditEntryBuilder {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
             risk_level: self.risk_level,
+            batch_id: None,     // filled by batch flush
+            batch_index: None,  // filled by batch flush
+            merkle_root: None,  // filled by batch flush
+            merkle_proof: None, // filled by batch flush
         }
     }
 }

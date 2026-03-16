@@ -2,9 +2,11 @@
 //! Implements HDS/PCI DSS/SecNumCloud/EU AI Act compliance features
 
 pub mod audit_log;
+pub mod audit_signer;
 pub mod cache;
 pub mod circuit_breaker;
 pub mod headers;
+pub mod merkle;
 pub mod provider_scorer;
 pub mod rate_limit;
 pub mod risk;

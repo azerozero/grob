@@ -258,6 +258,9 @@ pub(crate) fn init_security(config: &AppConfig) -> anyhow::Result<SecurityServic
             sign_key_path: Some(audit_dir.join("audit_key.pem")),
             signing_algorithm,
             hmac_key_path,
+            batch_size: config.security.audit_batch_size,
+            flush_interval_ms: config.security.audit_flush_interval_ms,
+            include_merkle_proof: config.security.audit_include_merkle_proof,
         }) {
             Ok(log) => {
                 info!("📝 Audit logging enabled: {}", audit_dir.display());

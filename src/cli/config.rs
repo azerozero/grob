@@ -49,6 +49,15 @@ pub struct SecurityConfig {
     /// Path to HMAC key file (only for hmac-sha256 algorithm; default: <audit_dir>/audit_hmac.key)
     #[serde(default)]
     pub audit_hmac_key_path: String,
+    /// Entries per Merkle batch (1 = per-entry signing, >1 = batch)
+    #[serde(default = "default_batch_size")]
+    pub audit_batch_size: usize,
+    /// Max milliseconds before flushing an incomplete batch
+    #[serde(default = "default_flush_interval_ms")]
+    pub audit_flush_interval_ms: u64,
+    /// Include Merkle inclusion proof in each batch entry
+    #[serde(default)]
+    pub audit_include_merkle_proof: bool,
     /// Enable adaptive provider scoring (opt-in, default false)
     #[serde(default)]
     pub adaptive_scoring: bool,
@@ -78,6 +87,9 @@ impl Default for SecurityConfig {
             audit_dir: String::new(),
             audit_signing_algorithm: String::new(),
             audit_hmac_key_path: String::new(),
+            audit_batch_size: default_batch_size(),
+            audit_flush_interval_ms: default_flush_interval_ms(),
+            audit_include_merkle_proof: false,
             adaptive_scoring: false,
             scoring_latency_alpha: default_scoring_latency_alpha(),
             scoring_window_size: default_scoring_window_size(),
@@ -85,6 +97,14 @@ impl Default for SecurityConfig {
             scoring_persist: false,
         }
     }
+}
+
+fn default_batch_size() -> usize {
+    1
+}
+
+fn default_flush_interval_ms() -> u64 {
+    5000
 }
 
 // NOTE: 100 rps sustains ~10 concurrent Claude Code sessions (each bursting

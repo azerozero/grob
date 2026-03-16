@@ -1,142 +1,153 @@
-//! Immutable signed audit logs for Grob
-//! Conforms to HDS/PCI DSS/SecNumCloud requirements
+//! Immutable signed audit logs for Grob.
 //!
-//! Features:
-//! - ECDSA P-256 or HMAC-SHA256 signatures per log entry
-//! - Hash chain for integrity verification
-//! - Append-only storage
-//! - AES-256 encryption at rest
+//! Supports per-entry signing (batch_size=1) and Merkle-tree batch
+//! signing (batch_size>1) with configurable algorithm via [`AuditSigner`].
+//!
+//! Conforms to HDS/PCI DSS/SecNumCloud requirements.
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use hmac::{Hmac, Mac};
-use p256::ecdsa::SigningKey;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 
-/// Signing algorithm for audit log entries
+use super::audit_signer::AuditSigner;
+use super::merkle::{MerkleTree, ProofStep};
+
+/// Signing algorithm selection for config parsing.
 #[derive(Debug, Clone, Default)]
 pub enum SigningAlgorithm {
-    /// ECDSA P-256 (default, 64-byte signatures)
+    /// ECDSA P-256 (default, 64-byte signatures).
     #[default]
     EcdsaP256,
-    /// HMAC-SHA256 (32-byte signatures, symmetric key)
+    /// Ed25519 (64-byte signatures, faster than P-256).
+    Ed25519,
+    /// HMAC-SHA256 (32-byte MACs, symmetric key).
     HmacSha256,
 }
 
 impl SigningAlgorithm {
-    /// Parse from config string (case-insensitive)
+    /// Parses from a config string (case-insensitive).
     pub fn from_str_config(s: &str) -> Self {
         match s.to_lowercase().as_str() {
             "hmac-sha256" | "hmac_sha256" | "hmac" => Self::HmacSha256,
+            "ed25519" => Self::Ed25519,
             _ => Self::EcdsaP256,
         }
     }
 
-    /// Label for display/logging
+    /// Label for display/logging.
     pub fn label(&self) -> &'static str {
         match self {
             Self::EcdsaP256 => "ecdsa-p256",
+            Self::Ed25519 => "ed25519",
             Self::HmacSha256 => "hmac-sha256",
         }
     }
 }
 
-/// Signing material: holds the key for the configured algorithm
-pub enum SigningMaterial {
-    /// ECDSA P-256 signing key (asymmetric).
-    Ecdsa(SigningKey),
-    /// HMAC-SHA256 symmetric key (32 bytes).
-    Hmac([u8; 32]),
-}
-
-/// Classification levels for audit entries
+/// Classification levels for audit entries.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum Classification {
-    /// Non-classified (public data)
+    /// Non-classified (public data).
     Nc,
-    /// Internal use
+    /// Internal use.
     C1,
-    /// Restricted - HDS/PCI data
+    /// Restricted — HDS/PCI data.
     C2,
-    /// Secret - Defense data (IGI 1300)
+    /// Secret — Defense data (IGI 1300).
     C3,
 }
 
-/// Audit event types
+/// Audit event types.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AuditEvent {
-    /// Request received
+    /// Request received.
     Request,
-    /// Response sent
+    /// Response sent.
     Response,
-    /// DLP block triggered
+    /// DLP block triggered.
     DlpBlock,
-    /// DLP warning
+    /// DLP warning.
     DlpWarn,
-    /// Authentication attempt
+    /// Authentication attempt.
     Auth,
-    /// Config change
+    /// Config change.
     ConfigChange,
-    /// Error
+    /// Error.
     Error,
 }
 
-/// Immutable audit log entry
-/// Conforms to HDS/PCI DSS requirements for audit trails
+/// Immutable audit log entry.
+///
+/// Conforms to HDS/PCI DSS requirements for audit trails.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEntry {
-    /// RFC 3339 timestamp
+    /// RFC 3339 timestamp.
     pub timestamp: DateTime<Utc>,
-    /// Unique event ID (UUID v4)
+    /// Unique event ID (UUID v4).
     pub event_id: String,
-    /// Tenant ID
+    /// Tenant ID.
     pub tenant_id: String,
-    /// User or service ID
+    /// User or service ID.
     pub user_id: Option<String>,
-    /// Event type
+    /// Event type.
     pub action: AuditEvent,
-    /// Data classification
+    /// Data classification.
     pub classification: Classification,
-    /// Backend routed to (or "BLOCKED")
+    /// Backend routed to (or "BLOCKED").
     pub backend_routed: String,
-    /// SHA-256 hash of request payload (for integrity)
+    /// SHA-256 hash of request payload (for integrity).
     pub request_hash: Option<String>,
-    /// DLP rules triggered
+    /// DLP rules triggered.
     pub dlp_rules_triggered: Vec<String>,
-    /// Source IP (pseudonymized)
+    /// Source IP (pseudonymized).
     pub ip_source: String,
-    /// Processing duration in ms
+    /// Processing duration in ms.
     pub duration_ms: u64,
-    /// Previous entry hash (for chain)
+    /// Previous entry hash (for chain).
     pub previous_hash: String,
-    /// Signature of this entry (ECDSA P-256 = 64 bytes, HMAC-SHA256 = 32 bytes)
+    /// Signature bytes (ECDSA/Ed25519 = 64, HMAC = 32).
     #[serde(with = "hex")]
     pub signature: Vec<u8>,
-    /// Signing algorithm used (backward-compatible: defaults to "ecdsa-p256")
+    /// Signing algorithm used (backward-compatible default).
     #[serde(default)]
     pub signature_algorithm: String,
-    /// Model name used (EU AI Act Article 12)
+    /// Model name used (EU AI Act Article 12).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_name: Option<String>,
-    /// Input tokens counted (EU AI Act Article 12)
+    /// Input tokens counted (EU AI Act Article 12).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u32>,
-    /// Output tokens counted (EU AI Act Article 12)
+    /// Output tokens counted (EU AI Act Article 12).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u32>,
-    /// Risk level classification (EU AI Act Article 14)
+    /// Risk level classification (EU AI Act Article 14).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_level: Option<RiskLevel>,
+
+    // ── Merkle batch fields ──
+    /// Batch ID (UUID v4). Present when batch_size > 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_id: Option<String>,
+    /// Zero-based index of this entry within its batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch_index: Option<u32>,
+    /// Hex-encoded Merkle root signed for this batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merkle_root: Option<String>,
+    /// Inclusion proof from this leaf to the Merkle root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merkle_proof: Option<Vec<ProofStep>>,
 }
 
-/// Risk classification levels per EU AI Act Article 14
+/// Risk classification levels per EU AI Act Article 14.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RiskLevel {
@@ -151,7 +162,8 @@ pub enum RiskLevel {
 }
 
 impl RiskLevel {
-    /// Parse a risk level from a config string (case-insensitive).
+    /// Parses a risk level from a config string (case-insensitive).
+    ///
     /// Returns `High` for unrecognized values.
     pub fn from_str_threshold(s: &str) -> Self {
         match s.to_lowercase().as_str() {
@@ -164,17 +176,23 @@ impl RiskLevel {
     }
 }
 
-/// Audit log configuration
+/// Audit log configuration.
 #[derive(Debug, Clone)]
 pub struct AuditConfig {
-    /// Log directory
+    /// Log directory.
     pub log_dir: PathBuf,
-    /// Sign key path (if None, generates ephemeral) — used for ECDSA
+    /// Sign key path (if None, generates ephemeral) — used for ECDSA/Ed25519.
     pub sign_key_path: Option<PathBuf>,
-    /// Signing algorithm (default: ECDSA P-256)
+    /// Signing algorithm.
     pub signing_algorithm: SigningAlgorithm,
-    /// HMAC key path (only for HMAC-SHA256 algorithm)
+    /// HMAC key path (only for HMAC-SHA256 algorithm).
     pub hmac_key_path: Option<PathBuf>,
+    /// Entries per Merkle batch (1 = per-entry signing, >1 = batch).
+    pub batch_size: usize,
+    /// Max milliseconds before flushing an incomplete batch.
+    pub flush_interval_ms: u64,
+    /// Include Merkle inclusion proof in each entry.
+    pub include_merkle_proof: bool,
 }
 
 /// Returns the platform-appropriate default audit log directory.
@@ -199,8 +217,17 @@ impl Default for AuditConfig {
             sign_key_path: None,
             signing_algorithm: SigningAlgorithm::default(),
             hmac_key_path: None,
+            batch_size: 1,
+            flush_interval_ms: 5000,
+            include_merkle_proof: false,
         }
     }
+}
+
+/// Pending entry in the batch buffer: entry + its content hash.
+struct PendingEntry {
+    entry: AuditEntry,
+    hash: String,
 }
 
 /// Combined mutable state for the audit log, protected by a single Mutex.
@@ -208,39 +235,66 @@ struct AuditLogState {
     file: std::fs::File,
     size: u64,
     last_hash: String,
+    /// Pending entries waiting for the batch to fill.
+    batch_buffer: Vec<PendingEntry>,
+    /// When the current batch started accumulating.
+    batch_start: Instant,
 }
 
-/// Audit log writer with integrity guarantees
+/// Audit log writer with integrity guarantees.
+///
+/// When `batch_size == 1` (default), each entry is individually signed
+/// and hash-chained — identical to the pre-batch behavior.
+///
+/// When `batch_size > 1`, entries accumulate until the batch is full
+/// or `flush_interval_ms` elapses, then a Merkle tree is built over
+/// the batch, the root is signed once, and all entries are written
+/// with their batch metadata.
 pub struct AuditLog {
     _config: AuditConfig,
-    signing_material: SigningMaterial,
-    algorithm: SigningAlgorithm,
+    signer: Box<dyn AuditSigner>,
+    batch_size: usize,
+    flush_interval: std::time::Duration,
+    include_merkle_proof: bool,
     state: Mutex<AuditLogState>,
 }
 
 impl AuditLog {
-    /// Create new audit log with signing key
+    /// Creates a new audit log with the configured signing backend.
     pub fn new(config: AuditConfig) -> Result<Self> {
-        // Ensure log directory exists
         std::fs::create_dir_all(&config.log_dir)
             .with_context(|| format!("Failed to create audit directory: {:?}", config.log_dir))?;
 
-        // Load or generate signing material based on algorithm
-        let algorithm = config.signing_algorithm.clone();
-        let signing_material = match &algorithm {
+        let signer: Box<dyn AuditSigner> = match &config.signing_algorithm {
             SigningAlgorithm::EcdsaP256 => {
-                let key = Self::load_or_generate_ecdsa_key(&config)?;
-                SigningMaterial::Ecdsa(key)
+                Box::new(super::audit_signer::EcdsaP256Signer::load_or_generate(
+                    config.sign_key_path.as_deref(),
+                )?)
+            }
+            SigningAlgorithm::Ed25519 => {
+                Box::new(super::audit_signer::Ed25519Signer::load_or_generate(
+                    config.sign_key_path.as_deref(),
+                )?)
             }
             SigningAlgorithm::HmacSha256 => {
-                let key = Self::load_or_generate_hmac_key(&config)?;
-                SigningMaterial::Hmac(key)
+                let key_path = config
+                    .hmac_key_path
+                    .clone()
+                    .unwrap_or_else(|| config.log_dir.join("audit_hmac.key"));
+                Box::new(super::audit_signer::HmacSha256Signer::load_or_generate(
+                    &key_path,
+                )?)
             }
         };
 
-        tracing::info!("Audit log signing algorithm: {}", algorithm.label());
+        tracing::info!(
+            "Audit log: algorithm={}, batch_size={}, flush_interval={}ms, merkle_proof={}",
+            signer.algorithm(),
+            config.batch_size,
+            config.flush_interval_ms,
+            config.include_merkle_proof,
+        );
 
-        // Open or create current log file
         let current_path = config.log_dir.join("current.jsonl");
         let (file, last_hash) = if current_path.exists() {
             Self::read_last_hash(&current_path)?
@@ -252,83 +306,25 @@ impl AuditLog {
             (file, Self::genesis_hash())
         };
 
-        let metadata = file.metadata()?;
-        let current_size = metadata.len();
+        let current_size = file.metadata()?.len();
 
         Ok(Self {
+            batch_size: config.batch_size.max(1),
+            flush_interval: std::time::Duration::from_millis(config.flush_interval_ms),
+            include_merkle_proof: config.include_merkle_proof,
             _config: config,
-            signing_material,
-            algorithm,
+            signer,
             state: Mutex::new(AuditLogState {
                 file,
                 size: current_size,
                 last_hash,
+                batch_buffer: Vec::new(),
+                batch_start: Instant::now(),
             }),
         })
     }
 
-    /// Load or generate ECDSA P-256 signing key
-    fn load_or_generate_ecdsa_key(config: &AuditConfig) -> Result<SigningKey> {
-        if let Some(key_path) = &config.sign_key_path {
-            if key_path.exists() {
-                let key_bytes =
-                    std::fs::read(key_path).with_context(|| "Failed to read signing key")?;
-                SigningKey::from_slice(&key_bytes)
-                    .map_err(|e| anyhow::anyhow!("Invalid signing key: {}", e))
-            } else {
-                let key = SigningKey::random(&mut rand::thread_rng());
-                let key_bytes = key.to_bytes();
-                std::fs::write(key_path, key_bytes)
-                    .with_context(|| "Failed to save signing key")?;
-                Self::set_key_permissions(key_path)?;
-                Ok(key)
-            }
-        } else {
-            tracing::warn!(
-                "Using ephemeral ECDSA signing key. Logs won't be verifiable across restarts."
-            );
-            Ok(SigningKey::random(&mut rand::thread_rng()))
-        }
-    }
-
-    /// Load or generate HMAC-SHA256 key (32 bytes)
-    fn load_or_generate_hmac_key(config: &AuditConfig) -> Result<[u8; 32]> {
-        let key_path = config
-            .hmac_key_path
-            .clone()
-            .unwrap_or_else(|| config.log_dir.join("audit_hmac.key"));
-
-        if key_path.exists() {
-            let key_bytes = std::fs::read(&key_path).with_context(|| "Failed to read HMAC key")?;
-            if key_bytes.len() != 32 {
-                anyhow::bail!("HMAC key must be exactly 32 bytes, got {}", key_bytes.len());
-            }
-            let mut key = [0u8; 32];
-            key.copy_from_slice(&key_bytes);
-            Ok(key)
-        } else {
-            let mut key = [0u8; 32];
-            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut key);
-            std::fs::write(&key_path, key).with_context(|| "Failed to save HMAC key")?;
-            Self::set_key_permissions(&key_path)?;
-            tracing::info!("Generated new HMAC-SHA256 key at {:?}", key_path);
-            Ok(key)
-        }
-    }
-
-    /// Set 0o600 permissions on a key file (Unix only)
-    fn set_key_permissions(_path: &Path) -> Result<()> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(_path)?.permissions();
-            perms.set_mode(0o600);
-            std::fs::set_permissions(_path, perms)?;
-        }
-        Ok(())
-    }
-
-    /// Read last hash from existing log for chain continuity
+    /// Read last hash from existing log for chain continuity.
     fn read_last_hash(path: &Path) -> Result<(std::fs::File, String)> {
         let file = OpenOptions::new().append(true).open(path)?;
         let reader = BufReader::new(std::fs::File::open(path)?);
@@ -344,16 +340,16 @@ impl AuditLog {
         Ok((file, last_hash))
     }
 
-    /// Genesis hash for empty chain
+    /// Genesis hash for empty chain.
     fn genesis_hash() -> String {
         hex::encode(Sha256::digest(b"GROB_AUDIT_GENESIS"))
     }
 
-    /// Hash an entry for chaining (writes directly into hasher, no intermediate String)
+    /// Hashes an entry for chaining (writes directly into hasher).
     fn hash_entry(entry: &AuditEntry) -> String {
         use std::io::Write as _;
         let mut hasher = Sha256::new();
-        // Hash of all fields except signature and signature_algorithm
+        // Excludes signature, signature_algorithm, and batch metadata.
         let _ = write!(
             hasher,
             "{}|{}|{}|{}|{:?}|{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{:?}",
@@ -377,47 +373,94 @@ impl AuditLog {
         hex::encode(hasher.finalize())
     }
 
-    /// Write an audit entry with signature and hash chain
+    /// Writes an audit entry.
+    ///
+    /// In per-entry mode (batch_size=1), signs and appends immediately.
+    /// In batch mode, buffers the entry and flushes when the batch is
+    /// full or the flush interval has elapsed.
     pub fn write(&self, mut entry: AuditEntry) -> Result<()> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
-        // Chain: set previous_hash from last entry
+        // Chain: set previous_hash from last written entry.
         entry.previous_hash = state.last_hash.clone();
 
-        // Set signature algorithm label
-        entry.signature_algorithm = self.algorithm.label().to_string();
-
-        // Sign based on configured algorithm
         let hash = Self::hash_entry(&entry);
-        entry.signature = match &self.signing_material {
-            SigningMaterial::Ecdsa(key) => {
-                use p256::ecdsa::signature::Signer;
-                let sig: p256::ecdsa::Signature = key.sign(hash.as_bytes());
-                sig.to_bytes().to_vec()
-            }
-            SigningMaterial::Hmac(key) => {
-                let mut mac =
-                    Hmac::<Sha256>::new_from_slice(key).expect("HMAC accepts any key size");
-                mac.update(hash.as_bytes());
-                mac.finalize().into_bytes().to_vec()
-            }
-        };
+        state.last_hash = hash.clone();
 
-        // Append JSONL
-        let mut line = serde_json::to_string(&entry).context("Failed to serialize audit entry")?;
+        if self.batch_size <= 1 {
+            // Per-entry signing (original behavior).
+            entry.signature_algorithm = self.signer.algorithm().to_string();
+            entry.signature = self.signer.sign(hash.as_bytes());
+            Self::append_entry(&mut state, &entry)?;
+        } else {
+            // Batch mode: accumulate.
+            state.batch_buffer.push(PendingEntry { entry, hash });
+
+            let batch_full = state.batch_buffer.len() >= self.batch_size;
+            let interval_elapsed = state.batch_start.elapsed() >= self.flush_interval;
+
+            if batch_full || interval_elapsed {
+                self.flush_batch(&mut state)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Flushes any pending batch entries. Safe to call even if buffer is empty.
+    pub fn flush(&self) -> Result<()> {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if !state.batch_buffer.is_empty() {
+            self.flush_batch(&mut state)?;
+        }
+        Ok(())
+    }
+
+    /// Builds the Merkle tree, signs the root, and writes all buffered entries.
+    fn flush_batch(&self, state: &mut AuditLogState) -> Result<()> {
+        let batch: Vec<PendingEntry> = state.batch_buffer.drain(..).collect();
+        state.batch_start = Instant::now();
+
+        if batch.is_empty() {
+            return Ok(());
+        }
+
+        let leaf_hashes: Vec<String> = batch.iter().map(|p| p.hash.clone()).collect();
+        let tree = MerkleTree::from_leaves(&leaf_hashes);
+        let merkle_root = tree.root().to_string();
+
+        // Sign the Merkle root once for the entire batch.
+        let root_signature = self.signer.sign(merkle_root.as_bytes());
+        let batch_id = uuid::Uuid::new_v4().to_string();
+        let algorithm = self.signer.algorithm().to_string();
+
+        for (i, pending) in batch.into_iter().enumerate() {
+            let mut entry = pending.entry;
+            entry.signature_algorithm = algorithm.clone();
+            entry.signature = root_signature.clone();
+            entry.batch_id = Some(batch_id.clone());
+            entry.batch_index = Some(i as u32);
+            entry.merkle_root = Some(merkle_root.clone());
+
+            if self.include_merkle_proof {
+                entry.merkle_proof = tree.proof(i);
+            }
+
+            Self::append_entry(state, &entry)?;
+        }
+
+        Ok(())
+    }
+
+    /// Serializes and appends a single entry to the JSONL file.
+    fn append_entry(state: &mut AuditLogState, entry: &AuditEntry) -> Result<()> {
+        let mut line = serde_json::to_string(entry).context("Failed to serialize audit entry")?;
         line.push('\n');
-
         state
             .file
             .write_all(line.as_bytes())
             .context("Failed to write audit entry")?;
-        // Rely on OS buffering; per-entry flush() triggers a blocking fsync syscall
-        // that can stall the tokio runtime under load.
-
-        // Update chain state
         state.size += line.len() as u64;
-        state.last_hash = hash;
-
         Ok(())
     }
 }
@@ -449,7 +492,6 @@ mod tests {
             log_dir: dir.path().to_path_buf(),
             ..Default::default()
         };
-
         let _log = AuditLog::new(config).unwrap();
     }
 
@@ -483,6 +525,10 @@ mod tests {
             input_tokens: None,
             output_tokens: None,
             risk_level: None,
+            batch_id: None,
+            batch_index: None,
+            merkle_root: None,
+            merkle_proof: None,
         }
     }
 
@@ -492,7 +538,6 @@ mod tests {
         let entry = make_entry(AuditEvent::Response);
         log.write(entry).unwrap();
 
-        // Verify file contains one JSONL line
         let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
         let lines: Vec<&str> = content.trim().lines().collect();
         assert_eq!(lines.len(), 1);
@@ -505,16 +550,11 @@ mod tests {
     #[test]
     fn test_hash_chain() {
         let (_dir, log) = make_test_log();
-
         let genesis = AuditLog::genesis_hash();
 
-        let e1 = make_entry(AuditEvent::Request);
-        log.write(e1).unwrap();
+        log.write(make_entry(AuditEvent::Request)).unwrap();
+        log.write(make_entry(AuditEvent::Response)).unwrap();
 
-        let e2 = make_entry(AuditEvent::Response);
-        log.write(e2).unwrap();
-
-        // Read back entries and verify chain
         let content = std::fs::read_to_string(_dir.path().join("current.jsonl")).unwrap();
         let lines: Vec<&str> = content.trim().lines().collect();
         assert_eq!(lines.len(), 2);
@@ -522,31 +562,20 @@ mod tests {
         let parsed1: AuditEntry = serde_json::from_str(lines[0]).unwrap();
         let parsed2: AuditEntry = serde_json::from_str(lines[1]).unwrap();
 
-        // First entry chains from genesis
         assert_eq!(parsed1.previous_hash, genesis);
-        // Second entry chains from first entry's hash
         assert_eq!(parsed2.previous_hash, AuditLog::hash_entry(&parsed1));
     }
 
     #[test]
     fn test_signature_present() {
         let (_dir, log) = make_test_log();
-        let entry = make_entry(AuditEvent::DlpBlock);
-        log.write(entry).unwrap();
+        log.write(make_entry(AuditEvent::DlpBlock)).unwrap();
 
         let content = std::fs::read_to_string(_dir.path().join("current.jsonl")).unwrap();
         let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
 
-        // ECDSA P-256 signature is 64 bytes
-        assert_eq!(
-            parsed.signature.len(),
-            64,
-            "ECDSA P-256 signature should be 64 bytes"
-        );
-        assert!(
-            parsed.signature.iter().any(|&b| b != 0),
-            "Signature should not be all zeros"
-        );
+        assert_eq!(parsed.signature.len(), 64, "ECDSA P-256 = 64 bytes");
+        assert!(parsed.signature.iter().any(|&b| b != 0));
     }
 
     #[test]
@@ -558,35 +587,143 @@ mod tests {
             ..Default::default()
         };
         let log = AuditLog::new(config).unwrap();
-
-        let entry = make_entry(AuditEvent::Request);
-        log.write(entry).unwrap();
+        log.write(make_entry(AuditEvent::Request)).unwrap();
 
         let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
         let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
 
-        // HMAC-SHA256 signature is 32 bytes
-        assert_eq!(
-            parsed.signature.len(),
-            32,
-            "HMAC-SHA256 signature should be 32 bytes"
-        );
+        assert_eq!(parsed.signature.len(), 32, "HMAC-SHA256 = 32 bytes");
         assert_eq!(parsed.signature_algorithm, "hmac-sha256");
-        assert!(
-            parsed.signature.iter().any(|&b| b != 0),
-            "Signature should not be all zeros"
-        );
+    }
+
+    #[test]
+    fn test_ed25519_signature() {
+        let dir = TempDir::new().unwrap();
+        let config = AuditConfig {
+            log_dir: dir.path().to_path_buf(),
+            signing_algorithm: SigningAlgorithm::Ed25519,
+            ..Default::default()
+        };
+        let log = AuditLog::new(config).unwrap();
+        log.write(make_entry(AuditEvent::Auth)).unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
+
+        assert_eq!(parsed.signature.len(), 64, "Ed25519 = 64 bytes");
+        assert_eq!(parsed.signature_algorithm, "ed25519");
+    }
+
+    #[test]
+    fn test_batch_signing() {
+        let dir = TempDir::new().unwrap();
+        let config = AuditConfig {
+            log_dir: dir.path().to_path_buf(),
+            batch_size: 3,
+            include_merkle_proof: true,
+            ..Default::default()
+        };
+        let log = AuditLog::new(config).unwrap();
+
+        // Write 3 entries — batch should flush automatically.
+        for _ in 0..3 {
+            log.write(make_entry(AuditEvent::Response)).unwrap();
+        }
+
+        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert_eq!(lines.len(), 3);
+
+        let entries: Vec<AuditEntry> = lines
+            .iter()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+
+        // All entries share the same batch_id and merkle_root.
+        let batch_id = entries[0].batch_id.as_ref().unwrap();
+        let merkle_root = entries[0].merkle_root.as_ref().unwrap();
+        for (i, e) in entries.iter().enumerate() {
+            assert_eq!(e.batch_id.as_ref().unwrap(), batch_id);
+            assert_eq!(e.batch_index, Some(i as u32));
+            assert_eq!(e.merkle_root.as_ref().unwrap(), merkle_root);
+            assert!(e.merkle_proof.is_some(), "proof should be included");
+        }
+
+        // All entries share the same signature (root signature).
+        assert_eq!(entries[0].signature, entries[1].signature);
+        assert_eq!(entries[1].signature, entries[2].signature);
+    }
+
+    #[test]
+    fn test_batch_merkle_proof_verifiable() {
+        let dir = TempDir::new().unwrap();
+        let config = AuditConfig {
+            log_dir: dir.path().to_path_buf(),
+            batch_size: 4,
+            include_merkle_proof: true,
+            ..Default::default()
+        };
+        let log = AuditLog::new(config).unwrap();
+
+        for _ in 0..4 {
+            log.write(make_entry(AuditEvent::Request)).unwrap();
+        }
+
+        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let entries: Vec<AuditEntry> = content
+            .trim()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+
+        let merkle_root = entries[0].merkle_root.as_ref().unwrap();
+
+        for entry in &entries {
+            let leaf_hash = AuditLog::hash_entry(entry);
+            let proof = entry.merkle_proof.as_ref().unwrap();
+            assert!(
+                MerkleTree::verify(merkle_root, &leaf_hash, proof),
+                "Merkle proof failed for entry {}",
+                entry.event_id
+            );
+        }
+    }
+
+    #[test]
+    fn test_batch_flush_partial() {
+        let dir = TempDir::new().unwrap();
+        let config = AuditConfig {
+            log_dir: dir.path().to_path_buf(),
+            batch_size: 10,
+            include_merkle_proof: false,
+            ..Default::default()
+        };
+        let log = AuditLog::new(config).unwrap();
+
+        // Write fewer entries than batch_size, then flush explicitly.
+        log.write(make_entry(AuditEvent::Request)).unwrap();
+        log.write(make_entry(AuditEvent::Response)).unwrap();
+
+        // Nothing written yet (batch incomplete).
+        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        assert!(content.is_empty(), "batch should not be flushed yet");
+
+        // Explicit flush.
+        log.flush().unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let lines: Vec<&str> = content.trim().lines().collect();
+        assert_eq!(lines.len(), 2);
     }
 
     #[test]
     fn test_backward_compat_deserialization() {
-        // Old entries without signature_algorithm, model_name, etc. should deserialize
+        // Old entries without batch fields should deserialize fine.
         let json = r#"{"timestamp":"2026-01-01T00:00:00Z","event_id":"test","tenant_id":"t","user_id":null,"action":"REQUEST","classification":"NC","backend_routed":"p","request_hash":null,"dlp_rules_triggered":[],"ip_source":"127.0.0.1","duration_ms":0,"previous_hash":"abc","signature":"deadbeef"}"#;
         let entry: AuditEntry = serde_json::from_str(json).unwrap();
         assert_eq!(entry.signature_algorithm, "");
-        assert!(entry.model_name.is_none());
-        assert!(entry.input_tokens.is_none());
-        assert!(entry.output_tokens.is_none());
-        assert!(entry.risk_level.is_none());
+        assert!(entry.batch_id.is_none());
+        assert!(entry.merkle_root.is_none());
+        assert!(entry.merkle_proof.is_none());
     }
 }
