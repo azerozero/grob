@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0](https://github.com/azerozero/grob/compare/v0.15.3...v0.16.0) - 2026-03-16
+
+### Added
+
+- bootstrap UX overhaul — wizard auth/compliance/budget + startup warnings
+
+### Fixed
+
+- upgrade quinn-proto 0.11.13 → 0.11.14 (RUSTSEC-2026-0037 DoS fix)
+
+### Other
+
+- add OWASP LLM Top 10 coverage reference
+
 ## [0.15.3](https://github.com/azerozero/grob/compare/v0.15.2...v0.15.3) - 2026-03-09
 
 ### Other
