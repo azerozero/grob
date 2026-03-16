@@ -171,7 +171,10 @@ impl OpenAIProvider {
 
         let response = Self::check_response(response).await?;
         let response_text = response.text().await?;
-        tracing::debug!("Responses API response body: {}", response_text);
+        tracing::debug!(
+            "Responses API response length: {} bytes",
+            response_text.len()
+        );
 
         let content_blocks = transform::parse_sse_response(&response_text)?;
 
@@ -224,12 +227,18 @@ impl OpenAIProvider {
 
         let response = Self::check_response(response).await?;
         let response_text = response.text().await?;
-        tracing::debug!("OpenAI provider response body: {}", response_text);
+        tracing::debug!(
+            "OpenAI provider response length: {} bytes",
+            response_text.len()
+        );
 
         let openai_response: OpenAIResponse =
             serde_json::from_str(&response_text).map_err(|e| {
                 tracing::error!("Failed to parse OpenAI response: {}", e);
-                tracing::error!("Response body was: {}", response_text);
+                tracing::debug!(
+                    "Response body (truncated): {}",
+                    &response_text[..response_text.len().min(200)]
+                );
                 e
             })?;
 

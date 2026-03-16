@@ -174,7 +174,8 @@ fn convert_tool_choice(tc: &serde_json::Value) -> Option<serde_json::Value> {
 pub fn transform_openai_to_canonical(
     openai_req: OpenAIRequest,
 ) -> Result<CanonicalRequest, String> {
-    let mut messages = Vec::with_capacity(openai_req.messages.len());
+    // Cap pre-allocation to prevent memory exhaustion from malicious input.
+    let mut messages = Vec::with_capacity(openai_req.messages.len().min(1024));
     let mut system_prompt: Option<SystemPrompt> = None;
 
     for msg in openai_req.messages {
@@ -270,7 +271,7 @@ pub fn transform_canonical_to_openai(
     anthropic_resp: ProviderResponse,
     model: String,
 ) -> OpenAIResponse {
-    let mut text_parts: Vec<String> = Vec::with_capacity(anthropic_resp.content.len());
+    let mut text_parts: Vec<String> = Vec::with_capacity(anthropic_resp.content.len().min(1024));
     let mut tool_calls: Vec<OpenAIToolCall> = Vec::new();
 
     for block in &anthropic_resp.content {

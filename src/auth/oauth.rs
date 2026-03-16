@@ -8,6 +8,11 @@ use sha2::{Digest, Sha256};
 
 use super::token_store::{OAuthToken, TokenStore};
 
+/// Returns `true` if the URL points to a loopback address.
+fn is_localhost_url(url: &str) -> bool {
+    url.contains("://localhost") || url.contains("://127.0.0.1") || url.contains("://[::1]")
+}
+
 /// Google Gemini CLI public OAuth client ID (split to avoid secret scanners).
 /// Source: https://github.com/google-gemini/gemini-cli (public, installed-app type)
 fn gemini_default_client_id() -> String {
@@ -201,8 +206,14 @@ pub struct OAuthClient {
 }
 
 impl OAuthClient {
-    /// Create a new OAuth client
+    /// Create a new OAuth client.
     pub fn new(config: OAuthConfig, token_store: TokenStore) -> Self {
+        if config.token_url.starts_with("http://") && !is_localhost_url(&config.token_url) {
+            tracing::warn!(
+                "OAuth token_url uses plaintext HTTP for non-localhost endpoint: {}",
+                config.token_url
+            );
+        }
         Self {
             config,
             token_store,

@@ -189,6 +189,15 @@ impl TokenStore {
             return Ok(()); // GrobStore handles persistence
         }
 
+        // Validate path to prevent path traversal: reject components like ".."
+        // that could escape the intended directory.
+        let path_str = self.file_path.to_string_lossy();
+        anyhow::ensure!(
+            !path_str.contains(".."),
+            "Token file path must not contain '..': {}",
+            path_str
+        );
+
         let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         let json = serde_json::to_string_pretty(&*tokens).context("Failed to serialize tokens")?;
 

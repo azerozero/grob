@@ -76,6 +76,8 @@ impl GeminiProvider {
             }
         });
 
+        super::warn_if_cleartext(&base_url, "gemini");
+
         Self {
             api_key,
             base_url,

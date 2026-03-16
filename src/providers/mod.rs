@@ -97,6 +97,21 @@ pub fn build_provider_client(connect_timeout: Duration) -> Client {
         })
 }
 
+/// Logs a warning if a provider base URL uses plaintext HTTP for a non-localhost endpoint.
+pub fn warn_if_cleartext(url: &str, provider_name: &str) {
+    if url.starts_with("http://")
+        && !url.contains("://localhost")
+        && !url.contains("://127.0.0.1")
+        && !url.contains("://[::1]")
+    {
+        tracing::warn!(
+            "Provider '{}' uses plaintext HTTP: {}. Consider HTTPS for non-local endpoints.",
+            provider_name,
+            url
+        );
+    }
+}
+
 /// Main provider trait - all providers must implement this
 /// Maintains Anthropic Messages API compatibility
 #[async_trait]

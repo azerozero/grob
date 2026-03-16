@@ -20,10 +20,13 @@ A commercial license is available for organizations that cannot or do not wish t
 |------|----------|-------|
 | **Personal** | 1 user, local workstation only (no server) | Free |
 | **Community** | Internal use, < 50 people | AGPL-3.0, free |
-| **Enterprise** | Internal use, > 50 people | 8 000 EUR/year |
-| **Integrator** | ESN / systems integrator deploying for clients | 15 000 EUR/year |
-| **OEM** | Embedded in a third-party product | 25 000+ EUR/year (negotiated) |
+| **Pro** | Small team, AGPL-3.0 waiver | 5 000 EUR/year |
+| **Enterprise** | Internal use, > 50 people | Starting at 8 000 EUR/year |
+| **Integrator** | ESN / systems integrator deploying for clients | Starting at 15 000 EUR/year |
+| **OEM** | Embedded in a third-party product | Starting at 25 000 EUR/year (negotiated) |
 | **Source Available** | Audit without redistribution (defense sector) | 5 000 EUR/year |
+
+Pricing may change. Current prices are locked for 12 months from contract signature.
 
 ### What each tier includes
 
@@ -39,6 +42,12 @@ A commercial license is available for organizations that cannot or do not wish t
 - Full functionality, no restrictions
 - AGPL-3.0 obligations apply (source disclosure for network services)
 - Community support via GitHub Issues
+
+**Pro**
+- Use Grob without AGPL-3.0 source disclosure obligations
+- Keep internal modifications private
+- Up to 50 users
+- Email support
 
 **Enterprise**
 - Use Grob without AGPL-3.0 source disclosure obligations

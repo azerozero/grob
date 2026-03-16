@@ -144,20 +144,22 @@ impl NameAnonymizer {
     }
 
     fn derive_key() -> [u8; 32] {
+        // Domain separator for HKDF-like key derivation (not a secret).
+        const KDF_DOMAIN: &[u8] = b"grob-dlp-key-derivation-v1";
+
         if let Ok(secret) = std::env::var("GROB_DLP_SECRET") {
-            let mut mac =
-                HmacSha256::new_from_slice(b"grob-dlp-key-derivation").expect("HMAC key valid");
+            let mut mac = HmacSha256::new_from_slice(KDF_DOMAIN).expect("HMAC key valid");
             mac.update(secret.as_bytes());
             mac.finalize().into_bytes().into()
         } else {
             tracing::warn!(
-                "DLP: GROB_DLP_SECRET not set, using default key. \
-                 Pseudonyms are predictable. Set GROB_DLP_SECRET for production use."
+                "DLP: GROB_DLP_SECRET not set, generating random session key. \
+                 Pseudonyms will differ across restarts. Set GROB_DLP_SECRET for stable pseudonyms."
             );
-            let mut mac =
-                HmacSha256::new_from_slice(b"grob-dlp-default-key").expect("HMAC key valid");
-            mac.update(b"pseudonym-generation");
-            mac.finalize().into_bytes().into()
+            // Generate a random key per process so pseudonyms are unpredictable.
+            let mut key = [0u8; 32];
+            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut key);
+            key
         }
     }
 
@@ -291,11 +293,14 @@ mod tests {
 
     #[test]
     fn test_deterministic_pseudonyms() {
+        // Set a stable secret so the key is deterministic across instances.
+        std::env::set_var("GROB_DLP_SECRET", "test-deterministic");
         let anon1 = NameAnonymizer::new(&test_rules());
         let anon2 = NameAnonymizer::new(&test_rules());
         let r1 = anon1.anonymize_if_match("Thales").unwrap().0;
         let r2 = anon2.anonymize_if_match("Thales").unwrap().0;
         assert_eq!(r1, r2, "Same name should always produce same pseudonym");
+        std::env::remove_var("GROB_DLP_SECRET");
     }
 
     #[test]

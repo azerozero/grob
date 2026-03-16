@@ -261,13 +261,10 @@ pub fn print_preset_info(name: &str) -> Result<()> {
                     .unwrap_or("?");
                 format!("OAuth ({})", oauth_id)
             } else {
-                let key = p.get("api_key").and_then(|k| k.as_str()).unwrap_or("");
-                if key.starts_with('$') {
-                    format!("env: {}", key)
-                } else if !key.is_empty() {
-                    "API key (set)".to_string()
-                } else {
-                    "no key".to_string()
+                match p.get("api_key").and_then(|k| k.as_str()).unwrap_or("") {
+                    key if key.starts_with('$') => format!("env: {}", key),
+                    key if !key.is_empty() => "API key (configured)".to_string(),
+                    _ => "no key".to_string(),
                 }
             };
 

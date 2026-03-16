@@ -156,7 +156,7 @@ fn get_server() -> &'static ServerState {
             let tls_url = format!("https://127.0.0.1:{}", tls_port);
 
             let probe = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check] benchmark uses self-signed certs
                 .build()
                 .unwrap();
             for _ in 0..100 {
@@ -286,7 +286,7 @@ fn bench_tls(c: &mut Criterion) {
     let srv = get_server();
 
     let tls_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check] benchmark uses self-signed certs
         .pool_max_idle_per_host(10)
         .build()
         .unwrap();
@@ -319,7 +319,7 @@ fn bench_tls(c: &mut Criterion) {
     group.bench_function("health_tls_fresh_handshake", |b| {
         b.to_async(&srv.rt).iter(|| async {
             let fresh = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check] benchmark uses self-signed certs
                 .pool_max_idle_per_host(0)
                 .no_proxy()
                 .build()

@@ -289,10 +289,8 @@ mod tests {
             let result = engine.sanitize_text(&input);
             assert!(
                 result.contains("[REDACTED]"),
-                "{} secret should be detected and redacted: input='{}', output='{}'",
+                "{} secret should be detected and redacted (output contains no [REDACTED])",
                 name,
-                input,
-                result,
             );
         }
     }
@@ -368,12 +366,7 @@ mod tests {
         for (country, iban) in valid_ibans {
             let text = format!("IBAN: {}", iban);
             let result = scanner.redact(&text);
-            assert!(
-                result.is_some(),
-                "{} IBAN should be detected: {}",
-                country,
-                iban
-            );
+            assert!(result.is_some(), "{} IBAN should be detected", country,);
             let (redacted, _) = result.unwrap();
             assert!(
                 redacted.contains("[IBAN REDACTED]"),
