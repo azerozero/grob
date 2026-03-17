@@ -137,7 +137,11 @@ impl AppConfig {
         Ok(config)
     }
 
-    /// Resolve environment variables in configuration
+    /// Resolves `$ENV_VAR` references in provider API keys.
+    ///
+    /// Missing env vars disable the provider with a warning instead of
+    /// crashing, so the proxy can still serve traffic through the
+    /// remaining providers. Only fails if *all* providers end up disabled.
     fn resolve_env_vars(&mut self) -> Result<()> {
         // Resolve server API key
         if let Some(ref key) = self.server.api_key {
@@ -146,9 +150,10 @@ impl AppConfig {
             }
         }
 
+        let mut disabled_for_missing: Vec<(String, String)> = Vec::new();
+
         // Resolve provider API keys (only for enabled providers)
         for provider in &mut self.providers {
-            // Skip disabled providers
             if !provider.is_enabled() {
                 continue;
             }
@@ -159,24 +164,35 @@ impl AppConfig {
                     if let Ok(value) = std::env::var(env_var) {
                         provider.api_key = Some(value);
                     } else if std::env::var("GROB_MOCK_BACKEND").is_ok() {
-                        // Mock backend mode: use placeholder key.
                         provider.api_key = Some("mock-key".to_string());
                     } else {
-                        anyhow::bail!(
-                            "Environment variable ${} not set for provider '{}'\n\n\
-                             Fix with one of:\n  \
-                             export {}=your-api-key-here\n  \
-                             grob connect {}\n  \
-                             Set enabled = false for '{}' in config.toml",
-                            env_var,
-                            provider.name,
-                            env_var,
-                            provider.name,
-                            provider.name
-                        );
+                        // Gracefully disable instead of crashing.
+                        disabled_for_missing.push((provider.name.clone(), env_var.to_string()));
+                        provider.enabled = Some(false);
                     }
                 }
             }
+        }
+
+        if !disabled_for_missing.is_empty() {
+            let still_active = self.providers.iter().filter(|p| p.is_enabled()).count();
+
+            for (name, var) in &disabled_for_missing {
+                eprintln!("Warning: ${} not set — provider '{}' disabled", var, name);
+            }
+
+            if still_active == 0 {
+                eprintln!();
+                eprintln!("No providers left. Fix with one of:");
+                for (name, var) in &disabled_for_missing {
+                    eprintln!("  export {}=your-api-key-here", var);
+                    eprintln!("  grob connect {}", name);
+                }
+                anyhow::bail!("All providers disabled due to missing API keys");
+            }
+
+            eprintln!("Continuing with {} active provider(s)", still_active);
+            eprintln!();
         }
 
         Ok(())
