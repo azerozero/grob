@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1](https://github.com/azerozero/grob/compare/v0.17.0...v0.17.1) - 2026-03-17
+
+### Fixed
+
+- *(ux)* gracefully disable providers with missing API keys instead of crashing
+
 ## [0.17.0](https://github.com/azerozero/grob/compare/v0.16.2...v0.17.0) - 2026-03-16
 
 ### Added
