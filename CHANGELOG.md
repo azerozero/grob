@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0](https://github.com/azerozero/grob/compare/v0.17.1...v0.18.0) - 2026-03-18
+
+### Added
+
+- security hardening + grob watch + OTel + virtual keys + log export + compliance + docs
+
 ## [0.17.1](https://github.com/azerozero/grob/compare/v0.17.0...v0.17.1) - 2026-03-17
 
 ### Fixed
