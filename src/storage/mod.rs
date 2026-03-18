@@ -1,9 +1,12 @@
 //! Persistent storage layer using redb (embedded key-value store).
 
+/// AES-256-GCM encryption for credential storage at rest.
+pub(crate) mod encrypt;
 /// JSON-to-redb migration logic for legacy spend and token files.
 pub mod migrate;
 
 use crate::auth::token_store::OAuthToken;
+use crate::auth::virtual_keys::VirtualKeyRecord;
 use crate::features::token_pricing::spend::SpendData;
 use anyhow::{Context, Result};
 use redb::{Database, ReadableTable, TableDefinition};
@@ -14,6 +17,7 @@ use std::sync::Mutex;
 const SPEND_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("spend");
 const OAUTH_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("oauth_tokens");
 const META_TABLE: TableDefinition<&str, &str> = TableDefinition::new("meta");
+const VKEYS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("virtual_keys");
 
 /// Unified storage backend using redb (embedded key-value store).
 /// Replaces spend.json and oauth_tokens.json with a single ACID database.
@@ -24,6 +28,8 @@ pub struct GrobStore {
     /// Batch writes: flush to disk every N record_spend calls
     save_counter: AtomicU32,
     path: PathBuf,
+    /// AES-256-GCM cipher for encrypting OAuth tokens at rest.
+    cipher: encrypt::StorageCipher,
 }
 
 impl std::fmt::Debug for GrobStore {
@@ -48,6 +54,11 @@ impl GrobStore {
         let db = Database::create(path)
             .with_context(|| format!("Failed to open redb database: {}", path.display()))?;
 
+        // Restrict file permissions (owner-only) since DB contains OAuth tokens.
+        if let Err(e) = crate::auth::token_store::set_owner_only_permissions(path) {
+            tracing::warn!("Failed to set permissions on {}: {}", path.display(), e);
+        }
+
         // Ensure tables exist
         {
             let write_txn = db.begin_write()?;
@@ -55,9 +66,14 @@ impl GrobStore {
                 let _ = write_txn.open_table(SPEND_TABLE)?;
                 let _ = write_txn.open_table(OAUTH_TABLE)?;
                 let _ = write_txn.open_table(META_TABLE)?;
+                let _ = write_txn.open_table(VKEYS_TABLE)?;
             }
             write_txn.commit()?;
         }
+
+        // Initialize encryption cipher (generates key on first run).
+        let cipher = encrypt::StorageCipher::load_or_generate(path)
+            .with_context(|| "Failed to initialize storage encryption")?;
 
         // Run migration if needed
         migrate::migrate_from_json(&db, path)?;
@@ -70,6 +86,7 @@ impl GrobStore {
             spend_cache: Mutex::new(spend_cache),
             save_counter: AtomicU32::new(0),
             path: path.to_path_buf(),
+            cipher,
         })
     }
 
@@ -189,24 +206,26 @@ impl GrobStore {
         Ok(())
     }
 
-    /// Save an OAuth token to the database.
+    /// Saves an OAuth token to the database (encrypted with AES-256-GCM).
     pub fn save_oauth_token(&self, token: &OAuthToken) -> Result<()> {
-        let bytes = serde_json::to_vec(token)?;
+        let plaintext = serde_json::to_vec(token)?;
+        let encrypted = self.cipher.encrypt(&plaintext)?;
         let write_txn = self.db.begin_write()?;
         {
             let mut table = write_txn.open_table(OAUTH_TABLE)?;
-            table.insert(token.provider_id.as_str(), bytes.as_slice())?;
+            table.insert(token.provider_id.as_str(), encrypted.as_slice())?;
         }
         write_txn.commit()?;
         Ok(())
     }
 
-    /// Get an OAuth token by provider ID.
+    /// Gets an OAuth token by provider ID (decrypts from AES-256-GCM).
     pub fn get_oauth_token(&self, provider_id: &str) -> Option<OAuthToken> {
         let read_txn = self.db.begin_read().ok()?;
         let table = read_txn.open_table(OAUTH_TABLE).ok()?;
         let value = table.get(provider_id).ok()??;
-        serde_json::from_slice(value.value()).ok()
+        let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        serde_json::from_slice(&decrypted).ok()
     }
 
     /// Delete an OAuth token by provider ID.
@@ -240,7 +259,7 @@ impl GrobStore {
         providers
     }
 
-    /// Get all OAuth tokens.
+    /// Gets all OAuth tokens (decrypts each from AES-256-GCM).
     pub fn all_oauth_tokens(&self) -> std::collections::HashMap<String, OAuthToken> {
         let mut map = std::collections::HashMap::new();
         let read_txn = match self.db.begin_read() {
@@ -253,7 +272,8 @@ impl GrobStore {
         };
         if let Ok(iter) = table.iter() {
             for (key, value) in iter.flatten() {
-                if let Ok(token) = serde_json::from_slice::<OAuthToken>(value.value()) {
+                let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+                if let Ok(token) = serde_json::from_slice::<OAuthToken>(&decrypted) {
                     map.insert(key.value().to_string(), token);
                 }
             }
@@ -264,6 +284,108 @@ impl GrobStore {
     /// Get database file path (for diagnostics).
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    // ── Virtual key storage ──────────────────────────────────────────
+
+    /// Stores a virtual key record (encrypted with AES-256-GCM).
+    ///
+    /// The record is keyed by its SHA-256 hash for O(1) authentication lookups.
+    /// A secondary index keyed by `id:` + UUID enables list and revoke by id.
+    pub fn store_virtual_key(&self, record: &VirtualKeyRecord) -> Result<()> {
+        let plaintext = serde_json::to_vec(record)?;
+        let encrypted = self.cipher.encrypt(&plaintext)?;
+
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(VKEYS_TABLE)?;
+            // Primary key: hash (for auth lookup).
+            table.insert(record.key_hash.as_str(), encrypted.as_slice())?;
+            // Secondary key: id (for management operations).
+            let id_key = format!("id:{}", record.id);
+            table.insert(id_key.as_str(), encrypted.as_slice())?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    /// Looks up a virtual key record by its SHA-256 hash.
+    pub fn lookup_virtual_key(&self, key_hash: &str) -> Option<VirtualKeyRecord> {
+        let read_txn = self.db.begin_read().ok()?;
+        let table = read_txn.open_table(VKEYS_TABLE).ok()?;
+        let value = table.get(key_hash).ok()??;
+        let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        serde_json::from_slice(&decrypted).ok()
+    }
+
+    /// Lists all virtual key records (skips secondary `id:` index entries).
+    pub fn list_virtual_keys(&self) -> Vec<VirtualKeyRecord> {
+        let read_txn = match self.db.begin_read() {
+            Ok(t) => t,
+            Err(_) => return vec![],
+        };
+        let table = match read_txn.open_table(VKEYS_TABLE) {
+            Ok(t) => t,
+            Err(_) => return vec![],
+        };
+        let mut records = vec![];
+        if let Ok(iter) = table.iter() {
+            for entry in iter.flatten() {
+                let (key, value) = entry;
+                // Skip secondary id: index entries to avoid duplicates.
+                if key.value().starts_with("id:") {
+                    continue;
+                }
+                let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+                if let Ok(record) = serde_json::from_slice::<VirtualKeyRecord>(&decrypted) {
+                    records.push(record);
+                }
+            }
+        }
+        records
+    }
+
+    /// Revokes a virtual key by UUID (sets `revoked = true`).
+    pub fn revoke_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
+        let id_key = format!("id:{id}");
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(VKEYS_TABLE)?;
+        let value = match table.get(id_key.as_str())? {
+            Some(v) => v,
+            None => return Ok(false),
+        };
+        let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        let mut record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
+        drop(table);
+        drop(read_txn);
+
+        record.revoked = true;
+        self.store_virtual_key(&record)?;
+        Ok(true)
+    }
+
+    /// Deletes a virtual key by UUID (removes both hash and id entries).
+    pub fn delete_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
+        let id_key = format!("id:{id}");
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(VKEYS_TABLE)?;
+        let value = match table.get(id_key.as_str())? {
+            Some(v) => v,
+            None => return Ok(false),
+        };
+        let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        let record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
+        drop(table);
+        drop(read_txn);
+
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(VKEYS_TABLE)?;
+            table.remove(record.key_hash.as_str())?;
+            table.remove(id_key.as_str())?;
+        }
+        write_txn.commit()?;
+        Ok(true)
     }
 }
 
@@ -356,5 +478,135 @@ mod tests {
         let store = GrobStore::open(&db_path).unwrap();
         let spend = store.load_spend(None);
         assert!((spend.total - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_virtual_key_store_and_lookup() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let store = GrobStore::open(&db_path).unwrap();
+
+        let (full_key, hash) = crate::auth::virtual_keys::generate_key();
+        let record = VirtualKeyRecord {
+            id: uuid::Uuid::new_v4(),
+            name: "test-key".to_string(),
+            prefix: full_key[..12].to_string(),
+            key_hash: hash.clone(),
+            tenant_id: "tenant-1".to_string(),
+            budget_usd: Some(50.0),
+            rate_limit_rps: Some(10),
+            allowed_models: Some(vec!["claude-sonnet".to_string()]),
+            created_at: Utc::now(),
+            expires_at: None,
+            revoked: false,
+            last_used_at: None,
+        };
+
+        store.store_virtual_key(&record).unwrap();
+
+        let retrieved = store.lookup_virtual_key(&hash).unwrap();
+        assert_eq!(retrieved.id, record.id);
+        assert_eq!(retrieved.name, "test-key");
+        assert_eq!(retrieved.tenant_id, "tenant-1");
+        assert_eq!(retrieved.budget_usd, Some(50.0));
+    }
+
+    #[test]
+    fn test_virtual_key_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let store = GrobStore::open(&db_path).unwrap();
+
+        for i in 0..3 {
+            let (full_key, hash) = crate::auth::virtual_keys::generate_key();
+            let record = VirtualKeyRecord {
+                id: uuid::Uuid::new_v4(),
+                name: format!("key-{i}"),
+                prefix: full_key[..12].to_string(),
+                key_hash: hash,
+                tenant_id: "tenant-1".to_string(),
+                budget_usd: None,
+                rate_limit_rps: None,
+                allowed_models: None,
+                created_at: Utc::now(),
+                expires_at: None,
+                revoked: false,
+                last_used_at: None,
+            };
+            store.store_virtual_key(&record).unwrap();
+        }
+
+        let keys = store.list_virtual_keys();
+        assert_eq!(keys.len(), 3);
+    }
+
+    #[test]
+    fn test_virtual_key_revoke() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let store = GrobStore::open(&db_path).unwrap();
+
+        let (full_key, hash) = crate::auth::virtual_keys::generate_key();
+        let id = uuid::Uuid::new_v4();
+        let record = VirtualKeyRecord {
+            id,
+            name: "revocable".to_string(),
+            prefix: full_key[..12].to_string(),
+            key_hash: hash.clone(),
+            tenant_id: "tenant-1".to_string(),
+            budget_usd: None,
+            rate_limit_rps: None,
+            allowed_models: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            revoked: false,
+            last_used_at: None,
+        };
+
+        store.store_virtual_key(&record).unwrap();
+        assert!(!store.lookup_virtual_key(&hash).unwrap().revoked);
+
+        let revoked = store.revoke_virtual_key(&id).unwrap();
+        assert!(revoked);
+        assert!(store.lookup_virtual_key(&hash).unwrap().revoked);
+
+        // Revoking non-existent key returns false.
+        let missing = store.revoke_virtual_key(&uuid::Uuid::new_v4()).unwrap();
+        assert!(!missing);
+    }
+
+    #[test]
+    fn test_virtual_key_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("test.db");
+        let store = GrobStore::open(&db_path).unwrap();
+
+        let (full_key, hash) = crate::auth::virtual_keys::generate_key();
+        let id = uuid::Uuid::new_v4();
+        let record = VirtualKeyRecord {
+            id,
+            name: "deletable".to_string(),
+            prefix: full_key[..12].to_string(),
+            key_hash: hash.clone(),
+            tenant_id: "tenant-1".to_string(),
+            budget_usd: None,
+            rate_limit_rps: None,
+            allowed_models: None,
+            created_at: Utc::now(),
+            expires_at: None,
+            revoked: false,
+            last_used_at: None,
+        };
+
+        store.store_virtual_key(&record).unwrap();
+        assert!(store.lookup_virtual_key(&hash).is_some());
+
+        let deleted = store.delete_virtual_key(&id).unwrap();
+        assert!(deleted);
+        assert!(store.lookup_virtual_key(&hash).is_none());
+
+        // Deleting again returns false.
+        let again = store.delete_virtual_key(&id).unwrap();
+        assert!(!again);
     }
 }

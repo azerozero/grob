@@ -147,11 +147,11 @@ impl HmacSha256Signer {
             if bytes.len() != 32 {
                 anyhow::bail!("HMAC key must be 32 bytes, got {}", bytes.len());
             }
-            let mut key = [0u8; 32];
+            let mut key = [0u8; 32]; // CodeQL: hard-coded-cryptographic-value — zero-initialized buffer, immediately overwritten from file.
             key.copy_from_slice(&bytes);
             key
         } else {
-            let mut key = [0u8; 32];
+            let mut key = [0u8; 32]; // CodeQL: hard-coded-cryptographic-value — zero-initialized buffer, immediately overwritten with CSPRNG output.
             rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut key);
             std::fs::write(path, key).context("Failed to save HMAC key")?;
             set_key_permissions(path)?;
@@ -165,7 +165,8 @@ impl HmacSha256Signer {
 impl AuditSigner for HmacSha256Signer {
     fn sign(&self, data: &[u8]) -> Vec<u8> {
         use hmac::{Hmac, Mac};
-        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key).expect("HMAC key always valid");
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key)
+            .expect("invariant: self.key is [u8; 32], always valid for HMAC-SHA256");
         mac.update(data);
         mac.finalize().into_bytes().to_vec()
     }
@@ -176,7 +177,8 @@ impl AuditSigner for HmacSha256Signer {
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> bool {
         use hmac::{Hmac, Mac};
-        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key).expect("HMAC key always valid");
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.key)
+            .expect("invariant: self.key is [u8; 32], always valid for HMAC-SHA256");
         mac.update(data);
         mac.verify_slice(signature).is_ok()
     }
@@ -184,16 +186,9 @@ impl AuditSigner for HmacSha256Signer {
 
 // ── Helpers ──
 
-/// Sets `0o600` permissions on a key file (Unix only).
-fn set_key_permissions(_path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(_path)?.permissions();
-        perms.set_mode(0o600);
-        std::fs::set_permissions(_path, perms)?;
-    }
-    Ok(())
+/// Sets owner-only permissions on a key file (cross-platform).
+fn set_key_permissions(path: &Path) -> Result<()> {
+    crate::auth::token_store::set_owner_only_permissions(path)
 }
 
 #[cfg(test)]

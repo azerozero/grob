@@ -102,7 +102,24 @@ pub fn migrate_from_json(db: &Database, db_path: &Path) -> Result<()> {
     write_txn.commit()?;
 
     if migrated_anything {
-        tracing::info!("JSON → redb migration complete (original files preserved as backup)");
+        // Remove legacy JSON files after successful migration.
+        for legacy_file in &[spend_path, oauth_path] {
+            if legacy_file.exists() {
+                match std::fs::remove_file(legacy_file) {
+                    Ok(()) => {
+                        tracing::info!("Removed legacy file: {}", legacy_file.display());
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to remove legacy file {}: {} (non-fatal)",
+                            legacy_file.display(),
+                            e
+                        );
+                    }
+                }
+            }
+        }
+        tracing::info!("JSON → redb migration complete");
     }
 
     Ok(())
@@ -173,9 +190,9 @@ mod tests {
         let token = store.get_oauth_token("test-provider").unwrap();
         assert_eq!(token.provider_id, "test-provider");
 
-        // Verify JSON files still exist (not deleted)
-        assert!(grob_dir.join("spend.json").exists());
-        assert!(grob_dir.join("oauth_tokens.json").exists());
+        // Verify legacy JSON files were cleaned up after migration.
+        assert!(!grob_dir.join("spend.json").exists());
+        assert!(!grob_dir.join("oauth_tokens.json").exists());
 
         // Verify migration doesn't run again
         drop(store);

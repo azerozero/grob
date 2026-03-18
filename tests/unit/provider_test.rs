@@ -5,6 +5,7 @@
 #[cfg(test)]
 mod tests {
     use grob::providers::{AuthType, ProviderConfig};
+    use secrecy::SecretString;
 
     /// Test: Provider config enables by default
     #[test]
@@ -13,7 +14,7 @@ mod tests {
             name: "test".to_string(),
             provider_type: "openai".to_string(),
             auth_type: AuthType::ApiKey,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(SecretString::new("test-key".to_string())),
             oauth_provider: None,
             project_id: None,
             location: None,
@@ -36,7 +37,7 @@ mod tests {
             name: "test".to_string(),
             provider_type: "openai".to_string(),
             auth_type: AuthType::ApiKey,
-            api_key: Some("test-key".to_string()),
+            api_key: Some(SecretString::new("test-key".to_string())),
             oauth_provider: None,
             project_id: None,
             location: None,

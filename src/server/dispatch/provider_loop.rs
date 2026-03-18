@@ -96,6 +96,18 @@ pub(super) async fn dispatch_provider_loop(
 
         log_dispatch_attempt(ctx, mapping, decision, idx, effective_mappings.len());
 
+        // Emit RequestStart event for `grob watch`.
+        ctx.state
+            .event_bus
+            .emit(crate::features::watch::events::WatchEvent::RequestStart {
+                request_id: ctx.req_id.to_string(),
+                model: mapping.actual_model.clone(),
+                provider: mapping.provider.clone(),
+                input_tokens: 0,
+                route_type: decision.route_type.to_string(),
+                timestamp: chrono::Utc::now(),
+            });
+
         let (provider_request, original_model) =
             prepare_provider_request(ctx, request, mapping, &decision.route_type);
 
@@ -132,6 +144,18 @@ pub(super) async fn dispatch_provider_loop(
         match result {
             Ok(dispatch_result) => return Ok(dispatch_result),
             Err(ProviderLoopAction::Continue) => {
+                // Emit Fallback event for `grob watch`.
+                if let Some(next) = effective_mappings.get(idx + 1) {
+                    ctx.state.event_bus.emit(
+                        crate::features::watch::events::WatchEvent::Fallback {
+                            request_id: ctx.req_id.to_string(),
+                            from_provider: mapping.provider.clone(),
+                            to_provider: next.provider.clone(),
+                            reason: "provider error".to_string(),
+                            timestamp: chrono::Utc::now(),
+                        },
+                    );
+                }
                 // NOTE: Yield between provider attempts so other tasks (health checks,
                 // metrics scrapes) are not starved during long fallback chains.
                 tokio::task::yield_now().await;
@@ -154,6 +178,10 @@ pub(super) async fn dispatch_provider_loop(
         model_name: None,
         token_counts: None,
         risk_level: None,
+        dlp_blocked: false,
+        dlp_had_injection: false,
+        dlp_had_pii: false,
+        dlp_had_redact_or_warn: false,
     });
 
     tracing::error!(
@@ -319,11 +347,8 @@ async fn dispatch_streaming(
     match provider.send_message_stream(provider_request).await {
         Ok(stream_response) => {
             let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
-            if let Some(ref scorer) = ctx.state.security.provider_scorer {
-                scorer.record_success(&mapping.provider, latency_ms).await;
-            } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
-                cb.record_success(&mapping.provider).await;
-            }
+            ctx.record_provider_success(&mapping.provider, latency_ms)
+                .await;
 
             let stream = wrap_stream_with_middleware(ctx, stream_response.stream, tap_request_body);
 
@@ -338,11 +363,7 @@ async fn dispatch_streaming(
             })
         }
         Err(e) => {
-            if let Some(ref scorer) = ctx.state.security.provider_scorer {
-                scorer.record_failure(&mapping.provider).await;
-            } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
-                cb.record_failure(&mapping.provider).await;
-            }
+            ctx.record_provider_failure(&mapping.provider).await;
             if let Some(ref trace_id) = ctx.trace_id {
                 ctx.state
                     .observability
@@ -438,13 +459,8 @@ async fn dispatch_non_streaming(
         match provider.send_message(req).await {
             Ok(mut response) => {
                 let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
-                if let Some(ref scorer) = ctx.state.security.provider_scorer {
-                    scorer
-                        .record_success(&attempt.mapping.provider, latency_ms)
-                        .await;
-                } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
-                    cb.record_success(&attempt.mapping.provider).await;
-                }
+                ctx.record_provider_success(&attempt.mapping.provider, latency_ms)
+                    .await;
                 ctx.sanitize_output(&mut response);
                 response.model = attempt.original_model.to_string();
 
@@ -460,6 +476,36 @@ async fn dispatch_non_streaming(
                 record_success_telemetry(ctx, &outcome, cost_usd).await;
                 let response_bytes =
                     store_response_cache(ctx, attempt.mapping, attempt.cache_key, &response).await;
+
+                // Emit RequestEnd event for `grob watch`.
+                ctx.state
+                    .event_bus
+                    .emit(crate::features::watch::events::WatchEvent::RequestEnd {
+                        request_id: ctx.req_id.to_string(),
+                        model: attempt.mapping.actual_model.clone(),
+                        provider: attempt.mapping.provider.clone(),
+                        output_tokens: response.usage.output_tokens,
+                        latency_ms,
+                        cost_usd,
+                        timestamp: chrono::Utc::now(),
+                    });
+
+                // Emit to external log sinks.
+                if let Some(ref exporter) = ctx.state.log_exporter {
+                    exporter.emit(&crate::features::log_export::LogEntry {
+                        request_id: ctx.req_id.to_string(),
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        model: attempt.mapping.actual_model.clone(),
+                        provider: attempt.mapping.provider.clone(),
+                        input_tokens: response.usage.input_tokens,
+                        output_tokens: response.usage.output_tokens,
+                        latency_ms,
+                        cost_usd,
+                        status: "success".to_string(),
+                        dlp_actions: vec![],
+                        tenant_id: ctx.tenant_id.clone(),
+                    });
+                }
 
                 return Ok(DispatchResult::Complete {
                     response,
@@ -477,11 +523,7 @@ async fn dispatch_non_streaming(
                     continue;
                 }
 
-                if let Some(ref scorer) = ctx.state.security.provider_scorer {
-                    scorer.record_failure(&attempt.mapping.provider).await;
-                } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
-                    cb.record_failure(&attempt.mapping.provider).await;
-                }
+                ctx.record_provider_failure(&attempt.mapping.provider).await;
                 info!(
                     "Provider {} failed: {}, trying next fallback",
                     attempt.mapping.provider, e

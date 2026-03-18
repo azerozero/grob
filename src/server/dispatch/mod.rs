@@ -19,9 +19,10 @@ use std::sync::Arc;
 
 use super::{
     apply_transparency_headers, calculate_cost, is_provider_subscription, log_audit,
-    record_request_metrics, resolve_provider_mappings, sanitize_provider_response, AppError,
-    AppState, AuditCompliance, AuditParams, ReloadableState, RequestMetrics,
+    record_request_metrics, resolve_provider_mappings, sanitize_provider_response_reported,
+    AppError, AppState, AuditCompliance, AuditParams, ReloadableState, RequestMetrics,
 };
+use crate::features::watch::events::{DlpDirection, WatchEvent};
 
 /// All context needed to dispatch a request through the provider pipeline.
 pub(crate) struct DispatchContext<'a> {
@@ -52,24 +53,72 @@ struct AuditEntry<'a> {
     model_name: Option<&'a str>,
     token_counts: Option<(u32, u32)>,
     risk_level: Option<crate::security::audit_log::RiskLevel>,
+    dlp_blocked: bool,
+    dlp_had_injection: bool,
+    dlp_had_pii: bool,
+    dlp_had_redact_or_warn: bool,
 }
 
 impl DispatchContext<'_> {
-    /// Run DLP input sanitization if enabled.
+    /// Run DLP input sanitization if enabled, emitting watch events for actions taken.
     fn sanitize_input(&self, request: &mut CanonicalRequest) {
         if let Some(ref dlp_engine) = self.dlp {
             if dlp_engine.config.scan_input {
-                dlp_engine.sanitize_request(request);
+                let reports = dlp_engine.sanitize_request_reported(request);
+                self.emit_dlp_events(&reports, DlpDirection::Request);
             }
         }
     }
 
-    /// Run DLP output sanitization if enabled.
+    /// Run DLP output sanitization if enabled, emitting watch events for actions taken.
     fn sanitize_output(&self, response: &mut ProviderResponse) {
         if let Some(ref dlp_engine) = self.dlp {
             if dlp_engine.config.scan_output {
-                sanitize_provider_response(response, dlp_engine);
+                let reports = sanitize_provider_response_reported(response, dlp_engine);
+                self.emit_dlp_events(&reports, DlpDirection::Response);
             }
+        }
+    }
+
+    /// Emits [`WatchEvent::DlpAction`] for each DLP action report.
+    fn emit_dlp_events(
+        &self,
+        reports: &[crate::features::dlp::DlpActionReport],
+        direction: DlpDirection,
+    ) {
+        for report in reports {
+            self.state.event_bus.emit(WatchEvent::DlpAction {
+                request_id: self.req_id.to_string(),
+                direction: direction.clone(),
+                action: report.action.clone(),
+                rule_type: report.rule_type.clone(),
+                detail: report.detail.clone(),
+                timestamp: chrono::Utc::now(),
+            });
+        }
+    }
+
+    /// Records a provider success in the scorer or circuit breaker.
+    ///
+    /// Prefers the adaptive scorer (which wraps the circuit breaker);
+    /// falls back to the bare circuit breaker when no scorer is configured.
+    pub(crate) async fn record_provider_success(&self, provider: &str, latency_ms: u64) {
+        if let Some(ref scorer) = self.state.security.provider_scorer {
+            scorer.record_success(provider, latency_ms).await;
+        } else if let Some(ref cb) = self.state.security.circuit_breakers {
+            cb.record_success(provider).await;
+        }
+    }
+
+    /// Records a provider failure in the scorer or circuit breaker.
+    ///
+    /// Prefers the adaptive scorer (which wraps the circuit breaker);
+    /// falls back to the bare circuit breaker when no scorer is configured.
+    pub(crate) async fn record_provider_failure(&self, provider: &str) {
+        if let Some(ref scorer) = self.state.security.provider_scorer {
+            scorer.record_failure(provider).await;
+        } else if let Some(ref cb) = self.state.security.circuit_breakers {
+            cb.record_failure(provider).await;
         }
     }
 
@@ -91,6 +140,10 @@ impl DispatchContext<'_> {
                     token_counts: entry.token_counts,
                     risk_level: entry.risk_level,
                 },
+                dlp_blocked: entry.dlp_blocked,
+                dlp_had_injection: entry.dlp_had_injection,
+                dlp_had_pii: entry.dlp_had_pii,
+                dlp_had_redact_or_warn: entry.dlp_had_redact_or_warn,
             });
         }
     }
@@ -226,6 +279,25 @@ fn scan_dlp_input(
     }
 
     if let Err(block_err) = dlp_engine.sanitize_request_checked(request) {
+        // Emit DLP block event for `grob watch`.
+        let (block_rule_type, block_detail) = match &block_err {
+            crate::features::dlp::DlpBlockError::InjectionBlocked(dets) => {
+                ("injection", format!("{} injection(s) detected", dets.len()))
+            }
+            crate::features::dlp::DlpBlockError::UrlExfilBlocked(dets) => (
+                "url_exfil",
+                format!("{} exfiltration URL(s) detected", dets.len()),
+            ),
+        };
+        ctx.state.event_bus.emit(WatchEvent::DlpAction {
+            request_id: ctx.req_id.to_string(),
+            direction: DlpDirection::Request,
+            action: "block".into(),
+            rule_type: block_rule_type.into(),
+            detail: block_detail,
+            timestamp: chrono::Utc::now(),
+        });
+
         let had_injection = matches!(
             &block_err,
             crate::features::dlp::DlpBlockError::InjectionBlocked(_)
@@ -260,6 +332,10 @@ fn scan_dlp_input(
             model_name: Some(&ctx.model),
             token_counts: None,
             risk_level: Some(risk),
+            dlp_blocked: true,
+            dlp_had_injection: had_injection,
+            dlp_had_pii: false,
+            dlp_had_redact_or_warn: false,
         });
         return Err(AppError::DlpBlocked(format!("{}", block_err)));
     }
@@ -328,6 +404,10 @@ async fn handle_fan_out_success(
         ),
         token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
         risk_level: Some(crate::security::audit_log::RiskLevel::Low),
+        dlp_blocked: false,
+        dlp_had_injection: false,
+        dlp_had_pii: false,
+        dlp_had_redact_or_warn: false,
     });
 
     response.model = ctx.model.clone();

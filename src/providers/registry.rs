@@ -5,6 +5,7 @@ use super::{
 };
 use crate::auth::TokenStore;
 use crate::cli::{ModelConfig, TimeoutConfig};
+use secrecy::SecretString;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,7 +46,7 @@ impl ProviderRegistry {
     /// providers route traffic to the harness mock backend.
     fn build_params(
         config: &ProviderConfig,
-        api_key: String,
+        api_key: SecretString,
         default_base_url: &str,
         build_ctx: &ProviderBuildContext,
     ) -> ProviderParams {
@@ -72,7 +73,7 @@ impl ProviderRegistry {
     }
 
     /// Resolve the API key from a provider config.
-    fn resolve_api_key(config: &ProviderConfig) -> Result<String, ProviderError> {
+    fn resolve_api_key(config: &ProviderConfig) -> Result<SecretString, ProviderError> {
         match &config.auth_type {
             super::AuthType::ApiKey => config.api_key.clone().ok_or_else(|| {
                 ProviderError::ConfigError(format!(
@@ -80,17 +81,19 @@ impl ProviderRegistry {
                     config.name
                 ))
             }),
-            super::AuthType::OAuth => Ok(config
-                .oauth_provider
-                .clone()
-                .unwrap_or_else(|| config.name.clone())),
+            super::AuthType::OAuth => Ok(SecretString::new(
+                config
+                    .oauth_provider
+                    .clone()
+                    .unwrap_or_else(|| config.name.clone()),
+            )),
         }
     }
 
     /// Create a provider instance based on provider type.
     fn create_provider(
         config: &ProviderConfig,
-        api_key: String,
+        api_key: SecretString,
         build_ctx: &ProviderBuildContext,
     ) -> Result<Box<dyn LlmProvider>, ProviderError> {
         match config.provider_type.as_str() {
@@ -144,7 +147,7 @@ impl ProviderRegistry {
                 let gemini_api_key = if config.auth_type == super::AuthType::ApiKey {
                     api_key
                 } else {
-                    String::new()
+                    SecretString::new(String::new())
                 };
                 let mut params = Self::build_params(config, gemini_api_key, "", build_ctx);
                 // build_params sets base_url to Some("") — override with config's value
@@ -158,7 +161,8 @@ impl ProviderRegistry {
             }
 
             "vertex-ai" => {
-                let mut params = Self::build_params(config, String::new(), "", build_ctx);
+                let mut params =
+                    Self::build_params(config, SecretString::new(String::new()), "", build_ctx);
                 params.base_url = config.base_url.clone();
                 params.oauth_provider = None;
                 Ok(Box::new(GeminiProvider::new(
@@ -302,7 +306,7 @@ mod tests {
                 name: "provider-a".to_string(),
                 provider_type: "anthropic".to_string(),
                 auth_type: AuthType::ApiKey,
-                api_key: Some("test-key-1".to_string()),
+                api_key: Some(SecretString::new("test-key-1".to_string())),
                 base_url: None,
                 models: vec![],
                 enabled: Some(true),
@@ -318,7 +322,7 @@ mod tests {
                 name: "provider-b".to_string(),
                 provider_type: "anthropic".to_string(),
                 auth_type: AuthType::ApiKey,
-                api_key: Some("test-key-2".to_string()),
+                api_key: Some(SecretString::new("test-key-2".to_string())),
                 base_url: None,
                 models: vec![],
                 enabled: Some(true),

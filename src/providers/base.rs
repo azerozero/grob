@@ -6,13 +6,14 @@
 use super::{build_provider_client, error::ProviderError, ProviderParams};
 use crate::auth::{OAuthConfig, TokenStore};
 use reqwest::Client;
+use secrecy::{ExposeSecret, SecretString};
 use std::time::Duration;
 
 /// Common fields shared across all LLM providers.
 /// Embed in provider structs to eliminate field and method duplication.
 pub(crate) struct ProviderBase {
     pub name: String,
-    pub api_key: String,
+    pub api_key: SecretString,
     pub base_url: String,
     pub client: Client,
     pub models: Vec<String>,
@@ -59,7 +60,7 @@ impl ProviderBase {
             self.oauth_provider.as_deref(),
             self.token_store.as_ref(),
             config_fn,
-            &self.api_key,
+            self.api_key.expose_secret(),
         )
         .await
     }

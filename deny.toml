@@ -7,8 +7,9 @@
 version = 2
 # Fail CI on any known vulnerability.
 # rustls-pemfile: unmaintained but pulled by axum-server (optional tls feature).
-# No replacement available yet — tracked upstream.
-ignore = ["RUSTSEC-2025-0134"]
+# paste: unmaintained but pulled by ratatui (watch feature). Fork "pastey" exists
+# but ratatui hasn't migrated yet.
+ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2024-0436"]
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
 # Grob is AGPL-3.0-only. We allow permissive licenses (always compatible),

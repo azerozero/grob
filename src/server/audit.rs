@@ -13,6 +13,10 @@ pub struct AuditEntryBuilder {
     input_tokens: Option<u32>,
     output_tokens: Option<u32>,
     risk_level: Option<crate::security::audit_log::RiskLevel>,
+    dlp_blocked: bool,
+    dlp_had_injection: bool,
+    dlp_had_pii: bool,
+    dlp_had_redact_or_warn: bool,
 }
 
 impl AuditEntryBuilder {
@@ -35,6 +39,10 @@ impl AuditEntryBuilder {
             input_tokens: None,
             output_tokens: None,
             risk_level: None,
+            dlp_blocked: false,
+            dlp_had_injection: false,
+            dlp_had_pii: false,
+            dlp_had_redact_or_warn: false,
         }
     }
 
@@ -63,16 +71,60 @@ impl AuditEntryBuilder {
         self
     }
 
+    /// Marks the request as blocked by DLP.
+    pub fn dlp_blocked(mut self) -> Self {
+        self.dlp_blocked = true;
+        self
+    }
+
+    /// Marks that a prompt injection was detected.
+    pub fn dlp_injection(mut self) -> Self {
+        self.dlp_had_injection = true;
+        self
+    }
+
+    /// Marks that PII was detected in the request.
+    pub fn dlp_pii(mut self) -> Self {
+        self.dlp_had_pii = true;
+        self
+    }
+
+    /// Marks that DLP rules triggered a redact or warn action.
+    pub fn dlp_redact_or_warn(mut self) -> Self {
+        self.dlp_had_redact_or_warn = true;
+        self
+    }
+
+    /// Derives data classification from DLP context.
+    ///
+    /// - `C3`: DLP blocked **and** injection detected (Secret/Defense).
+    /// - `C2`: PII detected or DLP blocked (Restricted/HDS/PCI).
+    /// - `C1`: Any DLP rules triggered a redact or warn action (Internal).
+    /// - `Nc`: No DLP activity (Non-classified).
+    fn derive_classification(&self) -> crate::security::audit_log::Classification {
+        use crate::security::audit_log::Classification;
+        if self.dlp_blocked && self.dlp_had_injection {
+            Classification::C3
+        } else if self.dlp_had_pii || self.dlp_blocked {
+            Classification::C2
+        } else if self.dlp_had_redact_or_warn || !self.dlp_rules.is_empty() {
+            Classification::C1
+        } else {
+            Classification::Nc
+        }
+    }
+
     /// Consumes the builder and produces a finalized audit entry.
     pub fn build(self) -> crate::security::audit_log::AuditEntry {
-        use crate::security::audit_log::{AuditEntry, Classification};
+        use crate::security::audit_log::AuditEntry;
+        let classification = self.derive_classification();
         AuditEntry {
             timestamp: chrono::Utc::now(),
             event_id: uuid::Uuid::new_v4().to_string(),
             tenant_id: self.tenant_id,
             user_id: None,
             action: self.action,
-            classification: Classification::Nc,
+            classification,
             backend_routed: self.backend,
             request_hash: None,
             dlp_rules_triggered: self.dlp_rules,
@@ -111,6 +163,10 @@ pub(crate) struct AuditParams<'a> {
     pub ip: &'a str,
     pub duration_ms: u64,
     pub eu: AuditCompliance<'a>,
+    pub dlp_blocked: bool,
+    pub dlp_had_injection: bool,
+    pub dlp_had_pii: bool,
+    pub dlp_had_redact_or_warn: bool,
 }
 
 /// Fire-and-forget audit log entry writer.
@@ -120,6 +176,18 @@ pub(crate) struct AuditParams<'a> {
 pub(crate) fn log_audit(p: &AuditParams<'_>) {
     let mut builder = AuditEntryBuilder::new(p.tenant_id, p.action, p.backend, p.ip, p.duration_ms)
         .dlp_rules(p.dlp_rules.clone());
+    if p.dlp_blocked {
+        builder = builder.dlp_blocked();
+    }
+    if p.dlp_had_injection {
+        builder = builder.dlp_injection();
+    }
+    if p.dlp_had_pii {
+        builder = builder.dlp_pii();
+    }
+    if p.dlp_had_redact_or_warn {
+        builder = builder.dlp_redact_or_warn();
+    }
     if p.eu.config.enabled && p.eu.config.audit_model_name {
         if let Some(m) = p.eu.model_name {
             builder = builder.model(m);

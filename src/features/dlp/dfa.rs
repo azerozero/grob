@@ -236,7 +236,8 @@ impl SecretScanner {
                     result.push_str(&canary.fake);
                 }
                 SecretAction::Redact => {
-                    result.push_str("[REDACTED]");
+                    let canary = canary_gen.generate_for(rule.family, m.matched_len);
+                    result.push_str(&canary.fake);
                 }
                 SecretAction::Log => {
                     result.push_str(&text[m.start..m.end]);
@@ -338,7 +339,12 @@ mod tests {
         let result = scanner.redact(text, &canary_gen);
         assert!(result.is_some());
         let (redacted, events) = result.unwrap();
-        assert!(redacted.contains("[REDACTED]"));
+        // Redact action now uses canary tokens for traceability.
+        assert!(
+            redacted.contains("AKIA~CANARY"),
+            "redact should produce a canary token, got: {}",
+            redacted
+        );
         assert!(!redacted.contains("AKIAIOSFODNN7EXAMPLE"));
         assert_eq!(events.len(), 1);
     }

@@ -29,3 +29,5 @@ LICENSE-IDENTIFICATION.md
 
 # Configuration
 cleancode-plan.md
+codeql-db/
+codeql-results.sarif

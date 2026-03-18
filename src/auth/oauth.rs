@@ -451,9 +451,10 @@ impl OAuthClient {
     }
 
     /// POST a form-encoded request to the token endpoint.
+    // SAFETY: OAuth token exchange requires sending credentials to the token endpoint over HTTPS.
     async fn send_form_request(&self, params: &[(&str, &str)]) -> Result<reqwest::Response> {
         self.http_client
-            .post(&self.config.token_url)
+            .post(&self.config.token_url) // CodeQL: cleartext-transmission — token_url is an HTTPS endpoint configured by the operator.
             .header("Content-Type", "application/x-www-form-urlencoded")
             .form(params)
             .send()
@@ -462,9 +463,10 @@ impl OAuthClient {
     }
 
     /// POST a JSON request to the token endpoint.
+    // SAFETY: OAuth token exchange requires sending credentials to the token endpoint over HTTPS.
     async fn send_json_request(&self, body: &impl Serialize) -> Result<reqwest::Response> {
         self.http_client
-            .post(&self.config.token_url)
+            .post(&self.config.token_url) // CodeQL: cleartext-transmission — token_url is an HTTPS endpoint configured by the operator.
             .header("Content-Type", "application/json")
             .json(body)
             .send()

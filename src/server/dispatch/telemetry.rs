@@ -94,6 +94,10 @@ pub(crate) async fn record_success_telemetry(
         model_name: Some(&mapping.actual_model),
         token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
         risk_level: Some(crate::security::audit_log::RiskLevel::Low),
+        dlp_blocked: false,
+        dlp_had_injection: false,
+        dlp_had_pii: false,
+        dlp_had_redact_or_warn: false,
     });
 }
 

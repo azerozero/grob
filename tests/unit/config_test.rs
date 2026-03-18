@@ -112,7 +112,7 @@ mode = "kerberos"
         use grob::cli::{FanOutConfig, FanOutMode, ModelConfig, ModelMapping, ModelStrategy};
 
         let mut prov2 = base_provider_config("prov2");
-        prov2.api_key = Some("sk-test2".to_string());
+        prov2.api_key = Some(secrecy::SecretString::new("sk-test2".to_string()));
 
         let config = AppConfig {
             router: RouterConfig {

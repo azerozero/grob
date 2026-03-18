@@ -62,6 +62,8 @@ fn make_config() -> AppConfig {
         compliance: Default::default(),
         version: None,
         user: Default::default(),
+        otel: Default::default(),
+        log_export: Default::default(),
     }
 }
 

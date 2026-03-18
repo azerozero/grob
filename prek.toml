@@ -94,3 +94,13 @@ entry = "cargo audit"
 types = ["toml"]
 pass_filenames = false
 stages = ["pre-push"]
+
+# Sweep stale build artifacts (>7 days) to prevent target/ bloat
+[[repos.hooks]]
+id = "cargo-sweep"
+name = "cargo sweep (clean old artifacts)"
+language = "system"
+entry = "cargo sweep --time 7"
+always_run = true
+pass_filenames = false
+stages = ["pre-push"]

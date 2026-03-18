@@ -1,4 +1,27 @@
-//! OpenAI-compatible endpoint: /v1/chat/completions format translation.
+//! OpenAI-compatible `/v1/chat/completions` format translation layer.
+//!
+//! Translates between the OpenAI Chat Completions API format and Grob's
+//! canonical request/response types (structurally Anthropic Messages API).
+//!
+//! # Modules
+//!
+//! - `types` -- Request/response structs mirroring the OpenAI wire format.
+//! - `transform` -- Bidirectional conversion between OpenAI and canonical formats.
+//! - `stream` -- Real-time SSE event translator (Anthropic events to OpenAI chunks).
+//!
+//! # Data Flow
+//!
+//! ```text
+//! OpenAI request ──► transform_openai_to_canonical ──► CanonicalRequest
+//!                                                          │
+//!                                                     (dispatch pipeline)
+//!                                                          │
+//! OpenAI response ◄── transform_canonical_to_openai ◄── ProviderResponse
+//! ```
+//!
+//! For streaming, `AnthropicToOpenAIStream` converts Anthropic SSE events
+//! (`message_start`, `content_block_delta`, etc.) into OpenAI-format
+//! `chat.completion.chunk` events on the fly.
 
 mod stream;
 mod transform;

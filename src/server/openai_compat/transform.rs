@@ -31,7 +31,11 @@ fn parse_data_uri_image(url: &str) -> Option<ContentBlock> {
     }))
 }
 
-/// Converts OpenAI content to canonical MessageContent.
+/// Converts OpenAI content (string or multi-part) to canonical [`MessageContent`].
+///
+/// Handles plain text, multi-part text+image, and absent content.
+/// Base64 data URIs are parsed into Anthropic image source blocks;
+/// plain URLs are preserved as URL-type image sources.
 pub(crate) fn openai_content_to_canonical(content: Option<OpenAIContent>) -> MessageContent {
     match content {
         Some(OpenAIContent::String(text)) => MessageContent::Text(text),
@@ -66,7 +70,9 @@ pub(crate) fn openai_content_to_canonical(content: Option<OpenAIContent>) -> Mes
     }
 }
 
-/// Extract text from OpenAI content (string or parts).
+/// Extracts plain text from OpenAI content, ignoring non-text parts.
+///
+/// For multi-part content, concatenates all text segments with newlines.
 pub(crate) fn extract_text(content: OpenAIContent) -> String {
     match content {
         OpenAIContent::String(s) => s,
@@ -170,7 +176,22 @@ fn convert_tool_choice(tc: &serde_json::Value) -> Option<serde_json::Value> {
     }
 }
 
-/// Transforms an OpenAI request into a [`CanonicalRequest`].
+/// Transforms an [`OpenAIRequest`] into a [`CanonicalRequest`].
+///
+/// Performs the following translations:
+/// - System messages are extracted into the `system` field.
+/// - User messages become canonical user messages (text or multi-part).
+/// - Assistant messages with `tool_calls` become block-based messages
+///   containing text and `tool_use` content blocks.
+/// - Tool result messages are merged into user messages with `tool_result` blocks.
+/// - OpenAI tools JSON is converted to Anthropic [`Tool`] format.
+/// - Extension fields (`response_format`, `seed`, etc.) are captured in
+///   `RequestExtensions` for lossless provider roundtrips.
+///
+/// # Errors
+///
+/// Returns `Err` if message translation fails (currently infallible but
+/// reserved for future validation).
 pub fn transform_openai_to_canonical(
     openai_req: OpenAIRequest,
 ) -> Result<CanonicalRequest, String> {
@@ -266,7 +287,13 @@ pub fn transform_openai_to_canonical(
     })
 }
 
-/// Transforms a [`ProviderResponse`] into an OpenAI-compatible response.
+/// Transforms a [`ProviderResponse`] into an [`OpenAIResponse`].
+///
+/// Maps content blocks to the OpenAI format:
+/// - Text blocks become the `content` string (joined with newlines).
+/// - `tool_use` blocks become `tool_calls` entries.
+/// - Thinking and image blocks are silently dropped.
+/// - Stop reason is translated (e.g. `end_turn` to `stop`).
 pub fn transform_canonical_to_openai(
     anthropic_resp: ProviderResponse,
     model: String,

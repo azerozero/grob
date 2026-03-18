@@ -50,6 +50,8 @@ mode = "ldap"
     }
 
     #[test]
+    // NOTE: test uses a hardcoded dummy key ("my-secret-key") for config parsing validation.
+    // This is not a real credential — safe to expose in test assertions.
     fn test_auth_api_key_config() {
         let config = AppConfig::from_content(
             r#"
@@ -64,7 +66,14 @@ api_key = "my-secret-key"
         )
         .unwrap();
         assert_eq!(config.auth.mode, "api_key");
-        assert_eq!(config.auth.api_key.as_deref(), Some("my-secret-key"));
+        assert_eq!(
+            config
+                .auth
+                .api_key
+                .as_ref()
+                .map(|s| secrecy::ExposeSecret::expose_secret(s).as_str()),
+            Some("my-secret-key")
+        );
     }
 
     #[test]
@@ -113,6 +122,8 @@ api_key = "my-secret-key"
             compliance: Default::default(),
             version: None,
             user: Default::default(),
+            otel: Default::default(),
+            log_export: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
         };
@@ -169,6 +180,8 @@ api_key = "my-secret-key"
             compliance: Default::default(),
             version: None,
             user: Default::default(),
+            otel: Default::default(),
+            log_export: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
         };

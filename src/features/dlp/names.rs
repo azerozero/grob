@@ -144,8 +144,9 @@ impl NameAnonymizer {
     }
 
     fn derive_key() -> [u8; 32] {
-        // Domain separator for HKDF-like key derivation (not a secret).
-        const KDF_DOMAIN: &[u8] = b"grob-dlp-key-derivation-v1";
+        // SAFETY: Domain separator for HKDF-like key derivation — this is a public constant
+        // used for domain separation, not a secret. The actual secret comes from GROB_DLP_SECRET.
+        const KDF_DOMAIN: &[u8] = b"grob-dlp-key-derivation-v1"; // CodeQL: hard-coded-cryptographic-value — intentional domain separator, not a secret.
 
         if let Ok(secret) = std::env::var("GROB_DLP_SECRET") {
             let mut mac = HmacSha256::new_from_slice(KDF_DOMAIN).expect("HMAC key valid");

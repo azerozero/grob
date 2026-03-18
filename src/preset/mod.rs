@@ -268,6 +268,8 @@ pub fn print_preset_info(name: &str) -> Result<()> {
                 }
             };
 
+            // SAFETY: auth_info contains only provider type labels (e.g. "OAuth (anthropic-max)") or
+            // redacted status like "API key (configured)", never actual secrets.
             println!("   {} ({}) — {}{}", pname, ptype, auth_info, status);
             if let Some(url) = base_url {
                 println!("     URL: {}", url);

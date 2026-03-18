@@ -274,15 +274,53 @@ When enabled, incoming requests must include a valid JWT in the `Authorization: 
 
 ```toml
 [dlp]
-enabled = true           # Enable DLP scanning (default: true when dlp feature is compiled)
+enabled = true           # Enable DLP scanning (default: false)
 scan_input = true        # Scan outgoing requests for secrets/PII (default: true)
 scan_output = true       # Scan incoming responses for secrets/PII (default: true)
-block_on_match = false   # Block requests that match DLP rules (default: false)
-custom_patterns = []     # Additional regex patterns to scan for
-canary_enabled = false   # Enable canary token injection/detection
+no_builtins = false      # Disable all 25 built-in secret rules (default: false)
+rules_file = ""          # Path to external TOML rules file (optional)
+enable_sessions = false  # Per-API-key DLP isolation (default: false)
+
+[[dlp.secrets]]
+name = "internal_token"
+prefix = "itk_"
+pattern = "itk_[A-Za-z0-9]{40}"
+action = "canary"        # canary | redact | log
+
+[[dlp.names]]
+term = "Thales"
+action = "pseudonym"     # pseudonym | redact | log
+
+[dlp.pii]
+credit_cards = true      # Luhn-validated (default: true)
+iban = true              # mod-97 validated (default: true)
+bic = false              # BIC/SWIFT codes (default: false)
+action = "redact"        # redact | log
+
+[dlp.entropy]
+enabled = false          # SPRT entropy scanner (default: false)
+action = "log"           # log | alert
+
+[dlp.url_exfil]
+enabled = false          # URL exfiltration detector (default: false)
+action = "log"           # redact | log | block
+whitelist_domains = []
+blacklist_domains = []
+domain_match_mode = "suffix"  # exact | suffix | glob
+
+[dlp.prompt_injection]
+enabled = false          # Prompt injection detector (default: false)
+action = "log"           # redact | log | block
+languages = ["all"]      # 28 languages supported
+
+[dlp.signed_config]
+enabled = false          # Hot-reload signed config (default: false)
+source = ""              # File path or HTTPS URL
+poll_interval = "1h"
+verify_signature = false
 ```
 
-DLP scanning uses Aho-Corasick deterministic finite automata for O(n) performance. 25 builtin rules cover AWS keys, API tokens, private keys, database connection strings, and more.
+DLP scanning uses prefix-gated DFA matching with Aho-Corasick pre-filtering for O(n) performance. 25 built-in rules cover AWS keys, API tokens, private keys, database URIs, and more. See the [DLP Reference](reference/dlp.md) for the complete configuration guide.
 
 ## Tap (Webhook Events)
 

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
@@ -258,8 +259,12 @@ pub struct AuthConfig {
     #[serde(default = "default_auth_mode")]
     pub mode: String,
     /// API key (for mode = "api_key", backward compat with server.api_key)
-    #[serde(default)]
-    pub api_key: Option<String>,
+    #[serde(
+        default,
+        serialize_with = "crate::auth::token_store::serialize_secret_opt",
+        deserialize_with = "crate::auth::token_store::deserialize_secret_opt"
+    )]
+    pub api_key: Option<SecretString>,
     /// JWT configuration (for mode = "jwt")
     #[serde(default)]
     pub jwt: JwtConfig,

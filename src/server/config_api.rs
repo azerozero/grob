@@ -44,7 +44,9 @@ fn remove_null_values(value: &mut serde_json::Value) {
 pub(crate) async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let inner = state.snapshot();
 
-    // Redact API keys before serializing
+    // Redact API keys before serializing.
+    // NOTE: serde serializes SecretString via expose_secret, so we must
+    // immediately redact to avoid leaking the full key in the JSON response.
     let providers: Vec<serde_json::Value> = inner
         .config
         .providers

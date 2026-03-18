@@ -123,6 +123,15 @@ pub enum Commands {
     },
     /// Interactive setup wizard (auto-triggered on first run)
     Setup,
+    /// Live traffic inspector — watch requests, DLP actions, and fallbacks in real time
+    #[cfg(feature = "watch")]
+    Watch,
+    /// Manage virtual API keys (create, list, revoke)
+    Key {
+        /// Key management subcommand
+        #[command(subcommand)]
+        action: KeyAction,
+    },
     /// Run diagnostic checks on your Grob installation
     Doctor,
     /// Zero-downtime upgrade: spawn new process, wait for health, signal old to drain
@@ -175,6 +184,43 @@ pub enum HarnessAction {
         /// Maximum duration in seconds (0 = no limit)
         #[arg(long, default_value = "0")]
         duration: u64,
+    },
+}
+
+/// Subcommands for managing virtual API keys.
+#[derive(Subcommand)]
+pub enum KeyAction {
+    /// Create a new virtual API key
+    Create {
+        /// Human-readable key name
+        #[arg(short, long)]
+        name: String,
+        /// Tenant identifier
+        #[arg(short, long)]
+        tenant: String,
+        /// Monthly budget in USD (optional)
+        #[arg(short, long)]
+        budget: Option<f64>,
+        /// Rate limit in requests per second (optional)
+        #[arg(short, long)]
+        rate_limit: Option<u32>,
+        /// Comma-separated list of allowed model names (optional)
+        #[arg(short, long, value_delimiter = ',')]
+        allowed_models: Option<Vec<String>>,
+        /// Key expiration in days from now (optional)
+        #[arg(short, long)]
+        expires: Option<u64>,
+    },
+    /// List all virtual API keys
+    List {
+        /// Output in JSON format instead of table
+        #[arg(long)]
+        json: bool,
+    },
+    /// Revoke a virtual API key by ID or prefix
+    Revoke {
+        /// Key UUID or prefix to revoke
+        id_or_prefix: String,
     },
 }
 

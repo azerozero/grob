@@ -4,7 +4,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Stack
 
-- **Language**: Rust 2021 edition (~33.6K LOC, ~512 public items, 100% doc coverage)
+- **Language**: Rust 2021 edition (~39.5K LOC, ~543 public items, 100% doc coverage)
 - **Runtime**: Tokio async
 - **HTTP framework**: Axum 0.7 with Tower middleware
 - **HTTP client**: reqwest 0.12 (HTTP/2, rustls)
@@ -74,6 +74,7 @@ cargo run -- validate      # Test all providers with real API calls
 cargo run -- exec -- claude # Launch Claude Code behind proxy (auto-start/stop)
 cargo run -- doctor        # Run diagnostic checks
 cargo run -- upgrade       # Zero-downtime upgrade via SO_REUSEPORT
+cargo run -- setup         # Interactive setup wizard (auth/compliance/budget)
 cargo run -- connect       # Interactive credential setup
 cargo run -- init          # Create per-project .grob.toml
 cargo run -- config-diff   # Compare config against preset
@@ -105,7 +106,8 @@ cargo bench --bench hotpath
 - The `models` field on `ProviderConfig` is a legacy field -- model support is determined by `[[models.mappings]]`, not by listing models on the provider.
 - `jemalloc` is not available on MSVC targets -- the `#[cfg(not(target_env = "msvc"))]` guard handles this.
 - `cargo chef` is used in the Containerfile for layer caching.
-- The OpenAI compat endpoint translates to canonical format internally. Extension fields (response_format, reasoning_effort, seed, logprobs, etc.) are captured for lossless roundtrip but may not be enforced by Anthropic backends.
+- The OpenAI compat endpoint (`/v1/chat/completions`) translates to canonical format internally. Extension fields (response_format, reasoning_effort, seed, logprobs, etc.) are captured for lossless roundtrip but may not be enforced by Anthropic backends.
+- The Responses API endpoint (`/v1/responses`) is used by Codex CLI and OpenAI SDK. It uses named SSE events (`event: response.output_text.delta`) for streaming, flat tool format (no nested `function` wrapper), and `instructions` instead of system messages. Translation logic lives in `src/server/responses_compat/`.
 - Presets live in `presets/*.toml` (shipped with the binary) and user presets in `~/.grob/presets/`.
 - Feature flags are all on by default. To build without DLP: `cargo build --no-default-features --features oauth,tap,compliance,mcp`.
 - Anthropic beta features (`anthropic-beta` header) include prompt-caching-scope, interleaved-thinking, fine-grained-tool-streaming, and oauth. Client-provided beta features are merged with server defaults (no duplicates).
@@ -115,3 +117,4 @@ cargo bench --bench hotpath
 - Budget exceeded returns HTTP 402, not 429. Rate limit exceeded returns 429.
 - `grob -- <cmd>` is shorthand for `grob exec -- <cmd>` (trailing args syntax).
 - The `harness` feature flag is opt-in (not in `default`). Build with `cargo build --features harness` to enable `grob harness record/replay`. Set `GROB_HARNESS_RECORD=<path>` to enable the tape recorder middleware at runtime.
+- Providers with missing API keys are gracefully disabled at startup (logged as warnings) rather than causing a crash. The server starts with the remaining valid providers.

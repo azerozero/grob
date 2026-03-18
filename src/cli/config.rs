@@ -1,3 +1,4 @@
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
 use super::{BodySizeLimit, BudgetUsd, Port};
@@ -251,7 +252,13 @@ pub struct ServerConfig {
     #[serde(default = "default_host")]
     pub host: String,
     /// Optional API key for authenticating incoming requests
-    pub api_key: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::auth::token_store::serialize_secret_opt",
+        deserialize_with = "crate::auth::token_store::deserialize_secret_opt"
+    )]
+    pub api_key: Option<SecretString>,
     /// Log verbosity level (default: "info")
     #[serde(default = "default_log_level")]
     pub log_level: String,
@@ -361,6 +368,38 @@ impl Default for TracingConfig {
 
 fn default_tracing_path() -> String {
     "~/.grob/trace.jsonl".to_string()
+}
+
+/// OpenTelemetry export configuration
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct OtelConfig {
+    /// Enable OpenTelemetry trace export
+    #[serde(default)]
+    pub enabled: bool,
+    /// OTLP endpoint (default: http://localhost:4317)
+    #[serde(default = "default_otel_endpoint")]
+    pub endpoint: String,
+    /// Service name reported in traces (default: "grob")
+    #[serde(default = "default_otel_service_name")]
+    pub service_name: String,
+}
+
+impl Default for OtelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: default_otel_endpoint(),
+            service_name: default_otel_service_name(),
+        }
+    }
+}
+
+fn default_otel_endpoint() -> String {
+    "http://localhost:4317".to_string()
+}
+
+fn default_otel_service_name() -> String {
+    "grob".to_string()
 }
 
 fn default_true() -> bool {

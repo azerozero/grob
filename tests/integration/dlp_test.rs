@@ -122,8 +122,8 @@ fn test_dlp_sanitizes_secrets_via_text_api() {
         result
     );
     assert!(
-        result.contains("[REDACTED]"),
-        "Should contain [REDACTED] marker, got: {}",
+        result.contains("~CANARY"),
+        "Should contain canary token marker, got: {}",
         result
     );
 }

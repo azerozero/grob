@@ -103,7 +103,14 @@ pub(crate) async fn auth_middleware(
     let auth_mode = inner.config.auth.mode.as_str();
 
     let effective_mode = if auth_mode == "none" {
-        let legacy_key = inner.config.server.api_key.as_deref().unwrap_or("");
+        // SAFETY: expose_secret() used only for emptiness check, value is never logged.
+        let legacy_key = inner
+            .config
+            .server
+            .api_key
+            .as_ref()
+            .map(|s| secrecy::ExposeSecret::expose_secret(s).as_str())
+            .unwrap_or("");
         if legacy_key.is_empty() {
             "none"
         } else {
@@ -116,13 +123,23 @@ pub(crate) async fn auth_middleware(
     match effective_mode {
         "none" => next.run(request).await,
         "api_key" => {
+            // SAFETY: expose_secret() used only for constant-time comparison,
+            // value is never logged or included in any tracing output.
             let api_key = inner
                 .config
                 .auth
                 .api_key
-                .as_deref()
+                .as_ref()
+                .map(|s| secrecy::ExposeSecret::expose_secret(s).as_str())
                 .filter(|k| !k.is_empty())
-                .or_else(|| inner.config.server.api_key.as_deref())
+                .or_else(|| {
+                    inner
+                        .config
+                        .server
+                        .api_key
+                        .as_ref()
+                        .map(|s| secrecy::ExposeSecret::expose_secret(s).as_str())
+                })
                 .unwrap_or("");
 
             if api_key.is_empty() {
@@ -132,7 +149,18 @@ pub(crate) async fn auth_middleware(
             let token = extract_api_credential(request.headers());
             match token {
                 Some(t) if constant_time_eq(t, api_key) => next.run(request).await,
-                _ => auth_error_response("Invalid or missing API key. Provide via Authorization: Bearer <key> or x-api-key header."),
+                Some(t) => {
+                    // Static key didn't match — try virtual key lookup.
+                    match resolve_virtual_key(&state, t) {
+                        Some(vk_ctx) => {
+                            debug!("Virtual key auth: tenant={}, key={}", vk_ctx.tenant_id, vk_ctx.name);
+                            request.extensions_mut().insert(vk_ctx);
+                            next.run(request).await
+                        }
+                        None => auth_error_response("Invalid or missing API key. Provide via Authorization: Bearer <key> or x-api-key header."),
+                    }
+                }
+                None => auth_error_response("Invalid or missing API key. Provide via Authorization: Bearer <key> or x-api-key header."),
             }
         }
         "jwt" => {
@@ -166,6 +194,46 @@ pub(crate) async fn auth_middleware(
             auth_error_response(&format!("Unknown auth mode: {}", other))
         }
     }
+}
+
+/// Resolves a bearer token as a virtual API key.
+///
+/// Hashes the token with SHA-256, looks up the record in redb,
+/// and returns a [`VirtualKeyContext`] if the key is valid (not revoked, not expired).
+fn resolve_virtual_key(
+    state: &Arc<AppState>,
+    token: &str,
+) -> Option<crate::auth::virtual_keys::VirtualKeyContext> {
+    use sha2::{Digest, Sha256};
+
+    // Only attempt lookup for tokens with the grob_ prefix.
+    if !token.starts_with("grob_") {
+        return None;
+    }
+
+    let hash = hex::encode(Sha256::digest(token.as_bytes()));
+    let record = state.grob_store.lookup_virtual_key(&hash)?;
+
+    if record.revoked {
+        debug!("Virtual key {} is revoked", record.prefix);
+        return None;
+    }
+
+    if let Some(expires_at) = record.expires_at {
+        if chrono::Utc::now() >= expires_at {
+            debug!("Virtual key {} is expired", record.prefix);
+            return None;
+        }
+    }
+
+    Some(crate::auth::virtual_keys::VirtualKeyContext {
+        key_id: record.id,
+        tenant_id: record.tenant_id,
+        name: record.name,
+        budget_usd: record.budget_usd,
+        rate_limit_rps: record.rate_limit_rps,
+        allowed_models: record.allowed_models,
+    })
 }
 
 /// Request ID middleware: reads X-Request-Id header or generates UUID v4.
@@ -206,7 +274,12 @@ pub(crate) async fn rate_limit_check_middleware(
         None => return next.run(request).await,
     };
 
-    let key = if let Some(claims) = request.extensions().get::<crate::auth::GrobClaims>() {
+    let key = if let Some(vk) = request
+        .extensions()
+        .get::<crate::auth::virtual_keys::VirtualKeyContext>()
+    {
+        RateLimitKey::Tenant(format!("vk:{}", vk.key_id))
+    } else if let Some(claims) = request.extensions().get::<crate::auth::GrobClaims>() {
         RateLimitKey::Tenant(claims.tenant_id().to_string())
     } else if let Some(credential) = extract_api_credential(request.headers()) {
         RateLimitKey::Tenant(credential.to_string())

@@ -51,12 +51,12 @@ mod tests {
             !result.contains("ghp_abcdefghijklmnopqrstuvwxyz1234567890"),
             "GitHub PAT should be redacted"
         );
-        // Should contain [REDACTED] markers (builtins use Redact action)
-        let redacted_count = result.matches("[REDACTED]").count();
+        // Redact action now uses canary tokens for traceability.
+        let canary_count = result.matches("~CANARY").count();
         assert!(
-            redacted_count >= 3,
-            "Expected >= 3 [REDACTED] markers, got {}",
-            redacted_count
+            canary_count >= 3,
+            "Expected >= 3 canary token markers, got {}",
+            canary_count
         );
     }
 
@@ -171,8 +171,8 @@ mod tests {
         match &request.messages[0].content {
             MessageContent::Text(text) => {
                 assert!(
-                    text.contains("[REDACTED]"),
-                    "Secret in message should be redacted, got: {}",
+                    text.contains("~CANARY"),
+                    "Secret in message should be replaced with canary token, got: {}",
                     text
                 );
                 assert!(!text.contains("sk-test-abcdefghijklmnopqrst"));
@@ -288,8 +288,8 @@ mod tests {
             let input = format!("credential: {}", secret);
             let result = engine.sanitize_text(&input);
             assert!(
-                result.contains("[REDACTED]"),
-                "{} secret should be detected and redacted (output contains no [REDACTED])",
+                result.contains("~CANARY"),
+                "{} secret should be detected and replaced with canary token",
                 name,
             );
         }
@@ -404,6 +404,8 @@ mod tests {
             compliance: Default::default(),
             version: None,
             user: Default::default(),
+            otel: Default::default(),
+            log_export: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
         })
@@ -594,8 +596,8 @@ action = "redact"
         let result_without = engine_without.sanitize_text(text);
 
         assert!(
-            result_with.contains("[REDACTED]"),
-            "With builtins should detect OpenAI key"
+            result_with.contains("~CANARY"),
+            "With builtins should detect OpenAI key and replace with canary token"
         );
         assert_eq!(
             result_without.as_ref(),

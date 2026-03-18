@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-/// SSE event from provider
+/// Parsed Server-Sent Event from a provider byte stream.
 #[derive(Debug, Clone)]
 pub struct SseEvent {
     /// Optional event type (e.g. "message_start", "content_block_delta").
@@ -15,7 +15,7 @@ pub struct SseEvent {
     pub data: String,
 }
 
-/// Parse SSE events from a byte stream
+/// Parses SSE-formatted text into a vector of discrete events.
 pub fn parse_sse_events(input: &str) -> Vec<SseEvent> {
     let mut events = Vec::with_capacity(4);
     let mut current_event: Option<String> = None;

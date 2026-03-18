@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 use grob::cli;
-use grob::cli::args::{Cli, Commands, PresetAction};
+use grob::cli::args::{Cli, Commands, KeyAction, PresetAction};
 use grob::commands;
 
 #[tokio::main]
@@ -94,13 +94,39 @@ async fn main() -> anyhow::Result<()> {
             .unwrap_or(&config.server.log_level);
         EnvFilter::new(level)
     });
-    if use_json_logs {
-        tracing_subscriber::fmt()
-            .json()
-            .with_env_filter(filter)
-            .init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
+    // Initialize tracing subscriber (with optional OpenTelemetry layer).
+    #[cfg(feature = "otel")]
+    {
+        if config.otel.enabled {
+            match grob::otel::init_subscriber_with_otel(&config.otel, filter, use_json_logs) {
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("OpenTelemetry init failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            if use_json_logs {
+                tracing_subscriber::fmt()
+                    .json()
+                    .with_env_filter(filter)
+                    .init();
+            } else {
+                tracing_subscriber::fmt().with_env_filter(filter).init();
+            }
+        }
+    }
+
+    #[cfg(not(feature = "otel"))]
+    {
+        if use_json_logs {
+            tracing_subscriber::fmt()
+                .json()
+                .with_env_filter(filter)
+                .init();
+        } else {
+            tracing_subscriber::fmt().with_env_filter(filter).init();
+        }
     }
 
     match command {
@@ -150,7 +176,31 @@ async fn main() -> anyhow::Result<()> {
         Commands::Setup => {
             // Already handled above; if we reach here, wizard already ran.
         }
+        Commands::Key { action } => match action {
+            KeyAction::Create {
+                name,
+                tenant,
+                budget,
+                rate_limit,
+                allowed_models,
+                expires,
+            } => commands::key::cmd_key_create(
+                &name,
+                &tenant,
+                budget,
+                rate_limit,
+                allowed_models,
+                expires,
+            ),
+            KeyAction::List { json } => commands::key::cmd_key_list(json),
+            KeyAction::Revoke { id_or_prefix } => commands::key::cmd_key_revoke(&id_or_prefix),
+        },
         Commands::Doctor => commands::doctor::cmd_doctor(&config, &config_source).await,
+        #[cfg(feature = "watch")]
+        Commands::Watch => {
+            let base_url = cli::format_base_url(&config.server.host, config.server.port.value());
+            grob::features::watch::tui::run(&base_url).await?;
+        }
         Commands::Upgrade => commands::upgrade::cmd_upgrade(&config, cli_args.config).await?,
         #[cfg(feature = "harness")]
         Commands::Harness { action } => {

@@ -155,8 +155,9 @@ fn get_server() -> &'static ServerState {
             let http_url = format!("http://127.0.0.1:{}", http_port);
             let tls_url = format!("https://127.0.0.1:{}", tls_port);
 
+            // SAFETY: benchmark uses self-signed certificates; this is test-only code, never production.
             let probe = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check] benchmark uses self-signed certs
+                .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check]
                 .build()
                 .unwrap();
             for _ in 0..100 {
@@ -285,8 +286,9 @@ fn bench_http(c: &mut Criterion) {
 fn bench_tls(c: &mut Criterion) {
     let srv = get_server();
 
+    // SAFETY: benchmark uses self-signed certificates; this is test-only code, never production.
     let tls_client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check] benchmark uses self-signed certs
+        .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check]
         .pool_max_idle_per_host(10)
         .build()
         .unwrap();
@@ -318,8 +320,9 @@ fn bench_tls(c: &mut Criterion) {
     group.sample_size(20);
     group.bench_function("health_tls_fresh_handshake", |b| {
         b.to_async(&srv.rt).iter(|| async {
+            // SAFETY: benchmark uses self-signed certificates; this is test-only code, never production.
             let fresh = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check] benchmark uses self-signed certs
+                .danger_accept_invalid_certs(true) // lgtm[rust/disabled-certificate-check]
                 .pool_max_idle_per_host(0)
                 .no_proxy()
                 .build()

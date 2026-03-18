@@ -163,6 +163,8 @@ impl OpenAIProvider {
 
         req_builder = self.base.apply_headers(req_builder);
 
+        // SAFETY: auth_value is sent only in the Authorization header to the upstream API.
+        // It is never logged or exposed in tracing output.
         let response = req_builder
             .timeout(self.base.api_timeout)
             .json(&responses_request)
@@ -219,6 +221,8 @@ impl OpenAIProvider {
 
         req_builder = self.base.apply_headers(req_builder);
 
+        // SAFETY: auth_value is sent only in the Authorization header to the upstream API.
+        // It is never logged or exposed in tracing output.
         let response = req_builder
             .timeout(self.base.api_timeout)
             .json(&openai_request)
@@ -313,6 +317,8 @@ impl LlmProvider for OpenAIProvider {
 
         req_builder = self.base.apply_headers(req_builder);
 
+        // SAFETY: auth_value is sent only in the Authorization header to the upstream API.
+        // It is never logged or exposed in tracing output.
         let response = req_builder
             .timeout(self.base.api_timeout)
             .json(&request_body)

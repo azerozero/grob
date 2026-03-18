@@ -6,7 +6,10 @@ pub mod jwt;
 pub mod oauth;
 /// Persistent token storage for OAuth credentials.
 pub mod token_store;
+/// Virtual API key management for multi-tenant access control.
+pub mod virtual_keys;
 
 pub use jwt::{GrobClaims, JwtValidator};
 pub use oauth::{OAuthClient, OAuthConfig, OAuthProviderType};
 pub use token_store::TokenStore;
+pub use virtual_keys::{VirtualKeyContext, VirtualKeyRecord};

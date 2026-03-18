@@ -19,6 +19,8 @@ pub mod exec;
 pub mod harness;
 /// Initializes a new grob configuration file interactively.
 pub mod init;
+/// Virtual API key management (create, list, revoke).
+pub mod key;
 /// Lists, inspects, and manages available LLM models.
 pub mod model;
 /// Manages named configuration presets (save, load, delete).

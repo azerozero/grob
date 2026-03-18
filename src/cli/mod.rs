@@ -7,11 +7,12 @@ mod defaults;
 mod newtypes;
 mod validation;
 
+pub use crate::features::log_export::LogExportConfig;
 pub use config::{
     AcmeConfig, BudgetConfig, CacheConfig, ComplianceConfig, FanOutConfig, FanOutMode, ModelConfig,
-    ModelMapping, ModelStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,
-    RouterConfig, SecurityConfig, ServerConfig, TimeoutConfig, TlsConfig, TracingConfig,
-    UserConfig,
+    ModelMapping, ModelStrategy, OtelConfig, PresetConfig, ProjectConfig, ProjectRouterOverlay,
+    PromptRule, RouterConfig, SecurityConfig, ServerConfig, TimeoutConfig, TlsConfig,
+    TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
@@ -73,6 +74,12 @@ pub struct AppConfig {
     /// User-defined section preserved across preset applies
     #[serde(default)]
     pub user: UserConfig,
+    /// OpenTelemetry distributed tracing export
+    #[serde(default)]
+    pub otel: OtelConfig,
+    /// External log sink configuration for structured request/response export
+    #[serde(default)]
+    pub log_export: LogExportConfig,
 }
 
 impl AppConfig {
@@ -143,10 +150,12 @@ impl AppConfig {
     /// crashing, so the proxy can still serve traffic through the
     /// remaining providers. Only fails if *all* providers end up disabled.
     fn resolve_env_vars(&mut self) -> Result<()> {
+        use secrecy::{ExposeSecret, SecretString};
+
         // Resolve server API key
         if let Some(ref key) = self.server.api_key {
-            if let Some(env_var) = key.strip_prefix('$') {
-                self.server.api_key = std::env::var(env_var).ok();
+            if let Some(env_var) = key.expose_secret().strip_prefix('$') {
+                self.server.api_key = std::env::var(env_var).ok().map(SecretString::new);
             }
         }
 
@@ -160,11 +169,11 @@ impl AppConfig {
 
             // Only resolve env vars for API key auth
             if let Some(ref api_key) = provider.api_key {
-                if let Some(env_var) = api_key.strip_prefix('$') {
+                if let Some(env_var) = api_key.expose_secret().strip_prefix('$') {
                     if let Ok(value) = std::env::var(env_var) {
-                        provider.api_key = Some(value);
+                        provider.api_key = Some(SecretString::new(value));
                     } else if std::env::var("GROB_MOCK_BACKEND").is_ok() {
-                        provider.api_key = Some("mock-key".to_string());
+                        provider.api_key = Some(SecretString::new("mock-key".to_string()));
                     } else {
                         // Gracefully disable instead of crashing.
                         disabled_for_missing.push((provider.name.clone(), env_var.to_string()));

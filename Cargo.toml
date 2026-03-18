@@ -45,12 +45,19 @@ toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
+# OpenTelemetry (optional, for distributed tracing export)
+opentelemetry = { version = "0.28", optional = true }
+opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"], optional = true }
+opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic"], optional = true }
+tracing-opentelemetry = { version = "0.29", optional = true }
+
 # Error Handling
 anyhow = "1"
 thiserror = "1"
 
 # Utilities
 async-trait = "0.1"        # Async trait support (needed for dyn Provider dispatch)
+async-stream = "0.3"       # SSE event streaming for `grob watch`
 dirs = "5"                 # User directories
 regex = "1"                # Regular expressions
 uuid = { version = "1.0", features = ["v4", "serde"] }  # UUID generation for streaming
@@ -76,6 +83,9 @@ hmac = "0.12"
 # Storage (embedded key-value store)
 redb = "2"
 
+# Credential encryption at rest (AES-256-GCM)
+aes-gcm = "0.10"
+
 # Caching (high-performance concurrent cache with TTL)
 moka = { version = "0.12", features = ["future", "sync"] }
 
@@ -93,6 +103,10 @@ hex = { version = "0.4", features = ["serde"] }      # Hex encoding/decoding
 
 # Security headers
 http = "1"
+
+# TUI dashboard (`grob watch`)
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
 
 # Socket options (SO_REUSEPORT for zero-downtime restarts)
 socket2 = { version = "0.5", features = ["all"] }
@@ -140,7 +154,9 @@ harness = false
 required-features = ["tls"]
 
 [features]
-default = ["dlp", "oauth", "tap", "compliance", "mcp"]
+default = ["dlp", "oauth", "tap", "compliance", "mcp", "watch"]
+watch = ["ratatui", "crossterm"]
+otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
 tls = ["axum-server", "rustls", "rustls-pemfile"]
 acme = ["tls", "rustls-acme"]
 dlp = []

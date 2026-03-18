@@ -19,6 +19,7 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/server/mod.rs` | Axum HTTP server, middleware stack, application state |
 | `src/server/dispatch/mod.rs` | Core dispatch pipeline: DLP, cache, route, provider loop |
 | `src/server/openai_compat/` | OpenAI `/v1/chat/completions` translation |
+| `src/server/responses_compat/` | OpenAI Responses API (`/v1/responses`) translation (Codex CLI) |
 | `src/server/oauth_handlers.rs` | OAuth API endpoints |
 | `src/server/fan_out.rs` | Parallel multi-provider dispatch (fan-out strategy) |
 | `src/providers/` | Provider implementations (Anthropic, OpenAI, Gemini, etc.) |

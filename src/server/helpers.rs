@@ -65,11 +65,23 @@ pub(crate) fn resolve_provider_mappings(
         Ok(sorted)
     } else {
         // No explicit [[models]] config — check for pass-through providers
+        let gdpr = inner.config.router.gdpr;
+        let required_region = inner.config.router.region.as_deref();
         let all_pass_through: Vec<&crate::providers::ProviderConfig> = inner
             .config
             .providers
             .iter()
             .filter(|p| p.is_enabled() && p.pass_through.unwrap_or(false))
+            .filter(|p| {
+                // GDPR/region filtering for pass-through providers
+                if gdpr || required_region.is_some() {
+                    let region_filter = required_region.unwrap_or("eu");
+                    let provider_region = p.region.as_deref().unwrap_or("global");
+                    provider_region == region_filter || provider_region == "global"
+                } else {
+                    true
+                }
+            })
             .collect();
 
         // Smart filtering: prefer providers whose type matches the inferred model family
@@ -137,19 +149,23 @@ pub(crate) fn format_route_type(decision: &crate::models::RouteDecision) -> Stri
     }
 }
 
-/// Apply DLP sanitization to a non-streaming provider response.
-pub(crate) fn sanitize_provider_response(
+/// Applies DLP sanitization to a non-streaming response and collects reports.
+pub(crate) fn sanitize_provider_response_reported(
     response: &mut crate::providers::ProviderResponse,
     dlp: &Arc<DlpEngine>,
-) {
+) -> Vec<crate::features::dlp::DlpActionReport> {
     use crate::models::{ContentBlock, KnownContentBlock};
+    let mut reports = Vec::new();
     for block in &mut response.content {
         if let ContentBlock::Known(KnownContentBlock::Text { text, .. }) = block {
-            if let Cow::Owned(s) = dlp.sanitize_response_text(text) {
+            let (new_text, r) = dlp.sanitize_response_text_reported(text);
+            reports.extend(r);
+            if let Cow::Owned(s) = new_text {
                 *text = s;
             }
         }
     }
+    reports
 }
 
 /// Check if message has tool results but no text content

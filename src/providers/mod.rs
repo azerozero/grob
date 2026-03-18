@@ -30,6 +30,7 @@ use bytes::Bytes;
 use error::ProviderError;
 use futures::stream::Stream;
 use reqwest::Client;
+use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -112,32 +113,32 @@ pub fn warn_if_cleartext(url: &str, provider_name: &str) {
     }
 }
 
-/// Main provider trait - all providers must implement this
-/// Maintains Anthropic Messages API compatibility
+/// Core provider trait -- all LLM backends implement this.
+///
+/// Maintains Anthropic Messages API compatibility as the canonical
+/// internal format. Non-Anthropic providers translate to/from their
+/// native formats in their implementations.
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
-    /// Send a message request to the provider
-    /// Must transform to/from Anthropic format as needed
+    /// Sends a non-streaming message request to the provider.
     async fn send_message(
         &self,
         request: CanonicalRequest,
     ) -> Result<ProviderResponse, ProviderError>;
 
-    /// Send a streaming message request to the provider
-    /// Returns a stream of raw bytes (SSE format) along with headers to forward
+    /// Sends a streaming message request, returning an SSE byte stream and headers.
     async fn send_message_stream(
         &self,
         request: CanonicalRequest,
     ) -> Result<StreamResponse, ProviderError>;
 
-    /// Count tokens for a request
-    /// Provider-specific implementation (tiktoken for OpenAI, etc.)
+    /// Counts tokens for a request (provider-specific or character heuristic).
     async fn count_tokens(
         &self,
         request: CountTokensRequest,
     ) -> Result<CountTokensResponse, ProviderError>;
 
-    /// Check if provider supports a specific model
+    /// Returns `true` if this provider serves the given model name.
     fn supports_model(&self, model: &str) -> bool;
 
     /// Return the provider's base URL for connection warmup.
@@ -151,8 +152,8 @@ pub trait LlmProvider: Send + Sync {
 pub struct ProviderParams {
     /// Human-readable provider name from configuration.
     pub name: String,
-    /// API key for authenticating requests.
-    pub api_key: String,
+    /// API key for authenticating requests (wrapped to prevent accidental logging).
+    pub api_key: SecretString,
     /// Custom base URL override for the provider endpoint.
     pub base_url: Option<String>,
     /// List of model identifiers this provider serves.
@@ -194,8 +195,13 @@ pub struct ProviderConfig {
     pub auth_type: AuthType,
 
     /// API key (required for auth_type = "apikey")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::auth::token_store::serialize_secret_opt",
+        deserialize_with = "crate::auth::token_store::deserialize_secret_opt"
+    )]
+    pub api_key: Option<SecretString>,
 
     /// OAuth provider ID (required for auth_type = "oauth")
     /// References a token stored in TokenStore

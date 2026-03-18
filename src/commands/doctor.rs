@@ -116,7 +116,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
             continue;
         }
         if let Some(ref key) = provider.api_key {
-            if let Some(var) = key.strip_prefix('$') {
+            if let Some(var) = secrecy::ExposeSecret::expose_secret(key).strip_prefix('$') {
                 if std::env::var(var).is_err() {
                     missing_env.push(format!("${} ({})", var, provider.name));
                 }

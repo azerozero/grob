@@ -1,6 +1,7 @@
 //! Test fixtures for Claude Code Mux
 
 use grob::models::{CanonicalRequest, Message, MessageContent, ThinkingConfig};
+use secrecy::SecretString;
 
 /// Creates a simple Anthropic request for testing
 pub fn create_test_request(model: &str, text: &str) -> CanonicalRequest {
@@ -107,7 +108,7 @@ pub fn base_provider_config(name: &str) -> grob::providers::ProviderConfig {
         name: name.to_string(),
         provider_type: "anthropic".to_string(),
         auth_type: grob::providers::AuthType::ApiKey,
-        api_key: Some("sk-test".to_string()),
+        api_key: Some(SecretString::new("sk-test".to_string())),
         base_url: None,
         models: vec![],
         enabled: Some(true),
@@ -140,6 +141,8 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         compliance: Default::default(),
         version: None,
         user: Default::default(),
+        otel: Default::default(),
+        log_export: Default::default(),
         #[cfg(feature = "mcp")]
         mcp: Default::default(),
     }

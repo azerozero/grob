@@ -9,6 +9,7 @@ use crate::auth::{OAuthConfig, TokenStore};
 use crate::models::CanonicalRequest;
 use async_trait::async_trait;
 use reqwest::Client;
+use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
 use std::time::Duration;
 use types::*;
@@ -21,7 +22,7 @@ use types::*;
 /// 2. API Key (Google AI Studio) - Uses public Gemini API
 /// 3. Vertex AI (Google Cloud) - Uses Vertex AI API
 pub struct GeminiProvider {
-    api_key: Option<String>,
+    api_key: Option<SecretString>,
     base_url: String,
     models: Vec<String>,
     client: Client,
@@ -57,7 +58,7 @@ impl GeminiProvider {
         project_id: Option<String>,
         location: Option<String>,
     ) -> Self {
-        let api_key = if params.api_key.is_empty() {
+        let api_key = if params.api_key.expose_secret().is_empty() {
             None
         } else {
             Some(params.api_key)
@@ -314,7 +315,7 @@ impl GeminiProvider {
             self.base_url,
             request.model,
             action,
-            key,
+            key.expose_secret(),
             sep,
             alt_sse.trim_start_matches('?')
         );
@@ -352,10 +353,11 @@ impl GeminiProvider {
     }
 
     /// Build an HTTP request from prepared data (used for non-retry paths).
+    // SAFETY: Gemini API requires the API key as a URL query parameter over HTTPS.
     fn build_http_request(&self, prep: &PreparedRequest) -> reqwest::RequestBuilder {
         let mut req_builder = self
             .client
-            .post(&prep.url)
+            .post(&prep.url) // CodeQL: cleartext-transmission — URL uses HTTPS; API key in query param is Gemini's design.
             .header("Content-Type", "application/json");
 
         if let Some(ref auth) = prep.auth_header {
@@ -443,8 +445,9 @@ impl LlmProvider for GeminiProvider {
         let response = self
             .handle_rate_limit_retry(
                 move || {
+                    // SAFETY: Gemini API requires the API key as a URL query parameter over HTTPS.
                     let mut req_builder =
-                        client.post(&url).header("Content-Type", "application/json");
+                        client.post(&url).header("Content-Type", "application/json"); // CodeQL: cleartext-transmission — URL uses HTTPS; API key in query param is Gemini's design.
 
                     if let Some(ref auth) = auth_header {
                         req_builder = req_builder.header("Authorization", auth);

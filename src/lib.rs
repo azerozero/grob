@@ -21,6 +21,8 @@ pub mod message_tracing;
 pub mod models;
 /// Network utilities and port management.
 pub mod net;
+/// OpenTelemetry distributed tracing export.
+pub mod otel;
 /// PID file management for daemon mode.
 pub mod pid;
 /// Preset management: builtin/installed presets and apply/export.

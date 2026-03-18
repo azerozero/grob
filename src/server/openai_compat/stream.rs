@@ -3,52 +3,75 @@ use serde::Serialize;
 
 use crate::providers::streaming::{parse_sse_events, SseEvent};
 
-/// OpenAI streaming chunk (SSE)
+/// Represents one SSE chunk in the OpenAI streaming protocol.
+///
+/// Each chunk corresponds to a `data:` line in the server-sent event stream
+/// and contains incremental content updates for the client.
 #[derive(Debug, Serialize)]
 pub struct OpenAIStreamChunk {
+    /// Stable completion identifier shared across all chunks.
     pub id: String,
+    /// Object type, always `"chat.completion.chunk"`.
     pub object: &'static str,
+    /// Unix timestamp when the completion started.
     pub created: u64,
+    /// Model name echoed from the request.
     pub model: String,
+    /// Incremental choice updates (always one element).
     pub choices: Vec<OpenAIStreamChoice>,
 }
 
-/// Streaming choice with delta content
+/// Wraps a [`OpenAIStreamDelta`] with its position and stop signal.
 #[derive(Debug, Serialize)]
 pub struct OpenAIStreamChoice {
+    /// Zero-based position (always 0; Grob returns one choice).
     pub index: u32,
+    /// Incremental content or tool call fragment.
     pub delta: OpenAIStreamDelta,
+    /// Set on the final chunk (e.g. `"stop"`, `"tool_calls"`, `"length"`).
     pub finish_reason: Option<String>,
 }
 
-/// Delta content in a streaming chunk
+/// Incremental content payload inside a streaming chunk.
 #[derive(Debug, Serialize)]
 pub struct OpenAIStreamDelta {
+    /// Set to `"assistant"` on the first chunk only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Text fragment appended to the completion.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// Incremental tool call updates.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<OpenAIStreamToolCallDelta>>,
 }
 
-/// Incremental tool call update in a streaming chunk
+/// Incremental tool call update within a streaming chunk.
+///
+/// The first delta for a tool call carries `id`, `type`, and `function.name`.
+/// Subsequent deltas carry only `function.arguments` fragments.
 #[derive(Debug, Serialize)]
 pub struct OpenAIStreamToolCallDelta {
+    /// Position of this tool call in the tool_calls array.
     pub index: u32,
+    /// Tool call identifier (present on the first delta only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Tool type, `"function"` (present on the first delta only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r#type: Option<String>,
+    /// Function name or argument fragment.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub function: Option<OpenAIStreamFunctionDelta>,
 }
 
-/// Incremental function call update (name or argument fragment)
+/// Carries either a function name or an argument fragment.
 #[derive(Debug, Serialize)]
 pub struct OpenAIStreamFunctionDelta {
+    /// Function name (present on the first delta only).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// Partial JSON arguments string to be concatenated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arguments: Option<String>,
 }

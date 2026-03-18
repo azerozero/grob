@@ -25,7 +25,7 @@ export OPENAI_API_KEY=sk-...
 export GEMINI_API_KEY=AI...
 ```
 
-Available presets: `perf`, `medium`, `cheap`, `fast`, `local`, `gdpr`.
+Available presets: `perf`, `medium`, `cheap`, `fast`, `local`, `gdpr`, `eu-ai-act`.
 Run `grob preset list` to see all options.
 
 ## 3. Launch your tool

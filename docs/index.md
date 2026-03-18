@@ -38,6 +38,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 |------|-------|
 | Set up a provider | [Provider Setup](PROVIDERS.md) |
 | Configure OAuth | [OAuth Setup](OAUTH_SETUP.md) |
+| Configure DLP | [How to Configure DLP](how-to/dlp.md) |
 | Configure options | [How to Configure Grob](how-to/configure.md) |
 | Deploy in a container | [How to Deploy Grob](how-to/deploy.md) |
 | Fix common problems | [Troubleshooting](TROUBLESHOOTING.md) |
@@ -48,9 +49,14 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Topic | Document |
 |-------|----------|
 | All config options | [Configuration Reference](CONFIGURATION.md) |
+| DLP engine | [DLP Reference](reference/dlp.md) |
+| OWASP LLM Top 10 | [OWASP Coverage](reference/owasp-llm-top10.md) |
 | CLI commands | [CLI Reference](reference/cli.md) |
+| Provider internals | [Provider Reference](reference/providers.md) |
+| API compatibility | [API Compatibility Reference](reference/api-compatibility.md) |
 | API endpoints | [OpenAPI Spec](openapi.yaml) |
 | OpenAI compatibility | [OpenAI Compatibility](openai-compatibility.md) |
+| Responses API | [Responses API Compatibility](responses-api-compatibility.md) |
 | Error codes | [Error Reference](reference/errors.md) |
 
 ### Understanding Grob
@@ -66,4 +72,4 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 
 ## Version
 
-Current release: **v0.14.0** -- see [CHANGELOG](../CHANGELOG.md) for history.
+Current release: **v0.17.0** -- see [CHANGELOG](../CHANGELOG.md) for history.

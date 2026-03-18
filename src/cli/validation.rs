@@ -31,7 +31,8 @@ impl AppConfig {
             use crate::providers::AuthType;
             match provider.auth_type {
                 AuthType::ApiKey => {
-                    if provider.api_key.is_none() {
+                    let key_missing = provider.api_key.is_none();
+                    if key_missing {
                         // Special case: gemini/vertex-ai may use ADC
                         if provider.provider_type != "vertex-ai" {
                             anyhow::bail!(

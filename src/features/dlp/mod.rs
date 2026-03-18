@@ -35,6 +35,17 @@ use config::DlpConfig;
 use std::borrow::Cow;
 use std::sync::Arc;
 
+/// Describes a single DLP action taken during sanitization.
+#[derive(Debug, Clone)]
+pub struct DlpActionReport {
+    /// Action performed: "redact", "canary", "pseudonym", "block", "log".
+    pub action: String,
+    /// Rule category: "name", "secret", "pii", "injection", "url_exfil", "entropy".
+    pub rule_type: String,
+    /// Human-readable detail (rule name, PII type, etc.).
+    pub detail: String,
+}
+
 /// Error returned when DLP blocks a request or response.
 #[derive(Debug)]
 pub enum DlpBlockError {
@@ -217,6 +228,64 @@ impl DlpEngine {
         }
     }
 
+    /// Sanitizes an outgoing request and collects action reports.
+    ///
+    /// Returns a list of [`DlpActionReport`]s describing every action taken.
+    pub fn sanitize_request_reported(
+        &self,
+        request: &mut CanonicalRequest,
+    ) -> Vec<DlpActionReport> {
+        let mut reports = Vec::new();
+
+        // Sanitize system prompt
+        if let Some(ref mut system) = request.system {
+            match system {
+                SystemPrompt::Text(text) => {
+                    let (new_text, r) = self.sanitize_text_reported(text);
+                    reports.extend(r);
+                    if let Cow::Owned(s) = new_text {
+                        *text = s;
+                    }
+                }
+                SystemPrompt::Blocks(blocks) => {
+                    for block in blocks {
+                        let (new_text, r) = self.sanitize_text_reported(&block.text);
+                        reports.extend(r);
+                        if let Cow::Owned(s) = new_text {
+                            block.text = s;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sanitize messages
+        for msg in &mut request.messages {
+            match &mut msg.content {
+                MessageContent::Text(text) => {
+                    let (new_text, r) = self.sanitize_text_reported(text);
+                    reports.extend(r);
+                    if let Cow::Owned(s) = new_text {
+                        *text = s;
+                    }
+                }
+                MessageContent::Blocks(blocks) => {
+                    for block in blocks {
+                        if let ContentBlock::Known(KnownContentBlock::Text { text, .. }) = block {
+                            let (new_text, r) = self.sanitize_text_reported(text);
+                            reports.extend(r);
+                            if let Cow::Owned(s) = new_text {
+                                *text = s;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        reports
+    }
+
     /// Sanitize an outgoing request with block support.
     /// Returns `Err(DlpBlockError)` if prompt injection is detected with `action: block`.
     pub fn sanitize_request_checked(
@@ -345,6 +414,100 @@ impl DlpEngine {
         }
     }
 
+    /// Sanitizes a single text string and collects action reports.
+    ///
+    /// Returns the sanitized text and a list of [`DlpActionReport`]s.
+    pub fn sanitize_text_reported<'a>(
+        &self,
+        text: &'a str,
+    ) -> (Cow<'a, str>, Vec<DlpActionReport>) {
+        let mut modified: Option<String> = None;
+        let mut reports = Vec::new();
+
+        // 1. Anonymize names
+        if !self.anonymizer.is_empty() {
+            let current = modified.as_deref().unwrap_or(text);
+            if let Some((anonymized, replacements)) = self.anonymizer.anonymize_if_match(current) {
+                for (real, pseudo) in &replacements {
+                    tracing::debug!("DLP name anonymized: '{}' → '{}'", real, pseudo);
+                    metrics::counter!(
+                        "grob_dlp_detections_total",
+                        "type" => "name",
+                        "rule" => real.clone(),
+                        "action" => "pseudonym"
+                    )
+                    .increment(1);
+                    reports.push(DlpActionReport {
+                        action: "pseudonym".into(),
+                        rule_type: "name".into(),
+                        detail: format!("'{}' → '{}'", real, pseudo),
+                    });
+                }
+                modified = Some(anonymized);
+            }
+        }
+
+        // 2. Scan and replace secrets
+        if !self.scanner.is_empty() {
+            let current = modified.as_deref().unwrap_or(text);
+            if self.scanner.might_contain_secret(current) {
+                if let Some((redacted, events)) = self.scanner.redact(current, &self.canary_gen) {
+                    for event in &events {
+                        tracing::debug!(
+                            "DLP secret detected: rule='{}' action='{}'",
+                            event.rule_name,
+                            event.action
+                        );
+                        metrics::counter!(
+                            "grob_dlp_detections_total",
+                            "type" => "secret",
+                            "rule" => event.rule_name.clone(),
+                            "action" => event.action.clone()
+                        )
+                        .increment(1);
+                        reports.push(DlpActionReport {
+                            action: event.action.clone(),
+                            rule_type: "secret".into(),
+                            detail: format!("rule={}", event.rule_name),
+                        });
+                    }
+                    modified = Some(redacted);
+                }
+            }
+        }
+
+        // 3. Scan for PII
+        if let Some(ref pii) = self.pii_scanner {
+            let current = modified.as_deref().unwrap_or(text);
+            if pii.might_contain_pii(current) {
+                if let Some((redacted, detections)) = pii.redact(current) {
+                    for det in &detections {
+                        tracing::debug!("DLP PII detected: type='{}'", det.pii_type);
+                        metrics::counter!(
+                            "grob_dlp_detections_total",
+                            "type" => "pii",
+                            "rule" => det.pii_type.to_string(),
+                            "action" => "redact"
+                        )
+                        .increment(1);
+                        reports.push(DlpActionReport {
+                            action: "redact".into(),
+                            rule_type: "pii".into(),
+                            detail: format!("type={}", det.pii_type),
+                        });
+                    }
+                    modified = Some(redacted);
+                }
+            }
+        }
+
+        let result = match modified {
+            Some(s) => Cow::Owned(s),
+            None => Cow::Borrowed(text),
+        };
+        (result, reports)
+    }
+
     /// De-anonymize response text: pseudonyms → real names (for LLM → user).
     /// Also scans for secrets leaked in the response.
     ///
@@ -416,6 +579,103 @@ impl DlpEngine {
             Some(s) => Cow::Owned(s),
             None => Cow::Borrowed(text),
         }
+    }
+
+    /// De-anonymizes response text and collects action reports.
+    ///
+    /// Returns the sanitized text and a list of [`DlpActionReport`]s.
+    pub fn sanitize_response_text_reported<'a>(
+        &self,
+        text: &'a str,
+    ) -> (Cow<'a, str>, Vec<DlpActionReport>) {
+        let mut modified: Option<String> = None;
+        let mut reports = Vec::new();
+
+        // 1. De-anonymize names
+        if !self.anonymizer.is_empty() {
+            let current = modified.as_deref().unwrap_or(text);
+            if let Some(deanonymized) = self.anonymizer.deanonymize_if_match(current) {
+                reports.push(DlpActionReport {
+                    action: "deanonymize".into(),
+                    rule_type: "name".into(),
+                    detail: "pseudonyms restored".into(),
+                });
+                modified = Some(deanonymized);
+            }
+        }
+
+        // 2. Scan response for secrets
+        if !self.scanner.is_empty() {
+            let current = modified.as_deref().unwrap_or(text);
+            if self.scanner.might_contain_secret(current) {
+                if let Some((redacted, events)) = self.scanner.redact(current, &self.canary_gen) {
+                    for event in &events {
+                        tracing::warn!(
+                            "DLP secret in response: rule='{}' action='{}'",
+                            event.rule_name,
+                            event.action
+                        );
+                        metrics::counter!(
+                            "grob_dlp_detections_total",
+                            "type" => "secret",
+                            "rule" => event.rule_name.clone(),
+                            "action" => event.action.clone()
+                        )
+                        .increment(1);
+                        reports.push(DlpActionReport {
+                            action: event.action.clone(),
+                            rule_type: "secret".into(),
+                            detail: format!("rule={}", event.rule_name),
+                        });
+                    }
+                    modified = Some(redacted);
+                }
+            }
+        }
+
+        // 3. Scan response for PII
+        if let Some(ref pii) = self.pii_scanner {
+            let current = modified.as_deref().unwrap_or(text);
+            if pii.might_contain_pii(current) {
+                if let Some((redacted, detections)) = pii.redact(current) {
+                    for det in &detections {
+                        tracing::warn!("DLP PII in response: type='{}'", det.pii_type);
+                        metrics::counter!(
+                            "grob_dlp_detections_total",
+                            "type" => "pii",
+                            "rule" => det.pii_type.to_string(),
+                            "action" => "redact"
+                        )
+                        .increment(1);
+                        reports.push(DlpActionReport {
+                            action: "redact".into(),
+                            rule_type: "pii".into(),
+                            detail: format!("type={}", det.pii_type),
+                        });
+                    }
+                    modified = Some(redacted);
+                }
+            }
+        }
+
+        // 4. URL exfiltration scan
+        if let Some(ref exfil) = self.url_exfil_scanner {
+            let current = modified.as_deref().unwrap_or(text);
+            if let Cow::Owned(sanitized) = exfil.sanitize_response(current) {
+                reports.push(DlpActionReport {
+                    action: "redact".into(),
+                    rule_type: "url_exfil".into(),
+                    detail: "suspicious URL sanitized".into(),
+                });
+                modified = Some(sanitized);
+            }
+        }
+
+        let result = match modified {
+            Some(s) => Cow::Owned(s),
+            None => Cow::Borrowed(text),
+        };
+        (result, reports)
     }
 
     /// Check response text for URL exfiltration block. Returns error if blocked.
@@ -647,9 +907,10 @@ mod tests {
         let engine = DlpEngine::from_config(config).unwrap();
         let text = "my key is sk-proj-abcdefghijklmnopqrstuvwxyz1234567890ABCD";
         let result = engine.sanitize_text(text);
+        // Redact action now uses canary tokens for traceability.
         assert!(
-            result.contains("[REDACTED]"),
-            "OpenAI key should be redacted, got: {}",
+            result.contains("~CANARY"),
+            "OpenAI key should be replaced with a canary token, got: {}",
             result
         );
     }
@@ -664,9 +925,10 @@ mod tests {
         let text =
             "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJBALRiMLAHudeSA/x3hB2f-----END RSA PRIVATE KEY-----";
         let result = engine.sanitize_text(text);
+        // Redact action now uses canary tokens for traceability.
         assert!(
-            result.contains("[REDACTED]"),
-            "PEM key should be redacted, got: {}",
+            result.contains("~CANARY"),
+            "PEM key should be replaced with a canary token, got: {}",
             result
         );
     }

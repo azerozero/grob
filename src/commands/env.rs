@@ -10,7 +10,7 @@ pub fn cmd_env(config: &cli::AppConfig) {
         if !provider.is_enabled() {
             continue;
         }
-        let raw_key = provider.api_key.as_deref().unwrap_or("");
+        let has_key = provider.api_key.is_some();
         let env_var_name = format!("{}_API_KEY", provider.name.to_uppercase().replace('-', "_"));
 
         match provider.auth_type {
@@ -18,7 +18,7 @@ pub fn cmd_env(config: &cli::AppConfig) {
                 println!("  {:<25} OAuth (no env var needed)", provider.name);
             }
             providers::AuthType::ApiKey => {
-                if raw_key.is_empty() {
+                if !has_key {
                     println!("  {:<25} ⚠️  {} MISSING", provider.name, env_var_name);
                     any_missing = true;
                 } else {

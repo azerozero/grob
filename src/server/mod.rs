@@ -21,6 +21,7 @@ mod oauth_handlers;
 pub mod openai_compat;
 /// OpenAI Responses API (`/v1/responses`) compatibility translation layer.
 pub mod responses_compat;
+mod watch_sse;
 
 pub use audit::AuditEntryBuilder;
 pub(crate) use audit::{log_audit, AuditCompliance, AuditParams};
@@ -31,7 +32,7 @@ pub(crate) use budget::{
 pub use error::AppError;
 pub(crate) use helpers::{
     format_route_type, inject_continuation_text, resolve_provider_mappings,
-    sanitize_provider_response, should_inject_continuation,
+    sanitize_provider_response_reported, should_inject_continuation,
 };
 #[cfg(feature = "mcp")]
 pub(crate) use init::init_mcp;
@@ -143,6 +144,8 @@ pub struct AppState {
 
     /// Persistent state - NOT reloaded
     pub token_store: TokenStore,
+    /// Shared storage backend (redb) for virtual key lookups and spend tracking.
+    pub grob_store: Arc<crate::storage::GrobStore>,
     /// Identifies how the configuration was loaded (file, env, CLI).
     pub config_source: crate::cli::ConfigSource,
     /// Counter of currently in-flight requests for graceful drain.
@@ -154,6 +157,10 @@ pub struct AppState {
     pub observability: ObservabilityState,
     /// Auth, rate limiting, DLP, circuit breakers, audit, cache, tap
     pub security: SecurityState,
+    /// Live event bus for `grob watch` TUI and SSE endpoint.
+    pub event_bus: crate::features::watch::EventBus,
+    /// External log exporter for structured request/response logs.
+    pub log_exporter: Option<Arc<crate::features::log_export::LogExporter>>,
 }
 
 impl AppState {
@@ -223,12 +230,19 @@ pub async fn start_server(
     let availability: Option<Arc<dyn traits::ProviderAvailability>> =
         circuit_breakers.map(|cb| cb as Arc<dyn traits::ProviderAvailability>);
 
+    let log_exporter = crate::features::log_export::init_log_exporter(&config.log_export);
+
+    let event_bus = crate::features::watch::EventBus::new();
+
     let state = Arc::new(AppState {
         inner: std::sync::RwLock::new(reloadable),
         token_store,
+        grob_store,
         config_source,
         active_requests: std::sync::atomic::AtomicU64::new(0),
         started_at: chrono::Utc::now(),
+        event_bus,
+        log_exporter,
         observability: ObservabilityState {
             message_tracer: tracer,
             metrics_handle,
@@ -255,9 +269,23 @@ pub async fn start_server(
     let oauth_state = state.clone();
     let drain_state = state.clone();
 
+    // Validate all model mappings in background (non-blocking).
+    // Warns about dead fallback models without delaying startup.
+    {
+        let validation_state = state.clone();
+        tokio::spawn(async move {
+            let inner = validation_state.snapshot();
+            info!("Validating model mappings...");
+            let results =
+                crate::preset::validate_config(&inner.config, &inner.provider_registry).await;
+            crate::preset::log_validation_results(&results);
+        });
+    }
+
     lifecycle::spawn_oauth_callback(oauth_state);
     lifecycle::bind_and_serve(&config, app, shutdown_signal).await?;
     lifecycle::drain_in_flight(&drain_state).await;
+    crate::otel::shutdown_otel();
 
     Ok(())
 }
@@ -283,6 +311,7 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
         .route("/api/config", post(config_api::update_config_json))
         .route("/api/config/reload", post(config_api::reload_config))
         .route("/api/scores", get(endpoints::scores_endpoint))
+        .route("/api/events", get(watch_sse::watch_events_sse))
         .route(
             "/api/oauth/authorize",
             post(oauth_handlers::oauth_authorize),

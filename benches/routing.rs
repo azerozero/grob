@@ -38,6 +38,8 @@ fn make_router() -> Router {
         mcp: Default::default(),
         version: None,
         user: Default::default(),
+        otel: Default::default(),
+        log_export: Default::default(),
     })
 }
 

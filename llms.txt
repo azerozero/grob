@@ -16,6 +16,7 @@
 - [OpenAI Compatibility](docs/openai-compatibility.md): `/v1/chat/completions` endpoint details, supported features, and limitations
 - [OpenAPI Specification](docs/openapi.yaml): Full API reference in OpenAPI 3.0 format
 - [Error Reference](docs/reference/errors.md): HTTP status codes and error types
+- [Provider Reference](docs/reference/providers.md): Provider trait, implementations, format translation, streaming, and error types
 - [Troubleshooting](docs/TROUBLESHOOTING.md): Common errors, diagnostics, and fixes
 
 ## How-to
@@ -71,6 +72,7 @@
 - [Changelog](CHANGELOG.md): Release history
 - [License](LICENSE): AGPL-3.0-only
 - [Licensing](LICENSING.md): Dual-license tiers and commercial options
+- [Contributing](CONTRIBUTING.md): How to contribute (redirect to full guide)
 - [CLA](CLA.md): Contributor License Agreement
 - [AI Agent Context](AGENTS.md): Project context optimized for AI coding agents
 - [Development Guidelines](CLAUDE.md): Code style, doc comment conventions, module layout
