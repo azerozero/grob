@@ -95,6 +95,16 @@ types = ["toml"]
 pass_filenames = false
 stages = ["pre-push"]
 
+# Semver compatibility — catch accidental API breakage
+[[repos.hooks]]
+id = "cargo-semver-checks"
+name = "cargo semver-checks"
+language = "system"
+entry = "cargo semver-checks"
+types = ["rust"]
+pass_filenames = false
+stages = ["pre-push"]
+
 # Sweep stale build artifacts (>7 days) to prevent target/ bloat
 [[repos.hooks]]
 id = "cargo-sweep"

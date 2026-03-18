@@ -153,3 +153,18 @@ jobs:
           shared-key: machete
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - uses: bnjbvr/cargo-machete@main
+
+  semver:
+    name: API Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: semver
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Check semver compatibility
+        uses: obi1kenobi/cargo-semver-checks-action@v2
