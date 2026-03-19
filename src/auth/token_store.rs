@@ -275,14 +275,18 @@ pub(crate) fn set_owner_only_permissions(path: &std::path::Path) -> Result<()> {
 
         // NOTE: Uses raw Win32 API to avoid heavy crate dependencies.
         // Sets a DACL with a single GENERIC_ALL ACE for the current user.
-        #[allow(non_snake_case)]
+        #[allow(
+            non_snake_case,
+            non_upper_case_globals,
+            dead_code,
+            clippy::upper_case_acronyms
+        )]
         mod win32 {
             pub const DACL_SECURITY_INFORMATION: u32 = 0x00000004;
             pub const PROTECTED_DACL_SECURITY_INFORMATION: u32 = 0x80000000;
             pub const TOKEN_QUERY: u32 = 0x0008;
             pub const TokenUser: u32 = 1;
             pub const ACL_REVISION: u8 = 2;
-            pub const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
             pub const GENERIC_ALL: u32 = 0x10000000;
 
             #[repr(C)]
@@ -292,20 +296,6 @@ pub(crate) fn set_owner_only_permissions(path: &std::path::Path) -> Result<()> {
                 pub AclSize: u16,
                 pub AceCount: u16,
                 pub Sbz2: u16,
-            }
-
-            #[repr(C)]
-            pub struct ACE_HEADER {
-                pub AceType: u8,
-                pub AceFlags: u8,
-                pub AceSize: u16,
-            }
-
-            #[repr(C)]
-            pub struct ACCESS_ALLOWED_ACE {
-                pub Header: ACE_HEADER,
-                pub Mask: u32,
-                pub SidStart: u32,
             }
 
             extern "system" {
@@ -323,11 +313,6 @@ pub(crate) fn set_owner_only_permissions(path: &std::path::Path) -> Result<()> {
                     ReturnLength: *mut u32,
                 ) -> i32;
                 pub fn GetLengthSid(pSid: *const u8) -> u32;
-                pub fn CopySid(
-                    nDestinationSidLength: u32,
-                    pDestinationSid: *mut u8,
-                    pSourceSid: *const u8,
-                ) -> i32;
                 pub fn InitializeAcl(pAcl: *mut ACL, nAclLength: u32, dwAclRevision: u32) -> i32;
                 pub fn AddAccessAllowedAce(
                     pAcl: *mut ACL,
