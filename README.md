@@ -19,7 +19,7 @@
 
 **Grob** is a high-performance LLM routing proxy that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, and fits in a 6 MB container with zero dependencies.
 
-> **227 µs P50 overhead** with full DLP + routing + caching + rate limiting enabled — [20x faster than LiteLLM](docs/reference/features.md), every feature measured individually.
+> **~100 µs pure overhead** with full DLP + routing + caching + rate limiting — [50x faster than LiteLLM](docs/reference/features.md), every feature [measured individually](benches/).
 
 ```
 Claude Code ─┐                          ┌── Anthropic (primary)
