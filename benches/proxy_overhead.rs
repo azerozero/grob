@@ -422,6 +422,42 @@ async fn main() {
         .expect("Mock backend unreachable");
     assert_eq!(probe_resp.status(), 200, "Mock backend returned non-200");
 
+    // Measure direct-to-mock baseline (TCP+HTTP floor, no proxy).
+    {
+        let client = reqwest::Client::builder()
+            .pool_max_idle_per_host(10)
+            .build()
+            .unwrap();
+        let body = clean_request_body();
+        for _ in 0..WARMUP_REQUESTS {
+            let resp = client
+                .post(format!("{}/v1/messages", backend_url))
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            let _ = resp.bytes().await;
+        }
+        let mut latencies = Vec::with_capacity(MEASURED_REQUESTS);
+        for _ in 0..MEASURED_REQUESTS {
+            let start = Instant::now();
+            let resp = client
+                .post(format!("{}/v1/messages", backend_url))
+                .json(&body)
+                .send()
+                .await
+                .unwrap();
+            let _ = resp.bytes().await;
+            latencies.push(start.elapsed());
+        }
+        let stats = compute_stats(latencies);
+        print_stats(
+            "direct_to_mock",
+            "Direct HTTP to mock backend (no proxy) — TCP+HTTP floor",
+            &stats,
+        );
+    }
+
     println!("--- Results (lower = better) ---");
     println!();
 
@@ -513,5 +549,10 @@ async fn main() {
         print_stats(scenario.name, scenario.description, &stats);
     }
 
+    println!();
+    println!("NOTE: Pure proxy overhead = scenario_P50 - direct_to_mock_P50");
+    println!("      The direct_to_mock baseline measures TCP+HTTP cost without any proxy.");
+    println!("      Subtract it to get grob's actual processing overhead.");
+    println!();
     println!("=== Done ===");
 }
