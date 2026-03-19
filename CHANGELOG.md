@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1](https://github.com/azerozero/grob/compare/v0.20.0...v0.20.1) - 2026-03-19
+
+### Added
+
+- *(observability)* x-grob-overhead-duration-ms header + DLP benchmark scenarios
+
 ## [0.20.0](https://github.com/azerozero/grob/compare/v0.19.2...v0.20.0) - 2026-03-19
 
 ### Added
