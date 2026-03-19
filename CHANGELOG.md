@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.2](https://github.com/azerozero/grob/compare/v0.19.1...v0.19.2) - 2026-03-19
+
+### Fixed
+
+- *(windows)* suppress clippy/dead-code warnings in Win32 FFI module
+
 ## [0.19.1](https://github.com/azerozero/grob/compare/v0.19.0...v0.19.1) - 2026-03-19
 
 ### Fixed
