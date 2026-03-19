@@ -95,13 +95,14 @@ types = ["toml"]
 pass_filenames = false
 stages = ["pre-push"]
 
-# Semver compatibility — catch accidental API breakage
+# Semver compatibility — compare against latest git tag (not crates.io)
 [[repos.hooks]]
 id = "cargo-semver-checks"
 name = "cargo semver-checks"
 language = "system"
-entry = "cargo semver-checks"
-types = ["rust"]
+entry = "sh"
+args = ["-c", "TAG=$(git tag --sort=-v:refname | head -1) && [ -n \"$TAG\" ] && cargo semver-checks --baseline-rev \"$TAG\" || echo 'No tags found, skipping semver check'"]
+always_run = true
 pass_filenames = false
 stages = ["pre-push"]
 

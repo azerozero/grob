@@ -166,5 +166,11 @@ jobs:
         with:
           shared-key: semver
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Find latest tag for baseline
+        id: baseline
+        run: |
+          TAG=$(git tag --sort=-v:refname | head -1)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Check semver compatibility
-        uses: obi1kenobi/cargo-semver-checks-action@v2
+        if: steps.baseline.outputs.tag != ''
+        run: cargo semver-checks --baseline-rev ${{ steps.baseline.outputs.tag }}
