@@ -27,11 +27,13 @@ pub(crate) struct ProviderBase {
 impl ProviderBase {
     /// Creates a ProviderBase from standard constructor parameters.
     pub fn new(params: ProviderParams, custom_headers: Vec<(String, String)>) -> Self {
+        let client =
+            build_provider_client(params.connect_timeout, params.tls_identity, params.tls_ca);
         Self {
             name: params.name,
             api_key: params.api_key,
             base_url: params.base_url.unwrap_or_default(),
-            client: build_provider_client(params.connect_timeout),
+            client,
             models: params.models,
             custom_headers,
             oauth_provider: params.oauth_provider,

@@ -59,6 +59,56 @@ impl ProviderRegistry {
                 .unwrap_or_else(|| default_base_url.to_string())
         };
 
+        // Load mTLS identity (cert + key) if both paths are configured.
+        let tls_identity = match (&config.tls_cert, &config.tls_key) {
+            (Some(cert_path), Some(key_path)) => {
+                let cert_pem = std::fs::read(cert_path).unwrap_or_else(|e| {
+                    tracing::warn!("Failed to read TLS cert '{}': {}", cert_path, e);
+                    Vec::new()
+                });
+                let key_pem = std::fs::read(key_path).unwrap_or_else(|e| {
+                    tracing::warn!("Failed to read TLS key '{}': {}", key_path, e);
+                    Vec::new()
+                });
+                if cert_pem.is_empty() || key_pem.is_empty() {
+                    None
+                } else {
+                    let mut combined = cert_pem;
+                    combined.extend_from_slice(&key_pem);
+                    match reqwest::Identity::from_pem(&combined) {
+                        Ok(id) => Some(id),
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to load mTLS identity for '{}': {}",
+                                config.name,
+                                e
+                            );
+                            None
+                        }
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        // Load custom CA certificate if configured.
+        let tls_ca = config
+            .tls_ca
+            .as_ref()
+            .and_then(|ca_path| match std::fs::read(ca_path) {
+                Ok(ca_pem) => match reqwest::Certificate::from_pem(&ca_pem) {
+                    Ok(cert) => Some(cert),
+                    Err(e) => {
+                        tracing::warn!("Failed to parse CA cert for '{}': {}", config.name, e);
+                        None
+                    }
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to read CA cert '{}': {}", ca_path, e);
+                    None
+                }
+            });
+
         ProviderParams {
             name: config.name.clone(),
             api_key,
@@ -69,6 +119,8 @@ impl ProviderRegistry {
             api_timeout: build_ctx.api_timeout,
             connect_timeout: build_ctx.connect_timeout,
             pass_through: config.pass_through.unwrap_or(false),
+            tls_identity,
+            tls_ca,
         }
     }
 
@@ -253,7 +305,7 @@ impl ProviderRegistry {
     /// Pre-warm TLS connections to all providers (fire-and-forget).
     /// Spawns a background task per provider to open a TCP+TLS connection.
     pub fn warmup_connections(self: &Arc<Self>) {
-        let warmup_client = super::build_provider_client(Duration::from_secs(5));
+        let warmup_client = super::build_provider_client(Duration::from_secs(5), None, None);
 
         for (name, provider) in &self.providers {
             if let Some(base_url) = provider.base_url() {
@@ -317,6 +369,9 @@ mod tests {
                 budget_usd: None,
                 region: None,
                 pass_through: None,
+                tls_cert: None,
+                tls_key: None,
+                tls_ca: None,
             },
             ProviderConfig {
                 name: "provider-b".to_string(),
@@ -333,6 +388,9 @@ mod tests {
                 budget_usd: None,
                 region: None,
                 pass_through: None,
+                tls_cert: None,
+                tls_key: None,
+                tls_ca: None,
             },
         ];
 

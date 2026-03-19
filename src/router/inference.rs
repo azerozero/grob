@@ -7,7 +7,7 @@
 /// Infers the provider backend type from a model name.
 ///
 /// Returns the canonical `provider_type` string that matches
-/// [`ProviderConfig::provider_type`] values used in TOML configuration.
+/// `provider_type` values used in TOML `[[providers]]` configuration.
 ///
 /// # Examples
 ///

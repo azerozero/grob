@@ -3,7 +3,8 @@ use super::hot_config::SharedHotConfig;
 use super::DlpEngine;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 /// Manages per-API-key DLP engine instances for session isolation.
 ///
@@ -18,6 +19,10 @@ pub struct DlpSessionManager {
     sessions_enabled: bool,
     /// Shared hot config (same Arc across all session engines).
     hot_config: SharedHotConfig,
+    /// Tracks when the session seed was last rotated.
+    last_rotation: Mutex<Instant>,
+    /// How often to rotate the session seed (zero = never).
+    rotation_interval: Duration,
 }
 
 impl DlpSessionManager {
@@ -25,12 +30,19 @@ impl DlpSessionManager {
     pub fn from_config(config: DlpConfig) -> Option<Arc<Self>> {
         let global_engine = DlpEngine::from_config(config.clone())?;
         let hot_config = Arc::clone(&global_engine.hot_config);
+        let rotation_interval = if config.key_rotation_hours == 0 {
+            Duration::ZERO
+        } else {
+            Duration::from_secs(config.key_rotation_hours * 3600)
+        };
         Some(Arc::new(Self {
             global_engine,
             sessions: RwLock::new(HashMap::new()),
             sessions_enabled: config.enable_sessions,
             config,
             hot_config,
+            last_rotation: Mutex::new(Instant::now()),
+            rotation_interval,
         }))
     }
 
@@ -53,6 +65,8 @@ impl DlpSessionManager {
     /// - No key → returns global engine
     /// - Sessions enabled + key → returns cached or newly-created session engine
     pub fn engine_for(&self, session_key: Option<&str>) -> Arc<DlpEngine> {
+        self.maybe_rotate_key();
+
         if !self.sessions_enabled {
             return Arc::clone(&self.global_engine);
         }
@@ -88,6 +102,39 @@ impl DlpSessionManager {
     #[cfg(test)]
     pub fn global_engine(&self) -> &Arc<DlpEngine> {
         &self.global_engine
+    }
+
+    /// Rotates the session seed if the rotation interval has elapsed.
+    ///
+    /// Clears the session cache so new engines pick up the fresh seed.
+    /// No-op when `key_rotation_hours` is 0.
+    fn maybe_rotate_key(&self) {
+        if self.rotation_interval.is_zero() {
+            return;
+        }
+
+        let mut last = self.last_rotation.lock().unwrap_or_else(|e| e.into_inner());
+        if last.elapsed() < self.rotation_interval {
+            return;
+        }
+
+        // Clear session cache so new engines are built with a fresh random seed.
+        let mut sessions = self.sessions.write().unwrap_or_else(|e| e.into_inner());
+        sessions.clear();
+        *last = Instant::now();
+
+        tracing::info!(
+            "DLP key rotated (pseudonyms from previous session are no longer reversible)"
+        );
+    }
+
+    /// Forces an immediate key rotation (test helper).
+    #[cfg(test)]
+    fn force_rotate(&self) {
+        let mut sessions = self.sessions.write().unwrap_or_else(|e| e.into_inner());
+        sessions.clear();
+        let mut last = self.last_rotation.lock().unwrap_or_else(|e| e.into_inner());
+        *last = Instant::now();
     }
 
     /// SHA256 hash of API key → hex string (session identifier).
@@ -182,6 +229,7 @@ mod tests {
             url_exfil: Default::default(),
             prompt_injection: Default::default(),
             signed_config: Default::default(),
+            key_rotation_hours: 24,
         }
     }
 
@@ -313,6 +361,40 @@ mod tests {
         assert!(
             h1.chars().all(|c| c.is_ascii_hexdigit()),
             "Should be hex chars only"
+        );
+    }
+
+    #[test]
+    fn test_rotation_clears_session_cache() {
+        let mgr = DlpSessionManager::from_config(test_config(true)).unwrap();
+
+        let e_before = mgr.engine_for(Some("key-rotate"));
+        let _text_before = e_before.sanitize_text("Thales");
+
+        // Force rotation: clears cache, so next engine_for creates a new engine.
+        mgr.force_rotate();
+
+        let e_after = mgr.engine_for(Some("key-rotate"));
+        assert!(
+            !Arc::ptr_eq(&e_before, &e_after),
+            "After rotation, a new engine should be created"
+        );
+    }
+
+    #[test]
+    fn test_no_rotation_when_disabled() {
+        let mut cfg = test_config(true);
+        cfg.key_rotation_hours = 0;
+        let mgr = DlpSessionManager::from_config(cfg).unwrap();
+
+        let e1 = mgr.engine_for(Some("key-stable"));
+        // Calling maybe_rotate_key should be a no-op when interval is zero.
+        mgr.maybe_rotate_key();
+        let e2 = mgr.engine_for(Some("key-stable"));
+
+        assert!(
+            Arc::ptr_eq(&e1, &e2),
+            "With rotation disabled, same engine should be reused"
         );
     }
 }

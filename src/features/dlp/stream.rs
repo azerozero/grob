@@ -418,6 +418,7 @@ mod tests {
             url_exfil: Default::default(),
             prompt_injection: Default::default(),
             signed_config: Default::default(),
+            key_rotation_hours: 24,
         };
         DlpEngine::from_config(config).unwrap()
     }
@@ -572,6 +573,7 @@ mod tests {
             url_exfil: Default::default(),
             prompt_injection: Default::default(),
             signed_config: Default::default(),
+            key_rotation_hours: 24,
         };
         let engine = DlpEngine::from_config(config).unwrap();
         let mut canary_count: usize = 0;
@@ -653,6 +655,7 @@ mod tests {
             url_exfil: Default::default(),
             prompt_injection: Default::default(),
             signed_config: Default::default(),
+            key_rotation_hours: 24,
         };
         let engine = DlpEngine::from_config(config).unwrap();
 

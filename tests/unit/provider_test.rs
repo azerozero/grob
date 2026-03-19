@@ -25,6 +25,9 @@ mod tests {
             budget_usd: None,
             region: None,
             pass_through: None,
+            tls_cert: None,
+            tls_key: None,
+            tls_ca: None,
         };
 
         assert!(config.is_enabled());
@@ -48,6 +51,9 @@ mod tests {
             budget_usd: None,
             region: None,
             pass_through: None,
+            tls_cert: None,
+            tls_key: None,
+            tls_ca: None,
         };
 
         assert!(!config.is_enabled());

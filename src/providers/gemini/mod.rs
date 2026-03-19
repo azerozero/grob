@@ -79,11 +79,13 @@ impl GeminiProvider {
 
         super::warn_if_cleartext(&base_url, "gemini");
 
+        let client =
+            build_provider_client(params.connect_timeout, params.tls_identity, params.tls_ca);
         Self {
             api_key,
             base_url,
             models: params.models,
-            client: build_provider_client(params.connect_timeout),
+            client,
             custom_headers,
             project_id,
             location,

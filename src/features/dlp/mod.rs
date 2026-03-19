@@ -821,6 +821,7 @@ mod tests {
             url_exfil: Default::default(),
             prompt_injection: Default::default(),
             signed_config: Default::default(),
+            key_rotation_hours: 24,
         }
     }
 

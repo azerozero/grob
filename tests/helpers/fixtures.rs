@@ -119,6 +119,9 @@ pub fn base_provider_config(name: &str) -> grob::providers::ProviderConfig {
         budget_usd: None,
         region: None,
         pass_through: None,
+        tls_cert: None,
+        tls_key: None,
+        tls_ca: None,
     }
 }
 

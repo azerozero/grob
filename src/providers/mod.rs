@@ -84,18 +84,31 @@ pub struct StreamResponse {
 ///
 /// Applies: TCP_NODELAY (disable Nagle), connect timeout (fail-fast),
 /// connection pooling, and HTTP/2 adaptive flow control.
-pub fn build_provider_client(connect_timeout: Duration) -> Client {
-    Client::builder()
+/// When `identity` or `ca` are provided, configures mTLS client
+/// certificate authentication and/or custom CA trust.
+pub fn build_provider_client(
+    connect_timeout: Duration,
+    identity: Option<reqwest::Identity>,
+    ca: Option<reqwest::Certificate>,
+) -> Client {
+    let mut builder = Client::builder()
         .tcp_nodelay(true)
         .connect_timeout(connect_timeout)
         .pool_max_idle_per_host(20)
         .pool_idle_timeout(Duration::from_secs(90))
-        .http2_adaptive_window(true)
-        .build()
-        .unwrap_or_else(|e| {
-            tracing::warn!("Provider client build failed, using defaults: {}", e);
-            Client::new()
-        })
+        .http2_adaptive_window(true);
+
+    if let Some(id) = identity {
+        builder = builder.identity(id);
+    }
+    if let Some(cert) = ca {
+        builder = builder.add_root_certificate(cert);
+    }
+
+    builder.build().unwrap_or_else(|e| {
+        tracing::warn!("Provider client build failed, using defaults: {}", e);
+        Client::new()
+    })
 }
 
 /// Logs a warning if a provider base URL uses plaintext HTTP for a non-localhost endpoint.
@@ -168,6 +181,10 @@ pub struct ProviderParams {
     pub connect_timeout: Duration,
     /// Accepts any model name not listed in configured models.
     pub pass_through: bool,
+    /// Pre-loaded mTLS client identity (cert + key) for upstream connections.
+    pub tls_identity: Option<reqwest::Identity>,
+    /// Pre-loaded custom CA certificate for upstream server verification.
+    pub tls_ca: Option<reqwest::Certificate>,
 }
 
 /// Authentication type for providers
@@ -240,6 +257,16 @@ pub struct ProviderConfig {
     /// Accepts any model name not explicitly configured in `[[models]]`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_through: Option<bool>,
+
+    /// Path to PEM client certificate for mTLS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_cert: Option<String>,
+    /// Path to PEM client private key for mTLS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_key: Option<String>,
+    /// Path to custom CA certificate for verifying the upstream server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_ca: Option<String>,
 }
 
 impl ProviderConfig {

@@ -48,6 +48,13 @@ pub struct DlpConfig {
     /// Signed config hot-reload settings. Default: disabled.
     #[serde(default)]
     pub signed_config: SignedConfigSettings,
+    /// Interval in hours for rotating the DLP pseudonymization key (default: 24, 0 = no rotation).
+    #[serde(default = "default_key_rotation_hours")]
+    pub key_rotation_hours: u64,
+}
+
+fn default_key_rotation_hours() -> u64 {
+    24
 }
 
 fn default_true() -> bool {

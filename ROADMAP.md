@@ -93,6 +93,32 @@ Quick wins identifiés :
 
 ---
 
+## Zero Trust — Sécurité inter-composants
+
+### Niveau 1 — Implémenté
+
+| Feature | Status |
+|---------|--------|
+| JWT auth sur requêtes entrantes | ✅ RS256/HS256, JWKS refresh |
+| Virtual keys auth | ✅ SHA-256 hash, per-key budget/rate-limit |
+| Rate limiting par token | ✅ Per-tenant token bucket |
+| Constant-time auth | ✅ `subtle` crate |
+| mTLS client cert upstream | ✅ `tls_cert`/`tls_key`/`tls_ca` par provider |
+| Rotation clé DLP | ✅ Auto toutes les 24h (configurable) |
+
+### Niveau 2 — Feature requests (backlog)
+
+| Feature | Description | Priorité |
+|---------|-------------|----------|
+| **LoRA adapter registry** | Distribution sécurisée de LoRA via OCI registry avec signature ECDSA + manifest SHA-256 + licence token JWT | M6+ |
+| **LoRA chargement dynamique** | Header `X-Dunst-Adapter` + vérification JWT → charge l'adapter si en cache, pull si absent | M6+ |
+| **LoRA fichier local (air-gap)** | `.gguf` + `.gguf.sig` + `manifest.toml` avec SHA-256 + signature ECDSA. Refus de démarrer si sig invalide. | M6+ |
+| **HSM pour clés de session** | PKI complète avec HSM pour les clés de session DLP. Overkill sauf contrat OTAN. | Sur demande client |
+| **Re-auth par requête LLM** | Vérifier l'identité à chaque token généré. Overkill pour 99% des cas. | Sur demande client |
+| **Intégrité SSE stream** | Signature de chaque chunk SSE. Overkill. | Sur demande client |
+
+---
+
 ## Pas prioritaire (backlog)
 
 | Feature | Pourquoi pas maintenant |
