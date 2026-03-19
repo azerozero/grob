@@ -134,6 +134,18 @@ pub enum Commands {
     },
     /// Restore previous configuration from backup
     Rollback,
+    /// Run performance benchmark on the current system
+    Bench {
+        /// Number of requests per scenario (default: 500)
+        #[arg(short = 'n', long, default_value = "500")]
+        requests: usize,
+        /// Include auth overhead (creates a virtual key and authenticates each request)
+        #[arg(long)]
+        with_auth: bool,
+        /// Output format (table or json)
+        #[arg(long, default_value = "table")]
+        format: String,
+    },
     /// Run diagnostic checks on your Grob installation
     Doctor,
     /// Zero-downtime upgrade: spawn new process, wait for health, signal old to drain

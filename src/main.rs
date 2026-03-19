@@ -204,6 +204,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::Rollback => {
             commands::config_rollback::cmd_config_rollback(&config, &config_source).await?;
         }
+        Commands::Bench {
+            requests,
+            with_auth,
+            format,
+        } => commands::bench::cmd_bench(&config, requests, with_auth, &format).await?,
         Commands::Doctor => commands::doctor::cmd_doctor(&config, &config_source).await,
         #[cfg(feature = "watch")]
         Commands::Watch => {

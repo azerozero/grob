@@ -1,5 +1,7 @@
 //! CLI subcommands: start, stop, status, doctor, spend, etc.
 
+/// Self-contained performance evaluation of the proxy pipeline.
+pub mod bench;
 /// Shared utilities and helpers used across subcommands.
 pub mod common;
 /// Shell completion script generation for supported shells.

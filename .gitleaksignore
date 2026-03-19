@@ -79,3 +79,7 @@ benches/proxy_overhead.rs:aws-access-token:367
 benches/proxy_overhead.rs:github-pat:367
 benches/proxy_overhead.rs:aws-access-token:353
 benches/proxy_overhead.rs:github-pat:353
+src/commands/bench.rs:aws-access-token:318
+src/commands/bench.rs:github-pat:318
+src/commands/bench.rs:github-pat:314
+src/commands/bench.rs:aws-access-token:314
