@@ -13,10 +13,18 @@ hooks = [
   { id = "mixed-line-ending", args = ["--fix", "lf"] },
 ]
 
-# Cargo fmt — fast, runs on pre-commit
+# Gitleaks — detect secrets in staged changes (pre-commit)
 [[repos]]
 repo = "local"
 
+[[repos.hooks]]
+id = "gitleaks"
+name = "gitleaks (secret detection)"
+language = "system"
+entry = "gitleaks protect --staged --no-banner"
+pass_filenames = false
+
+# Cargo fmt — fast, runs on pre-commit
 [[repos.hooks]]
 id = "cargo-fmt"
 name = "cargo fmt"
