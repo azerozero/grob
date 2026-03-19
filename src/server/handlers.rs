@@ -133,6 +133,7 @@ fn finish_dispatch<S, C, F>(
     result: dispatch::DispatchResult,
     transparency_enabled: bool,
     req_id: &str,
+    start_time: std::time::Instant,
     on_streaming: S,
     on_complete: C,
     on_fan_out: F,
@@ -151,16 +152,26 @@ where
     F: FnOnce(crate::providers::ProviderResponse) -> Response,
 {
     match result {
-        dispatch::DispatchResult::CacheHit(resp) => Ok(resp),
+        dispatch::DispatchResult::CacheHit(mut resp) => {
+            // Cache hit: entire elapsed time is overhead (no provider call).
+            let overhead_ms = start_time.elapsed().as_millis() as u64;
+            resp.headers_mut().insert(
+                "x-grob-overhead-duration-ms",
+                axum::http::HeaderValue::from(overhead_ms),
+            );
+            Ok(resp)
+        }
 
         dispatch::DispatchResult::Streaming {
             stream,
             provider,
             actual_model,
             upstream_headers,
+            overhead_ms,
         } => {
             let body = on_streaming(stream);
-            let mut response_builder = build_sse_response();
+            let mut response_builder =
+                build_sse_response().header("x-grob-overhead-duration-ms", overhead_ms);
 
             for (name, value) in &upstream_headers {
                 response_builder = response_builder.header(name.as_str(), value.as_str());
@@ -187,17 +198,35 @@ where
             provider,
             actual_model,
             response_bytes,
+            provider_duration_ms,
         } => {
+            // Overhead = total time - provider call time.
+            let total_ms = start_time.elapsed().as_millis() as u64;
+            let overhead_ms = total_ms.saturating_sub(provider_duration_ms);
+
             let body = match response_bytes {
                 Some(bytes) => bytes,
                 None => on_complete(response)?,
             };
             let transparency =
                 transparency_enabled.then_some((provider.as_str(), actual_model.as_str(), req_id));
-            build_json_response(body, transparency)
+            let mut resp = build_json_response(body, transparency)?;
+            resp.headers_mut().insert(
+                "x-grob-overhead-duration-ms",
+                axum::http::HeaderValue::from(overhead_ms),
+            );
+            Ok(resp)
         }
 
-        dispatch::DispatchResult::FanOut { response } => Ok(on_fan_out(response)),
+        dispatch::DispatchResult::FanOut { response } => {
+            let total_ms = start_time.elapsed().as_millis() as u64;
+            let mut resp = on_fan_out(response);
+            resp.headers_mut().insert(
+                "x-grob-overhead-duration-ms",
+                axum::http::HeaderValue::from(total_ms),
+            );
+            Ok(resp)
+        }
     }
 }
 
@@ -222,6 +251,7 @@ pub(crate) async fn handle_openai_chat_completions(
         .map_err(|e| AppError::ParseError(format!("Failed to transform OpenAI request: {}", e)))?;
     forward_beta_header(&mut request, &headers);
 
+    let start_time = std::time::Instant::now();
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -231,7 +261,7 @@ pub(crate) async fn handle_openai_chat_completions(
         tenant_id: prelude.tenant_id,
         peer_ip: prelude.peer_ip,
         req_id: &request_id.0,
-        start_time: std::time::Instant::now(),
+        start_time,
         headers: &headers,
         trace_id: None,
     };
@@ -244,6 +274,7 @@ pub(crate) async fn handle_openai_chat_completions(
         result,
         prelude.transparency_enabled,
         &request_id.0,
+        start_time,
         |stream| {
             let mut transformer = openai_compat::AnthropicToOpenAIStream::new(model_for_stream);
             let mapped = stream
@@ -286,6 +317,7 @@ pub(crate) async fn handle_responses(
         })?;
     forward_beta_header(&mut request, &headers);
 
+    let start_time = std::time::Instant::now();
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -295,7 +327,7 @@ pub(crate) async fn handle_responses(
         tenant_id: prelude.tenant_id,
         peer_ip: prelude.peer_ip,
         req_id: &request_id.0,
-        start_time: std::time::Instant::now(),
+        start_time,
         headers: &headers,
         trace_id: None,
     };
@@ -308,6 +340,7 @@ pub(crate) async fn handle_responses(
         result,
         prelude.transparency_enabled,
         &request_id.0,
+        start_time,
         |stream| {
             let mut transformer =
                 responses_compat::AnthropicToResponsesStream::new(model_for_stream);
@@ -387,6 +420,7 @@ pub(crate) async fn handle_messages(
 
     let is_streaming = request.stream == Some(true);
 
+    let start_time = std::time::Instant::now();
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -396,7 +430,7 @@ pub(crate) async fn handle_messages(
         tenant_id: prelude.tenant_id,
         peer_ip: prelude.peer_ip,
         req_id,
-        start_time: std::time::Instant::now(),
+        start_time,
         headers: &headers,
         trace_id: Some(trace_id),
     };
@@ -407,6 +441,7 @@ pub(crate) async fn handle_messages(
         result,
         prelude.transparency_enabled,
         req_id,
+        start_time,
         |stream| {
             let body_stream = stream.map_err(|e| {
                 error!("Stream error: {}", e);

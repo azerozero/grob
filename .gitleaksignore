@@ -65,3 +65,9 @@ b50b9db794d33a33dc7b1fd24a28840a29dea9d3:src/features/dlp/mod.rs:private-key:443
 c09662f3060ffac77e0d63b5b5dfa9b6dc2db910:benches/routing.rs:aws-access-token:141
 f724fbf7b6bac214b6e1b08b7316d2c75bb6e66f:src/features/dlp/mod.rs:github-pat:313
 f724fbf7b6bac214b6e1b08b7316d2c75bb6e66f:src/features/dlp/sprt.rs:generic-api-key:169
+
+# DLP benchmark test payloads (not real secrets)
+benches/routing.rs:github-pat:245
+benches/routing.rs:aws-access-token:246
+benches/routing.rs:aws-access-token:255
+benches/routing.rs:aws-access-token:479

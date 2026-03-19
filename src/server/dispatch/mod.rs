@@ -163,6 +163,8 @@ pub(crate) enum DispatchResult {
         actual_model: String,
         /// Upstream headers to forward (e.g., rate-limit headers).
         upstream_headers: Vec<(String, String)>,
+        /// Proxy overhead in ms (time from request receipt to first SSE byte).
+        overhead_ms: u64,
     },
     /// Non-streaming response from a provider.
     Complete {
@@ -171,6 +173,8 @@ pub(crate) enum DispatchResult {
         actual_model: String,
         /// Pre-serialized JSON bytes (serialized once, used for cache + response).
         response_bytes: Option<Vec<u8>>,
+        /// Time spent inside the provider call (ms), used for overhead calculation.
+        provider_duration_ms: u64,
     },
     /// Fan-out response (multiple providers called in parallel).
     FanOut { response: ProviderResponse },

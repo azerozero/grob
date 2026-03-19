@@ -328,6 +328,7 @@ async fn try_direct_provider_lookup(
         provider: model_name.to_string(),
         actual_model: model_name.to_string(),
         response_bytes: None,
+        provider_duration_ms: 0,
     }))
 }
 
@@ -398,7 +399,9 @@ async fn dispatch_streaming(
 
     match provider.send_message_stream(provider_request).await {
         Ok(stream_response) => {
-            let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
+            // Overhead = time from request receipt to first SSE byte (before provider responded).
+            let overhead_ms = ctx.start_time.elapsed().as_millis() as u64;
+            let latency_ms = overhead_ms;
             ctx.record_provider_success(&mapping.provider, latency_ms)
                 .await;
 
@@ -412,6 +415,7 @@ async fn dispatch_streaming(
                 provider: mapping.provider.clone(),
                 actual_model: mapping.actual_model.clone(),
                 upstream_headers,
+                overhead_ms,
             })
         }
         Err(e) => {
@@ -516,8 +520,10 @@ async fn dispatch_non_streaming(
             owned_request.take().expect("set before loop")
         };
 
+        let provider_start = std::time::Instant::now();
         match provider.send_message(req).await {
             Ok(mut response) => {
+                let provider_duration_ms = provider_start.elapsed().as_millis() as u64;
                 let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
                 ctx.record_provider_success(&attempt.mapping.provider, latency_ms)
                     .await;
@@ -572,6 +578,7 @@ async fn dispatch_non_streaming(
                     provider: attempt.mapping.provider.clone(),
                     actual_model: attempt.mapping.actual_model.clone(),
                     response_bytes,
+                    provider_duration_ms,
                 });
             }
             Err(e) => {
