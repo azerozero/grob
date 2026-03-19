@@ -153,6 +153,11 @@ name = "http_overhead"
 harness = false
 required-features = ["tls"]
 
+[[bench]]
+name = "proxy_overhead"
+harness = false
+required-features = ["harness"]
+
 [features]
 default = ["dlp", "oauth", "tap", "compliance", "mcp", "watch"]
 watch = ["ratatui", "crossterm"]

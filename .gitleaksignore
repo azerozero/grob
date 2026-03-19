@@ -71,3 +71,11 @@ benches/routing.rs:github-pat:245
 benches/routing.rs:aws-access-token:246
 benches/routing.rs:aws-access-token:255
 benches/routing.rs:aws-access-token:479
+
+# End-to-end proxy overhead benchmark test payloads
+benches/proxy_overhead.rs:aws-access-token:373
+benches/proxy_overhead.rs:github-pat:373
+benches/proxy_overhead.rs:aws-access-token:367
+benches/proxy_overhead.rs:github-pat:367
+benches/proxy_overhead.rs:aws-access-token:353
+benches/proxy_overhead.rs:github-pat:353

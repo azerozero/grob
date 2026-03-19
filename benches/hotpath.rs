@@ -10,6 +10,8 @@ use grob::features::dlp::sprt::SprtDetector;
 use grob::features::token_pricing::{pricing, PricingTable};
 use grob::models::*;
 use grob::providers::streaming::parse_sse_events;
+use grob::security::audit_signer::{AuditSigner, EcdsaP256Signer, Ed25519Signer, HmacSha256Signer};
+use grob::security::merkle::MerkleTree;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -420,6 +422,110 @@ fn bench_value_clone(c: &mut Criterion) {
     group.finish();
 }
 
+// ── 8. Audit signing ────────────────────────────────────────────
+
+fn bench_audit_signing(c: &mut Criterion) {
+    let mut group = c.benchmark_group("audit_signing");
+
+    let data = [0u8; 32]; // SHA-256 hash to sign.
+
+    // ECDSA P-256
+    group.bench_function("ecdsa_p256_sign", |b| {
+        let signer = EcdsaP256Signer::load_or_generate(None).unwrap();
+        b.iter(|| black_box(signer.sign(&data)))
+    });
+
+    // Ed25519
+    group.bench_function("ed25519_sign", |b| {
+        let signer = Ed25519Signer::load_or_generate(None).unwrap();
+        b.iter(|| black_box(signer.sign(&data)))
+    });
+
+    // HMAC-SHA256
+    group.bench_function("hmac_sha256_sign", |b| {
+        let dir = tempfile::TempDir::new().unwrap();
+        let key_path = dir.path().join("bench_hmac.key");
+        let signer = HmacSha256Signer::load_or_generate(&key_path).unwrap();
+        b.iter(|| black_box(signer.sign(&data)))
+    });
+
+    // Merkle tree build — 10 leaves.
+    let leaves_10: Vec<String> = (0..10)
+        .map(|i| {
+            use sha2::{Digest, Sha256};
+            hex::encode(Sha256::digest(format!("leaf-{i}").as_bytes()))
+        })
+        .collect();
+
+    group.bench_function("merkle_tree_build_10", |b| {
+        b.iter(|| black_box(MerkleTree::from_leaves(&leaves_10)))
+    });
+
+    // Merkle tree build — 100 leaves.
+    let leaves_100: Vec<String> = (0..100)
+        .map(|i| {
+            use sha2::{Digest, Sha256};
+            hex::encode(Sha256::digest(format!("leaf-{i}").as_bytes()))
+        })
+        .collect();
+
+    group.bench_function("merkle_tree_build_100", |b| {
+        b.iter(|| black_box(MerkleTree::from_leaves(&leaves_100)))
+    });
+
+    // Audit entry hash (SHA-256 chain hash via write! into hasher).
+    group.bench_function("audit_hash_entry", |b| {
+        use sha2::{Digest, Sha256};
+        use std::io::Write;
+
+        let fields = (
+            "2026-02-27T10:00:00+00:00",
+            "550e8400-e29b-41d4-a716-446655440000",
+            "tenant-123",
+            "",
+            "Request",
+            "Nc",
+            "anthropic",
+            "None",
+            "",
+            "192.168.1.1",
+            42u64,
+            "abc123hash",
+            "claude-sonnet-4-6",
+            1500u32,
+            350u32,
+            "Low",
+        );
+
+        b.iter(|| {
+            let mut hasher = Sha256::new();
+            let _ = write!(
+                hasher,
+                "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+                fields.0,
+                fields.1,
+                fields.2,
+                fields.3,
+                fields.4,
+                fields.5,
+                fields.6,
+                fields.7,
+                fields.8,
+                fields.9,
+                fields.10,
+                fields.11,
+                fields.12,
+                fields.13,
+                fields.14,
+                fields.15,
+            );
+            black_box(hex::encode(hasher.finalize()))
+        })
+    });
+
+    group.finish();
+}
+
 // ── Register all groups ────────────────────────────────────────
 
 criterion_group!(
@@ -431,5 +537,6 @@ criterion_group!(
     bench_sse_parsing,
     bench_audit_hash,
     bench_value_clone,
+    bench_audit_signing,
 );
 criterion_main!(benches);
