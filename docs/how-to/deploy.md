@@ -41,7 +41,7 @@ docker run -d \
 
 ## Kubernetes
 
-A sample manifest is provided in `grob-kube.yml`. Key points:
+A sample manifest is provided in `deploy/grob-kube.yml`. Key points:
 
 - Use a Secret for API keys
 - Mount config via ConfigMap or use remote config URL
