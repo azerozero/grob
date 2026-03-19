@@ -83,3 +83,9 @@ src/commands/bench.rs:aws-access-token:318
 src/commands/bench.rs:github-pat:318
 src/commands/bench.rs:github-pat:314
 src/commands/bench.rs:aws-access-token:314
+src/commands/bench.rs:github-pat:416
+src/commands/bench.rs:aws-access-token:415
+src/commands/bench.rs:private-key:419
+src/commands/bench.rs:private-key:420
+src/commands/bench.rs:aws-access-token:416
+src/commands/bench.rs:github-pat:417

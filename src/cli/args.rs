@@ -136,7 +136,7 @@ pub enum Commands {
     Rollback,
     /// Run performance benchmark on the current system
     Bench {
-        /// Number of requests per scenario (default: 500)
+        /// Number of requests per scenario (default: 500, used in sequential mode)
         #[arg(short = 'n', long, default_value = "500")]
         requests: usize,
         /// Include auth overhead (creates a virtual key and authenticates each request)
@@ -145,6 +145,12 @@ pub enum Commands {
         /// Output format (table or json)
         #[arg(long, default_value = "table")]
         format: String,
+        /// Concurrent requests (0 = auto = num_cpus, 1 = sequential)
+        #[arg(short, long, default_value = "1")]
+        concurrency: usize,
+        /// Payload size: small (~300B), medium (~80KB), large (~150KB), all
+        #[arg(short, long, default_value = "small")]
+        payload: String,
     },
     /// Run diagnostic checks on your Grob installation
     Doctor,

@@ -364,9 +364,8 @@ pub(crate) fn set_owner_only_permissions(path: &std::path::Path) -> Result<()> {
             let sid_len = win32::GetLengthSid(sid_ptr);
 
             // Build an ACL with a single GENERIC_ALL ACE for the current user.
-            let acl_size = std::mem::size_of::<win32::ACL>()
-                + std::mem::size_of::<win32::ACCESS_ALLOWED_ACE>()
-                + sid_len as usize;
+            // ACCESS_ALLOWED_ACE is 12 bytes (ACE_HEADER 4 + Mask 4 + SidStart 4).
+            let acl_size = std::mem::size_of::<win32::ACL>() + 12 + sid_len as usize;
             let mut acl_buf = vec![0u8; acl_size];
             let acl = acl_buf.as_mut_ptr() as *mut win32::ACL;
 

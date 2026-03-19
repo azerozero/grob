@@ -40,7 +40,7 @@ impl PKCEVerifier {
     pub fn generate() -> Self {
         // Generate random verifier (43-128 characters)
         let mut rng = rand::thread_rng();
-        let random_bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+        let random_bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
         let verifier = URL_SAFE_NO_PAD.encode(&random_bytes);
 
         // Generate challenge (SHA256 of verifier)
@@ -231,7 +231,8 @@ impl OAuthClient {
             OAuthProviderType::OpenAI => {
                 // OpenAI uses a separate random state (not the PKCE verifier)
                 use rand::Rng;
-                let random_bytes: Vec<u8> = (0..16).map(|_| rand::thread_rng().gen()).collect();
+                let random_bytes: Vec<u8> =
+                    (0..16).map(|_| rand::thread_rng().gen::<u8>()).collect();
                 let state = random_bytes
                     .iter()
                     .map(|b| format!("{:02x}", b))
