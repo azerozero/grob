@@ -104,7 +104,14 @@ async fn reload_running_server(config: &cli::AppConfig) {
 }
 
 /// Exports the current config file as a reusable named preset.
-pub fn cmd_preset_export(name: &str, config_source: &cli::ConfigSource) -> anyhow::Result<()> {
+///
+/// When `env` is set, the preset file is saved as `{name}.{env}.toml`
+/// instead of `{name}.toml`, enabling per-environment presets.
+pub fn cmd_preset_export(
+    name: &str,
+    config_source: &cli::ConfigSource,
+    env: Option<&str>,
+) -> anyhow::Result<()> {
     let file_path = match config_source {
         cli::ConfigSource::File(p) => p.clone(),
         cli::ConfigSource::Url(_) => {
@@ -112,8 +119,12 @@ pub fn cmd_preset_export(name: &str, config_source: &cli::ConfigSource) -> anyho
             return Ok(());
         }
     };
-    println!("📤 Exporting current config as preset '{}'...", name);
-    match preset::export_preset(name, &file_path) {
+    let export_name = match env {
+        Some(e) => format!("{}.{}", name, e),
+        None => name.to_string(),
+    };
+    println!("📤 Exporting current config as preset '{}'...", export_name);
+    match preset::export_preset(&export_name, &file_path) {
         Ok(_) => println!("✅ Export complete"),
         Err(e) => eprintln!("❌ Export failed: {}", e),
     }

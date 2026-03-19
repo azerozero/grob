@@ -1,4 +1,5 @@
 use super::gemini::GeminiProvider;
+use super::key_pool::KeyPool;
 use super::{
     error::ProviderError, AnthropicCompatibleProvider, LlmProvider, OpenAIProvider, ProviderConfig,
     ProviderParams,
@@ -109,6 +110,29 @@ impl ProviderRegistry {
                 }
             });
 
+        // Build key pool when pool config is present.
+        let key_pool = config.pool.as_ref().map(|pool_cfg| {
+            let mut all_keys = vec![api_key.clone()];
+            for raw in &pool_cfg.keys {
+                let resolved = if let Some(env_var) = raw.strip_prefix('$') {
+                    std::env::var(env_var).unwrap_or_else(|_| {
+                        tracing::warn!(
+                            "Pool key env var ${} not set for provider '{}'",
+                            env_var,
+                            config.name
+                        );
+                        String::new()
+                    })
+                } else {
+                    raw.clone()
+                };
+                if !resolved.is_empty() {
+                    all_keys.push(SecretString::new(resolved));
+                }
+            }
+            Arc::new(KeyPool::new(all_keys, pool_cfg.strategy.clone()))
+        });
+
         ProviderParams {
             name: config.name.clone(),
             api_key,
@@ -121,6 +145,7 @@ impl ProviderRegistry {
             pass_through: config.pass_through.unwrap_or(false),
             tls_identity,
             tls_ca,
+            key_pool,
         }
     }
 
@@ -372,6 +397,7 @@ mod tests {
                 tls_cert: None,
                 tls_key: None,
                 tls_ca: None,
+                pool: None,
             },
             ProviderConfig {
                 name: "provider-b".to_string(),
@@ -391,6 +417,7 @@ mod tests {
                 tls_cert: None,
                 tls_key: None,
                 tls_ca: None,
+                pool: None,
             },
         ];
 

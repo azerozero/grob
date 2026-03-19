@@ -6,6 +6,10 @@ pub mod common;
 pub mod completions;
 /// Compares running config against the on-disk TOML file.
 pub mod config_diff;
+/// Push/pull config between grob instances for environment promotion.
+pub mod config_promote;
+/// Restore config from backup file.
+pub mod config_rollback;
 /// Establishes a live connection to a running grob instance.
 pub mod connect;
 /// Diagnoses configuration, connectivity, and provider health.

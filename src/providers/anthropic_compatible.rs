@@ -370,4 +370,11 @@ impl LlmProvider for AnthropicCompatibleProvider {
     fn base_url(&self) -> Option<&str> {
         Some(&self.base.base_url)
     }
+
+    fn rotate_key_pool(&self) -> bool {
+        self.base
+            .key_pool
+            .as_ref()
+            .is_some_and(|pool| pool.rotate_on_error())
+    }
 }

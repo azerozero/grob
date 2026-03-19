@@ -143,6 +143,55 @@ pub(super) async fn dispatch_provider_loop(
 
         match result {
             Ok(dispatch_result) => return Ok(dispatch_result),
+            Err(ProviderLoopAction::RateLimited) => {
+                // Try key pool rotation before falling through to next provider.
+                if provider.rotate_key_pool() {
+                    info!(
+                        "Provider {} rate-limited (stream), rotated to next pooled key — retrying",
+                        mapping.provider
+                    );
+                    // Re-prepare and retry with the same provider + new key.
+                    let (retry_request, _) =
+                        prepare_provider_request(ctx, request, mapping, &decision.route_type);
+                    let retry_result = if ctx.is_streaming {
+                        dispatch_streaming(ctx, retry_request, provider.as_ref(), mapping).await
+                    } else {
+                        dispatch_non_streaming(
+                            ctx,
+                            retry_request,
+                            provider.as_ref(),
+                            &ProviderAttempt {
+                                mapping,
+                                decision,
+                                cache_key,
+                                original_model: &original_model,
+                                is_subscription,
+                            },
+                        )
+                        .await
+                    };
+                    match retry_result {
+                        Ok(dispatch_result) => return Ok(dispatch_result),
+                        Err(_) => {
+                            // Fall through to next provider mapping.
+                        }
+                    }
+                }
+                // Emit Fallback event for `grob watch`.
+                if let Some(next) = effective_mappings.get(idx + 1) {
+                    ctx.state.event_bus.emit(
+                        crate::features::watch::events::WatchEvent::Fallback {
+                            request_id: ctx.req_id.to_string(),
+                            from_provider: mapping.provider.clone(),
+                            to_provider: next.provider.clone(),
+                            reason: "rate limited".to_string(),
+                            timestamp: chrono::Utc::now(),
+                        },
+                    );
+                }
+                tokio::task::yield_now().await;
+                continue;
+            }
             Err(ProviderLoopAction::Continue) => {
                 // Emit Fallback event for `grob watch`.
                 if let Some(next) = effective_mappings.get(idx + 1) {
@@ -328,6 +377,9 @@ fn wrap_stream_with_middleware(
 /// Internal signal to continue the provider loop.
 enum ProviderLoopAction {
     Continue,
+    /// Rate-limited (429): the caller should attempt key pool rotation
+    /// before falling through to the next provider mapping.
+    RateLimited,
 }
 
 /// Handle the streaming path for a single provider attempt.
@@ -371,7 +423,15 @@ async fn dispatch_streaming(
                     .trace_error(trace_id, &e.to_string());
             }
             handle_provider_error(mapping, &e);
-            Err(ProviderLoopAction::Continue)
+            let is_rate_limit = matches!(
+                e,
+                crate::providers::error::ProviderError::ApiError { status: 429, .. }
+            );
+            if is_rate_limit {
+                Err(ProviderLoopAction::RateLimited)
+            } else {
+                Err(ProviderLoopAction::Continue)
+            }
         }
     }
 }
@@ -516,10 +576,35 @@ async fn dispatch_non_streaming(
             }
             Err(e) => {
                 if classify_and_handle_error(ctx, attempt.mapping, &e, retry) {
+                    // On 429, try rotating to next pooled key before retrying.
+                    let is_rate_limit = matches!(
+                        e,
+                        crate::providers::error::ProviderError::ApiError { status: 429, .. }
+                    );
+                    if is_rate_limit && provider.rotate_key_pool() {
+                        info!(
+                            "Provider {} rate-limited, rotated to next pooled key",
+                            attempt.mapping.provider
+                        );
+                    }
                     warn!(
                         "Provider {} failed (retryable): {}",
                         attempt.mapping.provider, e
                     );
+                    continue;
+                }
+
+                // Before giving up on this provider, try key rotation for 429.
+                let is_rate_limit = matches!(
+                    e,
+                    crate::providers::error::ProviderError::ApiError { status: 429, .. }
+                );
+                if is_rate_limit && provider.rotate_key_pool() {
+                    info!(
+                        "Provider {} exhausted retries but rotated to next pooled key",
+                        attempt.mapping.provider
+                    );
+                    // Reset owned_request for another attempt cycle.
                     continue;
                 }
 

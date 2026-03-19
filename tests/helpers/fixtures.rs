@@ -122,6 +122,7 @@ pub fn base_provider_config(name: &str) -> grob::providers::ProviderConfig {
         tls_cert: None,
         tls_key: None,
         tls_ca: None,
+        pool: None,
     }
 }
 

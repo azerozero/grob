@@ -480,6 +480,29 @@ pub struct PromptRule {
     pub strip_match: bool,
 }
 
+/// Strategy for cycling through pooled API keys.
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PoolStrategy {
+    /// Exhaust one key before moving to the next.
+    #[default]
+    Sequential,
+    /// Rotate keys on every request.
+    RoundRobin,
+    /// Use first key; only switch on error.
+    Fallback,
+}
+
+/// Multi-account key pool configuration.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PoolConfig {
+    /// Key rotation strategy (default: sequential).
+    #[serde(default)]
+    pub strategy: PoolStrategy,
+    /// Additional API keys beyond the primary `api_key`.
+    pub keys: Vec<String>,
+}
+
 /// Strategy for routing requests across multiple provider mappings
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]

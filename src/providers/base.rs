@@ -3,10 +3,11 @@
 //! Eliminates field and method duplication across OpenAI, Gemini,
 //! and Anthropic-compatible providers.
 
-use super::{build_provider_client, error::ProviderError, ProviderParams};
+use super::{build_provider_client, error::ProviderError, key_pool::KeyPool, ProviderParams};
 use crate::auth::{OAuthConfig, TokenStore};
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Common fields shared across all LLM providers.
@@ -22,6 +23,7 @@ pub(crate) struct ProviderBase {
     pub token_store: Option<TokenStore>,
     pub api_timeout: Duration,
     pub pass_through: bool,
+    pub key_pool: Option<Arc<KeyPool>>,
 }
 
 impl ProviderBase {
@@ -40,6 +42,7 @@ impl ProviderBase {
             token_store: params.token_store,
             api_timeout: params.api_timeout,
             pass_through: params.pass_through,
+            key_pool: params.key_pool,
         }
     }
 
@@ -53,16 +56,28 @@ impl ProviderBase {
         self.pass_through || self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
     }
 
-    /// Resolves the auth token: OAuth refresh if configured, otherwise the API key.
+    /// Resolves the auth token: OAuth refresh if configured, key pool if
+    /// available, otherwise the primary API key.
     pub async fn resolve_auth(
         &self,
         config_fn: fn() -> OAuthConfig,
     ) -> Result<String, ProviderError> {
+        // When a key pool is configured, use its current key instead of the
+        // static api_key field. Round-robin pools advance on every call.
+        let effective_key: String = if let Some(ref pool) = self.key_pool {
+            if *pool.strategy() == crate::cli::PoolStrategy::RoundRobin {
+                pool.advance();
+            }
+            pool.current_key().expose_secret().to_string()
+        } else {
+            self.api_key.expose_secret().to_string()
+        };
+
         super::auth::resolve_access_token(
             self.oauth_provider.as_deref(),
             self.token_store.as_ref(),
             config_fn,
-            self.api_key.expose_secret(),
+            &effective_key,
         )
         .await
     }

@@ -14,6 +14,8 @@ pub mod error;
 pub mod gemini;
 /// Shared helper functions for request/response transformation.
 pub mod helpers;
+/// Multi-account API key pooling for provider key rotation.
+pub mod key_pool;
 /// OpenAI provider implementation with format translation.
 pub mod openai;
 /// Provider registry for model lookup and provider resolution.
@@ -159,6 +161,14 @@ pub trait LlmProvider: Send + Sync {
     fn base_url(&self) -> Option<&str> {
         None
     }
+
+    /// Attempts to rotate to the next API key in the pool after a rate-limit error.
+    ///
+    /// Returns `true` if rotation succeeded (more keys available), `false` if
+    /// no key pool is configured or all keys are exhausted.
+    fn rotate_key_pool(&self) -> bool {
+        false
+    }
 }
 
 /// Common parameters shared across all provider constructors.
@@ -185,6 +195,8 @@ pub struct ProviderParams {
     pub tls_identity: Option<reqwest::Identity>,
     /// Pre-loaded custom CA certificate for upstream server verification.
     pub tls_ca: Option<reqwest::Certificate>,
+    /// Optional multi-account key pool for API key rotation.
+    pub key_pool: Option<std::sync::Arc<key_pool::KeyPool>>,
 }
 
 /// Authentication type for providers
@@ -267,6 +279,10 @@ pub struct ProviderConfig {
     /// Path to custom CA certificate for verifying the upstream server.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_ca: Option<String>,
+
+    /// Multi-account key pool for chaining API keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<crate::cli::PoolConfig>,
 }
 
 impl ProviderConfig {

@@ -132,6 +132,8 @@ pub enum Commands {
         #[command(subcommand)]
         action: KeyAction,
     },
+    /// Restore previous configuration from backup
+    Rollback,
     /// Run diagnostic checks on your Grob installation
     Doctor,
     /// Zero-downtime upgrade: spawn new process, wait for health, signal old to drain
@@ -251,7 +253,30 @@ pub enum PresetAction {
     Export {
         /// Name for the exported preset
         name: String,
+        /// Optional environment tag (e.g., "qa", "prod") — saves as {name}.{env}.toml
+        #[arg(long)]
+        env: Option<String>,
     },
     /// Sync presets from configured git repo
     Sync,
+    /// Push a preset to a remote grob instance
+    Push {
+        /// Preset name to push
+        name: String,
+        /// Target grob instance URL (e.g., https://grob-qa.example.com)
+        #[arg(long)]
+        target: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Pull config from a remote grob instance and save as a preset
+    Pull {
+        /// Source grob instance URL (e.g., https://grob-prod.example.com)
+        #[arg(long)]
+        from: String,
+        /// Name to save the pulled config as
+        #[arg(long)]
+        save: String,
+    },
 }

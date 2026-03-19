@@ -4,13 +4,17 @@ mod retry;
 mod transform;
 pub(crate) mod types;
 
-use super::{build_provider_client, LlmProvider, ProviderError, ProviderResponse, StreamResponse};
+use super::{
+    build_provider_client, key_pool::KeyPool, LlmProvider, ProviderError, ProviderResponse,
+    StreamResponse,
+};
 use crate::auth::{OAuthConfig, TokenStore};
 use crate::models::CanonicalRequest;
 use async_trait::async_trait;
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use types::*;
 
@@ -36,6 +40,7 @@ pub struct GeminiProvider {
     /// Per-request timeout from server config
     api_timeout: Duration,
     pass_through: bool,
+    key_pool: Option<Arc<KeyPool>>,
 }
 
 /// Max retries for Gemini 429 rate-limit errors (higher than default because
@@ -81,6 +86,7 @@ impl GeminiProvider {
 
         let client =
             build_provider_client(params.connect_timeout, params.tls_identity, params.tls_ca);
+        let key_pool = params.key_pool;
         Self {
             api_key,
             base_url,
@@ -93,6 +99,7 @@ impl GeminiProvider {
             token_store: params.token_store,
             api_timeout: params.api_timeout,
             pass_through: params.pass_through,
+            key_pool,
         }
     }
 
@@ -303,12 +310,25 @@ impl GeminiProvider {
         gemini_request: GeminiRequest,
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
-        let key = self.api_key.as_ref().ok_or_else(|| {
-            ProviderError::ConfigError(
-                "Gemini provider requires either api_key, OAuth, or Vertex AI configuration"
-                    .to_string(),
-            )
-        })?;
+        // Use key pool if available, otherwise fall back to static api_key.
+        let pool_key_holder: Option<String> = self.key_pool.as_ref().map(|pool| {
+            if *pool.strategy() == crate::cli::PoolStrategy::RoundRobin {
+                pool.advance();
+            }
+            pool.current_key().expose_secret().to_string()
+        });
+        let key_str: String = match pool_key_holder {
+            Some(k) => k,
+            None => {
+                let key = self.api_key.as_ref().ok_or_else(|| {
+                    ProviderError::ConfigError(
+                        "Gemini provider requires either api_key, OAuth, or Vertex AI configuration"
+                            .to_string(),
+                    )
+                })?;
+                key.expose_secret().to_string()
+            }
+        };
 
         let (action, alt_sse) = Self::url_parts(streaming);
         let sep = if streaming { "&" } else { "" };
@@ -317,7 +337,7 @@ impl GeminiProvider {
             self.base_url,
             request.model,
             action,
-            key.expose_secret(),
+            key_str,
             sep,
             alt_sse.trim_start_matches('?')
         );
@@ -510,6 +530,12 @@ impl LlmProvider for GeminiProvider {
 
     fn base_url(&self) -> Option<&str> {
         Some(&self.base_url)
+    }
+
+    fn rotate_key_pool(&self) -> bool {
+        self.key_pool
+            .as_ref()
+            .is_some_and(|pool| pool.rotate_on_error())
     }
 }
 

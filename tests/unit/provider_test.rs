@@ -28,6 +28,7 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_ca: None,
+            pool: None,
         };
 
         assert!(config.is_enabled());
@@ -54,6 +55,7 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             tls_ca: None,
+            pool: None,
         };
 
         assert!(!config.is_enabled());

@@ -155,10 +155,16 @@ async fn main() -> anyhow::Result<()> {
             PresetAction::Apply { name, reload } => {
                 commands::preset::cmd_preset_apply(&name, &config_source, &config, reload).await?;
             }
-            PresetAction::Export { name } => {
-                commands::preset::cmd_preset_export(&name, &config_source)?;
+            PresetAction::Export { name, env } => {
+                commands::preset::cmd_preset_export(&name, &config_source, env.as_deref())?;
             }
             PresetAction::Sync => commands::preset::cmd_preset_sync(&config).await,
+            PresetAction::Push { name, target, yes } => {
+                commands::config_promote::cmd_config_push(&name, &target, yes).await?;
+            }
+            PresetAction::Pull { from, save } => {
+                commands::config_promote::cmd_config_pull(&from, &save).await?;
+            }
         },
         Commands::Exec { port, no_stop, cmd } => {
             commands::exec::cmd_exec(&config, port, no_stop, cmd, cli_args.config).await?;
@@ -195,6 +201,9 @@ async fn main() -> anyhow::Result<()> {
             KeyAction::List { json } => commands::key::cmd_key_list(json),
             KeyAction::Revoke { id_or_prefix } => commands::key::cmd_key_revoke(&id_or_prefix),
         },
+        Commands::Rollback => {
+            commands::config_rollback::cmd_config_rollback(&config, &config_source).await?;
+        }
         Commands::Doctor => commands::doctor::cmd_doctor(&config, &config_source).await,
         #[cfg(feature = "watch")]
         Commands::Watch => {

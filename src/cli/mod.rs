@@ -10,9 +10,9 @@ mod validation;
 pub use crate::features::log_export::LogExportConfig;
 pub use config::{
     AcmeConfig, BudgetConfig, CacheConfig, ComplianceConfig, FanOutConfig, FanOutMode, ModelConfig,
-    ModelMapping, ModelStrategy, OtelConfig, PresetConfig, ProjectConfig, ProjectRouterOverlay,
-    PromptRule, RouterConfig, SecurityConfig, ServerConfig, TimeoutConfig, TlsConfig,
-    TracingConfig, UserConfig,
+    ModelMapping, ModelStrategy, OtelConfig, PoolConfig, PoolStrategy, PresetConfig, ProjectConfig,
+    ProjectRouterOverlay, PromptRule, RouterConfig, SecurityConfig, ServerConfig, TimeoutConfig,
+    TlsConfig, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
@@ -180,6 +180,27 @@ impl AppConfig {
                         provider.enabled = Some(false);
                     }
                 }
+            }
+
+            // Resolve $ENV_VAR references in pool keys.
+            if let Some(ref mut pool) = provider.pool {
+                for key in &mut pool.keys {
+                    if let Some(env_var) = key.strip_prefix('$') {
+                        if let Ok(value) = std::env::var(env_var) {
+                            *key = value;
+                        } else if std::env::var("GROB_MOCK_BACKEND").is_ok() {
+                            *key = "mock-pool-key".to_string();
+                        } else {
+                            eprintln!(
+                                "Warning: pool key ${} not set for provider '{}'",
+                                env_var, provider.name
+                            );
+                            *key = String::new();
+                        }
+                    }
+                }
+                // Remove empty keys (unresolved env vars).
+                pool.keys.retain(|k| !k.is_empty());
             }
         }
 
