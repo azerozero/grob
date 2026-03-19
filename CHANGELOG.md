@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0](https://github.com/azerozero/grob/compare/v0.20.1...v0.21.0) - 2026-03-19
+
+### Added
+
+- *(cli)* grob bench — self-contained performance evaluation
+
+### Other
+
+- clean up project tree structure
+- correct benchmark headline to pure overhead (~100us)
+- add direct-to-mock baseline for accurate overhead calculation
+- add benchmark headline to README (227us P50 with all features)
+- audit signing + proxy overhead infrastructure
+
 ## [0.20.1](https://github.com/azerozero/grob/compare/v0.20.0...v0.20.1) - 2026-03-19
 
 ### Added
