@@ -166,6 +166,8 @@ jobs:
         with:
           shared-key: semver
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Install cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked
       - name: Find latest tag for baseline
         id: baseline
         run: |
