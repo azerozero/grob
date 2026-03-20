@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.1](https://github.com/azerozero/grob/compare/v0.23.0...v0.23.1) - 2026-03-20
+
+### Fixed
+
+- *(ci)* limit feature powerset to depth 2 (66 combos instead of 1561)
+
 ## [0.23.0](https://github.com/azerozero/grob/compare/v0.22.1...v0.23.0) - 2026-03-20
 
 ### Added
