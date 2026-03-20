@@ -106,6 +106,8 @@ struct ProxyState {
     enable_routing: bool,
     enable_dlp: bool,
     enable_auth: bool,
+    enable_rate_limit: bool,
+    enable_cache: bool,
     /// SHA-256 hash of the valid virtual key (for auth scenarios).
     auth_key_hash: Option<String>,
     routing_patterns: Arc<Vec<regex::Regex>>,
@@ -209,6 +211,44 @@ async fn dlp_mw(
     next.run(req).await
 }
 
+/// Simulated rate-limit check: atomic counter + window comparison.
+async fn rate_limit_mw(
+    State(state): State<Arc<ProxyState>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if state.enable_rate_limit {
+        // Simulate token-bucket overhead: atomic load + comparison.
+        let counter = AtomicUsize::new(0);
+        let _count = counter.fetch_add(1, Ordering::Relaxed);
+        // Always allow in bench — measures pure overhead of the check.
+    }
+    next.run(req).await
+}
+
+/// Simulated cache lookup: SHA-256 hash of first 256 bytes as cache key.
+async fn cache_mw(
+    State(state): State<Arc<ProxyState>>,
+    body_bytes: axum::body::Bytes,
+    next: Next,
+) -> Response {
+    if state.enable_cache {
+        use sha2::{Digest, Sha256};
+        let key_slice = &body_bytes[..body_bytes.len().min(256)];
+        let _cache_key = hex::encode(Sha256::digest(key_slice));
+        // Simulate cache miss — always forward.
+    }
+
+    let req = Request::builder()
+        .method(axum::http::Method::POST)
+        .uri("/v1/messages")
+        .header("content-type", "application/json")
+        .body(Body::from(body_bytes))
+        .unwrap();
+
+    next.run(req).await
+}
+
 /// Forwards the request to the mock backend.
 async fn proxy_handler(
     State(state): State<Arc<ProxyState>>,
@@ -245,13 +285,25 @@ async fn start_proxy(state: ProxyState) -> (String, tokio::task::JoinHandle<()>)
         .route("/health", get(|| async { "ok" }));
 
     // Layer order mirrors grob's middleware stack (outermost first).
+    // DLP is the innermost content-inspecting layer.
     let app = if shared.enable_dlp {
         app.layer(middleware::from_fn_with_state(shared.clone(), dlp_mw))
     } else {
         app
     };
 
+    // Cache layer sits before DLP.
+    let app = if shared.enable_cache {
+        app.layer(middleware::from_fn_with_state(shared.clone(), cache_mw))
+    } else {
+        app
+    };
+
     let app = app
+        .layer(middleware::from_fn_with_state(
+            shared.clone(),
+            rate_limit_mw,
+        ))
         .layer(middleware::from_fn_with_state(shared.clone(), auth_mw))
         .layer(middleware::from_fn_with_state(shared.clone(), routing_mw))
         .layer(middleware::from_fn(security_headers_mw))
@@ -275,7 +327,22 @@ struct Scenario {
     enable_routing: bool,
     enable_dlp: bool,
     enable_auth: bool,
+    enable_rate_limit: bool,
+    enable_cache: bool,
     inject_secrets: bool,
+    /// DLP patterns to use (None = use default full set).
+    dlp_pattern_set: Option<DlpPatternSet>,
+}
+
+/// Controls which subset of DLP patterns to compile for escalation steps.
+#[derive(Clone, Copy)]
+enum DlpPatternSet {
+    /// Only secret-detection patterns (AWS, GitHub PAT, PEM, OpenAI key).
+    SecretsOnly,
+    /// Secrets + PII patterns (credit card, email, SSN).
+    SecretsPlusPii,
+    /// All patterns including injection detection.
+    Full,
 }
 
 fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
@@ -285,14 +352,20 @@ fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
             enable_routing: false,
             enable_dlp: false,
             enable_auth: false,
+            enable_rate_limit: false,
+            enable_cache: false,
             inject_secrets: false,
+            dlp_pattern_set: None,
         },
         Scenario {
             name: "proxy",
             enable_routing: false,
             enable_dlp: false,
             enable_auth: false,
+            enable_rate_limit: false,
+            enable_cache: false,
             inject_secrets: false,
+            dlp_pattern_set: None,
         },
     ];
 
@@ -302,7 +375,10 @@ fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
             enable_routing: false,
             enable_dlp: false,
             enable_auth: true,
+            enable_rate_limit: false,
+            enable_cache: false,
             inject_secrets: false,
+            dlp_pattern_set: None,
         });
     }
 
@@ -311,7 +387,10 @@ fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_routing: true,
         enable_dlp: true,
         enable_auth: false,
+        enable_rate_limit: false,
+        enable_cache: false,
         inject_secrets: false,
+        dlp_pattern_set: None,
     });
 
     scenarios.push(Scenario {
@@ -319,7 +398,10 @@ fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_routing: true,
         enable_dlp: true,
         enable_auth: false,
+        enable_rate_limit: false,
+        enable_cache: false,
         inject_secrets: true,
+        dlp_pattern_set: None,
     });
 
     scenarios.push(Scenario {
@@ -327,10 +409,139 @@ fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_routing: true,
         enable_dlp: true,
         enable_auth: with_auth,
+        enable_rate_limit: true,
+        enable_cache: true,
         inject_secrets: false,
+        dlp_pattern_set: None,
     });
 
     scenarios
+}
+
+/// Builds the escalation staircase: each step adds one feature on top.
+fn build_escalation_steps() -> Vec<Scenario> {
+    vec![
+        Scenario {
+            name: "TCP baseline",
+            enable_routing: false,
+            enable_dlp: false,
+            enable_auth: false,
+            enable_rate_limit: false,
+            enable_cache: false,
+            inject_secrets: false,
+            dlp_pattern_set: None,
+        },
+        Scenario {
+            name: "+ HTTP proxy",
+            enable_routing: false,
+            enable_dlp: false,
+            enable_auth: false,
+            enable_rate_limit: false,
+            enable_cache: false,
+            inject_secrets: false,
+            dlp_pattern_set: None,
+        },
+        Scenario {
+            name: "+ routing",
+            enable_routing: true,
+            enable_dlp: false,
+            enable_auth: false,
+            enable_rate_limit: false,
+            enable_cache: false,
+            inject_secrets: false,
+            dlp_pattern_set: None,
+        },
+        Scenario {
+            name: "+ rate limiting",
+            enable_routing: true,
+            enable_dlp: false,
+            enable_auth: false,
+            enable_rate_limit: true,
+            enable_cache: false,
+            inject_secrets: false,
+            dlp_pattern_set: None,
+        },
+        Scenario {
+            name: "+ cache lookup",
+            enable_routing: true,
+            enable_dlp: false,
+            enable_auth: false,
+            enable_rate_limit: true,
+            enable_cache: true,
+            inject_secrets: false,
+            dlp_pattern_set: None,
+        },
+        Scenario {
+            name: "+ DLP secrets",
+            enable_routing: true,
+            enable_dlp: true,
+            enable_auth: false,
+            enable_rate_limit: true,
+            enable_cache: true,
+            inject_secrets: true,
+            dlp_pattern_set: Some(DlpPatternSet::SecretsOnly),
+        },
+        Scenario {
+            name: "+ DLP PII",
+            enable_routing: true,
+            enable_dlp: true,
+            enable_auth: false,
+            enable_rate_limit: true,
+            enable_cache: true,
+            inject_secrets: true,
+            dlp_pattern_set: Some(DlpPatternSet::SecretsPlusPii),
+        },
+        Scenario {
+            name: "+ DLP injection",
+            enable_routing: true,
+            enable_dlp: true,
+            enable_auth: false,
+            enable_rate_limit: true,
+            enable_cache: true,
+            inject_secrets: true,
+            dlp_pattern_set: Some(DlpPatternSet::Full),
+        },
+        Scenario {
+            name: "+ auth",
+            enable_routing: true,
+            enable_dlp: true,
+            enable_auth: true,
+            enable_rate_limit: true,
+            enable_cache: true,
+            inject_secrets: true,
+            dlp_pattern_set: Some(DlpPatternSet::Full),
+        },
+    ]
+}
+
+/// Compiles DLP patterns for the given subset.
+fn compile_dlp_patterns(set: DlpPatternSet) -> Arc<Vec<regex::Regex>> {
+    // Secret-detection patterns (always included).
+    let mut patterns = vec![
+        regex::Regex::new(r"(?i)(sk-[a-zA-Z0-9]{32,})").unwrap(),
+        regex::Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").unwrap(),
+        regex::Regex::new(r"(?i)(ghp_[a-zA-Z0-9]{36})").unwrap(),
+        regex::Regex::new(r"(?i)(-----BEGIN (?:RSA |EC )?PRIVATE KEY-----)").unwrap(),
+    ];
+
+    if matches!(set, DlpPatternSet::SecretsPlusPii | DlpPatternSet::Full) {
+        // PII patterns.
+        patterns.push(regex::Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").unwrap());
+        patterns.push(regex::Regex::new(r"\b[46]\d{15}\b").unwrap());
+        patterns.push(
+            regex::Regex::new(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b").unwrap(),
+        );
+        patterns.push(
+            regex::Regex::new(r"\b[A-Z]{2}\d{2}[A-Z0-9]{4}\d{7}([A-Z0-9]?){0,16}\b").unwrap(),
+        );
+    }
+
+    if matches!(set, DlpPatternSet::Full) {
+        // Injection detection.
+        patterns.push(regex::Regex::new(r"(?i)ignore\s+all\s+previous\s+instructions").unwrap());
+    }
+
+    Arc::new(patterns)
 }
 
 // ── Request payloads ────────────────────────────────────────────────────
@@ -665,6 +876,14 @@ async fn run_concurrent(
 
 // ── Entry point ─────────────────────────────────────────────────────────
 
+/// Renders a Unicode bar chart of the given proportion (0.0..=1.0).
+fn render_bar(proportion: f64, width: usize) -> String {
+    let filled = (proportion * width as f64).round() as usize;
+    let filled = filled.min(width);
+    let empty = width - filled;
+    format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty))
+}
+
 /// Runs the self-contained performance benchmark.
 pub async fn cmd_bench(
     _config: &AppConfig,
@@ -673,6 +892,7 @@ pub async fn cmd_bench(
     format: &str,
     concurrency: usize,
     payload: &str,
+    escalate: bool,
 ) -> Result<()> {
     let cpu_count = std::thread::available_parallelism()
         .map(|n| n.get())
@@ -776,6 +996,21 @@ pub async fn cmd_bench(
         .await?;
     anyhow::ensure!(probe_resp.status() == 200, "Mock backend returned non-200");
 
+    // ── Escalation mode ─────────────────────────────────────────────────
+    if escalate {
+        return run_escalation(
+            &backend_url,
+            &routing_patterns,
+            &dlp_patterns,
+            &auth_token,
+            &auth_key_hash,
+            requests,
+            concurrency,
+            format,
+        )
+        .await;
+    }
+
     let scenarios = build_scenarios(with_auth);
     let mut results: Vec<ScenarioResult> = Vec::new();
     // Track baseline P50 per payload size for overhead calculation.
@@ -802,6 +1037,10 @@ pub async fn cmd_bench(
             let target_url = if is_direct {
                 backend_url.clone()
             } else {
+                let effective_dlp_patterns = match scenario.dlp_pattern_set {
+                    Some(set) => compile_dlp_patterns(set),
+                    None => dlp_patterns.clone(),
+                };
                 let state = ProxyState {
                     backend_url: backend_url.clone(),
                     client: reqwest::Client::builder()
@@ -812,9 +1051,11 @@ pub async fn cmd_bench(
                     enable_routing: scenario.enable_routing,
                     enable_dlp: scenario.enable_dlp,
                     enable_auth: scenario.enable_auth,
+                    enable_rate_limit: scenario.enable_rate_limit,
+                    enable_cache: scenario.enable_cache,
                     auth_key_hash: auth_key_hash.clone(),
                     routing_patterns: routing_patterns.clone(),
-                    dlp_patterns: dlp_patterns.clone(),
+                    dlp_patterns: effective_dlp_patterns,
                 };
                 let (proxy_url, _proxy_handle) = start_proxy(state).await;
 
@@ -1074,6 +1315,462 @@ pub async fn cmd_bench(
         println!("  Verdict: {verdict}");
         println!();
     }
+
+    Ok(())
+}
+
+// ── Escalation mode ─────────────────────────────────────────────────────
+
+/// Holds results for one escalation step.
+struct EscalationRow {
+    step: usize,
+    name: &'static str,
+    p50: Duration,
+    rps: Option<f64>,
+    /// Overhead relative to step 0 (TCP baseline).
+    overhead: Option<Duration>,
+}
+
+/// Runs the escalation staircase benchmark.
+#[allow(clippy::too_many_arguments)]
+async fn run_escalation(
+    backend_url: &str,
+    routing_patterns: &Arc<Vec<regex::Regex>>,
+    _all_dlp_patterns: &Arc<Vec<regex::Regex>>,
+    auth_token: &Option<String>,
+    auth_key_hash: &Option<String>,
+    requests: usize,
+    concurrency: usize,
+    format: &str,
+) -> Result<()> {
+    let cpu_count = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let effective_concurrency = if concurrency == 0 {
+        cpu_count
+    } else {
+        concurrency
+    };
+    let is_concurrent = effective_concurrency > 1;
+
+    // Escalation always uses medium payload (realistic Claude Code traffic).
+    let psize = PayloadSize::Medium;
+    let steps = build_escalation_steps();
+
+    if format != "json" {
+        println!();
+        println!("  Feature Escalation ({})", psize.label());
+        if is_concurrent {
+            println!(
+                "  Mode: concurrent (c={}), {} sec/step",
+                effective_concurrency, CONCURRENT_DURATION_SECS
+            );
+        } else {
+            println!("  Requests: {} per step", requests);
+        }
+        println!();
+    }
+
+    let mut rows: Vec<EscalationRow> = Vec::new();
+    let mut baseline_p50: Option<Duration> = None;
+
+    for (idx, step) in steps.iter().enumerate() {
+        let is_direct = idx == 0;
+
+        let body = if step.inject_secrets {
+            secrets_request_body(psize)
+        } else {
+            clean_request_body(psize)
+        };
+
+        let target_url = if is_direct {
+            backend_url.to_string()
+        } else {
+            let dlp_pats = match step.dlp_pattern_set {
+                Some(set) => compile_dlp_patterns(set),
+                None => Arc::new(Vec::new()),
+            };
+            let state = ProxyState {
+                backend_url: backend_url.to_string(),
+                client: reqwest::Client::builder()
+                    .pool_max_idle_per_host(10)
+                    .pool_idle_timeout(Duration::from_secs(30))
+                    .build()
+                    .unwrap(),
+                enable_routing: step.enable_routing,
+                enable_dlp: step.enable_dlp,
+                enable_auth: step.enable_auth,
+                enable_rate_limit: step.enable_rate_limit,
+                enable_cache: step.enable_cache,
+                auth_key_hash: auth_key_hash.clone(),
+                routing_patterns: routing_patterns.clone(),
+                dlp_patterns: dlp_pats,
+            };
+            let (proxy_url, _handle) = start_proxy(state).await;
+
+            // Wait for proxy readiness.
+            let client = reqwest::Client::new();
+            for _ in 0..50 {
+                if client
+                    .get(format!("{proxy_url}/health"))
+                    .send()
+                    .await
+                    .is_ok()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            proxy_url
+        };
+
+        let (stats, rps) = if is_concurrent {
+            let warmup_client = reqwest::Client::builder()
+                .pool_max_idle_per_host(10)
+                .build()
+                .unwrap();
+            for _ in 0..WARMUP_REQUESTS {
+                let mut req = warmup_client
+                    .post(format!("{target_url}/v1/messages"))
+                    .json(&body);
+                if step.enable_auth {
+                    if let Some(ref token) = auth_token {
+                        req = req.header("authorization", format!("Bearer {token}"));
+                    }
+                }
+                if let Ok(resp) = req.send().await {
+                    let _ = resp.bytes().await;
+                }
+            }
+
+            let (latencies, total) = run_concurrent(
+                &target_url,
+                &body,
+                auth_token,
+                step.enable_auth,
+                effective_concurrency,
+                CONCURRENT_DURATION_SECS,
+            )
+            .await;
+
+            if latencies.is_empty() {
+                anyhow::bail!("No requests completed for escalation step '{}'", step.name);
+            }
+
+            let rps_val = total as f64 / CONCURRENT_DURATION_SECS as f64;
+            (compute_stats(latencies), Some(rps_val))
+        } else {
+            let client = reqwest::Client::builder()
+                .pool_max_idle_per_host(10)
+                .pool_idle_timeout(Duration::from_secs(30))
+                .build()
+                .unwrap();
+
+            for _ in 0..WARMUP_REQUESTS {
+                let mut req = client.post(format!("{target_url}/v1/messages")).json(&body);
+                if step.enable_auth {
+                    if let Some(ref token) = auth_token {
+                        req = req.header("authorization", format!("Bearer {token}"));
+                    }
+                }
+                let resp = req.send().await?;
+                let _ = resp.bytes().await;
+            }
+
+            let mut latencies = Vec::with_capacity(requests);
+            for _ in 0..requests {
+                let mut req = client.post(format!("{target_url}/v1/messages")).json(&body);
+                if step.enable_auth {
+                    if let Some(ref token) = auth_token {
+                        req = req.header("authorization", format!("Bearer {token}"));
+                    }
+                }
+                let start = Instant::now();
+                let resp = req.send().await?;
+                let _ = resp.bytes().await;
+                latencies.push(start.elapsed());
+            }
+
+            (compute_stats(latencies), None)
+        };
+
+        if is_direct {
+            baseline_p50 = Some(stats.p50);
+        }
+
+        let overhead = baseline_p50.and_then(|b| {
+            if is_direct {
+                None
+            } else {
+                Some(stats.p50.saturating_sub(b))
+            }
+        });
+
+        rows.push(EscalationRow {
+            step: idx,
+            name: step.name,
+            p50: stats.p50,
+            rps,
+            overhead,
+        });
+    }
+
+    // Run the "ALL" step with every feature enabled.
+    {
+        let all_dlp = compile_dlp_patterns(DlpPatternSet::Full);
+        let state = ProxyState {
+            backend_url: backend_url.to_string(),
+            client: reqwest::Client::builder()
+                .pool_max_idle_per_host(10)
+                .pool_idle_timeout(Duration::from_secs(30))
+                .build()
+                .unwrap(),
+            enable_routing: true,
+            enable_dlp: true,
+            enable_auth: auth_token.is_some(),
+            enable_rate_limit: true,
+            enable_cache: true,
+            auth_key_hash: auth_key_hash.clone(),
+            routing_patterns: routing_patterns.clone(),
+            dlp_patterns: all_dlp,
+        };
+        let (proxy_url, _handle) = start_proxy(state).await;
+
+        let client = reqwest::Client::new();
+        for _ in 0..50 {
+            if client
+                .get(format!("{proxy_url}/health"))
+                .send()
+                .await
+                .is_ok()
+            {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        let body = secrets_request_body(psize);
+
+        let (stats, rps) = if is_concurrent {
+            let warmup_client = reqwest::Client::builder()
+                .pool_max_idle_per_host(10)
+                .build()
+                .unwrap();
+            for _ in 0..WARMUP_REQUESTS {
+                let mut req = warmup_client
+                    .post(format!("{proxy_url}/v1/messages"))
+                    .json(&body);
+                if let Some(ref token) = auth_token {
+                    req = req.header("authorization", format!("Bearer {token}"));
+                }
+                if let Ok(resp) = req.send().await {
+                    let _ = resp.bytes().await;
+                }
+            }
+
+            let (latencies, total) = run_concurrent(
+                &proxy_url,
+                &body,
+                auth_token,
+                auth_token.is_some(),
+                effective_concurrency,
+                CONCURRENT_DURATION_SECS,
+            )
+            .await;
+
+            if latencies.is_empty() {
+                anyhow::bail!("No requests completed for ALL escalation step");
+            }
+
+            let rps_val = total as f64 / CONCURRENT_DURATION_SECS as f64;
+            (compute_stats(latencies), Some(rps_val))
+        } else {
+            let client = reqwest::Client::builder()
+                .pool_max_idle_per_host(10)
+                .pool_idle_timeout(Duration::from_secs(30))
+                .build()
+                .unwrap();
+
+            for _ in 0..WARMUP_REQUESTS {
+                let mut req = client.post(format!("{proxy_url}/v1/messages")).json(&body);
+                if let Some(ref token) = auth_token {
+                    req = req.header("authorization", format!("Bearer {token}"));
+                }
+                let resp = req.send().await?;
+                let _ = resp.bytes().await;
+            }
+
+            let mut latencies = Vec::with_capacity(requests);
+            for _ in 0..requests {
+                let mut req = client.post(format!("{proxy_url}/v1/messages")).json(&body);
+                if let Some(ref token) = auth_token {
+                    req = req.header("authorization", format!("Bearer {token}"));
+                }
+                let start = Instant::now();
+                let resp = req.send().await?;
+                let _ = resp.bytes().await;
+                latencies.push(start.elapsed());
+            }
+
+            (compute_stats(latencies), None)
+        };
+
+        let overhead = baseline_p50.map(|b| stats.p50.saturating_sub(b));
+
+        rows.push(EscalationRow {
+            step: rows.len(),
+            name: "ALL (everything)",
+            p50: stats.p50,
+            rps,
+            overhead,
+        });
+    }
+
+    // ── Render output ───────────────────────────────────────────────
+    if format == "json" {
+        let json_rows: Vec<ScenarioResult> = rows
+            .iter()
+            .map(|r| ScenarioResult {
+                name: format!("{} {}", r.step, r.name),
+                payload_size: psize.label().to_string(),
+                p50_us: r.p50.as_secs_f64() * 1_000_000.0,
+                p95_us: 0.0,
+                p99_us: 0.0,
+                overhead_us: r.overhead.map(|d| d.as_secs_f64() * 1_000_000.0),
+                rps: r.rps,
+            })
+            .collect();
+        let output = BenchResult {
+            system: SystemInfo {
+                os: std::env::consts::OS.to_string(),
+                arch: std::env::consts::ARCH.to_string(),
+                cpu_count,
+                grob_version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+            requests_per_scenario: requests,
+            concurrency: effective_concurrency,
+            payload_sizes: vec![psize.label().to_string()],
+            scenarios: json_rows,
+            verdict: "escalation".to_string(),
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    // Find max overhead for bar scaling.
+    let max_overhead = rows
+        .iter()
+        .filter_map(|r| r.overhead)
+        .max()
+        .unwrap_or(Duration::ZERO);
+    let max_overhead_us = max_overhead.as_secs_f64() * 1_000_000.0;
+
+    const BAR_WIDTH: usize = 8;
+
+    // Print escalation table header.
+    println!(
+        "  {:<28} {:>9} {:>9} {:>10}  {:>10}",
+        "Feature Escalation", "P50", "RPS", "", "Overhead"
+    );
+    println!("  {}", "\u{2500}".repeat(70));
+
+    for row in &rows {
+        let p50_str = format_us(row.p50);
+        let rps_str = row
+            .rps
+            .map(format_rps)
+            .unwrap_or_else(|| "\u{2014}".to_string());
+
+        let (bar_str, overhead_str) = match row.overhead {
+            Some(oh) => {
+                let oh_us = oh.as_secs_f64() * 1_000_000.0;
+                let proportion = if max_overhead_us > 0.0 {
+                    oh_us / max_overhead_us
+                } else {
+                    0.0
+                };
+                let bar = render_bar(proportion, BAR_WIDTH);
+                let label = format!(
+                    "+{}",
+                    format_us(Duration::from_secs_f64(oh_us / 1_000_000.0))
+                );
+                (bar, label)
+            }
+            None => (" ".repeat(BAR_WIDTH), "\u{2014}".to_string()),
+        };
+
+        let label = if row.name == "ALL (everything)" {
+            "ALL (everything)".to_string()
+        } else {
+            format!("{} {}", row.step, row.name)
+        };
+
+        println!(
+            "  {:<28} {:>9} {:>9}    {}  {:>10}",
+            label, p50_str, rps_str, bar_str, overhead_str,
+        );
+    }
+
+    // ── Overhead breakdown ──────────────────────────────────────────
+    println!();
+    println!("  Overhead breakdown:");
+
+    // Compute per-feature cost as delta between consecutive steps.
+    let mut feature_costs: Vec<(&str, Duration)> = Vec::new();
+    for i in 1..rows.len() {
+        // Skip the ALL row — it validates the sum, not an incremental cost.
+        if rows[i].name == "ALL (everything)" {
+            continue;
+        }
+        let prev_p50 = rows[i - 1].p50;
+        let curr_p50 = rows[i].p50;
+        let delta = curr_p50.saturating_sub(prev_p50);
+        feature_costs.push((rows[i].name, delta));
+    }
+
+    let max_feature_cost = feature_costs
+        .iter()
+        .map(|(_, d)| *d)
+        .max()
+        .unwrap_or(Duration::ZERO);
+    let total_overhead = rows
+        .iter()
+        .rev()
+        .find(|r| r.name != "ALL (everything)")
+        .and_then(|r| r.overhead)
+        .unwrap_or(Duration::ZERO);
+    let total_overhead_us = total_overhead.as_secs_f64() * 1_000_000.0;
+    let max_feature_us = max_feature_cost.as_secs_f64() * 1_000_000.0;
+
+    const BREAKDOWN_BAR_WIDTH: usize = 40;
+
+    for (name, cost) in &feature_costs {
+        let cost_us = cost.as_secs_f64() * 1_000_000.0;
+        let pct = if total_overhead_us > 0.0 {
+            (cost_us / total_overhead_us * 100.0).round() as u32
+        } else {
+            0
+        };
+        let proportion = if max_feature_us > 0.0 {
+            cost_us / max_feature_us
+        } else {
+            0.0
+        };
+        let bar = render_bar(proportion, BREAKDOWN_BAR_WIDTH);
+        let clean_name = name.strip_prefix("+ ").unwrap_or(name);
+        println!(
+            "    {:<18} {}  {:>3}%  {}",
+            clean_name,
+            bar,
+            pct,
+            format_us(Duration::from_secs_f64(cost_us / 1_000_000.0)),
+        );
+    }
+
+    println!();
+    let rss = current_rss_mb();
+    println!("  Memory: {} RSS", rss);
+    println!();
 
     Ok(())
 }

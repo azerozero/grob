@@ -151,6 +151,9 @@ pub enum Commands {
         /// Payload size: small (~300B), medium (~80KB), large (~150KB), all
         #[arg(short, long, default_value = "small")]
         payload: String,
+        /// Run escalation mode: test each feature layer incrementally
+        #[arg(long)]
+        escalate: bool,
     },
     /// Run diagnostic checks on your Grob installation
     Doctor,

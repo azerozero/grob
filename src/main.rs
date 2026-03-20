@@ -210,9 +210,18 @@ async fn main() -> anyhow::Result<()> {
             format,
             concurrency,
             payload,
+            escalate,
         } => {
-            commands::bench::cmd_bench(&config, requests, with_auth, &format, concurrency, &payload)
-                .await?
+            commands::bench::cmd_bench(
+                &config,
+                requests,
+                with_auth,
+                &format,
+                concurrency,
+                &payload,
+                escalate,
+            )
+            .await?
         }
         Commands::Doctor => commands::doctor::cmd_doctor(&config, &config_source).await,
         #[cfg(feature = "watch")]
