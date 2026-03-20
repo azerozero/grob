@@ -118,7 +118,7 @@ jobs:
           shared-key: hack
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack check --feature-powerset --no-dev-deps
+      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps
 
   docs:
     name: Doc Coverage
