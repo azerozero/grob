@@ -121,9 +121,9 @@ Architecture hybride kernel/userspace avec **DLP complet en kernel** via Hypersc
 | PII credit card (Luhn) | ✅ | `bpf_loop` arithmétique | ~50 ns |
 | PII IBAN (mod97) | ✅ | `bpf_loop` arithmétique | ~50 ns |
 | Prompt injection (28 langues) | ✅ | Hyperscan kernel module | ~100 ns |
-| URL exfiltration (prefix) | ✅ | Prefix match dans XDP | ~50 ns |
+| URL exfiltration | ✅ | Prefix "https://" + domain scan (pas de full URL parse nécessaire) | ~50 ns |
 | Name pseudonymization | ❌ | HMAC + state → userspace | ~1µs |
-| JSON parsing | ❌ | Pas de parser JSON en kernel | — |
+| JSON parsing | ❌ | Pas nécessaire : DLP scanne les bytes bruts, pas les champs JSON | — |
 | Routing inter-node | ✅ | L3/L4 packet forwarding | ~200 ns |
 | mTLS termination | ❌ | Userspace (kTLS pour data path) | ~50µs |
 
@@ -156,6 +156,19 @@ Packet arrive
 | Secret détecté (redaction) | ~400µs | ~400µs (userspace) | 0 |
 | Injection (block) | ~400µs | **~200 ns** (XDP_DROP) | **2000x** |
 | Inter-node forward | ~50µs | **~200 ns** | **250x** |
+
+#### Impact single-node (sans mesh)
+
+XDP améliore aussi le proxy actuel en offloadant le DLP au kernel :
+
+| Métrique | Sans XDP | Avec XDP inline |
+|----------|:---:|:---:|
+| CPU grob pour DLP | ~40% du temps | **~0%** (offloadé kernel) |
+| Throughput RPS | 40K | **~60-80K** (cores libérés) |
+| Injection/DDoS block | ~400µs (userspace) | **~200ns** (XDP_DROP, grob ne voit rien) |
+| Latence clean traffic | ~170µs | ~170µs (inchangé) |
+
+**Note** : le DLP n'a pas besoin de JSON parsing — Aho-Corasick scanne les bytes bruts du body HTTP. Le routing (extraction du champ `model`) reste en userspace.
 
 #### Sous-phases
 
