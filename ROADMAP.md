@@ -97,14 +97,16 @@ signer_type = "human"
 | **mTLS inter-node** | Tous les hops chiffrés avec certificats clients mutuels |
 | **Load balancing** | Pondéré par `load` dans les annonces (least-loaded first) |
 
-```
-Client → Grob Local (Bearer grob_xxx)
-  → lit .grob.toml → compliance = ["pci-dss", "air-gap"]
-  → DLP scan local (AVANT de quitter la machine)
-  → Mesh Controller (mTLS) → "route pci-dss + air-gap"
-  → Controller → Node Air-Gap Brest (mTLS)
-  → Ollama/vLLM local → réponse
-  → Audit signé à chaque hop
+```mermaid
+flowchart TB
+    client["Client"] -->|"Bearer grob_xxx"| local["Grob Local"]
+    local -->|"lit .grob.toml"| compliance["compliance = pci-dss, air-gap"]
+    compliance --> dlp["DLP scan local<br/>(AVANT de quitter la machine)"]
+    dlp -->|mTLS| ctrl["Mesh Controller<br/>route pci-dss + air-gap"]
+    ctrl -->|mTLS| node["Node Air-Gap Brest"]
+    node --> ollama["Ollama/vLLM local"]
+    ollama --> resp["réponse"]
+    resp --> audit["Audit signé à chaque hop"]
 ```
 
 ### Phase 4.4 — eBPF XDP + Hyperscan DLP (5-10j)
@@ -129,22 +131,20 @@ Architecture hybride kernel/userspace avec **DLP complet en kernel** via Hypersc
 
 #### Architecture
 
-```
-Packet arrive
-     │
-     ▼
-┌──────────────────────────────┐
-│  XDP + Hyperscan module      │  ~100-200 ns
-│                               │
-│  1. Hyperscan: 25 patterns   │  ← DLP secrets complet en kernel
-│  2. Luhn checksum (bpf_loop) │  ← Credit card en kernel
-│  3. Injection regex          │  ← 28 langues en kernel
-│  4. URL prefix scan          │  ← Exfiltration en kernel
-│                               │
-│  ├─ Clean → XDP_REDIRECT     │──→ Forward direct (~200 ns)
-│  ├─ Secret → XDP_PASS        │──→ Userspace (redaction ~100µs)
-│  └─ Injection → XDP_DROP     │──→ Block instantané (~200 ns)
-└──────────────────────────────┘
+```mermaid
+flowchart TB
+    pkt["Packet arrive"] --> xdp
+
+    subgraph xdp["XDP + Hyperscan module — ~100-200 ns"]
+        h1["1. Hyperscan: 25 patterns<br/>← DLP secrets complet en kernel"]
+        h2["2. Luhn checksum (bpf_loop)<br/>← Credit card en kernel"]
+        h3["3. Injection regex<br/>← 28 langues en kernel"]
+        h4["4. URL prefix scan<br/>← Exfiltration en kernel"]
+    end
+
+    xdp -->|"Clean"| redirect["XDP_REDIRECT<br/>Forward direct (~200 ns)"]
+    xdp -->|"Secret"| pass["XDP_PASS<br/>Userspace (redaction ~100µs)"]
+    xdp -->|"Injection"| drop["XDP_DROP<br/>Block instantané (~200 ns)"]
 ```
 
 #### Performance

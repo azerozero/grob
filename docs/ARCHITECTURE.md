@@ -4,120 +4,69 @@ Grob is a multi-provider LLM routing proxy written in Rust. It accepts requests 
 
 ## Request flow
 
-```
-Client (Claude Code, Aider, curl, ...)
-  |
-  |  POST /v1/messages           (Anthropic native)
-  |  POST /v1/chat/completions   (OpenAI compat)
-  v
-+------------------------------------------------------------------+
-|                        Axum HTTP Server                          |
-|                                                                  |
-|  Middleware chain (applied outermost-first):                     |
-|                                                                  |
-|  1. Request ID                                                   |
-|     Reads X-Request-Id or generates UUID v4.                     |
-|     Echoed back in response header.                              |
-|                                                                  |
-|  2. Body Size Limit                                              |
-|     Rejects payloads over max_body_size (default 10 MB).         |
-|                                                                  |
-|  3. Security Headers                                             |
-|     Applies OWASP response headers (X-Content-Type-Options,      |
-|     X-Frame-Options, Strict-Transport-Security, etc).            |
-|                                                                  |
-|  4. Rate Limiter                                                 |
-|     Token-bucket per tenant/API-key/IP.                          |
-|     Returns 429 + Retry-After when exceeded.                     |
-|                                                                  |
-|  5. Auth                                                         |
-|     Three modes: none, api_key, jwt.                             |
-|     Skips health/metrics/oauth paths.                            |
-|                                                                  |
-+------------------------------------------------------------------+
-  |
-  v
-+------------------------------------------------------------------+
-|                          Handler                                 |
-|                                                                  |
-|  - Parses request body (Anthropic or OpenAI format)              |
-|  - Checks budget (global, per-provider, per-model)               |
-|  - Increments active_requests gauge                              |
-|  - OpenAI requests are translated to Anthropic internal format   |
-|                                                                  |
-+------------------------------------------------------------------+
-  |
-  v
-+------------------------------------------------------------------+
-|                          Router                                  |
-|                                                                  |
-|  Determines route type and target model:                         |
-|                                                                  |
-|  0. Auto-map regex   -- transform model name (e.g. claude-*)    |
-|  1. WebSearch        -- web_search tool detected (highest)       |
-|  2. Background       -- model matches background_regex           |
-|  3. Subagent         -- GROB-SUBAGENT-MODEL tag in system prompt |
-|  4. Prompt rules     -- regex match on user message content      |
-|  5. Think            -- thinking/reasoning enabled               |
-|  6. Default model    -- fallback from [router] config            |
-|                                                                  |
-|  Output: RouteDecision { model, route_type, matched_prompt }     |
-|                                                                  |
-+------------------------------------------------------------------+
-  |
-  v
-+------------------------------------------------------------------+
-|                    Provider Dispatch                              |
-|                                                                  |
-|  For each mapping (ordered by priority):                         |
-|                                                                  |
-|  1. Circuit Breaker check                                        |
-|     - Closed:   allow request                                    |
-|     - Open:     skip provider, try next (fail-fast)              |
-|     - HalfOpen: allow limited probe requests                     |
-|                                                                  |
-|  2. Provider call                                                |
-|     - Anthropic (native passthrough)                             |
-|     - OpenAI (translate to OpenAI API format)                    |
-|     - Gemini (translate to Gemini API format)                    |
-|     - DeepSeek, Ollama, OpenRouter, etc.                         |
-|                                                                  |
-|  3. On success: record_success on circuit breaker                |
-|     On failure: record_failure, try next mapping (fallback)      |
-|                                                                  |
-|  Strategy modes:                                                 |
-|  - fallback: sequential by priority (default)                    |
-|  - fan_out:  parallel dispatch, return fastest/best              |
-|                                                                  |
-+------------------------------------------------------------------+
-  |
-  v
-+------------------------------------------------------------------+
-|                     DLP (Data Loss Prevention)                   |
-|                                                                  |
-|  If enabled, scans response stream for:                          |
-|  - Secret patterns (25 builtin rules: AWS keys, tokens, etc.)   |
-|  - PII (names, emails, phone numbers)                            |
-|  - Canary tokens (watermarks for leak detection)                 |
-|                                                                  |
-|  Uses Aho-Corasick DFA for O(n) scanning of streaming chunks.   |
-|                                                                  |
-+------------------------------------------------------------------+
-  |
-  v
-+------------------------------------------------------------------+
-|                        Response                                  |
-|                                                                  |
-|  - Stream SSE events back to client (or buffer for non-stream)  |
-|  - Record metrics (latency, tokens, cost, status)                |
-|  - Update spend tracker (persistent in redb)                     |
-|  - Emit webhook tap event (if configured)                        |
-|  - Write audit log entry (if configured)                         |
-|                                                                  |
-+------------------------------------------------------------------+
-  |
-  v
-Client
+```mermaid
+flowchart TB
+    client(("Client<br/>(Claude Code, Aider, curl, ...)"))
+
+    subgraph server["Axum HTTP Server"]
+        direction TB
+        mw1["1. Request ID<br/>Reads X-Request-Id or generates UUID v4"]
+        mw2["2. Body Size Limit<br/>Rejects payloads over max_body_size (10 MB)"]
+        mw3["3. Security Headers<br/>OWASP headers (X-Content-Type-Options, etc.)"]
+        mw4["4. Rate Limiter<br/>Token-bucket per tenant/API-key/IP → 429"]
+        mw5["5. Auth<br/>none / api_key / jwt"]
+        mw1 --> mw2 --> mw3 --> mw4 --> mw5
+    end
+
+    subgraph handler["Handler"]
+        h1["Parse request body (Anthropic or OpenAI)"]
+        h2["Check budget (global, per-provider, per-model)"]
+        h3["OpenAI → Anthropic internal format"]
+    end
+
+    subgraph router["Router"]
+        r0["0. Auto-map regex — transform model name"]
+        r1["1. WebSearch — web_search tool detected"]
+        r2["2. Background — model matches background_regex"]
+        r3["3. Subagent — GROB-SUBAGENT-MODEL tag"]
+        r4["4. Prompt rules — regex on user message"]
+        r5["5. Think — thinking/reasoning enabled"]
+        r6["6. Default model — fallback"]
+        rd["RouteDecision { model, route_type }"]
+    end
+
+    subgraph dispatch["Provider Dispatch"]
+        cb{"Circuit Breaker"}
+        cb -->|Closed| call["Provider call<br/>(Anthropic, OpenAI, Gemini, ...)"]
+        cb -->|Open| skip["Skip → next provider"]
+        cb -->|HalfOpen| probe["Limited probe requests"]
+        call -->|success| ok["record_success"]
+        call -->|failure| fail["record_failure → try next"]
+        note["Strategies: fallback (sequential) · fan_out (parallel)"]
+    end
+
+    subgraph dlp["DLP (Data Loss Prevention)"]
+        dlp1["Secret patterns (25 builtin rules)"]
+        dlp2["PII (names, emails, phones)"]
+        dlp3["Canary tokens"]
+        dlp4["Aho-Corasick DFA — O(n) streaming"]
+    end
+
+    subgraph response["Response"]
+        resp1["Stream SSE events / buffer"]
+        resp2["Record metrics (latency, tokens, cost)"]
+        resp3["Update spend tracker (redb)"]
+        resp4["Emit webhook tap event"]
+        resp5["Write audit log entry"]
+    end
+
+    client -->|"POST /v1/messages\nPOST /v1/chat/completions"| server
+    server --> handler
+    handler --> router
+    router --> dispatch
+    dispatch --> dlp
+    dlp --> response
+    response --> client
 ```
 
 ## Module layout

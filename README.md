@@ -21,12 +21,18 @@
 
 > **~100 µs pure overhead** with full DLP + routing + caching + rate limiting — [50x faster than LiteLLM](docs/reference/features.md), every feature [measured individually](benches/).
 
-```
-Claude Code ─┐                          ┌── Anthropic (primary)
-Aider ───────┤   ┌──────────────────┐    ├── OpenRouter (fallback)
-Codex CLI ───┼──▶│  Grob  DLP  ▶│──▶├── Gemini
-Forge ───────┤   └──────────────────┘    ├── DeepSeek
-Cursor ──────┘     6 MB  zero deps       └── Ollama (local)
+```mermaid
+flowchart LR
+    CC[Claude Code] --> G
+    AI[Aider] --> G
+    CX[Codex CLI] --> G
+    FO[Forge] --> G
+    CU[Cursor] --> G
+    G["Grob &lt;DLP&gt;<br/>6 MB · zero deps"] --> A["Anthropic (primary)"]
+    G --> OR["OpenRouter (fallback)"]
+    G --> GE[Gemini]
+    G --> DS[DeepSeek]
+    G --> OL["Ollama (local)"]
 ```
 
 ## Why Grob?
@@ -95,14 +101,16 @@ grob watch
 
 Requests are classified by intent, then routed to the best model with automatic fallback:
 
-```
-Request ──▶ Classify ──▶ Model ──▶ Provider (P1) ──fail──▶ Provider (P2)
-                │
-                ├── extended thinking?  ──▶ Opus 4.6
-                ├── web_search tool?    ──▶ Gemini 3 Pro
-                ├── background task?    ──▶ Gemini 3 Flash
-                ├── regex match?        ──▶ custom model
-                └── default             ──▶ Sonnet 4.6
+```mermaid
+flowchart LR
+    R[Request] --> CL[Classify]
+    CL --> M[Model] --> P1["Provider (P1)"]
+    P1 -->|fail| P2["Provider (P2)"]
+    CL -->|extended thinking?| O[Opus 4.6]
+    CL -->|web_search tool?| GP[Gemini 3 Pro]
+    CL -->|background task?| GF[Gemini 3 Flash]
+    CL -->|regex match?| CM[custom model]
+    CL -->|default| S[Sonnet 4.6]
 ```
 
 Presets configure everything in one command:

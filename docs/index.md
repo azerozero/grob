@@ -10,15 +10,12 @@ Grob is a multi-provider LLM routing proxy. It sits between your AI coding assis
 
 ## How it works
 
-```
-Claude Code / Aider / Cline
-        |
-        v
-      Grob (proxy on localhost:13456)
-        |
-        +---> Anthropic (priority 1)
-        +---> OpenRouter (priority 2, fallback)
-        +---> Ollama (priority 3, local fallback)
+```mermaid
+flowchart TB
+    clients["Claude Code / Aider / Cline"] --> grob["Grob<br/>(proxy on localhost:13456)"]
+    grob --> a["Anthropic (priority 1)"]
+    grob --> or["OpenRouter (priority 2, fallback)"]
+    grob --> ol["Ollama (priority 3, local fallback)"]
 ```
 
 Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them, classifies by task type (thinking, web search, background, default), and dispatches to the best available provider. If one provider fails, the next in the priority chain is tried automatically.

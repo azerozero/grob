@@ -4,33 +4,16 @@ Decision tree and all possible paths through `grob setup`.
 
 ## Overview
 
-```
-grob setup
-    |
-    v
-[Screen 1] Tool Selection
-    |
-    +---> "Custom" -----> Minimal config written, exit
-    |
-    +---> Tools selected
-            |
-            v
-      Preset auto-selected (perf / fast)
-            |
-            v
-[Screen 2] Provider & Auth (per provider)
-            |
-            v
-[Screen 3] Fallback Provider
-            |
-            v
-[Screen 4] Compliance Mode
-            |
-            v
-[Screen 5] Budget Cap
-            |
-            v
-[Screen 6] Validation & Instructions
+```mermaid
+flowchart TB
+    setup["grob setup"] --> s1["Screen 1: Tool Selection"]
+    s1 -->|Custom| exit1["Minimal config written, exit"]
+    s1 -->|Tools selected| preset["Preset auto-selected<br/>(perf / fast)"]
+    preset --> s2["Screen 2: Provider & Auth<br/>(per provider)"]
+    s2 --> s3["Screen 3: Fallback Provider"]
+    s3 --> s4["Screen 4: Compliance Mode"]
+    s4 --> s5["Screen 5: Budget Cap"]
+    s5 --> s6["Screen 6: Validation & Instructions"]
 ```
 
 ---
@@ -51,20 +34,12 @@ Multi-select prompt. User enters comma-separated numbers or `all`.
 
 ### Decision logic
 
-```
-Selected tools
-    |
-    +-- needs_anthropic AND needs_openai ---> preset = "fast"
-    |                                         (Anthropic + OpenAI + Gemini + OpenRouter)
-    |
-    +-- needs_openai only -----------------> preset = "fast"
-    |                                         (OpenAI + OpenRouter pass-through)
-    |
-    +-- needs_anthropic only --------------> preset = "perf"
-    |                                         (Anthropic OAuth + OpenRouter fallback)
-    |
-    +-- Custom (choice 7) -----------------> Minimal [server]+[router] written
-                                              Print next-steps, exit
+```mermaid
+flowchart TB
+    sel["Selected tools"] -->|needs_anthropic AND needs_openai| fast1["preset = fast<br/>(Anthropic + OpenAI + Gemini + OpenRouter)"]
+    sel -->|needs_openai only| fast2["preset = fast<br/>(OpenAI + OpenRouter pass-through)"]
+    sel -->|needs_anthropic only| perf["preset = perf<br/>(Anthropic OAuth + OpenRouter fallback)"]
+    sel -->|"Custom (choice 7)"| min["Minimal config written<br/>Print next-steps, exit"]
 ```
 
 ### Provider mapping per tool
@@ -86,18 +61,13 @@ Shown for each enabled provider in the applied preset. Iterates over providers f
 
 ### Per-provider decision
 
-```
-Provider supports OAuth?  (anthropic, openai, gemini)
-    |
-    +-- YES
-    |     |
-    |     [1] OAuth (subscription)  ---> auth_type = "oauth"
-    |     [2] API key               ---> prompt for key or defer to env var
-    |
-    +-- NO  (openrouter, deepseek, mistral)
-          |
-          [1] Enter API key now     ---> key written to config
-          [2] Set env var later     ---> keep $ENV_VAR reference
+```mermaid
+flowchart TB
+    p["Provider supports OAuth?<br/>(anthropic, openai, gemini)"]
+    p -->|YES| oauth["[1] OAuth (subscription)<br/>→ auth_type = oauth"]
+    p -->|YES| apikey1["[2] API key<br/>→ prompt for key or defer"]
+    p -->|"NO (openrouter, deepseek, mistral)"| apikey2["[1] Enter API key now<br/>→ key written to config"]
+    p -->|"NO"| envvar["[2] Set env var later<br/>→ keep $ENV_VAR reference"]
 ```
 
 ### Provider auth capabilities
@@ -126,13 +96,11 @@ Shown only when:
 - 1 primary provider configured (excluding openrouter)
 - No openrouter already in the preset
 
-```
-Add a fallback provider?
-    |
-    [1] OpenRouter (recommended) ---> Add [[providers]] with pass_through = true
-    |                                  Ask for API key or defer
-    |
-    [2] No fallback --------------> Skip
+```mermaid
+flowchart TB
+    q["Add a fallback provider?"]
+    q -->|"[1] OpenRouter (recommended)"| add["Add providers with pass_through = true<br/>Ask for API key or defer"]
+    q -->|"[2] No fallback"| skip["Skip"]
 ```
 
 ### Config effect

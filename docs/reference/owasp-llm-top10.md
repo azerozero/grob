@@ -185,29 +185,25 @@ Audit entries are cryptographically signed (ECDSA P-256 or HMAC-SHA256) and hash
 
 ## Defense-in-depth diagram
 
-```
-Client request
-│
-├─ Rate Limiter ·························· LLM10
-├─ Auth (API key / JWT)
-├─ DLP Input Scan
-│   ├─ Prompt Injection Detection ········ LLM01
-│   ├─ Secret Redaction / Canary ········· LLM02
-│   ├─ PII Detection ···················· LLM02
-│   └─ Name Anonymization ··············· LLM02
-│
-├─ Router → Provider (circuit breaker) ··· LLM10
-│
-├─ DLP Output Scan
-│   ├─ URL Exfiltration Detection ········ LLM02, LLM05
-│   ├─ Secret Detection ················· LLM02
-│   └─ Entropy Analysis (async) ·········· LLM02
-│
-├─ Name De-anonymization (reverse map)
-├─ Audit Log (ECDSA signed, hash-chained)
-└─ Webhook Tap (observability)
-
-Response to client
+```mermaid
+flowchart TB
+    req["Client request"]
+    req --> rl["Rate Limiter · · · LLM10"]
+    rl --> auth["Auth (API key / JWT)"]
+    auth --> dlpIn["DLP Input Scan"]
+    dlpIn --> pi["Prompt Injection Detection · · · LLM01"]
+    dlpIn --> sr["Secret Redaction / Canary · · · LLM02"]
+    dlpIn --> pii["PII Detection · · · LLM02"]
+    dlpIn --> na["Name Anonymization · · · LLM02"]
+    na --> route["Router → Provider (circuit breaker) · · · LLM10"]
+    route --> dlpOut["DLP Output Scan"]
+    dlpOut --> ue["URL Exfiltration Detection · · · LLM02, LLM05"]
+    dlpOut --> sd["Secret Detection · · · LLM02"]
+    dlpOut --> ea["Entropy Analysis (async) · · · LLM02"]
+    ea --> deanon["Name De-anonymization (reverse map)"]
+    deanon --> audit["Audit Log (ECDSA signed, hash-chained)"]
+    audit --> tap["Webhook Tap (observability)"]
+    tap --> resp["Response to client"]
 ```
 
 ## Quick-start: enable all protections
