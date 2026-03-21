@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.5](https://github.com/azerozero/grob/compare/v0.24.4...v0.24.5) - 2026-03-21
+
+### Added
+
+- add brew install to README + CI homebrew test job
+
+### Other
+
+- *(release)* auto-update Homebrew tap on release
+- *(readme)* add benchmarks link, contributing section, trim badges
+- *(bench)* use req/s header and readable numbers in benchmark tables
+- translate French to English + deduplicate diagrams
+- convert 17 ASCII diagrams to Mermaid across 9 files
+
 ## [0.24.4](https://github.com/azerozero/grob/compare/v0.24.3...v0.24.4) - 2026-03-21
 
 ### Fixed
