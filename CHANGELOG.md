@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.3](https://github.com/azerozero/grob/compare/v0.24.2...v0.24.3) - 2026-03-21
+
+### Fixed
+
+- *(deps)* resolve 5 security advisories + harden pre-push hooks
+
 ## [0.24.2](https://github.com/azerozero/grob/compare/v0.24.1...v0.24.2) - 2026-03-21
 
 ### Fixed
