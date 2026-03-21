@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.2](https://github.com/azerozero/grob/compare/v0.24.1...v0.24.2) - 2026-03-21
+
+### Fixed
+
+- *(ci)* use gitleaks binary instead of paid org action
+
+### Other
+
+- add gitleaks secret scanning to CI pipeline
+- *(bench)* add AWS benchmark results with competitor comparison
+- *(roadmap)* clarify XDP DLP (byte scan, no JSON needed) + single-node gains
+- *(roadmap)* upgrade Phase 4.4 with Hyperscan kernel DLP
+- *(roadmap)* complete rewrite with Tier 4 mesh + pricing + benchmarks
+
 ## [0.24.1](https://github.com/azerozero/grob/compare/v0.24.0...v0.24.1) - 2026-03-21
 
 ### Other
