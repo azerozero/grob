@@ -113,7 +113,7 @@ jobs:
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
             | sudo tar xz -C /usr/local/bin gitleaks
       - name: Run gitleaks
-        run: gitleaks detect --source . --verbose
+        run: gitleaks detect --source . --log-opts "${{ github.event.before }}..${{ github.sha }}" --verbose
 
   deny:
     name: Cargo Deny
