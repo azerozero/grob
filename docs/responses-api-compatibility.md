@@ -32,13 +32,7 @@ All requests are translated to Grob's canonical format internally, routed throug
 
 ## Translation pipeline
 
-```mermaid
-flowchart LR
-    A["Responses request"] -->|transform_responses_to_canonical| B["CanonicalRequest"]
-    B --> C["dispatch pipeline"]
-    C --> D["ProviderResponse"]
-    D -->|transform_canonical_to_responses| E["Responses response"]
-```
+See [API Compatibility Reference — Responses pipeline](reference/api-compatibility.md#translation-pipeline-1) for the full diagram.
 
 For streaming, the `AnthropicToResponsesStream` state machine converts Anthropic SSE events into Responses API named-event SSE events on the fly.
 

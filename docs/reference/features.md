@@ -94,7 +94,7 @@ Grob maps its features to specific regulatory requirements. The table below show
 | **Art. 15** | Accuracy, robustness, cybersecurity | Prompt injection detection, DLP, circuit breakers | `[dlp] injection = "block"` |
 | **Art. 52** | Transparency obligations | `X-AI-Provider`, `X-AI-Model`, `X-AI-Generated` response headers | `[compliance] transparency_headers = true` |
 
-**Preset** : `grob preset apply eu-ai-act` active tout en une commande.
+**Preset**: `grob preset apply eu-ai-act` enables everything in one command.
 
 ### GDPR / RGPD
 
@@ -107,7 +107,7 @@ Grob maps its features to specific regulatory requirements. The table below show
 | Data breach notification (Art. 33) | Canary tokens detect data leaks | `[dlp] canary = true` |
 | Audit trail (Art. 30) | Signed audit log with hash chain | `[security] audit_dir` |
 
-**Preset** : `grob preset apply gdpr` active le routing EU-only + DLP.
+**Preset**: `grob preset apply gdpr` enables EU-only routing + DLP.
 
 ### HDS / PCI DSS / SecNumCloud
 

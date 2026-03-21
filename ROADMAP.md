@@ -1,24 +1,24 @@
-# Grob Roadmap — Priorités par impact business
+# Grob Roadmap — Priorities by business impact
 
-**Dernière MAJ** : 2026-03-21
+**Last updated**: 2026-03-21
 
 ---
 
-## Tier 1 — Vendre (semaines 1-2) ✅
+## Tier 1 — Ship (weeks 1-2) ✅
 
 | # | Feature | Status |
 |---|---------|--------|
-| 1 | Benchmark publié (overhead, RPS, escalation, payload sizes) | ✅ |
+| 1 | Published benchmarks (overhead, RPS, escalation, payload sizes) | ✅ |
 | 2 | README "Obviously Awesome" | ✅ |
 
-## Tier 2 — Différenciation visible (semaines 3-6) ✅
+## Tier 2 — Visible differentiation (weeks 3-6) ✅
 
 | # | Feature | Status |
 |---|---------|--------|
-| 3 | `grob watch` (TUI dashboard live) | ✅ |
+| 3 | `grob watch` (live TUI dashboard) | ✅ |
 | 4 | OpenTelemetry (OTLP export) | ✅ |
 
-## Tier 3 — Scale & monétisation (mois 2-4) ✅
+## Tier 3 — Scale & monetization (months 2-4) ✅
 
 | # | Feature | Status |
 |---|---------|--------|
@@ -30,46 +30,46 @@
 
 ---
 
-## Tier 4 — Proxy Mesh Souverain (M6-M12)
+## Tier 4 — Sovereign Proxy Mesh (M6-M12)
 
-Architecture multi-node avec routage par conformité, eBPF XDP, et annonces signées.
+Multi-node architecture with compliance-based routing, eBPF XDP, and signed announcements.
 
-### Pricing cible
+### Target pricing
 
-| Tier | Prix | Inclut |
-|------|------|--------|
-| **Community** | Gratuit (AGPL) | Single node, toutes les features actuelles |
-| **Pro** | 500-800€/mois | Virtual keys, log export, support 48h SLA |
-| **Enterprise** | 2 000-5 000€/mois | Mesh multi-node, annonces signées, audit cross-node |
-| **Sovereign** | 20-50k€/an + consulting | Air-gapped, eBPF XDP, LoRA adapters, PKI custom |
+| Tier | Price | Includes |
+|------|-------|----------|
+| **Community** | Free (AGPL) | Single node, all current features |
+| **Pro** | €500-800/mo | Virtual keys, log export, 48h SLA support |
+| **Enterprise** | €2,000-5,000/mo | Multi-node mesh, signed announcements, cross-node audit |
+| **Sovereign** | €20-50k/yr + consulting | Air-gapped, eBPF XDP, LoRA adapters, custom PKI |
 
-### Phase 4.1 — Mode passthrough (2-3j)
+### Phase 4.1 — Passthrough mode (2-3d)
 
-Byte-level proxy sans JSON parsing quand aucune feature L7 n'est activée.
+Byte-level proxy without JSON parsing when no L7 feature is enabled.
 
-| Métrique | Actuel (L7) | Passthrough | Bifrost |
-|----------|:---:|:---:|:---:|
+| Metric | Current (L7) | Passthrough | Bifrost |
+|--------|:---:|:---:|:---:|
 | Overhead | ~100µs | **~5µs** | 11µs |
-| Technique | hyper zero-copy, pas de serde | io::copy blob | Go net/http |
+| Technique | hyper zero-copy, no serde | io::copy blob | Go net/http |
 
-### Phase 4.2 — Mesh discovery + annonces signées (5-7j)
+### Phase 4.2 — Mesh discovery + signed announcements (5-7d)
 
-Chaque node broadcast ses capacités de conformité, signées cryptographiquement.
+Each node broadcasts its compliance capabilities, cryptographically signed.
 
 | Feature | Description |
 |---------|-------------|
-| **Annonces signées** | JSON signé ECDSA P-256 : `node_id`, `capabilities` (RGPD, PCI, HIPAA, air-gap), `region`, `load`, `timestamp` |
-| **Signataire** | Humain (RSSI certifie la conformité PCI), HSM (rotation auto), ou pipeline CI (post-audit) |
-| **Vérification** | Les nodes vérifient la signature avant d'accepter le routage |
-| **Lifecycle** | Re-annonce toutes les 5 min, expiration après 15 min sans refresh |
-| **Anti-tampering** | Node retiré du mesh si signature invalide ou expirée |
+| **Signed announcements** | ECDSA P-256 signed JSON: `node_id`, `capabilities` (GDPR, PCI, HIPAA, air-gap), `region`, `load`, `timestamp` |
+| **Signer** | Human (CISO certifies PCI compliance), HSM (auto-rotation), or CI pipeline (post-audit) |
+| **Verification** | Nodes verify signature before accepting routing |
+| **Lifecycle** | Re-announce every 5 min, expires after 15 min without refresh |
+| **Anti-tampering** | Node removed from mesh if signature is invalid or expired |
 
 ```toml
 [mesh.announce]
 signing_key = "/etc/grob/mesh-signing.key"  # ECDSA P-256
 interval = "5m"
 expires_after = "15m"
-# Qui signe : "human" | "hsm" | "ci-pipeline"
+# Who signs: "human" | "hsm" | "ci-pipeline"
 signer_type = "human"
 ```
 
@@ -81,222 +81,222 @@ signer_type = "human"
   "providers": ["mistral", "ovh-ai"],
   "load": 0.3,
   "timestamp": "2026-03-21T10:00:00Z",
-  "signer": "rssi@company.com",
+  "signer": "ciso@company.com",
   "signature": "MEUCIQD..."
 }
 ```
 
-### Phase 4.3 — Mesh controller + routage conformité (5-7j)
+### Phase 4.3 — Mesh controller + compliance routing (5-7d)
 
 | Feature | Description |
 |---------|-------------|
-| **Controller** | Reçoit les annonces, maintient la table de routage par conformité |
-| **Routage par contrainte** | Client demande "RGPD + PCI" → route vers Node EU Paris |
-| **Geo-routing** | Latence-aware + data residency (région tag) |
-| **Failover mesh** | Si Node EU-1 down → circuit breaker → failover vers Node EU-2 |
-| **mTLS inter-node** | Tous les hops chiffrés avec certificats clients mutuels |
-| **Load balancing** | Pondéré par `load` dans les annonces (least-loaded first) |
+| **Controller** | Receives announcements, maintains compliance-based routing table |
+| **Constraint-based routing** | Client requests "GDPR + PCI" → routes to EU Paris node |
+| **Geo-routing** | Latency-aware + data residency (region tag) |
+| **Mesh failover** | If EU-1 node down → circuit breaker → failover to EU-2 node |
+| **mTLS inter-node** | All hops encrypted with mutual client certificates |
+| **Load balancing** | Weighted by `load` in announcements (least-loaded first) |
 
 ```mermaid
 flowchart TB
     client["Client"] -->|"Bearer grob_xxx"| local["Grob Local"]
-    local -->|"lit .grob.toml"| compliance["compliance = pci-dss, air-gap"]
-    compliance --> dlp["DLP scan local<br/>(AVANT de quitter la machine)"]
+    local -->|"reads .grob.toml"| compliance["compliance = pci-dss, air-gap"]
+    compliance --> dlp["DLP scan local<br/>(before leaving the machine)"]
     dlp -->|mTLS| ctrl["Mesh Controller<br/>route pci-dss + air-gap"]
-    ctrl -->|mTLS| node["Node Air-Gap Brest"]
+    ctrl -->|mTLS| node["Air-Gap Node Brest"]
     node --> ollama["Ollama/vLLM local"]
-    ollama --> resp["réponse"]
-    resp --> audit["Audit signé à chaque hop"]
+    ollama --> resp["response"]
+    resp --> audit["Signed audit at each hop"]
 ```
 
-### Phase 4.4 — eBPF XDP + Hyperscan DLP (5-10j)
+### Phase 4.4 — eBPF XDP + Hyperscan DLP (5-10d)
 
-Architecture hybride kernel/userspace avec **DLP complet en kernel** via Hyperscan.
+Hybrid kernel/userspace architecture with **full DLP in kernel** via Hyperscan.
 
-**Référence** : [Gcore](https://gcore.com/blog/how-we-use-regular-expressions-in-xdp-for-packet-filtering) fait du regex dans XDP en production à 200M pps en compilant Hyperscan comme kernel module. Linux 6.x+ supporte `bpf_loop` (8M iterations) et les open-coded iterators (v6.4+).
+**Reference**: [Gcore](https://gcore.com/blog/how-we-use-regular-expressions-in-xdp-for-packet-filtering) runs regex in XDP in production at 200M pps by compiling Hyperscan as a kernel module. Linux 6.x+ supports `bpf_loop` (8M iterations) and open-coded iterators (v6.4+).
 
-#### DLP en kernel — ce qui est maintenant possible
+#### Kernel DLP — what is now possible
 
-| Validation DLP | XDP+Hyperscan | Comment | Latence |
+| DLP validation | XDP+Hyperscan | How | Latency |
 |----------------|:---:|---------|:---:|
 | Secret scan (25 patterns) | ✅ | Hyperscan kernel module (Aho-Corasick) | ~100 ns |
-| PII credit card (Luhn) | ✅ | `bpf_loop` arithmétique | ~50 ns |
-| PII IBAN (mod97) | ✅ | `bpf_loop` arithmétique | ~50 ns |
-| Prompt injection (28 langues) | ✅ | Hyperscan kernel module | ~100 ns |
-| URL exfiltration | ✅ | Prefix "https://" + domain scan (pas de full URL parse nécessaire) | ~50 ns |
+| PII credit card (Luhn) | ✅ | `bpf_loop` arithmetic | ~50 ns |
+| PII IBAN (mod97) | ✅ | `bpf_loop` arithmetic | ~50 ns |
+| Prompt injection (28 languages) | ✅ | Hyperscan kernel module | ~100 ns |
+| URL exfiltration | ✅ | Prefix "https://" + domain scan (no full URL parse needed) | ~50 ns |
 | Name pseudonymization | ❌ | HMAC + state → userspace | ~1µs |
-| JSON parsing | ❌ | Pas nécessaire : DLP scanne les bytes bruts, pas les champs JSON | — |
-| Routing inter-node | ✅ | L3/L4 packet forwarding | ~200 ns |
-| mTLS termination | ❌ | Userspace (kTLS pour data path) | ~50µs |
+| JSON parsing | ❌ | Not needed: DLP scans raw bytes, not JSON fields | — |
+| Inter-node routing | ✅ | L3/L4 packet forwarding | ~200 ns |
+| mTLS termination | ❌ | Userspace (kTLS for data path) | ~50µs |
 
 #### Architecture
 
 ```mermaid
 flowchart TB
-    pkt["Packet arrive"] --> xdp
+    pkt["Packet arrives"] --> xdp
 
     subgraph xdp["XDP + Hyperscan module — ~100-200 ns"]
-        h1["1. Hyperscan: 25 patterns<br/>← DLP secrets complet en kernel"]
-        h2["2. Luhn checksum (bpf_loop)<br/>← Credit card en kernel"]
-        h3["3. Injection regex<br/>← 28 langues en kernel"]
-        h4["4. URL prefix scan<br/>← Exfiltration en kernel"]
+        h1["1. Hyperscan: 25 patterns<br/>← full DLP secrets in kernel"]
+        h2["2. Luhn checksum (bpf_loop)<br/>← credit card in kernel"]
+        h3["3. Injection regex<br/>← 28 languages in kernel"]
+        h4["4. URL prefix scan<br/>← exfiltration in kernel"]
     end
 
-    xdp -->|"Clean"| redirect["XDP_REDIRECT<br/>Forward direct (~200 ns)"]
+    xdp -->|"Clean"| redirect["XDP_REDIRECT<br/>Direct forward (~200 ns)"]
     xdp -->|"Secret"| pass["XDP_PASS<br/>Userspace (redaction ~100µs)"]
-    xdp -->|"Injection"| drop["XDP_DROP<br/>Block instantané (~200 ns)"]
+    xdp -->|"Injection"| drop["XDP_DROP<br/>Instant block (~200 ns)"]
 ```
 
 #### Performance
 
-| Scénario | Sans XDP | Avec XDP+Hyperscan | Gain |
+| Scenario | Without XDP | With XDP+Hyperscan | Gain |
 |----------|:---:|:---:|:---:|
 | Clean traffic (99%) | ~170µs | **~100-200 ns** | **1000x** |
-| Secret détecté (block) | ~400µs | **~200 ns** (XDP_DROP) | **2000x** |
-| Secret détecté (redaction) | ~400µs | ~400µs (userspace) | 0 |
+| Secret detected (block) | ~400µs | **~200 ns** (XDP_DROP) | **2000x** |
+| Secret detected (redaction) | ~400µs | ~400µs (userspace) | 0 |
 | Injection (block) | ~400µs | **~200 ns** (XDP_DROP) | **2000x** |
 | Inter-node forward | ~50µs | **~200 ns** | **250x** |
 
-#### Impact single-node (sans mesh)
+#### Single-node impact (no mesh)
 
-XDP améliore aussi le proxy actuel en offloadant le DLP au kernel :
+XDP also improves the current proxy by offloading DLP to the kernel:
 
-| Métrique | Sans XDP | Avec XDP inline |
-|----------|:---:|:---:|
-| CPU grob pour DLP | ~40% du temps | **~0%** (offloadé kernel) |
-| Throughput RPS | 40K | **~60-80K** (cores libérés) |
-| Injection/DDoS block | ~400µs (userspace) | **~200ns** (XDP_DROP, grob ne voit rien) |
-| Latence clean traffic | ~170µs | ~170µs (inchangé) |
+| Metric | Without XDP | With XDP inline |
+|--------|:---:|:---:|
+| Grob CPU for DLP | ~40% of time | **~0%** (offloaded to kernel) |
+| Throughput RPS | 40K | **~60-80K** (cores freed) |
+| Injection/DDoS block | ~400µs (userspace) | **~200ns** (XDP_DROP, grob sees nothing) |
+| Clean traffic latency | ~170µs | ~170µs (unchanged) |
 
-**Note** : le DLP n'a pas besoin de JSON parsing — Aho-Corasick scanne les bytes bruts du body HTTP. Le routing (extraction du champ `model`) reste en userspace.
+**Note**: DLP does not need JSON parsing — Aho-Corasick scans the raw bytes of the HTTP body. Routing (extracting the `model` field) remains in userspace.
 
-#### Sous-phases
+#### Sub-phases
 
-| # | Composant | Effort |
+| # | Component | Effort |
 |---|-----------|--------|
-| 4.4a | Hyperscan kernel module + eBPF helpers | 5-7j |
-| 4.4b | Programme XDP DLP (`aya-rs`) | 3-5j |
-| 4.4c | Luhn/mod97 en `bpf_loop` | 1-2j |
-| 4.4d | Intégration grob (XDP_PASS → userspace) | 2-3j |
+| 4.4a | Hyperscan kernel module + eBPF helpers | 5-7d |
+| 4.4b | XDP DLP program (`aya-rs`) | 3-5d |
+| 4.4c | Luhn/mod97 in `bpf_loop` | 1-2d |
+| 4.4d | Grob integration (XDP_PASS → userspace) | 2-3d |
 
-**Crates** : `aya` (Rust eBPF), Hyperscan (Intel, kernel module).
+**Crates**: `aya` (Rust eBPF), Hyperscan (Intel, kernel module).
 
-#### Limites physiques
+#### Physical limits
 
 | Technique | Floor | Usage |
 |-----------|:---:|---|
-| HTTP TCP | ~3-5 µs | Standard actuel |
+| HTTP TCP | ~3-5 µs | Current standard |
 | eBPF XDP | ~100 ns | Kernel forwarding + DLP |
-| DPDK | ~50 ns | Kernel bypass complet (CPU dédié) |
+| DPDK | ~50 ns | Full kernel bypass (dedicated CPU) |
 | Shared memory | ~10 ns | Intra-machine |
 | L1 cache | ~1 ns | Intra-process |
-| Sub-ns | Impossible | Limite physique (lumière = 30cm/ns) |
+| Sub-ns | Impossible | Physical limit (light = 30cm/ns) |
 
-### Phase 4.5 — Cross-node audit (3-5j)
+### Phase 4.5 — Cross-node audit (3-5d)
 
 | Feature | Description |
 |---------|-------------|
-| **Merkle chain partagé** | Chaque hop ajoute une entrée signée à la chaîne d'audit |
-| **Traçabilité cross-node** | Audit trail complet : client → local → mesh → node → provider |
-| **Vérification end-to-end** | Un auditeur peut vérifier la chaîne complète avec les clés publiques de chaque node |
-| **Non-répudiation** | Chaque node signe son entrée — impossible de nier le traitement |
+| **Shared Merkle chain** | Each hop adds a signed entry to the audit chain |
+| **Cross-node traceability** | Full audit trail: client → local → mesh → node → provider |
+| **End-to-end verification** | An auditor can verify the complete chain with each node's public keys |
+| **Non-repudiation** | Each node signs its entry — impossible to deny processing |
 
-### Effort total Tier 4
+### Total Tier 4 effort
 
-| Phase | Composant | Effort |
+| Phase | Component | Effort |
 |-------|-----------|--------|
-| 4.1 | Mode passthrough | 2-3j |
-| 4.2 | Mesh discovery + annonces signées | 5-7j |
-| 4.3 | Mesh controller + routage conformité | 5-7j |
-| 4.4 | eBPF XDP | 3-5j |
-| 4.5 | Cross-node audit | 3-5j |
-| **Total** | | **~3-4 semaines** |
+| 4.1 | Passthrough mode | 2-3d |
+| 4.2 | Mesh discovery + signed announcements | 5-7d |
+| 4.3 | Mesh controller + compliance routing | 5-7d |
+| 4.4 | eBPF XDP | 3-5d |
+| 4.5 | Cross-node audit | 3-5d |
+| **Total** | | **~3-4 weeks** |
 
 ---
 
-## Zero Trust — Sécurité inter-composants
+## Zero Trust — Inter-component security
 
-### Niveau 1 — Implémenté ✅
+### Level 1 — Implemented ✅
 
 | Feature | Status |
 |---------|--------|
-| JWT auth sur requêtes entrantes | ✅ RS256/HS256, JWKS refresh |
+| JWT auth on incoming requests | ✅ RS256/HS256, JWKS refresh |
 | Virtual keys auth | ✅ SHA-256 hash, per-key budget/rate-limit |
-| Rate limiting par token | ✅ Per-tenant token bucket |
+| Per-token rate limiting | ✅ Per-tenant token bucket |
 | Constant-time auth | ✅ `subtle` crate |
-| mTLS client cert upstream | ✅ `tls_cert`/`tls_key`/`tls_ca` par provider |
-| Rotation clé DLP | ✅ Auto toutes les 24h (configurable) |
+| mTLS client cert upstream | ✅ `tls_cert`/`tls_key`/`tls_ca` per provider |
+| DLP key rotation | ✅ Auto every 24h (configurable) |
 
-### Niveau 2 — Feature requests (backlog)
+### Level 2 — Feature requests (backlog)
 
-| Feature | Description | Priorité |
+| Feature | Description | Priority |
 |---------|-------------|----------|
-| **LoRA adapter registry** | Distribution sécurisée de LoRA via OCI registry avec signature ECDSA + manifest SHA-256 + licence token JWT | M6+ |
-| **LoRA chargement dynamique** | Header `X-Dunst-Adapter` + vérification JWT → charge l'adapter si en cache, pull si absent | M6+ |
-| **LoRA fichier local (air-gap)** | `.gguf` + `.gguf.sig` + `manifest.toml` avec SHA-256 + signature ECDSA. Refus de démarrer si sig invalide. | M6+ |
-| **HSM pour clés de session** | PKI complète avec HSM pour les clés de session DLP. Overkill sauf contrat OTAN. | Sur demande client |
-| **Re-auth par requête LLM** | Vérifier l'identité à chaque token généré. Overkill pour 99% des cas. | Sur demande client |
-| **Intégrité SSE stream** | Signature de chaque chunk SSE. Overkill. | Sur demande client |
+| **LoRA adapter registry** | Secure LoRA distribution via OCI registry with ECDSA signature + SHA-256 manifest + JWT license token | M6+ |
+| **LoRA dynamic loading** | Header `X-Dunst-Adapter` + JWT verification → loads adapter if cached, pulls if absent | M6+ |
+| **LoRA local file (air-gap)** | `.gguf` + `.gguf.sig` + `manifest.toml` with SHA-256 + ECDSA signature. Refuses to start if signature is invalid. | M6+ |
+| **HSM for session keys** | Full PKI with HSM for DLP session keys. Overkill except for NATO contracts. | On client request |
+| **Per-request LLM re-auth** | Verify identity at each generated token. Overkill for 99% of use cases. | On client request |
+| **SSE stream integrity** | Signature on each SSE chunk. Overkill. | On client request |
 
 ---
 
-## Cleancode — Dette technique ✅
+## Clean code — Technical debt ✅
 
-**Score** : 7.4/10 → corrigé (handler boilerplate, scorer consolidation, router tests, crypto unwrap, error-path tests).
+**Score**: 7.4/10 → fixed (handler boilerplate, scorer consolidation, router tests, crypto unwrap, error-path tests).
 
 ---
 
 ## Documentation ✅
 
-**DCI Score** : 9.5/10. 16 docs de référence, AGENTS.md, llms.txt, feature matrix avec vérification compliance.
+**DCI Score**: 9.5/10. 16 reference docs, AGENTS.md, llms.txt, feature matrix with compliance verification.
 
 ---
 
-## Benchmarks — Chiffres publiés ✅
+## Benchmarks — Published numbers ✅
 
-### Overhead par feature (80KB payload, macOS 16 cores)
+### Per-feature overhead (80KB payload, macOS 16 cores)
 
-| Scénario | P50 | Overhead pur |
+| Scenario | P50 | Pure overhead |
 |----------|:---:|:---:|
 | TCP baseline (direct) | 123µs | — |
-| Proxy pur | 290µs | +167µs |
+| Proxy only | 290µs | +167µs |
 | + DLP (clean text) | 556µs | +433µs |
 | + DLP (trigger) | 533µs | +410µs |
 | + All features | 537µs | +414µs |
 
-### Throughput concurrent (c=16)
+### Concurrent throughput (c=16)
 
-| Scénario | RPS |
+| Scenario | RPS |
 |----------|:---:|
 | Direct baseline | 82,500 |
 | Proxy + all features | 40,100 |
 
 ### Signing cost
 
-| Algorithme | Latence |
+| Algorithm | Latency |
 |-----------|:---:|
 | HMAC-SHA256 | 1.2µs |
 | Ed25519 | 19µs |
 | ECDSA P-256 | 152µs |
 
-### Comparaison concurrence
+### Competitor comparison
 
-| Proxy | Overhead | RPS | Features actives |
+| Proxy | Overhead | RPS | Active features |
 |-------|:---:|:---:|---|
 | **Grob** | **~100µs** | **40K** | DLP + routing + cache + rate limit |
-| Bifrost | 11µs | 5K | Proxy pur (byte-copy) |
-| TensorZero | 370µs | 10K | Proxy pur |
-| LiteLLM | ~5000µs | 200 | Proxy pur |
+| Bifrost | 11µs | 5K | Proxy only (byte-copy) |
+| TensorZero | 370µs | 10K | Proxy only |
+| LiteLLM | ~5000µs | 200 | Proxy only |
 
 ---
 
-## Pas prioritaire (backlog)
+## Not prioritized (backlog)
 
-| Feature | Pourquoi pas maintenant |
-|---------|------------------------|
-| SSO/OIDC | Premiers clients en air-gapped — pas d'Okta |
-| RBAC | Besoin de virtual keys d'abord |
-| Embeddings/images/audio | Marché = coding assistants, pas DALL-E |
-| A2A protocol | Trop early, adoption quasi nulle |
-| SOC2/ISO | 0 client payant, $30-100k de certification = overkill |
-| LoRA-as-a-Service | Phase 3 (M6+). D'abord valider la traction proxy |
+| Feature | Why not now |
+|---------|------------|
+| SSO/OIDC | First clients are air-gapped — no Okta |
+| RBAC | Need virtual keys first |
+| Embeddings/images/audio | Market = coding assistants, not DALL-E |
+| A2A protocol | Too early, near-zero adoption |
+| SOC2/ISO | 0 paying clients, $30-100k certification = overkill |
+| LoRA-as-a-Service | Phase 3 (M6+). Validate proxy traction first |
