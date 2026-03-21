@@ -35,7 +35,7 @@ action = "canary"           # canary | redact | log
 | Action | Behavior |
 |--------|----------|
 | `canary` | Replaces with a syntactically valid fake containing `~CANARY` and a monotonic ID. Format-preserving: maintains prefix and length. Canaries cannot re-match the original pattern (the `~` character breaks `[A-Za-z0-9]` patterns). |
-| `redact` | Replaces with `[REDACTED]`. |
+| `redact` | Alias for `canary` on secret rules. A canary token is always generated (never a plain `[REDACTED]`) because format-preservation is strictly better for secrets: it avoids breaking the surrounding context and enables downstream exfiltration detection. |
 | `log` | Logs the detection without modifying the text. |
 
 ### Custom prefix rules
@@ -250,7 +250,7 @@ SSE stream chunks are intercepted by the `DlpStream` adapter:
 - **Token-length EMA pre-filter**: An exponential moving average of per-delta text lengths skips DFA scanning when tokens are long (normal prose). Short BPE fragments trigger scanning.
 - **Canary circuit breaker**: After 20 secret detections in one stream, canary generation switches to `[REDACTED]` to prevent canary flooding.
 - **Cross-chunk detection**: The full response is accumulated and scanned at end-of-stream to catch secrets split across SSE deltas.
-- **SPRT buffer**: Bounded at 4 KB with a sliding window for entropy scanning.
+- **SPRT buffer**: Bounded at 4 KB; accumulated per-stream. The SPRT scanner operates token-by-token (whitespace-split) rather than a raw byte sliding window.
 - **URL exfil block**: If a block-action URL exfiltration is detected, the stream is terminated with an `event: error` SSE event.
 
 ## Performance

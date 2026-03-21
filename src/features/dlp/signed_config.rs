@@ -244,6 +244,11 @@ async fn reload_once(
             let canonical_bytes = toml::to_string(&canonical)?.into_bytes();
             verify_signature(pk, &canonical_bytes, embedded_sig).inspect_err(|_| {
                 metrics::counter!(
+                    "grob_dlp_signature_verified_total",
+                    "result" => "invalid"
+                )
+                .increment(1);
+                metrics::counter!(
                     "grob_dlp_hot_reload_total",
                     "status" => "sig_failed"
                 )
@@ -253,6 +258,11 @@ async fn reload_once(
             // Try detached signature
             let sig_path = format!("{}{}", settings.source, settings.detached_sig_suffix);
             verify_detached_signature(pk, &content, &sig_path).inspect_err(|_| {
+                metrics::counter!(
+                    "grob_dlp_signature_verified_total",
+                    "result" => "invalid"
+                )
+                .increment(1);
                 metrics::counter!(
                     "grob_dlp_hot_reload_total",
                     "status" => "sig_failed"
