@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.6](https://github.com/azerozero/grob/compare/v0.24.5...v0.24.6) - 2026-03-21
+
+### Fixed
+
+- *(dlp)* align docs and metrics with implementation
+
 ## [0.24.5](https://github.com/azerozero/grob/compare/v0.24.4...v0.24.5) - 2026-03-21
 
 ### Added
