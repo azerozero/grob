@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.4](https://github.com/azerozero/grob/compare/v0.24.3...v0.24.4) - 2026-03-21
+
+### Fixed
+
+- *(ci)* scope gitleaks to pushed commits only
+
 ## [0.24.3](https://github.com/azerozero/grob/compare/v0.24.2...v0.24.3) - 2026-03-21
 
 ### Fixed
