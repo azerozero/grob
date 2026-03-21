@@ -18,7 +18,7 @@
 
 **Grob** is a high-performance LLM routing proxy that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, and fits in a 6 MB container with zero dependencies.
 
-> **~100 µs pure overhead** with full DLP + routing + caching + rate limiting — [50x faster than LiteLLM](docs/reference/benchmarks.md), every feature [measured individually](docs/reference/benchmarks.md).
+> **~100 µs pure overhead** with full DLP + routing + caching + rate limiting — [50x faster than LiteLLM, every feature measured individually](docs/reference/benchmarks.md).
 
 ```mermaid
 flowchart LR
@@ -188,18 +188,12 @@ grob preset apply gdpr        # EU-only routing + DLP
 ## Also included
 
 - **Signed audit log** — ECDSA-P256 / Ed25519 / HMAC-SHA256, hash-chained, Merkle tree batch signing
-- **Rate limiting** — Per-tenant token bucket (RPS + burst)
-- **Adaptive scoring** — EWMA latency + rolling success rate ranks providers dynamically
 - **Response caching** — Dedup temperature=0 requests (saves tokens and money)
 - **Native TLS + ACME** — Built-in HTTPS with Let's Encrypt auto-certificates
-- **Zero-downtime upgrades** — SO_REUSEPORT + graceful drain
 - **Three API endpoints** — `/v1/messages` (Anthropic), `/v1/chat/completions` (OpenAI), `/v1/responses` (Codex CLI)
-- **JWT + OAuth PKCE** — JWT auth with JWKS refresh, browser login for Anthropic Max and Gemini Pro
-- **Prometheus** — `/metrics` endpoint with request/latency/spend counters
-- **OpenTelemetry** — Distributed tracing export via OTLP (feature `otel`)
-- **Log export** — Structured request logs to stdout, file, or HTTP webhook
-- **MCP tool matrix** — Background bench engine scores tool support per provider
-- **Record & replay** — Capture live traffic, replay through mock backend
+- **Prometheus + OpenTelemetry** — `/metrics` endpoint, OTLP distributed tracing
+
+See the [full feature matrix](docs/reference/features.md) for rate limiting, JWT/OAuth, log export, zero-downtime upgrades, record & replay, and more.
 
 ## Configuration
 
@@ -263,8 +257,8 @@ docker run -e ANTHROPIC_API_KEY=sk-... ghcr.io/azerozero/grob:latest
 
 ## Documentation
 
-| | |
-|---|---|
+| Doc | Description |
+|-----|-------------|
 | [Feature Matrix](docs/reference/features.md) | Complete feature list with config references |
 | [Getting Started](docs/tutorials/getting-started.md) | Step-by-step tutorial |
 | [Configuration Reference](docs/CONFIGURATION.md) | All config options |
