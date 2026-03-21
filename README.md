@@ -8,7 +8,6 @@
   </p>
   <p align="center">
     <a href="https://github.com/azerozero/grob/actions/workflows/ci.yml"><img src="https://github.com/azerozero/grob/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-    <a href="https://github.com/azerozero/grob/actions/workflows/codeql.yml"><img src="https://github.com/azerozero/grob/actions/workflows/codeql.yml/badge.svg" alt="CodeQL"></a>
     <a href="https://github.com/azerozero/grob/releases"><img src="https://img.shields.io/github/v/release/azerozero/grob" alt="Release"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
     <a href="https://crates.io/crates/grob"><img src="https://img.shields.io/crates/v/grob.svg" alt="crates.io"></a>
@@ -19,7 +18,7 @@
 
 **Grob** is a high-performance LLM routing proxy that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, and fits in a 6 MB container with zero dependencies.
 
-> **~100 µs pure overhead** with full DLP + routing + caching + rate limiting — [50x faster than LiteLLM](docs/reference/features.md), every feature [measured individually](benches/).
+> **~100 µs pure overhead** with full DLP + routing + caching + rate limiting — [50x faster than LiteLLM](docs/reference/benchmarks.md), every feature [measured individually](docs/reference/benchmarks.md).
 
 ```mermaid
 flowchart LR
@@ -274,7 +273,12 @@ docker run -e ANTHROPIC_API_KEY=sk-... ghcr.io/azerozero/grob:latest
 | [Architecture](docs/ARCHITECTURE.md) | Module layout and design decisions |
 | [CLI Reference](docs/reference/cli.md) | Full command documentation |
 | [OAuth Setup](docs/OAUTH_SETUP.md) | Anthropic Max, Gemini Pro |
+| [Benchmarks](docs/reference/benchmarks.md) | AWS results, competitor comparison |
 | [Provider Setup](docs/PROVIDERS.md) | Per-provider guides |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR guidelines.
 
 ## License
 
