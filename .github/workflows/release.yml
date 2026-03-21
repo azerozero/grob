@@ -300,3 +300,25 @@ jobs:
           git add Formula/grob.rb
           git commit -m "grob ${V}"
           git push
+
+  homebrew-test:
+    name: Test Homebrew install
+    needs: [validate, homebrew]
+    runs-on: macos-latest
+    steps:
+      - name: Install via brew
+        run: |
+          brew install azerozero/tap/grob
+          grob --version
+          INSTALLED=$(grob --version | awk '{print $2}')
+          EXPECTED="${{ needs.validate.outputs.version }}"
+          EXPECTED="${EXPECTED#v}"
+          if [[ "$INSTALLED" != "$EXPECTED" ]]; then
+            echo "::error::Version mismatch: installed=$INSTALLED expected=$EXPECTED"
+            exit 1
+          fi
+
+      - name: Test brew upgrade (reinstall simulates upgrade)
+        run: |
+          brew reinstall azerozero/tap/grob
+          grob --version

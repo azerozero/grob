@@ -47,7 +47,8 @@ flowchart LR
 ## 30-second quickstart
 
 ```bash
-# Install
+# Install (pick one)
+brew install azerozero/tap/grob          # macOS / Linux
 curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
 
 # Setup (interactive wizard picks providers + auth)
