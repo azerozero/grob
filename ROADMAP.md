@@ -107,33 +107,77 @@ Client → Grob Local (Bearer grob_xxx)
   → Audit signé à chaque hop
 ```
 
-### Phase 4.4 — eBPF XDP (3-5j)
+### Phase 4.4 — eBPF XDP + Hyperscan DLP (5-10j)
 
-Architecture hybride kernel/userspace pour le forwarding inter-node.
+Architecture hybride kernel/userspace avec **DLP complet en kernel** via Hyperscan.
 
-| Couche | XDP | Latence | Notes |
-|--------|:---:|:---:|---|
-| Routing inter-node | ✅ | **~200 ns** | L3/L4 packet forwarding |
-| DLP pre-filter (prefix scan) | ✅ | **~50 ns** | "AKIA", "ghp_", "sk-", "BEGIN" sur 64 bytes |
-| DLP complet (Aho-Corasick) | ❌ | ~100µs | Escalade userspace si pre-filter match |
-| mTLS | ❌ | ~50µs | Reste en userspace (kTLS pour le chiffrement) |
+**Référence** : [Gcore](https://gcore.com/blog/how-we-use-regular-expressions-in-xdp-for-packet-filtering) fait du regex dans XDP en production à 200M pps en compilant Hyperscan comme kernel module. Linux 6.x+ supporte `bpf_loop` (8M iterations) et les open-coded iterators (v6.4+).
 
-**Performance avec XDP :**
+#### DLP en kernel — ce qui est maintenant possible
 
-| Scénario | Sans XDP | Avec XDP | Gain |
+| Validation DLP | XDP+Hyperscan | Comment | Latence |
+|----------------|:---:|---------|:---:|
+| Secret scan (25 patterns) | ✅ | Hyperscan kernel module (Aho-Corasick) | ~100 ns |
+| PII credit card (Luhn) | ✅ | `bpf_loop` arithmétique | ~50 ns |
+| PII IBAN (mod97) | ✅ | `bpf_loop` arithmétique | ~50 ns |
+| Prompt injection (28 langues) | ✅ | Hyperscan kernel module | ~100 ns |
+| URL exfiltration (prefix) | ✅ | Prefix match dans XDP | ~50 ns |
+| Name pseudonymization | ❌ | HMAC + state → userspace | ~1µs |
+| JSON parsing | ❌ | Pas de parser JSON en kernel | — |
+| Routing inter-node | ✅ | L3/L4 packet forwarding | ~200 ns |
+| mTLS termination | ❌ | Userspace (kTLS pour data path) | ~50µs |
+
+#### Architecture
+
+```
+Packet arrive
+     │
+     ▼
+┌──────────────────────────────┐
+│  XDP + Hyperscan module      │  ~100-200 ns
+│                               │
+│  1. Hyperscan: 25 patterns   │  ← DLP secrets complet en kernel
+│  2. Luhn checksum (bpf_loop) │  ← Credit card en kernel
+│  3. Injection regex          │  ← 28 langues en kernel
+│  4. URL prefix scan          │  ← Exfiltration en kernel
+│                               │
+│  ├─ Clean → XDP_REDIRECT     │──→ Forward direct (~200 ns)
+│  ├─ Secret → XDP_PASS        │──→ Userspace (redaction ~100µs)
+│  └─ Injection → XDP_DROP     │──→ Block instantané (~200 ns)
+└──────────────────────────────┘
+```
+
+#### Performance
+
+| Scénario | Sans XDP | Avec XDP+Hyperscan | Gain |
 |----------|:---:|:---:|:---:|
-| Clean traffic inter-node | ~50µs | **~200 ns** | 250x |
-| Clean traffic + DLP pre-filter | ~170µs | **~100 ns** | 1700x |
-| Traffic avec secrets (escalade) | ~400µs | ~400µs | 0 (inchangé) |
+| Clean traffic (99%) | ~170µs | **~100-200 ns** | **1000x** |
+| Secret détecté (block) | ~400µs | **~200 ns** (XDP_DROP) | **2000x** |
+| Secret détecté (redaction) | ~400µs | ~400µs (userspace) | 0 |
+| Injection (block) | ~400µs | **~200 ns** (XDP_DROP) | **2000x** |
+| Inter-node forward | ~50µs | **~200 ns** | **250x** |
 
-**Crate** : `aya` (pure Rust eBPF, production ready).
+#### Sous-phases
 
-**En dessous de la nanoseconde ?** Non en réseau. Le floor est :
-- **~100 ns** : eBPF XDP (kernel packet forwarding, pas de TCP)
-- **~10 ns** : shared memory (mmap, même machine)
-- **~1 ns** : L1 cache hit (même process, pas du réseau)
+| # | Composant | Effort |
+|---|-----------|--------|
+| 4.4a | Hyperscan kernel module + eBPF helpers | 5-7j |
+| 4.4b | Programme XDP DLP (`aya-rs`) | 3-5j |
+| 4.4c | Luhn/mod97 en `bpf_loop` | 1-2j |
+| 4.4d | Intégration grob (XDP_PASS → userspace) | 2-3j |
 
-Le HTTP sur TCP a un floor de ~3-5µs (kernel TCP stack). XDP bypass le TCP stack → ~200 ns. Pour descendre en dessous, il faudrait du DPDK (kernel bypass complet) ou du RDMA — mais ce n'est plus du HTTP standard.
+**Crates** : `aya` (Rust eBPF), Hyperscan (Intel, kernel module).
+
+#### Limites physiques
+
+| Technique | Floor | Usage |
+|-----------|:---:|---|
+| HTTP TCP | ~3-5 µs | Standard actuel |
+| eBPF XDP | ~100 ns | Kernel forwarding + DLP |
+| DPDK | ~50 ns | Kernel bypass complet (CPU dédié) |
+| Shared memory | ~10 ns | Intra-machine |
+| L1 cache | ~1 ns | Intra-process |
+| Sub-ns | Impossible | Limite physique (lumière = 30cm/ns) |
 
 ### Phase 4.5 — Cross-node audit (3-5j)
 
