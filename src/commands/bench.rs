@@ -29,6 +29,17 @@ use crate::storage::GrobStore;
 const WARMUP_REQUESTS: usize = 50;
 const CONCURRENT_DURATION_SECS: u64 = 5;
 
+/// Builds an HTTP client matching grob's real provider client optimizations.
+fn build_bench_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .tcp_nodelay(true)
+        .pool_max_idle_per_host(20)
+        .pool_idle_timeout(Duration::from_secs(90))
+        .http2_adaptive_window(true)
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 // ── Payload size enum ───────────────────────────────────────────────────
 
 /// Payload size category matching real Claude Code traffic patterns.
@@ -905,11 +916,7 @@ async fn run_concurrent(
         let auth_token = auth_token.clone();
 
         handles.push(tokio::spawn(async move {
-            let client = reqwest::Client::builder()
-                .pool_max_idle_per_host(10)
-                .pool_idle_timeout(Duration::from_secs(30))
-                .build()
-                .unwrap();
+            let client = build_bench_client();
 
             let mut local_latencies = Vec::new();
             while Instant::now() < deadline {
@@ -1119,11 +1126,7 @@ pub async fn cmd_bench(
                 };
                 let state = ProxyState {
                     backend_url: backend_url.clone(),
-                    client: reqwest::Client::builder()
-                        .pool_max_idle_per_host(10)
-                        .pool_idle_timeout(Duration::from_secs(30))
-                        .build()
-                        .unwrap(),
+                    client: build_bench_client(),
                     enable_routing: scenario.enable_routing,
                     enable_dlp: scenario.enable_dlp,
                     enable_auth: scenario.enable_auth,
@@ -1193,11 +1196,7 @@ pub async fn cmd_bench(
                 (compute_stats(latencies), Some(rps_val))
             } else {
                 // Sequential mode.
-                let client = reqwest::Client::builder()
-                    .pool_max_idle_per_host(10)
-                    .pool_idle_timeout(Duration::from_secs(30))
-                    .build()
-                    .unwrap();
+                let client = build_bench_client();
 
                 // Warmup.
                 for _ in 0..WARMUP_REQUESTS {
@@ -1468,11 +1467,7 @@ async fn run_escalation(
             };
             let state = ProxyState {
                 backend_url: backend_url.to_string(),
-                client: reqwest::Client::builder()
-                    .pool_max_idle_per_host(10)
-                    .pool_idle_timeout(Duration::from_secs(30))
-                    .build()
-                    .unwrap(),
+                client: build_bench_client(),
                 enable_routing: step.enable_routing,
                 enable_dlp: step.enable_dlp,
                 enable_auth: step.enable_auth,
@@ -1536,11 +1531,7 @@ async fn run_escalation(
             let rps_val = total as f64 / CONCURRENT_DURATION_SECS as f64;
             (compute_stats(latencies), Some(rps_val))
         } else {
-            let client = reqwest::Client::builder()
-                .pool_max_idle_per_host(10)
-                .pool_idle_timeout(Duration::from_secs(30))
-                .build()
-                .unwrap();
+            let client = build_bench_client();
 
             for _ in 0..WARMUP_REQUESTS {
                 let mut req = client.post(format!("{target_url}/v1/messages")).json(&body);
@@ -1596,11 +1587,7 @@ async fn run_escalation(
         let all_dlp = compile_dlp_patterns(DlpPatternSet::Full);
         let state = ProxyState {
             backend_url: backend_url.to_string(),
-            client: reqwest::Client::builder()
-                .pool_max_idle_per_host(10)
-                .pool_idle_timeout(Duration::from_secs(30))
-                .build()
-                .unwrap(),
+            client: build_bench_client(),
             enable_routing: true,
             enable_dlp: true,
             enable_auth: auth_token.is_some(),
@@ -1661,11 +1648,7 @@ async fn run_escalation(
             let rps_val = total as f64 / CONCURRENT_DURATION_SECS as f64;
             (compute_stats(latencies), Some(rps_val))
         } else {
-            let client = reqwest::Client::builder()
-                .pool_max_idle_per_host(10)
-                .pool_idle_timeout(Duration::from_secs(30))
-                .build()
-                .unwrap();
+            let client = build_bench_client();
 
             for _ in 0..WARMUP_REQUESTS {
                 let mut req = client.post(format!("{proxy_url}/v1/messages")).json(&body);
