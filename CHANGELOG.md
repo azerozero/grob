@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1](https://github.com/azerozero/grob/compare/v0.24.0...v0.24.1) - 2026-03-21
+
+### Other
+
+- *(bench)* align bench clients with real server optimizations
+
 ## [0.24.0](https://github.com/azerozero/grob/compare/v0.23.1...v0.24.0) - 2026-03-21
 
 ### Added
