@@ -1,0 +1,12 @@
+# Review date: 2026-04-15 — re-check if upstream fixed these.
+[advisories]
+ignore = [
+    # aws-lc-sys: CRL bypass + X.509 CN bypass. Blocked by rustls -> aws-lc-rs
+    # 1.16.1 pinning aws-lc-sys 0.38.x. No impact: grob does not use CRL
+    # validation or CN-based name constraints.
+    "RUSTSEC-2026-0044",
+    "RUSTSEC-2026-0048",
+    # rsa: Marvin Attack (timing sidechannel on PKCS#1 v1.5 decryption).
+    # No impact: grob only uses RSA for JWT signature verification, not decryption.
+    "RUSTSEC-2023-0071",
+]

@@ -90,7 +90,7 @@ aes-gcm = "0.10"
 moka = { version = "0.12", features = ["future", "sync"] }
 
 # JWT Auth
-jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
 
 # Security (HDS/PCI/SecNumCloud compliance)
 p256 = { version = "0.13", features = ["ecdsa"] }   # ECDSA P-256 for audit signing
@@ -105,7 +105,7 @@ hex = { version = "0.4", features = ["serde"] }      # Hex encoding/decoding
 http = "1"
 
 # TUI dashboard (`grob watch`)
-ratatui = { version = "0.29", optional = true }
+ratatui = { version = "0.30", optional = true }
 crossterm = { version = "0.28", optional = true }
 
 # Socket options (SO_REUSEPORT for zero-downtime restarts)

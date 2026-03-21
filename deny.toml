@@ -6,10 +6,21 @@
 [advisories]
 version = 2
 # Fail CI on any known vulnerability.
-# rustls-pemfile: unmaintained but pulled by axum-server (optional tls feature).
-# paste: unmaintained but pulled by ratatui (watch feature). Fork "pastey" exists
-# but ratatui hasn't migrated yet.
-ignore = ["RUSTSEC-2025-0134", "RUSTSEC-2024-0436"]
+# Review date: 2026-04-15 — re-check if upstream fixed these.
+#
+# rustls-pemfile: unmaintained, pulled by axum-server. Use rustls-pki-types
+# PemObject API when axum-server drops this dep.
+# aws-lc-sys: CRL bypass + X.509 CN bypass. Fix requires >=0.39.0, blocked
+# by rustls -> aws-lc-rs 1.16.1. No impact: grob does not use CRL validation
+# or CN-based name constraints.
+# rsa: Marvin Attack (timing sidechannel on PKCS#1 v1.5 decryption). No impact:
+# grob only uses RSA for JWT signature verification, not decryption.
+ignore = [
+    "RUSTSEC-2025-0134",
+    "RUSTSEC-2026-0044",
+    "RUSTSEC-2026-0048",
+    "RUSTSEC-2023-0071",
+]
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
 # Grob is AGPL-3.0-only. We allow permissive licenses (always compatible),

@@ -62,13 +62,13 @@ types = ["rust"]
 pass_filenames = false
 stages = ["pre-push"]
 
-# Cargo deny — license & dependency checks
+# Cargo deny — license & advisory & dependency checks
 [[repos.hooks]]
 id = "cargo-deny"
 name = "cargo deny"
 language = "system"
 entry = "cargo deny check"
-types = ["toml"]
+always_run = true
 pass_filenames = false
 stages = ["pre-push"]
 
@@ -99,7 +99,7 @@ id = "cargo-audit"
 name = "cargo audit"
 language = "system"
 entry = "cargo audit"
-types = ["toml"]
+always_run = true
 pass_filenames = false
 stages = ["pre-push"]
 
