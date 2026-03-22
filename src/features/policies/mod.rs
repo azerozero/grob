@@ -10,4 +10,6 @@ pub mod hit;
 pub mod hit_auth;
 #[cfg(feature = "policies")]
 pub mod matcher;
+pub mod multisig;
+pub mod quorum;
 pub mod resolved;
