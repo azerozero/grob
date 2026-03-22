@@ -86,6 +86,9 @@ redb = "2"
 # Credential encryption at rest (AES-256-GCM)
 aes-gcm = "0.10"
 
+# Policy engine (glob pattern matching for policy rules)
+globset = { version = "0.4", optional = true }
+
 # Caching (high-performance concurrent cache with TTL)
 moka = { version = "0.12", features = ["future", "sync"] }
 
@@ -159,7 +162,7 @@ harness = false
 required-features = ["harness"]
 
 [features]
-default = ["dlp", "oauth", "tap", "compliance", "mcp", "watch"]
+default = ["dlp", "oauth", "tap", "compliance", "mcp", "watch", "policies"]
 watch = ["ratatui", "crossterm"]
 otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
 tls = ["axum-server", "rustls", "rustls-pemfile"]
@@ -170,6 +173,7 @@ tap = []
 compliance = []
 mcp = []
 harness = []
+policies = ["globset"]
 test-util = []
 
 [package.metadata.cargo-machete]
