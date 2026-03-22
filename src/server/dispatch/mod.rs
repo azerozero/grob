@@ -42,6 +42,10 @@ pub(crate) struct DispatchContext<'a> {
     pub headers: &'a HeaderMap,
     /// Message tracer context. None for OpenAI compat endpoint.
     pub trace_id: Option<String>,
+    /// Resolved policy for this request (when policies feature is enabled).
+    #[cfg(feature = "policies")]
+    #[allow(dead_code)]
+    pub resolved_policy: Option<crate::features::policies::resolved::ResolvedPolicy>,
 }
 
 /// Variable fields for an audit log entry (fields that differ per call site).

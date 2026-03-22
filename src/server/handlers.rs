@@ -264,6 +264,8 @@ pub(crate) async fn handle_openai_chat_completions(
         start_time,
         headers: &headers,
         trace_id: None,
+        #[cfg(feature = "policies")]
+        resolved_policy: None,
     };
 
     let result = dispatch::dispatch(&ctx, &mut request).await?;
@@ -330,6 +332,8 @@ pub(crate) async fn handle_responses(
         start_time,
         headers: &headers,
         trace_id: None,
+        #[cfg(feature = "policies")]
+        resolved_policy: None,
     };
 
     let result = dispatch::dispatch(&ctx, &mut request).await?;
@@ -433,6 +437,8 @@ pub(crate) async fn handle_messages(
         start_time,
         headers: &headers,
         trace_id: Some(trace_id),
+        #[cfg(feature = "policies")]
+        resolved_policy: None,
     };
 
     let result = dispatch::dispatch(&ctx, &mut request).await?;
