@@ -216,4 +216,85 @@ pub mod mocks {
             HashMap::new()
         }
     }
+
+    /// Mock spend tracker that accumulates nothing and never exceeds budget.
+    pub struct MockSpendTracking;
+
+    impl SpendTracking for MockSpendTracking {
+        fn record(&mut self, _provider: &str, _model: &str, _cost: f64) {}
+        fn record_tenant(&mut self, _tenant: &str, _provider: &str, _model: &str, _cost: f64) {}
+        fn check_budget(
+            &self,
+            _provider: &str,
+            _model: &str,
+            _global: f64,
+            _provider_limit: Option<f64>,
+            _model_limit: Option<f64>,
+        ) -> std::result::Result<(), crate::features::token_pricing::spend::BudgetError> {
+            Ok(())
+        }
+        fn total(&self) -> f64 {
+            0.0
+        }
+        fn save(&self) {}
+        fn check_warnings(
+            &self,
+            _provider: &str,
+            _model: &str,
+            _limits: &crate::features::token_pricing::spend::BudgetLimits,
+        ) -> Option<String> {
+            None
+        }
+    }
+
+    /// Mock DLP pipeline that passes all content unchanged.
+    #[cfg(feature = "dlp")]
+    pub struct MockDlpPipeline;
+
+    #[cfg(feature = "dlp")]
+    impl DlpPipeline for MockDlpPipeline {
+        fn sanitize_request(&self, _request: &mut CanonicalRequest) {}
+        fn sanitize_request_checked(
+            &self,
+            _request: &mut CanonicalRequest,
+        ) -> std::result::Result<(), crate::features::dlp::DlpBlockError> {
+            Ok(())
+        }
+        fn sanitize_response_text<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
+            std::borrow::Cow::Borrowed(text)
+        }
+        fn check_response_url_exfil(
+            &self,
+            _text: &str,
+        ) -> std::result::Result<(), crate::features::dlp::DlpBlockError> {
+            Ok(())
+        }
+        fn scan_end_of_stream(&self, _full_text: &str) {}
+        fn scan_input_enabled(&self) -> bool {
+            false
+        }
+        fn scan_output_enabled(&self) -> bool {
+            false
+        }
+    }
+
+    /// Mock audit writer that discards all entries.
+    #[cfg(feature = "compliance")]
+    pub struct MockAuditWriter;
+
+    #[cfg(feature = "compliance")]
+    impl AuditWriter for MockAuditWriter {
+        fn write(&self, _entry: crate::security::audit_log::AuditEntry) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    /// Mock event tap that drops all events.
+    #[cfg(feature = "tap")]
+    pub struct MockEventTap;
+
+    #[cfg(feature = "tap")]
+    impl EventTap for MockEventTap {
+        fn try_send(&self, _event: crate::features::tap::TapEvent) {}
+    }
 }

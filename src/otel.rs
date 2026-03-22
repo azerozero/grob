@@ -62,6 +62,15 @@ pub fn init_subscriber_with_otel(
 }
 
 /// Flushes pending OTel spans on shutdown.
+///
+/// In opentelemetry 0.28+, the global provider flushes on drop, so this is a no-op.
+/// Gated behind `#[cfg(feature = "otel")]` so it is not compiled into non-otel builds.
+#[cfg(feature = "otel")]
 pub fn shutdown_otel() {
-    // In opentelemetry 0.28+, the global provider flushes on drop.
+    // Provider flushes on drop in opentelemetry 0.28+.
 }
+
+/// No-op stub for non-otel builds — allows the call site in `start_server` to be
+/// written unconditionally.
+#[cfg(not(feature = "otel"))]
+pub fn shutdown_otel() {}

@@ -164,6 +164,11 @@ name = "proxy_overhead"
 harness = false
 required-features = ["harness"]
 
+[[bench]]
+name = "policy"
+harness = false
+required-features = ["policies"]
+
 [features]
 default = ["dlp", "oauth", "tap", "compliance", "mcp", "watch", "policies"]
 watch = ["ratatui", "crossterm"]

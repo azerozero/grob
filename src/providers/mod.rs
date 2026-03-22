@@ -295,3 +295,106 @@ impl ProviderConfig {
 pub use anthropic_compatible::AnthropicCompatibleProvider;
 pub use openai::OpenAIProvider;
 pub use registry::ProviderRegistry;
+
+// ── Test mocks ───────────────────────────────────────────────────────────────
+
+#[cfg(any(test, feature = "test-util"))]
+pub mod mocks {
+    use super::*;
+    use futures::stream;
+
+    /// Mock LLM provider that returns a fixed response without making network calls.
+    ///
+    /// Suitable for unit tests and integration harness tests that need a controllable
+    /// provider without a live API endpoint.
+    pub struct MockLlmProvider {
+        /// Fixed response body returned by `send_message`.
+        pub response: ProviderResponse,
+        /// Model name reported by `supports_model`.
+        pub model: String,
+    }
+
+    impl MockLlmProvider {
+        /// Creates a provider that always returns a simple text response.
+        pub fn text(model: impl Into<String>, content: impl Into<String>) -> Self {
+            let model = model.into();
+            let text = content.into();
+            Self {
+                response: ProviderResponse {
+                    id: "mock-resp-1".to_string(),
+                    r#type: "message".to_string(),
+                    role: "assistant".to_string(),
+                    model: model.clone(),
+                    content: vec![crate::models::ContentBlock::Known(
+                        crate::models::KnownContentBlock::Text {
+                            text,
+                            cache_control: None,
+                        },
+                    )],
+                    usage: Usage {
+                        input_tokens: 10,
+                        output_tokens: 5,
+                        cache_creation_input_tokens: None,
+                        cache_read_input_tokens: None,
+                    },
+                    stop_reason: Some("end_turn".to_string()),
+                    stop_sequence: None,
+                },
+                model,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for MockLlmProvider {
+        async fn send_message(
+            &self,
+            _request: CanonicalRequest,
+        ) -> Result<ProviderResponse, ProviderError> {
+            Ok(self.response.clone())
+        }
+
+        async fn send_message_stream(
+            &self,
+            _request: CanonicalRequest,
+        ) -> Result<StreamResponse, ProviderError> {
+            // Emit a single text_delta chunk followed by message_stop.
+            let text = self
+                .response
+                .content
+                .iter()
+                .find_map(|b| {
+                    if let crate::models::ContentBlock::Known(
+                        crate::models::KnownContentBlock::Text { text, .. },
+                    ) = b
+                    {
+                        Some(text.clone())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_default();
+            let chunk = bytes::Bytes::from(format!(
+                "event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"{text}\"}}}}\n\n"
+            ));
+            let stop =
+                bytes::Bytes::from("event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n");
+            let items: Vec<Result<bytes::Bytes, ProviderError>> = vec![Ok(chunk), Ok(stop)];
+            Ok(StreamResponse {
+                stream: Box::pin(stream::iter(items)),
+                headers: Default::default(),
+            })
+        }
+
+        async fn count_tokens(
+            &self,
+            _request: CountTokensRequest,
+        ) -> Result<CountTokensResponse, ProviderError> {
+            Ok(CountTokensResponse { input_tokens: 10 })
+        }
+
+        fn supports_model(&self, model: &str) -> bool {
+            model == self.model
+        }
+    }
+}

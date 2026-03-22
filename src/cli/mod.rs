@@ -8,6 +8,8 @@ mod newtypes;
 mod validation;
 
 pub use crate::features::log_export::LogExportConfig;
+#[cfg(feature = "harness")]
+pub use config::HarnessConfig;
 pub use config::{
     AcmeConfig, BudgetConfig, CacheConfig, ComplianceConfig, FanOutConfig, FanOutMode, ModelConfig,
     ModelMapping, ModelStrategy, OtelConfig, PoolConfig, PoolStrategy, PresetConfig, ProjectConfig,
@@ -83,6 +85,10 @@ pub struct AppConfig {
     /// Policy engine rules for per-tenant/zone/compliance evaluation.
     #[serde(default)]
     pub policies: Vec<crate::features::policies::config::PolicyConfig>,
+    /// Record-and-replay harness configuration (opt-in, `harness` feature).
+    #[cfg(feature = "harness")]
+    #[serde(default)]
+    pub harness: HarnessConfig,
 }
 
 impl AppConfig {
