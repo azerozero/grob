@@ -445,6 +445,61 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             // Absorbed into the top panel, not shown in stream.
             Line::from("")
         }
+
+        WatchEvent::HitApprovalRequest {
+            tool_name,
+            timestamp,
+            ..
+        } => Line::from(vec![
+            Span::styled(
+                format!("  {}  ", timestamp.format("%H:%M:%S")),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!("HIT awaiting approval: {}", tool_name),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+
+        WatchEvent::HitApprovalResponse {
+            tool_name,
+            approved,
+            timestamp,
+            ..
+        } => Line::from(vec![
+            Span::styled(
+                format!("  {}  ", timestamp.format("%H:%M:%S")),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!(
+                    "HIT {} {}",
+                    if *approved { "approved" } else { "denied" },
+                    tool_name
+                ),
+                Style::default().fg(if *approved { Color::Green } else { Color::Red }),
+            ),
+        ]),
+
+        WatchEvent::HitFlaggedContent {
+            pattern,
+            matched_text,
+            timestamp,
+            ..
+        } => Line::from(vec![
+            Span::styled(
+                format!("  {}  ", timestamp.format("%H:%M:%S")),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                format!("HIT flagged [{pattern}]: {matched_text}"),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
     };
 
     ListItem::new(line)

@@ -37,8 +37,7 @@ pub(crate) use helpers::{
 #[cfg(feature = "mcp")]
 pub(crate) use init::init_mcp;
 pub(crate) use init::{
-    init_auth, init_core_services, init_dlp, init_observability, init_policies, init_security,
-    maybe_preset_sync,
+    init_auth, init_core_services, init_dlp, init_observability, init_security, maybe_preset_sync,
 };
 pub(crate) use middleware::{
     apply_transparency_headers, auth_middleware, extract_api_credential, extract_client_ip,
@@ -73,6 +72,12 @@ pub struct ReloadableState {
     pub provider_registry: Arc<ProviderRegistry>,
     /// Pre-computed index: lowercase model name → index into config.models (O(1) lookup)
     pub model_index: std::collections::HashMap<String, usize>,
+    /// Policy matcher for per-tenant/zone/compliance request evaluation.
+    ///
+    /// Rebuilt on every `/api/config/reload` because `[[policies]]` changes are
+    /// part of the reloadable config — policy rule updates take effect immediately.
+    #[cfg(feature = "policies")]
+    pub policy_matcher: Option<Arc<crate::features::policies::matcher::PolicyMatcher>>,
 }
 
 impl ReloadableState {
@@ -87,11 +92,15 @@ impl ReloadableState {
             .enumerate()
             .map(|(i, m)| (m.name.to_lowercase(), i))
             .collect();
+        #[cfg(feature = "policies")]
+        let policy_matcher = init::init_policies(&config);
         Self {
             config,
             router,
             provider_registry,
             model_index,
+            #[cfg(feature = "policies")]
+            policy_matcher,
         }
     }
 
@@ -133,9 +142,6 @@ pub struct SecurityState {
     pub tap_sender: Option<Arc<crate::features::tap::TapSender>>,
     /// Adaptive provider scorer for latency-aware routing.
     pub provider_scorer: Option<Arc<ProviderScorer>>,
-    /// Policy matcher for per-tenant/zone/compliance request evaluation.
-    #[cfg(feature = "policies")]
-    pub policy_matcher: Option<Arc<crate::features::policies::matcher::PolicyMatcher>>,
     /// MCP tool matrix and JSON-RPC server state.
     #[cfg(feature = "mcp")]
     pub mcp: Option<Arc<crate::features::mcp::McpState>>,
@@ -165,6 +171,9 @@ pub struct AppState {
     pub event_bus: crate::features::watch::EventBus,
     /// External log exporter for structured request/response logs.
     pub log_exporter: Option<Arc<crate::features::log_export::LogExporter>>,
+    /// Pending HIT approval channels keyed by `"{request_id}:{tool_name}"`.
+    #[cfg(feature = "policies")]
+    pub hit_pending: Arc<crate::features::policies::stream::HitPendingApprovals>,
 }
 
 impl AppState {
@@ -191,7 +200,6 @@ pub async fn start_server(
     let (message_tracer, spend_tracker, pricing_table, metrics_handle) =
         init_observability(&config, &grob_store).await?;
     let dlp_sessions = init_dlp(&config);
-    let policy_matcher = init_policies(&config);
     let jwt_validator = init_auth(&config).await?;
 
     #[cfg(feature = "tap")]
@@ -248,6 +256,8 @@ pub async fn start_server(
         started_at: chrono::Utc::now(),
         event_bus,
         log_exporter,
+        #[cfg(feature = "policies")]
+        hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         observability: ObservabilityState {
             message_tracer: tracer,
             metrics_handle,
@@ -263,14 +273,52 @@ pub async fn start_server(
             response_cache,
             tap_sender,
             provider_scorer,
-            #[cfg(feature = "policies")]
-            policy_matcher,
             #[cfg(feature = "mcp")]
             mcp: mcp_state,
         },
     });
 
     maybe_preset_sync(&config).await;
+
+    // Webhook relay: listens for HitApprovalRequest events with auth_method="webhook" and
+    // POSTs a notification to the configured webhook_url. The external system is expected to
+    // call POST /api/hit/approve to resolve the approval.
+    #[cfg(feature = "policies")]
+    {
+        let mut relay_rx = state.event_bus.subscribe();
+        tokio::spawn(async move {
+            use crate::features::watch::events::WatchEvent;
+            let client = reqwest::Client::new();
+            loop {
+                match relay_rx.recv().await {
+                    Ok(WatchEvent::HitApprovalRequest {
+                        auth_method,
+                        webhook_url: Some(url),
+                        request_id,
+                        tool_name,
+                        tool_input_preview,
+                        ..
+                    }) if auth_method == "webhook" => {
+                        let payload = serde_json::json!({
+                            "request_id": request_id,
+                            "tool_name": tool_name,
+                            "tool_input_preview": tool_input_preview,
+                            "callback": "POST /api/hit/approve",
+                        });
+                        if let Err(e) = client.post(&url).json(&payload).send().await {
+                            tracing::warn!(
+                                url = %url,
+                                error = %e,
+                                "HIT webhook relay: failed to notify webhook"
+                            );
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    _ => {}
+                }
+            }
+        });
+    }
 
     let app = build_app_router(&config, state.clone());
     let oauth_state = state.clone();
@@ -336,6 +384,10 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
             post(oauth_handlers::oauth_refresh_token),
         );
 
+    // HIT approval endpoint — allows TUI, webhooks, and external systems to approve/deny.
+    #[cfg(feature = "policies")]
+    let app = app.route("/api/hit/approve", post(hit_approve_handler));
+
     // MCP routes (conditionally compiled and enabled)
     #[cfg(feature = "mcp")]
     let app = if state.security.mcp.is_some() {
@@ -393,6 +445,135 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
     };
 
     app.with_state(state)
+}
+
+// ── HIT Gateway approval endpoint ──
+
+/// Request body for `POST /api/hit/approve`.
+#[cfg(feature = "policies")]
+#[derive(serde::Deserialize)]
+struct HitApproveRequest {
+    /// Correlation ID of the request that triggered the approval pause.
+    request_id: String,
+    /// Tool name to approve or deny.
+    tool_name: String,
+    /// Whether to approve (`true`) or deny (`false`) the tool call.
+    approved: bool,
+    /// Signer identity for multisig approvals (e.g. `"alice@company.com"`).
+    /// Required when the pending entry is `MultiSig`.
+    signer: Option<String>,
+}
+
+/// Resolves a pending HIT approval.
+///
+/// - `Simple`: first caller decides. Returns `200 OK`.
+/// - `MultiSig`: submits one signature; returns `200 OK` when quorum reached, `202 Accepted` while collecting.
+/// - `Quorum`: casts one vote; returns `200 OK` on decision, `202 Accepted` while gathering.
+/// - `404 Not Found` if no pending entry matches `request_id`/`tool_name`.
+#[cfg(feature = "policies")]
+async fn hit_approve_handler(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    axum::Json(body): axum::Json<HitApproveRequest>,
+) -> axum::http::StatusCode {
+    use crate::features::policies::hit_auth::{
+        AuthDecision, AuthMethod, HitAuthParams, HitAuthorization,
+    };
+    use crate::features::policies::multisig::MultiSigStatus;
+    use crate::features::policies::quorum::{tally_votes, QuorumResult, VoterDecision};
+    use crate::features::policies::stream::HitApprovalEntry;
+
+    let key = format!("{}:{}", body.request_id, body.tool_name);
+    let entry = state
+        .hit_pending
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&key);
+
+    match entry {
+        None => axum::http::StatusCode::NOT_FOUND,
+
+        Some(HitApprovalEntry::Simple(tx)) => {
+            let _ = tx.send(body.approved);
+            axum::http::StatusCode::OK
+        }
+
+        Some(HitApprovalEntry::MultiSig(mut multi)) => {
+            let signer = body.signer.unwrap_or_else(|| "unknown".to_string());
+            let prev_hash = multi.last_hash.take();
+            let auth = HitAuthorization::new(HitAuthParams {
+                request_id: body.request_id.clone(),
+                tool_name: body.tool_name.clone(),
+                tool_input: String::new(),
+                decision: if body.approved {
+                    AuthDecision::Approve
+                } else {
+                    AuthDecision::Deny
+                },
+                auth_method: AuthMethod::Multisig,
+                signer,
+                previous_hash: prev_hash,
+            });
+            multi.last_hash = Some(auth.hash.clone());
+            match multi.collector.submit(auth) {
+                MultiSigStatus::Complete => {
+                    let _ = multi.sender.send(true);
+                    axum::http::StatusCode::OK
+                }
+                MultiSigStatus::Rejected(reason) => {
+                    tracing::info!(reason = %reason, "HIT multisig: rejected");
+                    let _ = multi.sender.send(false);
+                    axum::http::StatusCode::OK
+                }
+                MultiSigStatus::Pending {
+                    received,
+                    remaining,
+                } => {
+                    tracing::info!(
+                        received = received,
+                        remaining = remaining,
+                        "HIT multisig: pending, re-inserting"
+                    );
+                    state
+                        .hit_pending
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(key, HitApprovalEntry::MultiSig(multi));
+                    axum::http::StatusCode::ACCEPTED
+                }
+            }
+        }
+
+        Some(HitApprovalEntry::Quorum(mut quorum)) => {
+            let vote = if body.approved {
+                VoterDecision::Approve
+            } else {
+                VoterDecision::Deny
+            };
+            quorum.votes.push(vote);
+            match tally_votes(&quorum.config, &quorum.votes) {
+                QuorumResult::Approve => {
+                    let _ = quorum.sender.send(true);
+                    axum::http::StatusCode::OK
+                }
+                QuorumResult::Deny => {
+                    let _ = quorum.sender.send(false);
+                    axum::http::StatusCode::OK
+                }
+                QuorumResult::Escalate => {
+                    tracing::info!(
+                        votes = quorum.votes.len(),
+                        "HIT quorum: inconclusive, waiting for more votes"
+                    );
+                    state
+                        .hit_pending
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(key, HitApprovalEntry::Quorum(quorum));
+                    axum::http::StatusCode::ACCEPTED
+                }
+            }
+        }
+    }
 }
 
 // ── Compile-time Send + Sync assertions ──

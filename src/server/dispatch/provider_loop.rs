@@ -355,6 +355,30 @@ fn wrap_stream_with_middleware(
         raw_stream
     };
 
+    // HIT stream: intercept tool_use blocks for human authorization.
+    #[cfg(feature = "policies")]
+    let stream = {
+        let hit_policy = ctx.resolved_policy.as_ref().and_then(|p| p.hit.clone());
+        if let Some(hit) = hit_policy {
+            Box::pin(crate::features::policies::stream::HitStream::new(
+                stream,
+                hit,
+                ctx.req_id.to_string(),
+                Some(Arc::clone(&ctx.state.hit_pending)),
+                Some(ctx.state.event_bus.clone()),
+                ctx.state.security.audit_log.clone(),
+            ))
+                as Pin<
+                    Box<
+                        dyn Stream<Item = Result<Bytes, crate::providers::error::ProviderError>>
+                            + Send,
+                    >,
+                >
+        } else {
+            stream
+        }
+    };
+
     if let Some(ref tap) = ctx.state.security.tap_sender {
         let tap_req_id = uuid::Uuid::new_v4().to_string();
         if let Some(body_json) = tap_request_body {

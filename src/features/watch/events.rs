@@ -102,6 +102,43 @@ pub enum WatchEvent {
         /// When this snapshot was taken.
         timestamp: DateTime<Utc>,
     },
+    /// HIT system requests human approval for a tool_use action.
+    HitApprovalRequest {
+        /// Correlation identifier for the owning request.
+        request_id: String,
+        /// Tool name requiring approval.
+        tool_name: String,
+        /// Preview of the tool input arguments.
+        tool_input_preview: String,
+        /// Authentication method configured for this policy.
+        auth_method: String,
+        /// Webhook URL to notify (present when auth_method is "webhook").
+        webhook_url: Option<String>,
+        /// When the approval was requested.
+        timestamp: DateTime<Utc>,
+    },
+    /// HIT policy detected a dangerous pattern in LLM response text.
+    HitFlaggedContent {
+        /// Correlation identifier for the owning request.
+        request_id: String,
+        /// The flag_pattern that matched.
+        pattern: String,
+        /// The portion of text that triggered the match.
+        matched_text: String,
+        /// When the match was detected.
+        timestamp: DateTime<Utc>,
+    },
+    /// HIT approval decision received.
+    HitApprovalResponse {
+        /// Correlation identifier for the owning request.
+        request_id: String,
+        /// Tool name that was evaluated.
+        tool_name: String,
+        /// Whether the tool was approved.
+        approved: bool,
+        /// When the decision was received.
+        timestamp: DateTime<Utc>,
+    },
 }
 
 /// Direction of DLP scanning.

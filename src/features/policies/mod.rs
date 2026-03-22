@@ -13,3 +13,5 @@ pub mod matcher;
 pub mod multisig;
 pub mod quorum;
 pub mod resolved;
+#[cfg(feature = "policies")]
+pub mod stream;

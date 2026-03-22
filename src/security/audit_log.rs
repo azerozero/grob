@@ -82,6 +82,8 @@ pub enum AuditEvent {
     ConfigChange,
     /// Error.
     Error,
+    /// HIT Gateway per-action authorization receipt.
+    HitApproval,
 }
 
 /// Immutable audit log entry.
@@ -487,21 +489,21 @@ mod tests {
 
     #[test]
     fn test_audit_log_create() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir");
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
             ..Default::default()
         };
-        let _log = AuditLog::new(config).unwrap();
+        let _log = AuditLog::new(config).expect("audit log");
     }
 
     fn make_test_log() -> (TempDir, AuditLog) {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir");
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
             ..Default::default()
         };
-        let log = AuditLog::new(config).unwrap();
+        let log = AuditLog::new(config).expect("audit log");
         (dir, log)
     }
 
@@ -536,13 +538,14 @@ mod tests {
     fn test_write_entry() {
         let (dir, log) = make_test_log();
         let entry = make_entry(AuditEvent::Response);
-        log.write(entry).unwrap();
+        log.write(entry).expect("write");
 
-        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let content =
+            std::fs::read_to_string(dir.path().join("current.jsonl")).expect("read log file");
         let lines: Vec<&str> = content.trim().lines().collect();
         assert_eq!(lines.len(), 1);
 
-        let parsed: AuditEntry = serde_json::from_str(lines[0]).unwrap();
+        let parsed: AuditEntry = serde_json::from_str(lines[0]).expect("parse line 0");
         assert_eq!(parsed.tenant_id, "test-tenant");
         assert_eq!(parsed.duration_ms, 42);
     }
@@ -552,15 +555,18 @@ mod tests {
         let (_dir, log) = make_test_log();
         let genesis = AuditLog::genesis_hash();
 
-        log.write(make_entry(AuditEvent::Request)).unwrap();
-        log.write(make_entry(AuditEvent::Response)).unwrap();
+        log.write(make_entry(AuditEvent::Request))
+            .expect("write entry");
+        log.write(make_entry(AuditEvent::Response))
+            .expect("write entry");
 
-        let content = std::fs::read_to_string(_dir.path().join("current.jsonl")).unwrap();
+        let content =
+            std::fs::read_to_string(_dir.path().join("current.jsonl")).expect("read log file");
         let lines: Vec<&str> = content.trim().lines().collect();
         assert_eq!(lines.len(), 2);
 
-        let parsed1: AuditEntry = serde_json::from_str(lines[0]).unwrap();
-        let parsed2: AuditEntry = serde_json::from_str(lines[1]).unwrap();
+        let parsed1: AuditEntry = serde_json::from_str(lines[0]).expect("parse line 0");
+        let parsed2: AuditEntry = serde_json::from_str(lines[1]).expect("parse line 1");
 
         assert_eq!(parsed1.previous_hash, genesis);
         assert_eq!(parsed2.previous_hash, AuditLog::hash_entry(&parsed1));
@@ -569,10 +575,12 @@ mod tests {
     #[test]
     fn test_signature_present() {
         let (_dir, log) = make_test_log();
-        log.write(make_entry(AuditEvent::DlpBlock)).unwrap();
+        log.write(make_entry(AuditEvent::DlpBlock))
+            .expect("write entry");
 
-        let content = std::fs::read_to_string(_dir.path().join("current.jsonl")).unwrap();
-        let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
+        let content =
+            std::fs::read_to_string(_dir.path().join("current.jsonl")).expect("read log file");
+        let parsed: AuditEntry = serde_json::from_str(content.trim()).expect("parse entry");
 
         assert_eq!(parsed.signature.len(), 64, "ECDSA P-256 = 64 bytes");
         assert!(parsed.signature.iter().any(|&b| b != 0));
@@ -580,17 +588,19 @@ mod tests {
 
     #[test]
     fn test_hmac_signature_present() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir");
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
             signing_algorithm: SigningAlgorithm::HmacSha256,
             ..Default::default()
         };
-        let log = AuditLog::new(config).unwrap();
-        log.write(make_entry(AuditEvent::Request)).unwrap();
+        let log = AuditLog::new(config).expect("audit log");
+        log.write(make_entry(AuditEvent::Request))
+            .expect("write entry");
 
-        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
-        let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
+        let content =
+            std::fs::read_to_string(dir.path().join("current.jsonl")).expect("read log file");
+        let parsed: AuditEntry = serde_json::from_str(content.trim()).expect("parse entry");
 
         assert_eq!(parsed.signature.len(), 32, "HMAC-SHA256 = 32 bytes");
         assert_eq!(parsed.signature_algorithm, "hmac-sha256");
@@ -598,17 +608,19 @@ mod tests {
 
     #[test]
     fn test_ed25519_signature() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir");
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
             signing_algorithm: SigningAlgorithm::Ed25519,
             ..Default::default()
         };
-        let log = AuditLog::new(config).unwrap();
-        log.write(make_entry(AuditEvent::Auth)).unwrap();
+        let log = AuditLog::new(config).expect("audit log");
+        log.write(make_entry(AuditEvent::Auth))
+            .expect("write entry");
 
-        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
-        let parsed: AuditEntry = serde_json::from_str(content.trim()).unwrap();
+        let content =
+            std::fs::read_to_string(dir.path().join("current.jsonl")).expect("read log file");
+        let parsed: AuditEntry = serde_json::from_str(content.trim()).expect("parse entry");
 
         assert_eq!(parsed.signature.len(), 64, "Ed25519 = 64 bytes");
         assert_eq!(parsed.signature_algorithm, "ed25519");
@@ -616,36 +628,38 @@ mod tests {
 
     #[test]
     fn test_batch_signing() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir");
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
             batch_size: 3,
             include_merkle_proof: true,
             ..Default::default()
         };
-        let log = AuditLog::new(config).unwrap();
+        let log = AuditLog::new(config).expect("audit log");
 
         // Write 3 entries — batch should flush automatically.
         for _ in 0..3 {
-            log.write(make_entry(AuditEvent::Response)).unwrap();
+            log.write(make_entry(AuditEvent::Response))
+                .expect("write entry");
         }
 
-        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let content =
+            std::fs::read_to_string(dir.path().join("current.jsonl")).expect("read log file");
         let lines: Vec<&str> = content.trim().lines().collect();
         assert_eq!(lines.len(), 3);
 
         let entries: Vec<AuditEntry> = lines
             .iter()
-            .map(|l| serde_json::from_str(l).unwrap())
+            .map(|l| serde_json::from_str(l).expect("parse line"))
             .collect();
 
         // All entries share the same batch_id and merkle_root.
-        let batch_id = entries[0].batch_id.as_ref().unwrap();
-        let merkle_root = entries[0].merkle_root.as_ref().unwrap();
+        let batch_id = entries[0].batch_id.as_ref().expect("batch_id");
+        let merkle_root = entries[0].merkle_root.as_ref().expect("merkle_root");
         for (i, e) in entries.iter().enumerate() {
-            assert_eq!(e.batch_id.as_ref().unwrap(), batch_id);
+            assert_eq!(e.batch_id.as_ref().expect("batch_id"), batch_id);
             assert_eq!(e.batch_index, Some(i as u32));
-            assert_eq!(e.merkle_root.as_ref().unwrap(), merkle_root);
+            assert_eq!(e.merkle_root.as_ref().expect("merkle_root"), merkle_root);
             assert!(e.merkle_proof.is_some(), "proof should be included");
         }
 
@@ -656,31 +670,33 @@ mod tests {
 
     #[test]
     fn test_batch_merkle_proof_verifiable() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir");
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
             batch_size: 4,
             include_merkle_proof: true,
             ..Default::default()
         };
-        let log = AuditLog::new(config).unwrap();
+        let log = AuditLog::new(config).expect("audit log");
 
         for _ in 0..4 {
-            log.write(make_entry(AuditEvent::Request)).unwrap();
+            log.write(make_entry(AuditEvent::Request))
+                .expect("write entry");
         }
 
-        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let content =
+            std::fs::read_to_string(dir.path().join("current.jsonl")).expect("read log file");
         let entries: Vec<AuditEntry> = content
             .trim()
             .lines()
-            .map(|l| serde_json::from_str(l).unwrap())
+            .map(|l| serde_json::from_str(l).expect("parse line"))
             .collect();
 
-        let merkle_root = entries[0].merkle_root.as_ref().unwrap();
+        let merkle_root = entries[0].merkle_root.as_ref().expect("merkle_root");
 
         for entry in &entries {
             let leaf_hash = AuditLog::hash_entry(entry);
-            let proof = entry.merkle_proof.as_ref().unwrap();
+            let proof = entry.merkle_proof.as_ref().expect("merkle_proof");
             assert!(
                 MerkleTree::verify(merkle_root, &leaf_hash, proof),
                 "Merkle proof failed for entry {}",
@@ -691,27 +707,31 @@ mod tests {
 
     #[test]
     fn test_batch_flush_partial() {
-        let dir = TempDir::new().unwrap();
+        let dir = TempDir::new().expect("tempdir");
         let config = AuditConfig {
             log_dir: dir.path().to_path_buf(),
             batch_size: 10,
             include_merkle_proof: false,
             ..Default::default()
         };
-        let log = AuditLog::new(config).unwrap();
+        let log = AuditLog::new(config).expect("audit log");
 
         // Write fewer entries than batch_size, then flush explicitly.
-        log.write(make_entry(AuditEvent::Request)).unwrap();
-        log.write(make_entry(AuditEvent::Response)).unwrap();
+        log.write(make_entry(AuditEvent::Request))
+            .expect("write entry");
+        log.write(make_entry(AuditEvent::Response))
+            .expect("write entry");
 
         // Nothing written yet (batch incomplete).
-        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let content =
+            std::fs::read_to_string(dir.path().join("current.jsonl")).expect("read log file");
         assert!(content.is_empty(), "batch should not be flushed yet");
 
         // Explicit flush.
-        log.flush().unwrap();
+        log.flush().expect("flush");
 
-        let content = std::fs::read_to_string(dir.path().join("current.jsonl")).unwrap();
+        let content =
+            std::fs::read_to_string(dir.path().join("current.jsonl")).expect("read log file");
         let lines: Vec<&str> = content.trim().lines().collect();
         assert_eq!(lines.len(), 2);
     }
@@ -720,7 +740,7 @@ mod tests {
     fn test_backward_compat_deserialization() {
         // Old entries without batch fields should deserialize fine.
         let json = r#"{"timestamp":"2026-01-01T00:00:00Z","event_id":"test","tenant_id":"t","user_id":null,"action":"REQUEST","classification":"NC","backend_routed":"p","request_hash":null,"dlp_rules_triggered":[],"ip_source":"127.0.0.1","duration_ms":0,"previous_hash":"abc","signature":"deadbeef"}"#;
-        let entry: AuditEntry = serde_json::from_str(json).unwrap();
+        let entry: AuditEntry = serde_json::from_str(json).expect("parse json");
         assert_eq!(entry.signature_algorithm, "");
         assert!(entry.batch_id.is_none());
         assert!(entry.merkle_root.is_none());

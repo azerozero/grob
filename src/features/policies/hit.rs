@@ -23,6 +23,16 @@ pub struct HitOverride {
     /// Regex patterns flagged as dangerous in response text.
     #[serde(default)]
     pub flag_patterns: Vec<String>,
+    /// Webhook URL to notify for approval (used when auth_method is "webhook").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_url: Option<String>,
+    /// Number of distinct human signatures required (used when auth_method is "multisig").
+    /// Defaults to 2 if not set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_signatures: Option<u32>,
+    /// Quorum voting configuration (used when auth_method is "quorum").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quorum: Option<crate::features::policies::quorum::QuorumConfig>,
 }
 
 fn default_auth_method() -> String {
@@ -108,6 +118,9 @@ mod tests {
             ],
             auth_method: "prompt".into(),
             flag_patterns: vec![],
+            webhook_url: None,
+            required_signatures: None,
+            quorum: None,
         }
     }
 

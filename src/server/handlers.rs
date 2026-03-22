@@ -570,7 +570,8 @@ fn evaluate_policy_if_configured(
     model: &str,
     headers: &axum::http::HeaderMap,
 ) -> Option<crate::features::policies::resolved::ResolvedPolicy> {
-    let matcher = state.security.policy_matcher.as_ref()?;
+    let inner = state.snapshot();
+    let matcher = inner.policy_matcher.as_ref()?;
     let ctx = crate::features::policies::context::RequestContext {
         tenant: tenant.map(|s| s.to_string()),
         zone: None,
