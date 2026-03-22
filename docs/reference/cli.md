@@ -211,6 +211,65 @@ grob key revoke <uuid>
 grob key revoke grob-ak-xxxx    # Prefix match
 ```
 
+### `grob bench`
+
+Run a self-contained performance benchmark of the proxy pipeline. Starts a mock backend, builds a minimal proxy with middleware layers, runs scenarios with increasing feature combinations, and reports latency percentiles plus overhead relative to a direct baseline.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-n, --requests <N>` | `500` | Number of requests per scenario (sequential mode) |
+| `--with-auth` | off | Include auth overhead (creates a virtual key and authenticates each request) |
+| `--format <FORMAT>` | `table` | Output format (`table` or `json`) |
+| `-c, --concurrency <N>` | `1` | Concurrent requests (`0` = auto = num_cpus, `1` = sequential) |
+| `-p, --payload <SIZE>` | `small` | Payload size: `small` (~300B), `medium` (~80KB), `large` (~150KB), `all` |
+| `--escalate` | off | Run escalation mode: test each feature layer incrementally and show per-feature cost breakdown |
+
+```bash
+grob bench                              # Quick sequential run (500 reqs, small payload)
+grob bench -c 0 --payload all           # Concurrent, all payload sizes
+grob bench --escalate -c 8              # Feature escalation staircase
+grob bench --format json -n 1000        # JSON output for CI
+grob bench --with-auth --escalate       # Include virtual-key auth in escalation
+```
+
+### `grob rollback`
+
+Restore the previous configuration from backup. Copies `config.toml.backup` over the active `config.toml`, then triggers a hot-reload on the running server if reachable. The backup file is created automatically when applying a preset via `grob preset apply`.
+
+Cannot be used when the config source is a remote URL.
+
+```bash
+grob rollback
+```
+
+### `grob preset push`
+
+Push a local preset to a remote grob instance. Loads the preset, fetches the remote config for a section-level diff, optionally prompts for confirmation, then uploads the config and triggers a reload.
+
+| Flag | Description |
+|------|-------------|
+| `<name>` | Preset name to push (positional, required) |
+| `--target <URL>` | Target grob instance URL (e.g., `https://grob-qa.example.com`) |
+| `--yes` | Skip confirmation prompt |
+
+```bash
+grob preset push perf --target https://grob-qa.example.com
+grob preset push medium --target https://grob-prod.example.com --yes
+```
+
+### `grob preset pull`
+
+Pull config from a remote grob instance and save it as a local preset. Fetches the remote `/api/config` JSON, strips the `server` section, and saves the result as a TOML preset file.
+
+| Flag | Description |
+|------|-------------|
+| `--from <URL>` | Source grob instance URL (e.g., `https://grob-prod.example.com`) |
+| `--save <NAME>` | Name to save the pulled config as |
+
+```bash
+grob preset pull --from https://grob-prod.example.com --save prod-snapshot
+```
+
 ### `grob watch` (requires `--features watch`)
 
 Live traffic inspector TUI. Connects to the running server's SSE endpoint (`/api/events`) and displays a ratatui dashboard with provider health, live request stream, and DLP alerts.

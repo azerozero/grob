@@ -68,6 +68,14 @@ Additional DLP features:
 - Homoglyph attack prevention (Unicode normalization)
 - External rules files (TOML, hot-reloadable)
 
+## Policy Engine
+
+| Feature | Description | Config |
+|---------|-------------|--------|
+| Policy engine | Unified per-tenant/zone/compliance policy evaluation with glob matching | `[[policies]]` |
+| HIT Gateway | Per-action human authorization for tool_use blocks (auto-approve, require-approval, deny) | `[policies.hit]` |
+| Encrypted audit export | Age envelope encryption with per-policy auditor matrix | `[policies.log_export] content = "encrypted"` |
+
 ## Security
 
 | Feature | Description | Config |

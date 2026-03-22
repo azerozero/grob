@@ -370,6 +370,48 @@ matrix_path = "~/.grob/matrix.toml" # Path to tool capability catalogue
 
 The MCP tool matrix is a static TOML catalogue of tools with per-provider reliability scores. A bench engine continuously tests tool-calling capabilities. The `/mcp` endpoint exposes a JSON-RPC interface for querying, benchmarking, and calibrating tool scores.
 
+## Policies
+
+Define per-tenant, per-zone, or per-compliance-framework policy overrides. Policies match requests using glob patterns and apply DLP, rate limit, budget, and log export settings.
+
+```toml
+[[policies]]
+name = "hospital-eu"
+
+[policies.match]
+tenant = "hospital-*"
+zone = "eu-*"
+compliance = ["gdpr"]
+
+[policies.dlp]
+secrets = "block"
+
+[policies.rate_limit]
+rps = 50
+
+[policies.budget]
+monthly_usd = 500.0
+
+[policies.log_export]
+content = "encrypted"
+recipients = ["rssi", "dpo"]
+```
+
+Multiple `[[policies]]` entries are evaluated in order; the first match wins. Unset fields inherit from the global config.
+
+## Log Export
+
+```toml
+[log_export]
+content = "encrypted"
+
+[log_export.auditors]
+rssi = "age1..."
+dpo = "age1..."
+```
+
+When `content = "encrypted"`, audit log entries are sealed with age envelope encryption. Each recipient listed in `[log_export.auditors]` receives an age X25519 public key. Only holders of the corresponding private key can decrypt their share of the audit export.
+
 ## Per-project overrides
 
 Create a `.grob.toml` file in your project root (or any parent directory up to `$HOME`) to overlay settings:

@@ -114,6 +114,9 @@ flowchart TB
 | `features::mcp` | `src/features/mcp/mod.rs` | MCP tool matrix: tool catalogue, scoring, calibration |
 | `features::mcp::bench` | `src/features/mcp/bench/` | Continuous tool-calling benchmark engine |
 | `features::mcp::server` | `src/features/mcp/server/` | JSON-RPC MCP endpoints |
+| `features::policies` | `src/features/policies/` | Unified policy engine (glob-based match rules, per-tenant/zone/compliance overrides) |
+| `features::policies::hit` | `src/features/policies/hit.rs` | HIT Gateway — per-action human authorization for tool_use |
+| `features::log_export::encryption` | `src/features/log_export/encryption.rs` | Age envelope encryption for multi-recipient audit export |
 | `features::harness` | `src/features/harness/mod.rs` | Record & replay sandwich testing harness (tape, mock backend, driver) |
 | `cache` | `src/cache/mod.rs` | Response cache (moka) for deterministic requests |
 | `message_tracing` | `src/message_tracing/mod.rs` | Request/response trace logging (JSONL) |
