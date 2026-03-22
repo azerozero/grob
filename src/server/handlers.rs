@@ -252,6 +252,9 @@ pub(crate) async fn handle_openai_chat_completions(
     forward_beta_header(&mut request, &headers);
 
     let start_time = std::time::Instant::now();
+    #[cfg(feature = "policies")]
+    let resolved_policy =
+        evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -265,7 +268,7 @@ pub(crate) async fn handle_openai_chat_completions(
         headers: &headers,
         trace_id: None,
         #[cfg(feature = "policies")]
-        resolved_policy: None,
+        resolved_policy,
     };
 
     let result = dispatch::dispatch(&ctx, &mut request).await?;
@@ -320,6 +323,9 @@ pub(crate) async fn handle_responses(
     forward_beta_header(&mut request, &headers);
 
     let start_time = std::time::Instant::now();
+    #[cfg(feature = "policies")]
+    let resolved_policy =
+        evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -333,7 +339,7 @@ pub(crate) async fn handle_responses(
         headers: &headers,
         trace_id: None,
         #[cfg(feature = "policies")]
-        resolved_policy: None,
+        resolved_policy,
     };
 
     let result = dispatch::dispatch(&ctx, &mut request).await?;
@@ -425,6 +431,9 @@ pub(crate) async fn handle_messages(
     let is_streaming = request.stream == Some(true);
 
     let start_time = std::time::Instant::now();
+    #[cfg(feature = "policies")]
+    let resolved_policy =
+        evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -438,7 +447,7 @@ pub(crate) async fn handle_messages(
         headers: &headers,
         trace_id: Some(trace_id),
         #[cfg(feature = "policies")]
-        resolved_policy: None,
+        resolved_policy,
     };
 
     let result = dispatch::dispatch(&ctx, &mut request).await?;
@@ -550,4 +559,36 @@ pub(crate) async fn handle_count_tokens(
             decision.model_name
         )))
     }
+}
+
+/// Evaluates the policy engine if configured. Returns `None` when no policies
+/// are loaded (backward compatible) or when the `policies` feature is disabled.
+#[cfg(feature = "policies")]
+fn evaluate_policy_if_configured(
+    state: &Arc<AppState>,
+    tenant: Option<&str>,
+    model: &str,
+    headers: &axum::http::HeaderMap,
+) -> Option<crate::features::policies::resolved::ResolvedPolicy> {
+    let matcher = state.security.policy_matcher.as_ref()?;
+    let ctx = crate::features::policies::context::RequestContext {
+        tenant: tenant.map(|s| s.to_string()),
+        zone: None,
+        project: headers
+            .get("x-grob-project")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string()),
+        user: None,
+        agent: headers
+            .get("user-agent")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string()),
+        compliance: vec![],
+        model: model.to_string(),
+        provider: String::new(),
+        route_type: String::new(),
+        dlp_triggered: false,
+        estimated_cost: 0.0,
+    };
+    Some(matcher.evaluate(&ctx))
 }
