@@ -74,6 +74,27 @@ When `pass_through = true`, the provider accepts any model name that does not ma
 | `kimi-coding` | Kimi | Anthropic Messages |
 | `zenmux` | Zenmux | Anthropic Messages |
 
+### Multi-account key pool
+
+Chain multiple API keys for a single provider. Grob rotates through them automatically.
+
+```toml
+[[providers]]
+name = "openai"
+provider_type = "openai"
+api_key = "$OPENAI_API_KEY_1"
+
+[providers.pool]
+strategy = "round_robin"   # "sequential" | "round_robin" | "fallback"
+keys = ["$OPENAI_API_KEY_2", "$OPENAI_API_KEY_3"]
+```
+
+| Strategy | Behavior |
+|----------|----------|
+| `sequential` | Use keys in order, rotate on rate limit (default) |
+| `round_robin` | Distribute requests evenly across all keys |
+| `fallback` | Use primary key, switch to pool only on failure |
+
 ### Environment variable expansion
 
 API keys support `$ENV_VAR` syntax. Grob resolves them at startup:
