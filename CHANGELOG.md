@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0](https://github.com/azerozero/grob/compare/v0.25.3...v0.26.0) - 2026-03-22
+
+### Added
+
+- *(policies)* WI-5/6 quorum voting + multi-sig co-signing
+- *(log-export)* WI-3 wire encrypted content emit in dispatch
+- *(policies)* WI-2 wire policy evaluation into dispatch handlers
+- *(policies)* WI-1 wire config + init for policy engine and HIT
+
+### Other
+
+- gitignore docs/reviews/ (generated audit reports)
+- add key pool configuration to CONFIGURATION.md
+- sync code→docs gaps (policies, encrypted audit, CLI commands)
+
 ## [0.25.3](https://github.com/azerozero/grob/compare/v0.25.2...v0.25.3) - 2026-03-22
 
 ### Fixed
