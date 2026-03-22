@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.7](https://github.com/azerozero/grob/compare/v0.24.6...v0.24.7) - 2026-03-22
+
+### Added
+
+- *(policies)* implement P1 policy engine with glob-based matching
+
+### Other
+
+- *(adr)* update 0006 with HIT tool interception, auth methods, risk matrix
+- *(adr)* 0006 unified policy engine + encrypted audit + HIT gateway
+
 ## [0.24.6](https://github.com/azerozero/grob/compare/v0.24.5...v0.24.6) - 2026-03-21
 
 ### Fixed
