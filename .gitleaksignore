@@ -89,3 +89,9 @@ src/commands/bench.rs:private-key:419
 src/commands/bench.rs:private-key:420
 src/commands/bench.rs:aws-access-token:416
 src/commands/bench.rs:github-pat:417
+
+# Bench payloads split into submodule (same DLP test tokens)
+src/commands/bench/payloads.rs:github-pat:165
+src/commands/bench/payloads.rs:private-key:168
+src/commands/bench/payloads.rs:aws-access-token:161
+src/commands/bench/payloads.rs:aws-access-token:164
