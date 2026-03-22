@@ -9,6 +9,27 @@ grob now supports OAuth authentication for Claude Pro/Max subscriptions, allowin
 - ✅ **Auto Refresh**: Tokens are automatically refreshed when expired
 - ✅ **Persistent Storage**: Tokens stored securely in `~/.grob/grob.db` (redb)
 
+## OAuth PKCE Flow
+
+The following diagram shows the complete OAuth PKCE authorization flow between the user, Grob, and the provider.
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant G as Grob
+    participant P as Provider (Anthropic/Gemini)
+
+    U->>G: grob connect anthropic
+    G->>G: Generate PKCE code_verifier + code_challenge
+    G->>U: Open browser → Provider auth page
+    U->>P: Login + authorize
+    P->>G: Redirect with authorization code
+    G->>P: Exchange code + code_verifier for tokens
+    P->>G: Access token + refresh token
+    G->>G: Encrypt tokens (AES-256-GCM) + store
+    G->>U: Connected! Ready to proxy.
+```
+
 ## Quick Start
 
 ### 1. Get Authorization URL

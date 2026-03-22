@@ -6,6 +6,12 @@
 use std::io::Write;
 
 /// Encrypts content for multiple age recipients. Returns base64-encoded age blob.
+///
+/// # Errors
+///
+/// - [`EncryptError::NoRecipients`] if `recipient_keys` is empty.
+/// - [`EncryptError::InvalidRecipient`] if a key cannot be parsed as an X25519 recipient.
+/// - [`EncryptError::Encryption`] if age encryption or stream writing fails.
 pub fn encrypt_for_recipients(
     content: &str,
     recipient_keys: &[String],

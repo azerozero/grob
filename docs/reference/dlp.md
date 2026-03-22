@@ -228,6 +228,26 @@ All built-in rules use the `redact` action.
 
 ## Scanning pipeline
 
+The following diagram illustrates the full DLP scan pipeline from request ingestion to client response.
+
+```mermaid
+flowchart TB
+    req["Incoming Request"] --> secrets["Secret Scanner<br/>(25 builtin rules, Aho-Corasick DFA)"]
+    secrets -->|"found"| action1{"Action?"}
+    action1 -->|redact| redact["Replace with [REDACTED]<br/>+ inject canary token"]
+    action1 -->|block| block["Return 400"]
+    action1 -->|warn| warn["Log + continue"]
+    secrets -->|"clean"| pii["PII Scanner<br/>(email, phone, credit card, IBAN)"]
+    pii --> names["Name Pseudonymizer<br/>(reversible HMAC mapping)"]
+    names --> injection["Injection Detector<br/>(28 languages)"]
+    injection -->|"detected"| block2["Block or warn"]
+    injection -->|"clean"| provider["Forward to provider"]
+    provider --> resp["Response"]
+    resp --> url["URL Exfiltration Scanner"]
+    url --> entropy["Entropy Detector (SPRT)"]
+    entropy --> client["Return to client"]
+```
+
 ### Request path (input)
 
 1. **Prompt injection detection** (if enabled, `action = block` short-circuits)

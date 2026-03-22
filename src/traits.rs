@@ -49,6 +49,10 @@ pub trait DlpPipeline: Send + Sync {
 /// Routes requests to model names based on rules.
 pub trait RequestRouter: Send + Sync {
     /// Routes a request and returns a routing decision.
+    ///
+    /// # Errors
+    ///
+    /// - Returns an error if no matching route is found or routing logic fails.
     fn route(&self, request: &mut CanonicalRequest) -> Result<crate::models::RouteDecision>;
 }
 
@@ -117,6 +121,10 @@ pub trait SpendTracking: Send {
 #[cfg(feature = "compliance")]
 pub trait AuditWriter: Send + Sync {
     /// Writes a single audit entry.
+    ///
+    /// # Errors
+    ///
+    /// - Returns an error if the audit entry cannot be written to the log.
     fn write(&self, entry: crate::security::audit_log::AuditEntry) -> Result<()>;
 }
 

@@ -27,6 +27,10 @@ pub struct PolicyMatcher {
 
 impl PolicyMatcher {
     /// Compiles policies from config. Fails fast on invalid glob patterns.
+    ///
+    /// # Errors
+    ///
+    /// - Returns an error if any glob pattern in the match rules is invalid.
     pub fn new(configs: Vec<PolicyConfig>) -> Result<Self, globset::Error> {
         let mut policies = Vec::with_capacity(configs.len());
         for config in configs {

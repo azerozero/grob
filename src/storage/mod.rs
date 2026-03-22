@@ -41,8 +41,15 @@ impl std::fmt::Debug for GrobStore {
 }
 
 impl GrobStore {
-    /// Open or create the database at the given path.
+    /// Opens or creates the database at the given path.
     /// Runs JSON migration on first open if legacy files exist.
+    ///
+    /// # Errors
+    ///
+    /// - Returns an error if the parent directory cannot be created.
+    /// - Returns an error if the redb database cannot be opened or created.
+    /// - Returns an error if storage encryption initialization fails.
+    /// - Returns an error if JSON migration from legacy files fails.
     pub fn open(path: &Path) -> Result<Self> {
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
