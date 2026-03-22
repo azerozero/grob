@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0](https://github.com/azerozero/grob/compare/v0.27.0...v0.28.0) - 2026-03-22
+
+### Added
+
+- *(tooling)* policy benchmark, test-util mocks, EventBus no-op, HarnessConfig, otel cfg fix
+- *(policies)* WI-7 HIT Gateway — BufferingInput, arg-pattern deny, flag_patterns, receipts, multisig/quorum, approval endpoint
+
+### Other
+
+- update ADRs, benchmarks v0.26.0, OpenAPI spec, README, add policies explanation
+
 ## [0.27.0](https://github.com/azerozero/grob/compare/v0.26.0...v0.27.0) - 2026-03-22
 
 ### Other
