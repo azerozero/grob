@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0](https://github.com/azerozero/grob/compare/v0.24.7...v0.25.0) - 2026-03-22
+
+### Added
+
+- *(hit)* P4 HIT tool authorization engine + hash-chained receipts
+- *(policies)* P3 wire policy engine into dispatch pipeline
+- *(log-export)* P2 encrypted audit export with age envelope encryption
+
+### Other
+
+- P5 HIT quorum voting + multi-sig co-signing design spec
+
 ## [0.24.7](https://github.com/azerozero/grob/compare/v0.24.6...v0.24.7) - 2026-03-22
 
 ### Added
