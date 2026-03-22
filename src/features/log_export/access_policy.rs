@@ -77,11 +77,7 @@ fn matches_access(rules: &AccessMatchRules, ctx: &AccessContext) -> bool {
         match ctx.tenant.as_deref() {
             None => return false,
             Some(tenant) => {
-                let glob = match globset::Glob::new(pattern) {
-                    Ok(g) => g.compile_matcher(),
-                    Err(_) => return false,
-                };
-                if !glob.is_match(tenant) {
+                if !glob_match(pattern, tenant) {
                     return false;
                 }
             }
@@ -103,6 +99,23 @@ fn matches_access(rules: &AccessMatchRules, ctx: &AccessContext) -> bool {
     }
 
     true
+}
+
+/// Simple glob matching supporting `*` as wildcard prefix/suffix.
+///
+/// Supports patterns like `"hospital-*"`, `"*-paris"`, `"*"`, or exact match.
+/// No dependency on the `globset` crate.
+fn glob_match(pattern: &str, value: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+    if let Some(prefix) = pattern.strip_suffix('*') {
+        return value.starts_with(prefix);
+    }
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        return value.ends_with(suffix);
+    }
+    pattern == value
 }
 
 #[cfg(test)]
