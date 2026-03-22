@@ -558,6 +558,10 @@ async fn dispatch_non_streaming(
 
                 // Emit to external log sinks.
                 if let Some(ref exporter) = ctx.state.log_exporter {
+                    // Optionally encrypt content based on policy.
+                    let (encrypted_content, content_recipients) =
+                        build_encrypted_content(ctx, &response_bytes);
+
                     exporter.emit(&crate::features::log_export::LogEntry {
                         request_id: ctx.req_id.to_string(),
                         timestamp: chrono::Utc::now().to_rfc3339(),
@@ -570,8 +574,8 @@ async fn dispatch_non_streaming(
                         status: "success".to_string(),
                         dlp_actions: vec![],
                         tenant_id: ctx.tenant_id.clone(),
-                        encrypted_content: None,
-                        content_recipients: None,
+                        encrypted_content,
+                        content_recipients,
                     });
                 }
 
@@ -642,3 +646,69 @@ fn handle_provider_error(
 }
 
 use super::super::should_inject_continuation;
+
+/// Builds encrypted content for log export when policy requires it.
+///
+/// Returns `(None, None)` when encryption is not configured or no policy matches.
+#[allow(unused_variables)]
+fn build_encrypted_content(
+    ctx: &DispatchContext<'_>,
+    response_bytes: &Option<Vec<u8>>,
+) -> (Option<String>, Option<Vec<String>>) {
+    #[cfg(feature = "policies")]
+    {
+        use crate::features::log_export::ContentMode;
+
+        // Check if log export is configured for encryption.
+        if ctx.state.log_exporter.is_none() {
+            return (None, None);
+        }
+        let log_config = &ctx.inner.config.log_export;
+        if log_config.content != ContentMode::Encrypted {
+            return (None, None);
+        }
+
+        // Resolve recipients from access policies.
+        let access_ctx = crate::features::log_export::access_policy::AccessContext {
+            tenant: ctx.tenant_id.clone(),
+            compliance: vec![],
+            dlp_triggered: false,
+        };
+        let recipient_keys = crate::features::log_export::access_policy::resolve_recipients(
+            &log_config.access_policies,
+            &log_config.auditors,
+            &access_ctx,
+        );
+        if recipient_keys.is_empty() {
+            return (None, None);
+        }
+
+        // Build content string from response.
+        let content = response_bytes
+            .as_ref()
+            .map(|b| String::from_utf8_lossy(b).to_string())
+            .unwrap_or_default();
+
+        // Encrypt.
+        let recipient_names: Vec<String> = log_config
+            .access_policies
+            .iter()
+            .flat_map(|p| p.recipients.clone())
+            .collect();
+
+        match crate::features::log_export::encryption::encrypt_for_recipients(
+            &content,
+            &recipient_keys,
+        ) {
+            Ok(encrypted) => (Some(encrypted), Some(recipient_names)),
+            Err(e) => {
+                tracing::warn!("Failed to encrypt log content: {}", e);
+                (None, None)
+            }
+        }
+    }
+    #[cfg(not(feature = "policies"))]
+    {
+        (None, None)
+    }
+}
