@@ -2,6 +2,10 @@
 //!
 //! Exports structured [`LogEntry`] records to configurable destinations
 //! (stdout JSON, JSONL file, HTTP endpoint) alongside the existing tap system.
+//! Supports encrypted content export via age envelope encryption.
+
+pub mod access_policy;
+pub mod encryption;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,6 +38,25 @@ pub struct LogEntry {
     /// Tenant identifier (multi-tenant deployments).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant_id: Option<String>,
+    /// Age-encrypted request/response content (base64).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encrypted_content: Option<String>,
+    /// Named auditor recipients who can decrypt the content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_recipients: Option<Vec<String>>,
+}
+
+/// Content export mode.
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ContentMode {
+    /// Do not export content (default).
+    #[default]
+    None,
+    /// Export content in plaintext.
+    Plaintext,
+    /// Export content encrypted with age.
+    Encrypted,
 }
 
 /// Log export configuration (deserialized from TOML).
@@ -45,6 +68,15 @@ pub struct LogExportConfig {
     /// Configured sink destinations.
     #[serde(default)]
     pub sinks: Vec<LogSinkConfig>,
+    /// Content export mode.
+    #[serde(default)]
+    pub content: ContentMode,
+    /// Named auditors with their age public keys.
+    #[serde(default)]
+    pub auditors: HashMap<String, String>,
+    /// Access policies controlling which auditors see which sessions.
+    #[serde(default)]
+    pub access_policies: Vec<access_policy::AccessPolicyConfig>,
 }
 
 /// Sink destination for log entries.
@@ -207,6 +239,7 @@ mod tests {
         let config = LogExportConfig {
             enabled: true,
             sinks: vec![],
+            ..Default::default()
         };
         assert!(init_log_exporter(&config).is_none());
     }
@@ -225,9 +258,12 @@ mod tests {
             status: "success".to_string(),
             dlp_actions: vec![],
             tenant_id: None,
+            encrypted_content: None,
+            content_recipients: None,
         };
         let json = serde_json::to_string(&entry).unwrap();
         assert!(json.contains("req-1"));
         assert!(!json.contains("tenant_id"));
+        assert!(!json.contains("encrypted_content"));
     }
 }

@@ -570,6 +570,8 @@ async fn dispatch_non_streaming(
                         status: "success".to_string(),
                         dlp_actions: vec![],
                         tenant_id: ctx.tenant_id.clone(),
+                        encrypted_content: None,
+                        content_recipients: None,
                     });
                 }
 

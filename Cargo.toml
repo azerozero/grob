@@ -89,6 +89,9 @@ aes-gcm = "0.10"
 # Policy engine (glob pattern matching for policy rules)
 globset = { version = "0.4", optional = true }
 
+# Encrypted audit export (envelope encryption, multi-recipient)
+age = { version = "0.11", features = ["armor"] }
+
 # Caching (high-performance concurrent cache with TTL)
 moka = { version = "0.12", features = ["future", "sync"] }
 
