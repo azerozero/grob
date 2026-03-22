@@ -37,7 +37,8 @@ pub(crate) use helpers::{
 #[cfg(feature = "mcp")]
 pub(crate) use init::init_mcp;
 pub(crate) use init::{
-    init_auth, init_core_services, init_dlp, init_observability, init_security, maybe_preset_sync,
+    init_auth, init_core_services, init_dlp, init_observability, init_policies, init_security,
+    maybe_preset_sync,
 };
 pub(crate) use middleware::{
     apply_transparency_headers, auth_middleware, extract_api_credential, extract_client_ip,
@@ -132,6 +133,9 @@ pub struct SecurityState {
     pub tap_sender: Option<Arc<crate::features::tap::TapSender>>,
     /// Adaptive provider scorer for latency-aware routing.
     pub provider_scorer: Option<Arc<ProviderScorer>>,
+    /// Policy matcher for per-tenant/zone/compliance request evaluation.
+    #[cfg(feature = "policies")]
+    pub policy_matcher: Option<Arc<crate::features::policies::matcher::PolicyMatcher>>,
     /// MCP tool matrix and JSON-RPC server state.
     #[cfg(feature = "mcp")]
     pub mcp: Option<Arc<crate::features::mcp::McpState>>,
@@ -187,6 +191,7 @@ pub async fn start_server(
     let (message_tracer, spend_tracker, pricing_table, metrics_handle) =
         init_observability(&config, &grob_store).await?;
     let dlp_sessions = init_dlp(&config);
+    let policy_matcher = init_policies(&config);
     let jwt_validator = init_auth(&config).await?;
 
     #[cfg(feature = "tap")]
@@ -258,6 +263,8 @@ pub async fn start_server(
             response_cache,
             tap_sender,
             provider_scorer,
+            #[cfg(feature = "policies")]
+            policy_matcher,
             #[cfg(feature = "mcp")]
             mcp: mcp_state,
         },

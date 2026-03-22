@@ -115,4 +115,7 @@ pub struct PolicyConfig {
     /// Log export overrides.
     #[serde(default)]
     pub log_export: Option<LogExportOverride>,
+    /// HIT (Human Intent Token) authorization overrides.
+    #[serde(default)]
+    pub hit: Option<super::hit::HitOverride>,
 }

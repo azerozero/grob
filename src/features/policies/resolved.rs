@@ -3,6 +3,7 @@
 use super::config::{
     BudgetOverride, DlpOverride, LogExportOverride, RateLimitOverride, RoutingOverride,
 };
+use super::hit::HitOverride;
 
 /// Merged policy result after evaluating all matching policies.
 #[derive(Debug, Clone, Default)]
@@ -19,6 +20,8 @@ pub struct ResolvedPolicy {
     pub budget: Option<BudgetOverride>,
     /// Merged log export overrides (union of recipients).
     pub log_export: Option<LogExportOverride>,
+    /// HIT authorization overrides.
+    pub hit: Option<HitOverride>,
 }
 
 impl ResolvedPolicy {

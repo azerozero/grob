@@ -406,6 +406,7 @@ mod tests {
             user: Default::default(),
             otel: Default::default(),
             log_export: Default::default(),
+            policies: vec![],
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
         })

@@ -64,6 +64,7 @@ fn make_config() -> AppConfig {
         user: Default::default(),
         otel: Default::default(),
         log_export: Default::default(),
+        policies: vec![],
     }
 }
 

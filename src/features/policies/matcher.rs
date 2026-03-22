@@ -232,6 +232,11 @@ impl PolicyMatcher {
                     }
                 }
             }
+
+            // HIT: first match wins.
+            if result.hit.is_none() {
+                result.hit = cfg.hit.clone();
+            }
         }
 
         result
@@ -281,6 +286,7 @@ mod tests {
             routing: None,
             budget: None,
             log_export: None,
+            hit: None,
         }
     }
 

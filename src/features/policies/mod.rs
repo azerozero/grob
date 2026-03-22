@@ -8,5 +8,6 @@ pub mod config;
 pub mod context;
 pub mod hit;
 pub mod hit_auth;
+#[cfg(feature = "policies")]
 pub mod matcher;
 pub mod resolved;
