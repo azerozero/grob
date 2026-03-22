@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0](https://github.com/azerozero/grob/compare/v0.26.0...v0.27.0) - 2026-03-22
+
+### Other
+
+- *(policies)* simplify merge, use enums, builder pattern
+
 ## [0.26.0](https://github.com/azerozero/grob/compare/v0.25.3...v0.26.0) - 2026-03-22
 
 ### Added
