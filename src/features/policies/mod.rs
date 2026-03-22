@@ -6,5 +6,7 @@
 
 pub mod config;
 pub mod context;
+pub mod hit;
+pub mod hit_auth;
 pub mod matcher;
 pub mod resolved;
