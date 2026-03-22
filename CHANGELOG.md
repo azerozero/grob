@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.3](https://github.com/azerozero/grob/compare/v0.25.2...v0.25.3) - 2026-03-22
+
+### Fixed
+
+- *(docs)* sync stale versions, broken link, routing priority, LOC count
+
 ## [0.25.2](https://github.com/azerozero/grob/compare/v0.25.1...v0.25.2) - 2026-03-22
 
 ### Fixed
