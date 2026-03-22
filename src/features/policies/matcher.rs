@@ -167,52 +167,16 @@ impl PolicyMatcher {
         for policy in matches {
             let cfg = &policy.config;
 
-            // DLP: first match wins.
-            if result.dlp.is_none() {
-                result.dlp = cfg.dlp.clone();
-            }
+            // First-match-wins fields.
+            first_wins(&mut result.dlp, &cfg.dlp);
+            first_wins(&mut result.routing, &cfg.routing);
+            first_wins(&mut result.hit, &cfg.hit);
 
-            // Rate limit: most restrictive (lowest rps).
-            if let Some(ref rl) = cfg.rate_limit {
-                match result.rate_limit {
-                    None => result.rate_limit = Some(rl.clone()),
-                    Some(ref mut existing) => {
-                        if let (Some(new_rps), Some(ref mut old_rps)) = (rl.rps, &mut existing.rps)
-                        {
-                            if new_rps < *old_rps {
-                                *old_rps = new_rps;
-                            }
-                        } else if existing.rps.is_none() {
-                            existing.rps = rl.rps;
-                        }
-                    }
-                }
-            }
+            // Most restrictive (lowest value wins).
+            merge_min(&mut result.rate_limit, &cfg.rate_limit, |r| &mut r.rps);
+            merge_min(&mut result.budget, &cfg.budget, |b| &mut b.monthly_usd);
 
-            // Routing: first match wins.
-            if result.routing.is_none() {
-                result.routing = cfg.routing.clone();
-            }
-
-            // Budget: most restrictive (lowest monthly_usd).
-            if let Some(ref budget) = cfg.budget {
-                match result.budget {
-                    None => result.budget = Some(budget.clone()),
-                    Some(ref mut existing) => {
-                        if let (Some(new_val), Some(ref mut old_val)) =
-                            (budget.monthly_usd, &mut existing.monthly_usd)
-                        {
-                            if new_val < *old_val {
-                                *old_val = new_val;
-                            }
-                        } else if existing.monthly_usd.is_none() {
-                            existing.monthly_usd = budget.monthly_usd;
-                        }
-                    }
-                }
-            }
-
-            // Log export: union recipients.
+            // Log export: union recipients, first-wins content.
             if let Some(ref le) = cfg.log_export {
                 match result.log_export {
                     None => result.log_export = Some(le.clone()),
@@ -225,21 +189,43 @@ impl PolicyMatcher {
                                 }
                             }
                         }
-                        // Content: first match wins.
-                        if existing.content.is_none() {
-                            existing.content = le.content.clone();
-                        }
+                        first_wins(&mut existing.content, &le.content);
                     }
                 }
-            }
-
-            // HIT: first match wins.
-            if result.hit.is_none() {
-                result.hit = cfg.hit.clone();
             }
         }
 
         result
+    }
+}
+
+/// Sets `target` to `source` if `target` is `None` (first-match-wins).
+fn first_wins<T: Clone>(target: &mut Option<T>, source: &Option<T>) {
+    if target.is_none() {
+        *target = source.clone();
+    }
+}
+
+/// Merges an optional struct by keeping the lowest value of a numeric field.
+fn merge_min<T: Clone, V: PartialOrd + Copy>(
+    target: &mut Option<T>,
+    source: &Option<T>,
+    get_field: impl Fn(&mut T) -> &mut Option<V>,
+) {
+    if let Some(ref src) = source {
+        match target {
+            None => *target = Some(src.clone()),
+            Some(ref mut existing) => {
+                let mut src_copy = src.clone();
+                let src_val = *get_field(&mut src_copy);
+                let existing_val = get_field(existing);
+                match (src_val, &*existing_val) {
+                    (Some(new), Some(old)) if new < *old => *existing_val = Some(new),
+                    (Some(new), None) => *existing_val = Some(new),
+                    _ => {}
+                }
+            }
+        }
     }
 }
 

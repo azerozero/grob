@@ -92,15 +92,16 @@ mod tests {
     use super::*;
 
     fn make_auth(signer: &str, tool: &str, previous_hash: Option<String>) -> HitAuthorization {
-        HitAuthorization::new(
-            "req-1".into(),
-            tool.into(),
-            "input data",
-            "approve",
-            "prompt".into(),
-            signer.into(),
+        use crate::features::policies::hit_auth::{AuthDecision, AuthMethod, HitAuthParams};
+        HitAuthorization::new(HitAuthParams {
+            request_id: "req-1".into(),
+            tool_name: tool.into(),
+            tool_input: "input data".into(),
+            decision: AuthDecision::Approve,
+            auth_method: AuthMethod::Prompt,
+            signer: signer.into(),
             previous_hash,
-        )
+        })
     }
 
     #[test]
@@ -157,7 +158,7 @@ mod tests {
         collector.submit(auth1);
 
         let mut auth2 = make_auth("bob", "Bash", Some(hash1));
-        auth2.decision = "deny".to_string(); // Tamper.
+        auth2.decision = crate::features::policies::hit_auth::AuthDecision::Deny; // Tamper.
         match collector.submit(auth2) {
             MultiSigStatus::Rejected(msg) => assert!(msg.contains("hash verification")),
             other => panic!("Expected Rejected, got {:?}", other),

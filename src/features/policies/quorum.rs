@@ -88,7 +88,6 @@ pub fn tally_votes(config: &QuorumConfig, votes: &[VoterDecision]) -> QuorumResu
         .filter(|v| **v == VoterDecision::Approve)
         .count();
     let denials = votes.iter().filter(|v| **v == VoterDecision::Deny).count();
-    let total_cast = approvals + denials;
 
     match config.strategy {
         QuorumStrategy::Majority => {
@@ -107,7 +106,7 @@ pub fn tally_votes(config: &QuorumConfig, votes: &[VoterDecision]) -> QuorumResu
         QuorumStrategy::Unanimous => {
             if denials > 0 {
                 QuorumResult::Deny
-            } else if approvals == votes.len() && total_cast >= config.min_voters {
+            } else if approvals == votes.len() && (approvals + denials) >= config.min_voters {
                 QuorumResult::Approve
             } else {
                 match config.on_failure {
