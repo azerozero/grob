@@ -4,7 +4,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Stack
 
-- **Language**: Rust 2021 edition (~39.5K LOC, ~543 public items, 100% doc coverage)
+- **Language**: Rust 2021 edition (~44K LOC, ~543 public items, 100% doc coverage)
 - **Runtime**: Tokio async
 - **HTTP framework**: Axum 0.7 with Tower middleware
 - **HTTP client**: reqwest 0.12 (HTTP/2, rustls)

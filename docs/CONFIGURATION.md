@@ -158,9 +158,9 @@ region = "eu"      # Region filter (only providers with matching "region" field)
 
 Order (highest to lowest):
 
-1. **auto_map** -- model name transformation (runs first, changes model name but not route type)
-2. **web_search** -- request contains a `web_search` tool
-3. **background** -- original model name matches `background_regex`
+1. **web_search** -- request contains a `web_search` tool
+2. **background** -- original model name matches `background_regex`
+3. **auto_map** -- model name transformation (after background check, changes model name but not route type)
 4. **subagent** -- system prompt contains `GROB-SUBAGENT-MODEL` tag
 5. **prompt_rules** -- user message matches a prompt rule pattern
 6. **think** -- request has `thinking` enabled

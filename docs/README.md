@@ -38,4 +38,4 @@ Grob exposes Prometheus metrics at `/metrics`. A Grafana dashboard is provided i
 
 ## Documentation Completeness
 
-See [DCI-REPORT.md](../DCI-REPORT.md) for the Documentation Completeness Index with scores, gaps, and improvement recommendations.
+See [DCI-REPORT.md](DCI-REPORT.md) for the Documentation Completeness Index with scores, gaps, and improvement recommendations.
