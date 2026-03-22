@@ -31,3 +31,5 @@ LICENSE-IDENTIFICATION.md
 cleancode-plan.md
 codeql-db/
 codeql-results.sarif
+codeql-db/
+codeql-results.sarif
