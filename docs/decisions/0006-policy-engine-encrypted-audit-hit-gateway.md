@@ -344,10 +344,23 @@ Policy matching is on the hot path but is a simple glob match over ~10 fields �
 
 ### Confirmation
 
-- Unit tests: policy matching with overlapping rules, recipient resolution
-- Unit tests: tool_use detection in SSE stream, pause/release/drop mechanics
-- Integration test: encrypt → decrypt roundtrip with age CLI
-- Integration test: end-to-end HIT flow (tool_use → pause → approve → release)
-- CI: `cargo deny check` passes with age crate license (MIT/Apache-2.0)
-- Benchmark: policy evaluation < 10 µs for 20 rules
-- Risk matrix review: verify all cells have at least 2 covering layers
+Implemented and verified:
+
+- ✅ Unit tests: policy matching with overlapping rules, recipient resolution (`src/features/policies/matcher.rs`)
+- ✅ Unit tests: tool_use detection in SSE stream — passthrough, auto-approve, deny, pause/release, machine_key, multisig, quorum, flag_patterns (`src/features/policies/stream.rs`)
+- ✅ Unit tests: `HitAuthorization` hash chain and tamper detection (`src/features/policies/hit_auth.rs`)
+- ✅ Unit tests: quorum strategy (majority, unanimous, timeout) (`src/features/policies/quorum.rs`)
+- ✅ Unit tests: multisig collection (2-of-3, duplicate signer, broken chain, tamper) (`src/features/policies/multisig.rs`)
+- ✅ `POST /api/hit/approve` endpoint wired — supports Simple, MultiSig, and Quorum entries
+- ✅ Receipt logging: `HitAuthorization` written to audit chain after every approve/deny decision
+- ✅ Tool input accumulation: all `input_json_delta` chunks buffered in `BufferingInput` state; receipts and deny-pattern evaluation use real tool input
+- ✅ Deny arg-patterns work: `Bash(rm -rf*)` correctly evaluated against buffered input
+- ✅ `tool_input_preview` populated in `HitApprovalRequest` events
+- ✅ Integration test: end-to-end HIT flow — `tests/integration/hit_test.rs` (approve, deny, arg-pattern deny)
+- ✅ Integration test: age encrypt → decrypt roundtrip — `src/features/log_export/encryption.rs` (single + multi-recipient, wrong-key rejection)
+- ✅ CI: `cargo deny check` passes with age crate license (MIT/Apache-2.0)
+
+Deferred / not yet implemented:
+- ⏳ Benchmark: policy evaluation target < 10 µs for 20 rules (currently unverified)
+- ⏳ TouchID / YubiKey biometric auth: types defined, falls back to `prompt` with a logged warning
+- ⏳ True N-of-M multisig with cross-session persistence (currently in-memory per server restart)

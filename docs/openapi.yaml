@@ -28,6 +28,10 @@ tags:
     description: Configuration management
   - name: OAuth
     description: OAuth token management for provider authentication
+  - name: HIT
+    description: Human Intent Token gateway — per-action human authorization for tool_use blocks
+  - name: Observability
+    description: Live event stream and provider scoring
 
 paths:
   /v1/messages:
@@ -620,6 +624,108 @@ paths:
       responses:
         "200":
           description: Token refreshed
+
+  /api/hit/approve:
+    post:
+      tags: [HIT]
+      summary: Approve or deny a pending HIT tool_use action
+      description: |
+        Resolves a pending HIT approval pause in a streaming response.
+
+        - **Simple** (`auth_method: prompt`): first caller decides. Returns `200 OK`.
+        - **MultiSig** (`auth_method: multisig`): one signature per call; returns `202 Accepted`
+          while collecting, `200 OK` when quorum is reached. `signer` is required.
+        - **Quorum** (`auth_method: quorum`): one vote per call; returns `202 Accepted` while
+          gathering, `200 OK` on decision.
+        - `404 Not Found` if no pending approval matches the `request_id`/`tool_name` pair.
+      operationId: hitApprove
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, tool_name, approved]
+              properties:
+                request_id:
+                  type: string
+                  description: Correlation ID from the HIT approval request event.
+                tool_name:
+                  type: string
+                  description: Name of the tool_use block to approve or deny.
+                approved:
+                  type: boolean
+                  description: "`true` to approve, `false` to deny."
+                signer:
+                  type: string
+                  description: Signer identity (e.g. `alice@company.com`). Required for multisig.
+      responses:
+        "200":
+          description: Decision applied — stream resumes or tool_use is dropped.
+        "202":
+          description: Vote/signature recorded — waiting for more approvals.
+        "404":
+          description: No pending approval found for this request_id/tool_name pair.
+
+  /api/events:
+    get:
+      tags: [Observability]
+      summary: Live event stream (SSE)
+      description: |
+        Server-Sent Events stream of dispatch pipeline events. Connect with
+        `Accept: text/event-stream`. Each event is a JSON-serialized `WatchEvent`.
+
+        Event types emitted:
+        - `request_start` — request entered dispatch
+        - `request_end` — request completed (with cost and latency)
+        - `request_error` — provider error
+        - `dlp_action` — DLP engine took action
+        - `fallback` — provider failover occurred
+        - `circuit_breaker` — circuit breaker state changed
+        - `provider_health` — periodic provider health snapshot
+        - `hit_approval_request` — HIT stream paused, human approval needed
+        - `hit_approval_response` — HIT approval decision received
+        - `hit_flagged_content` — dangerous pattern detected in response text
+      operationId: watchEvents
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/scores:
+    get:
+      tags: [Observability]
+      summary: Provider adaptive scores
+      description: |
+        Returns current adaptive scores for all providers when adaptive scoring
+        is enabled (`security.adaptive_scoring = true`). Scores reflect recent
+        latency and error rate and are used to re-order provider fallback chains.
+      operationId: getScores
+      security:
+        - bearerAuth: []
+        - apiKeyHeader: []
+        - {}
+      responses:
+        "200":
+          description: Provider scores map (provider name → score 0.0–1.0)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: number
+                  format: double
 
 components:
   securitySchemes:

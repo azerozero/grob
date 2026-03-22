@@ -42,6 +42,7 @@ flowchart LR
 | Provider goes down during a coding session | **Multi-provider failover** with circuit breakers and exponential backoff. Zero client changes. |
 | No visibility into what your AI tools send | **`grob watch`** — live TUI showing every request, response, DLP action, and fallback in real time |
 | Bill shock from runaway LLM usage | **Spend tracking** with per-tenant budgets, monthly caps, and alerts at 80% |
+| AI agent executes destructive tool calls without review | **HIT Gateway** — intercepts every `tool_use` block, enforces per-policy approval rules (auto-approve / require human / deny), supports multisig and quorum |
 | Deploying in air-gapped / sovereign environments | **Single binary, 6 MB, zero dependencies** — no Python, no PostgreSQL, no Redis |
 
 ## 30-second quickstart

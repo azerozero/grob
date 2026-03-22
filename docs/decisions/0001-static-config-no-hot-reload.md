@@ -1,4 +1,4 @@
-# ADR-0001: Static config — no hot reload
+# ADR-0001: Explicit API reload — no filesystem hot-reload
 
 ## Status
 
@@ -20,19 +20,51 @@ Grob loads configuration from a TOML file at startup. Should the server watch th
 - Hot reload with file watcher (notify crate)
 - Signal-based reload (SIGHUP)
 - Static config, restart to apply changes
+- Explicit API-triggered reload (chosen)
 
 ## Decision Outcome
 
-Chosen option: "Static config, restart to apply changes", because it eliminates an entire class of concurrency bugs and makes the server behavior fully deterministic. Config is loaded once into an `Arc` and shared immutably across all request handlers.
+Chosen option: "Explicit API-triggered reload", because it eliminates filesystem-watching complexity while giving operators a controlled, intentional mechanism to apply changes without a restart. Config is not file-watched; changes only take effect when the operator explicitly calls `/api/config/reload` or restarts the server.
+
+### Design
+
+`AppState` splits state into two tiers:
+
+**Reloadable** — wrapped in `RwLock<Arc<ReloadableState>>` and swapped atomically by `/api/config/reload`:
+
+| Field | Type |
+|-------|------|
+| `config` | Full `AppConfig` |
+| `router` | Compiled routing engine |
+| `provider_registry` | Provider registry with API keys |
+| `model_index` | `HashMap<String, usize>` for O(1) model lookup |
+| `policy_matcher` | Compiled glob policy engine (from `[[policies]]`) |
+
+**Stable** — created once at startup, never reloaded:
+
+| Field | Why stable |
+|-------|-----------|
+| `spend_tracker` | Cross-reload spend continuity |
+| `grob_store` | Embedded redb database |
+| `token_store` | OAuth token cache |
+| `audit_log` | Hash chain must be continuous |
+| `rate_limiter` | Token bucket state must persist |
+| `circuit_breakers` | Failure state must survive reloads |
+| `response_cache` | Cache hits across reloads are valuable |
+| `event_bus` | Live subscribers must not be disconnected |
+| `MCP` state | Tool matrix state is session-scoped |
+
+In-flight requests call `state.snapshot()` at entry, which clones the `Arc<ReloadableState>`. The swap only updates the `RwLock` inner value — in-flight requests hold their own `Arc` clone and are unaffected.
 
 ### Consequences
 
-- Good, because no race conditions between config changes and in-flight requests
-- Good, because simpler implementation — no watcher thread, no locking, no config versioning
-- Good, because operator always knows which config is active (the one loaded at startup)
-- Bad, because config changes require a server restart (mitigated by fast startup time)
+- Good, because no race conditions — in-flight requests always see a consistent snapshot
+- Good, because operator controls exactly when config takes effect (explicit API call)
+- Good, because no watcher thread, no inotify dependency, no race between FS events and request timing
+- Good, because reload atomically rebuilds router + registry + model index together (no partial state)
+- Bad, because a config file edit is not applied until `/api/config/reload` is called (by design)
 
 ### Confirmation
 
-The `AppState` struct holds reloadable config behind an `RwLock<Arc<ReloadableState>>`. The `/api/config/reload` endpoint atomically swaps the inner `Arc`, so in-flight requests continue using the old snapshot while new requests get the updated config. This is a controlled relaxation of the original "no hot reload" decision -- config changes still require an explicit action (API call or restart), not file watching.
-<!-- NEEDS-REVIEW: The original ADR stated no interior mutability, but ReloadableState swap was added later. This ADR could be updated to ADR-0001a to document the evolution. -->
+`src/server/mod.rs`: `AppState.inner: RwLock<Arc<ReloadableState>>` and `snapshot()` accessor.
+`src/server/config_api.rs`: `reload_config` handler performs the atomic swap.
