@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.1](https://github.com/azerozero/grob/compare/v0.25.0...v0.25.1) - 2026-03-22
+
+### Other
+
+- *(bench)* split bench.rs (1835 lines) into 5 submodules
+- add # Errors sections to 5 public APIs + DLP/OAuth diagrams
+- gitignore codeql-db/ and codeql-results.sarif
+
 ## [0.25.0](https://github.com/azerozero/grob/compare/v0.24.7...v0.25.0) - 2026-03-22
 
 ### Added
