@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0](https://github.com/azerozero/grob/compare/v0.28.0...v0.29.0) - 2026-03-23
+
+### Other
+
+- *(policies)* remove touchid (not cross-platform), scope WI-8 to yubikey + openbao
+
 ## [0.28.0](https://github.com/azerozero/grob/compare/v0.27.0...v0.28.0) - 2026-03-22
 
 ### Added
