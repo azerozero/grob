@@ -161,7 +161,6 @@ where
 
 fn parse_auth_method(s: &str) -> AuthMethod {
     match s {
-        "touchid" => AuthMethod::Touchid,
         "yubikey" => AuthMethod::Yubikey,
         "multisig" => AuthMethod::Multisig,
         "machine_key" => AuthMethod::MachineKey,
@@ -427,11 +426,11 @@ where
                                                 cx.waker().wake_by_ref();
                                                 return Poll::Pending;
                                             }
-                                            "touchid" | "yubikey" => {
+                                            "yubikey" => {
                                                 tracing::warn!(
                                                     request_id = %this.request_id,
                                                     auth_method = %this.policy.auth_method,
-                                                    "HIT: biometric auth not yet implemented, falling back to prompt"
+                                                    "HIT: yubikey auth not yet implemented (WI-8b), falling back to prompt"
                                                 );
                                                 {
                                                     let preview: String = this

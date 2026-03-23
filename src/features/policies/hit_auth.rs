@@ -28,9 +28,7 @@ impl std::fmt::Display for AuthDecision {
 pub enum AuthMethod {
     /// Text approval in grob watch terminal.
     Prompt,
-    /// macOS Touch ID / Windows Hello.
-    Touchid,
-    /// FIDO2 hardware key.
+    /// FIDO2 YubiKey hardware key (cross-platform).
     Yubikey,
     /// M-of-N human co-signing.
     Multisig,
@@ -44,7 +42,6 @@ impl std::fmt::Display for AuthMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Prompt => write!(f, "prompt"),
-            Self::Touchid => write!(f, "touchid"),
             Self::Yubikey => write!(f, "yubikey"),
             Self::Multisig => write!(f, "multisig"),
             Self::MachineKey => write!(f, "machine_key"),
@@ -179,7 +176,7 @@ mod tests {
             tool_name: "Edit".into(),
             tool_input: "config.toml".into(),
             decision: AuthDecision::Approve,
-            auth_method: AuthMethod::Touchid,
+            auth_method: AuthMethod::Yubikey,
             signer: "user".into(),
             previous_hash: Some(auth1.hash.clone()),
         });

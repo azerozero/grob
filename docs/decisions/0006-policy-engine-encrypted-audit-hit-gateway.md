@@ -183,7 +183,7 @@ match = { agent = "claude-code", user = "clement@*" }
 auto_approve = ["Read", "Glob", "Grep", "LSP"]
 require_approval = ["Edit", "Write", "Bash"]
 deny = ["Bash(rm -rf*)", "Bash(curl*|sh)", "Write(*.env)", "Write(*.key)"]
-auth_method = "touchid"
+auth_method = "yubikey"
 flag_patterns = ["run this command", "paste.*terminal", "curl.*| sh", "sudo"]
 
 [[policies]]
@@ -212,7 +212,7 @@ required_signatures = 2
 | auth_method | How | Security | Use case |
 |-------------|-----|----------|----------|
 | `prompt` | Text approval in `grob watch` (default) | Medium | Dev solo |
-| `touchid` | macOS Touch ID / Windows Hello | High | Daily dev work |
+| `yubikey` | FIDO2 YubiKey hardware key (cross-platform) | High | Daily dev work |
 | `yubikey` | FIDO2 hardware key touch | Very high | Financial, infra |
 | `multisig` | N humans approve via webhook/watch | Maximum | Prod, high-value |
 | `machine_key` | Automatic signature, no human | CI/CD only | Automated pipelines |
@@ -226,7 +226,7 @@ pub struct HitAuthorization {
     pub tool_name: String,
     pub tool_input_hash: [u8; 32],  // SHA-256 of tool_use content
     pub decision: Decision,          // Approve | Deny
-    pub auth_method: String,         // touchid | yubikey | multisig | ...
+    pub auth_method: String,         // yubikey | multisig | openbao | ...
     pub signer: String,              // Who approved
     pub timestamp: DateTime<Utc>,
     pub signature: Vec<u8>,          // Ed25519 / ECDSA
@@ -241,7 +241,7 @@ Each authorization is an individual proof, hash-chained in the audit log.
 |---------------------|---------------------|--------|
 | Scope validation | Policy engine `MatchRules` + `hit` section | New (this ADR) |
 | Tool interception | SSE stream pause + tool_use detection | New (this ADR) |
-| Auth methods | Touch ID / YubiKey / multisig / webhook | New (this ADR) |
+| Auth methods | YubiKey / multisig / webhook / openbao | New (this ADR) + WI-8 |
 | Credential injection | Provider API keys (agent never sees them) | Existing |
 | Receipt chain | `src/security/audit_log.rs` hash-chained ECDSA/Ed25519 | Existing |
 | Velocity controls | `src/security/rate_limit.rs` per-tenant token bucket | Existing |

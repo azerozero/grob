@@ -106,7 +106,7 @@ sequenceDiagram
 | `multisig` | M-of-N distinct signers, each posting to `/api/hit/approve` with `signer` field. Uses `MultiSigCollector`. |
 | `quorum` | N votes tallied with configurable majority/unanimous strategy. |
 | `webhook` | Emits event with `webhook_url`; relay task POSTs to external system. External calls `/api/hit/approve`. |
-| `touchid` / `yubikey` | Biometric OS integration — **not yet implemented**. Falls back to `prompt` with a warning. |
+| `yubikey` | FIDO2 YubiKey hardware key — **not yet implemented** (WI-8b). Falls back to `prompt` with a warning. |
 
 ---
 
@@ -146,7 +146,7 @@ user     = "clement@*"
 auto_approve      = ["Read", "Glob", "Grep", "LSP"]
 require_approval  = ["Edit", "Write", "Bash"]
 deny              = ["Bash(rm -rf*)", "Bash(curl*|sh)", "Write(*.env)"]
-auth_method       = "prompt"     # prompt | machine_key | multisig | quorum | webhook | touchid | yubikey
+auth_method       = "prompt"     # prompt | machine_key | multisig | quorum | webhook | yubikey | openbao
 flag_patterns     = ["run this command", "curl.*\\| sh", "sudo "]
 
 # multisig: require 2 distinct humans
