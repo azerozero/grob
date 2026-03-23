@@ -1,8 +1,8 @@
-//! Scenario definitions, DLP pattern sets, and escalation steps.
+//! Scenario definitions, DLP pattern sets, escalation steps, and policy configs.
 
 use std::sync::Arc;
 
-// ── Scenario definitions ────────────────────────────────────────────────
+// ── Scenario definitions ─────────────────────────────────────────────────────
 
 pub(super) struct Scenario {
     pub(super) name: &'static str,
@@ -14,6 +14,8 @@ pub(super) struct Scenario {
     pub(super) inject_secrets: bool,
     /// DLP patterns to use (None = use default full set).
     pub(super) dlp_pattern_set: Option<DlpPatternSet>,
+    /// Number of policy rules to evaluate per request (0 = disabled).
+    pub(super) policy_rule_count: usize,
 }
 
 /// Controls which subset of DLP patterns to compile for escalation steps.
@@ -38,6 +40,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            policy_rule_count: 0,
         },
         Scenario {
             name: "proxy",
@@ -48,6 +51,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            policy_rule_count: 0,
         },
     ];
 
@@ -61,6 +65,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            policy_rule_count: 0,
         });
     }
 
@@ -73,6 +78,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_cache: false,
         inject_secrets: false,
         dlp_pattern_set: None,
+        policy_rule_count: 0,
     });
 
     scenarios.push(Scenario {
@@ -84,8 +90,35 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_cache: false,
         inject_secrets: true,
         dlp_pattern_set: None,
+        policy_rule_count: 0,
     });
 
+    // Policy evaluation benchmarks — validates ADR-0006 target of < 10 µs for 20 rules.
+    scenarios.push(Scenario {
+        name: "proxy+policy (5 rules)",
+        enable_routing: true,
+        enable_dlp: false,
+        enable_auth: false,
+        enable_rate_limit: false,
+        enable_cache: false,
+        inject_secrets: false,
+        dlp_pattern_set: None,
+        policy_rule_count: 5,
+    });
+
+    scenarios.push(Scenario {
+        name: "proxy+policy (20 rules)",
+        enable_routing: true,
+        enable_dlp: false,
+        enable_auth: false,
+        enable_rate_limit: false,
+        enable_cache: false,
+        inject_secrets: false,
+        dlp_pattern_set: None,
+        policy_rule_count: 20,
+    });
+
+    // Full stack — all features including policy evaluation.
     scenarios.push(Scenario {
         name: "proxy+all",
         enable_routing: true,
@@ -95,6 +128,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_cache: true,
         inject_secrets: false,
         dlp_pattern_set: None,
+        policy_rule_count: 20,
     });
 
     scenarios
@@ -112,6 +146,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            policy_rule_count: 0,
         },
         Scenario {
             name: "+ HTTP proxy",
@@ -122,6 +157,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            policy_rule_count: 0,
         },
         Scenario {
             name: "+ routing",
@@ -132,6 +168,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            policy_rule_count: 0,
         },
         Scenario {
             name: "+ rate limiting",
@@ -142,6 +179,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            policy_rule_count: 0,
         },
         Scenario {
             name: "+ cache lookup",
@@ -152,6 +190,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: false,
             dlp_pattern_set: None,
+            policy_rule_count: 0,
         },
         Scenario {
             name: "+ DLP secrets",
@@ -162,6 +201,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::SecretsOnly),
+            policy_rule_count: 0,
         },
         Scenario {
             name: "+ DLP PII",
@@ -172,6 +212,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::SecretsPlusPii),
+            policy_rule_count: 0,
         },
         Scenario {
             name: "+ DLP injection",
@@ -182,6 +223,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::Full),
+            policy_rule_count: 0,
         },
         Scenario {
             name: "+ auth",
@@ -192,8 +234,77 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::Full),
+            policy_rule_count: 0,
+        },
+        // Validates ADR-0006: policy eval on top of full stack.
+        Scenario {
+            name: "+ policy (20 rules)",
+            enable_routing: true,
+            enable_dlp: true,
+            enable_auth: true,
+            enable_rate_limit: true,
+            enable_cache: true,
+            inject_secrets: true,
+            dlp_pattern_set: Some(DlpPatternSet::Full),
+            policy_rule_count: 20,
         },
     ]
+}
+
+/// Builds N synthetic policy configs for the benchmark.
+///
+/// Generates a mix of glob patterns on tenant, zone, agent, and model fields
+/// to simulate realistic policy evaluation overhead.
+#[cfg(feature = "policies")]
+pub(super) fn build_bench_policies(
+    n: usize,
+) -> Vec<crate::features::policies::config::PolicyConfig> {
+    use crate::features::policies::config::{MatchRules, PolicyConfig};
+
+    (0..n)
+        .map(|i| PolicyConfig {
+            name: format!("bench-policy-{i}"),
+            match_rules: MatchRules {
+                tenant: if i % 3 == 0 {
+                    Some(format!("tenant-{i}*"))
+                } else {
+                    None
+                },
+                zone: if i % 4 == 0 {
+                    Some(format!("zone-eu-{i}"))
+                } else {
+                    None
+                },
+                agent: if i % 5 == 0 {
+                    Some("claude-code*".to_string())
+                } else {
+                    None
+                },
+                model: if i % 7 == 0 {
+                    Some("claude-*".to_string())
+                } else {
+                    None
+                },
+                compliance: if i % 6 == 0 {
+                    Some(vec!["gdpr".to_string()])
+                } else {
+                    None
+                },
+                project: None,
+                user: None,
+                provider: None,
+                dlp_triggered: None,
+                cost_above: None,
+                route_type: None,
+            },
+            dlp: None,
+            rate_limit: None,
+            routing: None,
+            budget: None,
+            log_export: None,
+            hit: None,
+        })
+        .collect()
 }
 
 /// Compiles DLP patterns for the given subset.

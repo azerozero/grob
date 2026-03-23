@@ -157,32 +157,27 @@ pub(crate) fn init_dlp(config: &AppConfig) -> Option<Arc<DlpSessionManager>> {
 }
 
 /// Initializes the policy engine from configured `[[policies]]` rules.
+///
+/// Returns `None` when no policies are configured or the `policies` feature is disabled.
+#[cfg(feature = "policies")]
 pub(crate) fn init_policies(
     config: &AppConfig,
 ) -> Option<Arc<crate::features::policies::matcher::PolicyMatcher>> {
-    #[cfg(feature = "policies")]
-    {
-        if config.policies.is_empty() {
-            return None;
-        }
-        match crate::features::policies::matcher::PolicyMatcher::new(config.policies.clone()) {
-            Ok(matcher) => {
-                info!(
-                    "Policy engine loaded with {} policies",
-                    config.policies.len()
-                );
-                Some(Arc::new(matcher))
-            }
-            Err(e) => {
-                error!("Failed to initialize policy engine: {}", e);
-                None
-            }
-        }
+    if config.policies.is_empty() {
+        return None;
     }
-    #[cfg(not(feature = "policies"))]
-    {
-        let _ = config;
-        None
+    match crate::features::policies::matcher::PolicyMatcher::new(config.policies.clone()) {
+        Ok(matcher) => {
+            info!(
+                "Policy engine loaded with {} policies",
+                config.policies.len()
+            );
+            Some(Arc::new(matcher))
+        }
+        Err(e) => {
+            error!("Failed to initialize policy engine: {}", e);
+            None
+        }
     }
 }
 

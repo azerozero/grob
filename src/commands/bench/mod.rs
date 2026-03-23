@@ -21,6 +21,8 @@ use crate::storage::GrobStore;
 
 use mock::{start_mock_backend, start_proxy, ProxyState};
 use payloads::{clean_request_body, secrets_request_body};
+#[cfg(feature = "policies")]
+use scenarios::build_bench_policies;
 use scenarios::{build_escalation_steps, build_scenarios, compile_dlp_patterns, DlpPatternSet};
 use stats::{
     compute_stats, current_rss_mb, format_rps, format_us, run_concurrent, BenchResult,
@@ -212,6 +214,16 @@ pub async fn cmd_bench(
                     Some(set) => compile_dlp_patterns(set),
                     None => dlp_patterns.clone(),
                 };
+                #[cfg(feature = "policies")]
+                let policy_matcher = if scenario.policy_rule_count > 0 {
+                    let configs = build_bench_policies(scenario.policy_rule_count);
+                    crate::features::policies::matcher::PolicyMatcher::new(configs)
+                        .ok()
+                        .map(std::sync::Arc::new)
+                } else {
+                    None
+                };
+
                 let state = ProxyState {
                     backend_url: backend_url.clone(),
                     client: build_bench_client(),
@@ -223,6 +235,8 @@ pub async fn cmd_bench(
                     auth_key_hash: auth_key_hash.clone(),
                     routing_patterns: routing_patterns.clone(),
                     dlp_patterns: effective_dlp_patterns,
+                    #[cfg(feature = "policies")]
+                    policy_matcher,
                 };
                 let (proxy_url, _proxy_handle) = start_proxy(state).await;
 
@@ -564,6 +578,8 @@ async fn run_escalation(
                 auth_key_hash: auth_key_hash.clone(),
                 routing_patterns: routing_patterns.clone(),
                 dlp_patterns: dlp_pats,
+                #[cfg(feature = "policies")]
+                policy_matcher: None,
             };
             let (proxy_url, _handle) = start_proxy(state).await;
 
@@ -684,6 +700,8 @@ async fn run_escalation(
             auth_key_hash: auth_key_hash.clone(),
             routing_patterns: routing_patterns.clone(),
             dlp_patterns: all_dlp,
+            #[cfg(feature = "policies")]
+            policy_matcher: None,
         };
         let (proxy_url, _handle) = start_proxy(state).await;
 

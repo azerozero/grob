@@ -21,6 +21,7 @@ mod oauth_handlers;
 pub mod openai_compat;
 /// OpenAI Responses API (`/v1/responses`) compatibility translation layer.
 pub mod responses_compat;
+#[cfg(feature = "watch")]
 mod watch_sse;
 
 pub use audit::AuditEntryBuilder;
@@ -366,7 +367,6 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
         .route("/api/config", post(config_api::update_config_json))
         .route("/api/config/reload", post(config_api::reload_config))
         .route("/api/scores", get(endpoints::scores_endpoint))
-        .route("/api/events", get(watch_sse::watch_events_sse))
         .route(
             "/api/oauth/authorize",
             post(oauth_handlers::oauth_authorize),
@@ -383,6 +383,10 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
             "/api/oauth/tokens/refresh",
             post(oauth_handlers::oauth_refresh_token),
         );
+
+    // Live event stream — only available when the watch feature is compiled in.
+    #[cfg(feature = "watch")]
+    let app = app.route("/api/events", get(watch_sse::watch_events_sse));
 
     // HIT approval endpoint — allows TUI, webhooks, and external systems to approve/deny.
     #[cfg(feature = "policies")]

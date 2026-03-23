@@ -62,6 +62,9 @@ pub(super) struct ProxyState {
     pub(super) auth_key_hash: Option<String>,
     pub(super) routing_patterns: Arc<Vec<regex::Regex>>,
     pub(super) dlp_patterns: Arc<Vec<regex::Regex>>,
+    /// Policy matcher for per-request evaluation (None = policy disabled).
+    #[cfg(feature = "policies")]
+    pub(super) policy_matcher: Option<Arc<crate::features::policies::matcher::PolicyMatcher>>,
 }
 
 // ── Middleware layers ───────────────────────────────────────────────────
@@ -199,6 +202,35 @@ async fn cache_mw(
     next.run(req).await
 }
 
+/// Policy evaluation middleware: runs PolicyMatcher::evaluate on a synthetic context.
+///
+/// The request context uses a fixed tenant/agent/model to ensure the matcher
+/// processes the maximum number of glob comparisons — worst-case per rule.
+#[cfg(feature = "policies")]
+async fn policy_mw(
+    State(state): State<Arc<ProxyState>>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if let Some(ref matcher) = state.policy_matcher {
+        let ctx = crate::features::policies::context::RequestContext {
+            tenant: Some("bench-tenant".to_string()),
+            zone: Some("zone-eu-1".to_string()),
+            project: Some("bench-project".to_string()),
+            user: Some("bench-user@corp.example".to_string()),
+            agent: Some("claude-code/1.0".to_string()),
+            compliance: vec!["gdpr".to_string()],
+            model: "claude-sonnet-4-6".to_string(),
+            provider: "anthropic".to_string(),
+            route_type: "default".to_string(),
+            dlp_triggered: false,
+            estimated_cost: 0.02,
+        };
+        let _ = matcher.evaluate(&ctx);
+    }
+    next.run(req).await
+}
+
 /// Forwards the request to the mock backend.
 async fn proxy_handler(
     State(state): State<Arc<ProxyState>>,
@@ -245,6 +277,14 @@ pub(super) async fn start_proxy(state: ProxyState) -> (String, tokio::task::Join
     // Cache layer sits before DLP.
     let app = if shared.enable_cache {
         app.layer(middleware::from_fn_with_state(shared.clone(), cache_mw))
+    } else {
+        app
+    };
+
+    // Policy middleware sits between routing and rate-limit (same position as in dispatch).
+    #[cfg(feature = "policies")]
+    let app = if shared.policy_matcher.is_some() {
+        app.layer(middleware::from_fn_with_state(shared.clone(), policy_mw))
     } else {
         app
     };

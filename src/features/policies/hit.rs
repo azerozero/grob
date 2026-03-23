@@ -92,11 +92,13 @@ fn matches_tool_pattern(pattern: &str, tool_name: &str, tool_input: &str) -> boo
             return false;
         }
         let arg_pattern = &pattern[paren_start + 1..pattern.len().saturating_sub(1)];
+        // globset is only available when the policies feature is enabled;
+        // fall back to substring match otherwise.
+        #[cfg(feature = "policies")]
         if let Ok(glob) = globset::Glob::new(arg_pattern) {
-            glob.compile_matcher().is_match(tool_input)
-        } else {
-            tool_input.contains(arg_pattern)
+            return glob.compile_matcher().is_match(tool_input);
         }
+        tool_input.contains(arg_pattern)
     } else {
         pattern == tool_name
     }
