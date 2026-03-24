@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.2](https://github.com/azerozero/grob/compare/v0.29.1...v0.29.2) - 2026-03-24
+
+### Fixed
+
+- *(bench)* gate policy_rule_count behind #[cfg(feature = "policies")]
+
 ## [0.29.1](https://github.com/azerozero/grob/compare/v0.29.0...v0.29.1) - 2026-03-23
 
 ### Added
