@@ -284,7 +284,8 @@ pub async fn start_server(
     // Webhook relay: listens for HitApprovalRequest events with auth_method="webhook" and
     // POSTs a notification to the configured webhook_url. The external system is expected to
     // call POST /api/hit/approve to resolve the approval.
-    #[cfg(feature = "policies")]
+    // NOTE: requires both `policies` (HIT logic) and `watch` (event bus subscribe()).
+    #[cfg(all(feature = "policies", feature = "watch"))]
     {
         let mut relay_rx = state.event_bus.subscribe();
         tokio::spawn(async move {
