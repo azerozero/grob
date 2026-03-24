@@ -15,6 +15,7 @@ pub(super) struct Scenario {
     /// DLP patterns to use (None = use default full set).
     pub(super) dlp_pattern_set: Option<DlpPatternSet>,
     /// Number of policy rules to evaluate per request (0 = disabled).
+    #[cfg(feature = "policies")]
     pub(super) policy_rule_count: usize,
 }
 
@@ -40,6 +41,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -51,6 +53,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
     ];
@@ -65,6 +68,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         });
     }
@@ -78,6 +82,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_cache: false,
         inject_secrets: false,
         dlp_pattern_set: None,
+        #[cfg(feature = "policies")]
         policy_rule_count: 0,
     });
 
@@ -90,6 +95,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_cache: false,
         inject_secrets: true,
         dlp_pattern_set: None,
+        #[cfg(feature = "policies")]
         policy_rule_count: 0,
     });
 
@@ -103,6 +109,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_cache: false,
         inject_secrets: false,
         dlp_pattern_set: None,
+        #[cfg(feature = "policies")]
         policy_rule_count: 5,
     });
 
@@ -115,6 +122,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_cache: false,
         inject_secrets: false,
         dlp_pattern_set: None,
+        #[cfg(feature = "policies")]
         policy_rule_count: 20,
     });
 
@@ -128,6 +136,7 @@ pub(super) fn build_scenarios(with_auth: bool) -> Vec<Scenario> {
         enable_cache: true,
         inject_secrets: false,
         dlp_pattern_set: None,
+        #[cfg(feature = "policies")]
         policy_rule_count: 20,
     });
 
@@ -146,6 +155,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -157,6 +167,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -168,6 +179,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -179,6 +191,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: false,
             inject_secrets: false,
             dlp_pattern_set: None,
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -190,6 +203,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: false,
             dlp_pattern_set: None,
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -201,6 +215,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::SecretsOnly),
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -212,6 +227,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::SecretsPlusPii),
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -223,6 +239,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::Full),
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         Scenario {
@@ -234,6 +251,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::Full),
+            #[cfg(feature = "policies")]
             policy_rule_count: 0,
         },
         // Validates ADR-0006: policy eval on top of full stack.
@@ -246,6 +264,7 @@ pub(super) fn build_escalation_steps() -> Vec<Scenario> {
             enable_cache: true,
             inject_secrets: true,
             dlp_pattern_set: Some(DlpPatternSet::Full),
+            #[cfg(feature = "policies")]
             policy_rule_count: 20,
         },
     ]
