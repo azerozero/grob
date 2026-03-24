@@ -47,15 +47,19 @@ flowchart LR
 
 ## 30-second quickstart
 
+**With Homebrew** (macOS / Linux):
 ```bash
-# Install (pick one)
-brew install azerozero/tap/grob          # macOS / Linux
+brew install azerozero/tap/grob
+```
+
+**Without Homebrew** (Linux / CI):
+```bash
 curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
+```
 
-# Setup (interactive wizard picks providers + auth)
-grob setup
-
-# Launch Claude Code through Grob
+Then:
+```bash
+grob setup        # interactive wizard — picks providers + auth
 grob exec -- claude
 ```
 
