@@ -40,8 +40,8 @@ flowchart TB
         cb -->|Closed| call["Provider call<br/>(Anthropic, OpenAI, Gemini, ...)"]
         cb -->|Open| skip["Skip → next provider"]
         cb -->|HalfOpen| probe["Limited probe requests"]
-        call -->|success| ok["record_success"]
-        call -->|failure| fail["record_failure → try next"]
+        call -->|success| rec_ok["record_success"]
+        call -->|failure| rec_fail["record_failure → try next"]
         note["Strategies: fallback (sequential) · fan_out (parallel)"]
     end
 

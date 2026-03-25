@@ -6,6 +6,7 @@
 //! Supports concurrent throughput testing and varied payload sizes.
 
 mod mock;
+mod output;
 mod payloads;
 mod scenarios;
 mod stats;
@@ -20,13 +21,17 @@ use crate::cli::AppConfig;
 use crate::storage::GrobStore;
 
 use mock::{start_mock_backend, start_proxy, ProxyState};
+use output::{
+    print_escalation_table, print_matrix_table, print_overhead_breakdown, print_scenario_header,
+    print_scenario_row, EscalationRow,
+};
 use payloads::{clean_request_body, secrets_request_body};
 #[cfg(feature = "policies")]
 use scenarios::build_bench_policies;
 use scenarios::{build_escalation_steps, build_scenarios, compile_dlp_patterns, DlpPatternSet};
 use stats::{
-    compute_stats, current_rss_mb, format_rps, format_us, run_concurrent, BenchResult,
-    ScenarioResult, SystemInfo,
+    compute_stats, current_rss_mb, format_us, run_concurrent, BenchResult, ScenarioResult,
+    SystemInfo,
 };
 
 pub use payloads::{parse_payload_flag, PayloadSize};
@@ -48,14 +53,6 @@ fn build_bench_client() -> reqwest::Client {
 }
 
 // ── Entry point ─────────────────────────────────────────────────────────
-
-/// Renders a Unicode bar chart of the given proportion (0.0..=1.0).
-fn render_bar(proportion: f64, width: usize) -> String {
-    let filled = (proportion * width as f64).round() as usize;
-    let filled = filled.min(width);
-    let empty = width - filled;
-    format!("{}{}", "\u{2588}".repeat(filled), "\u{2591}".repeat(empty))
-}
 
 /// Runs the self-contained performance benchmark.
 pub async fn cmd_bench(
@@ -192,13 +189,12 @@ pub async fn cmd_bench(
     let mut header_printed = false;
 
     // For multi-payload matrix mode, collect per-size results then print at end.
-    // For single payload or concurrent, print as we go.
-    type SizeResult = (PayloadSize, stats::Stats, Option<f64>, Option<f64>);
-    let mut matrix_rows: Vec<(String, Vec<SizeResult>)> = Vec::new();
+    type MatrixRow = (String, Vec<stats::Stats>);
+    let mut matrix_rows: Vec<MatrixRow> = Vec::new();
 
     for scenario in &scenarios {
         let is_direct = scenario.name == "direct (baseline)";
-        let mut size_results = Vec::new();
+        let mut size_stats = Vec::new();
 
         for &psize in &payload_sizes {
             let body = if scenario.inject_secrets {
@@ -256,82 +252,19 @@ pub async fn cmd_bench(
                 proxy_url
             };
 
-            let (stats, rps) = if is_concurrent {
-                // Warmup with a burst.
-                let warmup_client = reqwest::Client::builder()
-                    .pool_max_idle_per_host(10)
-                    .build()
-                    .unwrap();
-                for _ in 0..WARMUP_REQUESTS {
-                    let mut req = warmup_client
-                        .post(format!("{target_url}/v1/messages"))
-                        .json(&body);
-                    if scenario.enable_auth {
-                        if let Some(ref token) = auth_token {
-                            req = req.header("authorization", format!("Bearer {token}"));
-                        }
-                    }
-                    if let Ok(resp) = req.send().await {
-                        let _ = resp.bytes().await;
-                    }
-                }
-
-                let (latencies, total) = run_concurrent(
-                    &target_url,
-                    &body,
-                    &auth_token,
-                    scenario.enable_auth,
-                    effective_concurrency,
-                    CONCURRENT_DURATION_SECS,
-                )
-                .await;
-
-                if latencies.is_empty() {
-                    anyhow::bail!(
-                        "No requests completed for scenario '{}' with payload {}",
-                        scenario.name,
-                        psize.label()
-                    );
-                }
-
-                let rps_val = total as f64 / CONCURRENT_DURATION_SECS as f64;
-                (compute_stats(latencies), Some(rps_val))
-            } else {
-                // Sequential mode.
-                let client = build_bench_client();
-
-                // Warmup.
-                for _ in 0..WARMUP_REQUESTS {
-                    let mut req = client.post(format!("{target_url}/v1/messages")).json(&body);
-                    if scenario.enable_auth {
-                        if let Some(ref token) = auth_token {
-                            req = req.header("authorization", format!("Bearer {token}"));
-                        }
-                    }
-                    let resp = req.send().await?;
-                    let _ = resp.bytes().await;
-                }
-
-                // Measured run.
-                let mut latencies = Vec::with_capacity(requests);
-                for _ in 0..requests {
-                    let mut req = client.post(format!("{target_url}/v1/messages")).json(&body);
-                    if scenario.enable_auth {
-                        if let Some(ref token) = auth_token {
-                            req = req.header("authorization", format!("Bearer {token}"));
-                        }
-                    }
-                    let start = Instant::now();
-                    let resp = req.send().await?;
-                    let _ = resp.bytes().await;
-                    latencies.push(start.elapsed());
-                }
-
-                (compute_stats(latencies), None)
-            };
+            let (s, rps) = measure(
+                &target_url,
+                &body,
+                &auth_token,
+                scenario.enable_auth,
+                is_concurrent,
+                effective_concurrency,
+                requests,
+            )
+            .await?;
 
             if is_direct {
-                baseline_p50.insert(psize.label(), stats.p50);
+                baseline_p50.insert(psize.label(), s.p50);
             }
 
             let overhead_us = if is_direct {
@@ -339,111 +272,42 @@ pub async fn cmd_bench(
             } else {
                 baseline_p50
                     .get(psize.label())
-                    .map(|b| (stats.p50.as_secs_f64() - b.as_secs_f64()) * 1_000_000.0)
+                    .map(|b| (s.p50.as_secs_f64() - b.as_secs_f64()) * 1_000_000.0)
             };
 
             results.push(ScenarioResult {
                 name: scenario.name.to_string(),
                 payload_size: psize.label().to_string(),
-                p50_us: stats.p50.as_secs_f64() * 1_000_000.0,
-                p95_us: stats.p95.as_secs_f64() * 1_000_000.0,
-                p99_us: stats.p99.as_secs_f64() * 1_000_000.0,
+                p50_us: s.p50.as_secs_f64() * 1_000_000.0,
+                p95_us: s.p95.as_secs_f64() * 1_000_000.0,
+                p99_us: s.p99.as_secs_f64() * 1_000_000.0,
                 overhead_us,
                 rps,
             });
 
-            size_results.push((psize, stats, overhead_us, rps));
-        }
-
-        // Print output for non-matrix modes inline.
-        if format != "json" && !is_multi_payload {
-            let (psize, ref stats, overhead_us, rps) = size_results[0];
-            let _ = psize; // Single payload, no label needed.
-
-            if !header_printed {
-                if is_concurrent {
-                    println!(
-                        "  {:<22} {:>9} {:>9} {:>9} {:>10} {:>10}",
-                        "Scenario",
-                        "P50",
-                        "P95",
-                        "RPS",
-                        format!("c={}", effective_concurrency),
-                        "Overhead"
-                    );
-                } else {
-                    println!(
-                        "  {:<22} {:>9} {:>9} {:>9} {:>10}",
-                        "Scenario", "P50", "P95", "P99", "Overhead"
-                    );
+            if format != "json" && !is_multi_payload {
+                if !header_printed {
+                    print_scenario_header(is_concurrent, effective_concurrency);
+                    header_printed = true;
                 }
-                println!(
-                    "  {}",
-                    "\u{2500}".repeat(if is_concurrent { 73 } else { 63 })
-                );
-                header_printed = true;
+                print_scenario_row(scenario.name, &s, overhead_us, rps, is_concurrent);
             }
 
-            let overhead_str = match overhead_us {
-                Some(us) => format!("+{}", format_us(Duration::from_secs_f64(us / 1_000_000.0))),
-                None => "\u{2014}".to_string(),
-            };
-
-            if is_concurrent {
-                let rps_str = rps
-                    .map(format_rps)
-                    .unwrap_or_else(|| "\u{2014}".to_string());
-                println!(
-                    "  {:<22} {:>9} {:>9} {:>9} {:>10} {:>10}",
-                    scenario.name,
-                    format_us(stats.p50),
-                    format_us(stats.p95),
-                    format_us(stats.p99),
-                    rps_str,
-                    overhead_str,
-                );
-            } else {
-                println!(
-                    "  {:<22} {:>9} {:>9} {:>9} {:>10}",
-                    scenario.name,
-                    format_us(stats.p50),
-                    format_us(stats.p95),
-                    format_us(stats.p99),
-                    overhead_str,
-                );
-            }
+            size_stats.push(s);
         }
 
         if is_multi_payload && format != "json" {
-            matrix_rows.push((scenario.name.to_string(), size_results));
+            matrix_rows.push((scenario.name.to_string(), size_stats));
         }
     }
 
-    // Print multi-payload matrix table.
     if format != "json" && is_multi_payload {
         let size_labels: Vec<&str> = payload_sizes.iter().map(|s| s.label()).collect();
-        let col_width = 12;
-
-        print!("  {:<22}", "Scenario");
-        for label in &size_labels {
-            print!(" {:>width$}", label, width = col_width);
-        }
-        println!();
-        let total_width = 22 + size_labels.len() * (col_width + 1);
-        println!("  {}", "\u{2500}".repeat(total_width));
-
-        for (name, size_results) in &matrix_rows {
-            print!("  {:<22}", name);
-            for (_psize, stats, _overhead, _rps) in size_results {
-                print!(" {:>width$}", format_us(stats.p50), width = col_width);
-            }
-            println!();
-        }
+        print_matrix_table(&size_labels, &matrix_rows);
     }
 
     let rss = current_rss_mb();
 
-    // Determine verdict based on the "proxy+all" overhead (use first payload size).
     let all_overhead = results
         .iter()
         .find(|r| r.name == "proxy+all")
@@ -496,17 +360,85 @@ pub async fn cmd_bench(
     Ok(())
 }
 
-// ── Escalation mode ─────────────────────────────────────────────────────
+// ── Shared measurement helper ────────────────────────────────────────────────
 
-/// Holds results for one escalation step.
-struct EscalationRow {
-    step: usize,
-    name: &'static str,
-    p50: Duration,
-    rps: Option<f64>,
-    /// Overhead relative to step 0 (TCP baseline).
-    overhead: Option<Duration>,
+/// Runs warmup + timed requests for one scenario/payload combination.
+///
+/// Returns `(stats, Option<rps>)`.
+async fn measure(
+    target_url: &str,
+    body: &serde_json::Value,
+    auth_token: &Option<String>,
+    enable_auth: bool,
+    is_concurrent: bool,
+    effective_concurrency: usize,
+    requests: usize,
+) -> Result<(stats::Stats, Option<f64>)> {
+    if is_concurrent {
+        let warmup_client = reqwest::Client::builder()
+            .pool_max_idle_per_host(10)
+            .build()
+            .unwrap();
+        for _ in 0..WARMUP_REQUESTS {
+            let mut req = warmup_client
+                .post(format!("{target_url}/v1/messages"))
+                .json(body);
+            if enable_auth {
+                if let Some(ref token) = auth_token {
+                    req = req.header("authorization", format!("Bearer {token}"));
+                }
+            }
+            if let Ok(resp) = req.send().await {
+                let _ = resp.bytes().await;
+            }
+        }
+
+        let (latencies, total) = run_concurrent(
+            target_url,
+            body,
+            auth_token,
+            enable_auth,
+            effective_concurrency,
+            CONCURRENT_DURATION_SECS,
+        )
+        .await;
+
+        anyhow::ensure!(!latencies.is_empty(), "No requests completed");
+        let rps_val = total as f64 / CONCURRENT_DURATION_SECS as f64;
+        Ok((compute_stats(latencies), Some(rps_val)))
+    } else {
+        let client = build_bench_client();
+
+        for _ in 0..WARMUP_REQUESTS {
+            let mut req = client.post(format!("{target_url}/v1/messages")).json(body);
+            if enable_auth {
+                if let Some(ref token) = auth_token {
+                    req = req.header("authorization", format!("Bearer {token}"));
+                }
+            }
+            let resp = req.send().await?;
+            let _ = resp.bytes().await;
+        }
+
+        let mut latencies = Vec::with_capacity(requests);
+        for _ in 0..requests {
+            let mut req = client.post(format!("{target_url}/v1/messages")).json(body);
+            if enable_auth {
+                if let Some(ref token) = auth_token {
+                    req = req.header("authorization", format!("Bearer {token}"));
+                }
+            }
+            let start = Instant::now();
+            let resp = req.send().await?;
+            let _ = resp.bytes().await;
+            latencies.push(start.elapsed());
+        }
+
+        Ok((compute_stats(latencies), None))
+    }
 }
+
+// ── Escalation mode ─────────────────────────────────────────────────────
 
 /// Runs the escalation staircase benchmark.
 #[allow(clippy::too_many_arguments)]
@@ -599,88 +531,33 @@ async fn run_escalation(
             proxy_url
         };
 
-        let (stats, rps) = if is_concurrent {
-            let warmup_client = reqwest::Client::builder()
-                .pool_max_idle_per_host(10)
-                .build()
-                .unwrap();
-            for _ in 0..WARMUP_REQUESTS {
-                let mut req = warmup_client
-                    .post(format!("{target_url}/v1/messages"))
-                    .json(&body);
-                if step.enable_auth {
-                    if let Some(ref token) = auth_token {
-                        req = req.header("authorization", format!("Bearer {token}"));
-                    }
-                }
-                if let Ok(resp) = req.send().await {
-                    let _ = resp.bytes().await;
-                }
-            }
-
-            let (latencies, total) = run_concurrent(
-                &target_url,
-                &body,
-                auth_token,
-                step.enable_auth,
-                effective_concurrency,
-                CONCURRENT_DURATION_SECS,
-            )
-            .await;
-
-            if latencies.is_empty() {
-                anyhow::bail!("No requests completed for escalation step '{}'", step.name);
-            }
-
-            let rps_val = total as f64 / CONCURRENT_DURATION_SECS as f64;
-            (compute_stats(latencies), Some(rps_val))
-        } else {
-            let client = build_bench_client();
-
-            for _ in 0..WARMUP_REQUESTS {
-                let mut req = client.post(format!("{target_url}/v1/messages")).json(&body);
-                if step.enable_auth {
-                    if let Some(ref token) = auth_token {
-                        req = req.header("authorization", format!("Bearer {token}"));
-                    }
-                }
-                let resp = req.send().await?;
-                let _ = resp.bytes().await;
-            }
-
-            let mut latencies = Vec::with_capacity(requests);
-            for _ in 0..requests {
-                let mut req = client.post(format!("{target_url}/v1/messages")).json(&body);
-                if step.enable_auth {
-                    if let Some(ref token) = auth_token {
-                        req = req.header("authorization", format!("Bearer {token}"));
-                    }
-                }
-                let start = Instant::now();
-                let resp = req.send().await?;
-                let _ = resp.bytes().await;
-                latencies.push(start.elapsed());
-            }
-
-            (compute_stats(latencies), None)
-        };
+        let (s, rps) = measure(
+            &target_url,
+            &body,
+            auth_token,
+            step.enable_auth,
+            is_concurrent,
+            effective_concurrency,
+            requests,
+        )
+        .await?;
 
         if is_direct {
-            baseline_p50 = Some(stats.p50);
+            baseline_p50 = Some(s.p50);
         }
 
         let overhead = baseline_p50.and_then(|b| {
             if is_direct {
                 None
             } else {
-                Some(stats.p50.saturating_sub(b))
+                Some(s.p50.saturating_sub(b))
             }
         });
 
+        let label = format!("{} {}", idx, step.name);
         rows.push(EscalationRow {
-            step: idx,
-            name: step.name,
-            p50: stats.p50,
+            label,
+            p50: s.p50,
             rps,
             overhead,
         });
@@ -719,84 +596,33 @@ async fn run_escalation(
         }
 
         let body = secrets_request_body(psize);
+        let (s, rps) = measure(
+            &proxy_url,
+            &body,
+            auth_token,
+            auth_token.is_some(),
+            is_concurrent,
+            effective_concurrency,
+            requests,
+        )
+        .await?;
 
-        let (stats, rps) = if is_concurrent {
-            let warmup_client = reqwest::Client::builder()
-                .pool_max_idle_per_host(10)
-                .build()
-                .unwrap();
-            for _ in 0..WARMUP_REQUESTS {
-                let mut req = warmup_client
-                    .post(format!("{proxy_url}/v1/messages"))
-                    .json(&body);
-                if let Some(ref token) = auth_token {
-                    req = req.header("authorization", format!("Bearer {token}"));
-                }
-                if let Ok(resp) = req.send().await {
-                    let _ = resp.bytes().await;
-                }
-            }
-
-            let (latencies, total) = run_concurrent(
-                &proxy_url,
-                &body,
-                auth_token,
-                auth_token.is_some(),
-                effective_concurrency,
-                CONCURRENT_DURATION_SECS,
-            )
-            .await;
-
-            if latencies.is_empty() {
-                anyhow::bail!("No requests completed for ALL escalation step");
-            }
-
-            let rps_val = total as f64 / CONCURRENT_DURATION_SECS as f64;
-            (compute_stats(latencies), Some(rps_val))
-        } else {
-            let client = build_bench_client();
-
-            for _ in 0..WARMUP_REQUESTS {
-                let mut req = client.post(format!("{proxy_url}/v1/messages")).json(&body);
-                if let Some(ref token) = auth_token {
-                    req = req.header("authorization", format!("Bearer {token}"));
-                }
-                let resp = req.send().await?;
-                let _ = resp.bytes().await;
-            }
-
-            let mut latencies = Vec::with_capacity(requests);
-            for _ in 0..requests {
-                let mut req = client.post(format!("{proxy_url}/v1/messages")).json(&body);
-                if let Some(ref token) = auth_token {
-                    req = req.header("authorization", format!("Bearer {token}"));
-                }
-                let start = Instant::now();
-                let resp = req.send().await?;
-                let _ = resp.bytes().await;
-                latencies.push(start.elapsed());
-            }
-
-            (compute_stats(latencies), None)
-        };
-
-        let overhead = baseline_p50.map(|b| stats.p50.saturating_sub(b));
+        let overhead = baseline_p50.map(|b| s.p50.saturating_sub(b));
 
         rows.push(EscalationRow {
-            step: rows.len(),
-            name: "ALL (everything)",
-            p50: stats.p50,
+            label: "ALL (everything)".to_string(),
+            p50: s.p50,
             rps,
             overhead,
         });
     }
 
-    // ── Render output ───────────────────────────────────────────────
+    // ── Render output ────────────────────────────────────────────────
     if format == "json" {
         let json_rows: Vec<ScenarioResult> = rows
             .iter()
             .map(|r| ScenarioResult {
-                name: format!("{} {}", r.step, r.name),
+                name: r.label.clone(),
                 payload_size: psize.label().to_string(),
                 p50_us: r.p50.as_secs_f64() * 1_000_000.0,
                 p95_us: 0.0,
@@ -809,7 +635,9 @@ async fn run_escalation(
             system: SystemInfo {
                 os: std::env::consts::OS.to_string(),
                 arch: std::env::consts::ARCH.to_string(),
-                cpu_count,
+                cpu_count: std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(1),
                 grob_version: env!("CARGO_PKG_VERSION").to_string(),
             },
             requests_per_scenario: requests,
@@ -822,119 +650,29 @@ async fn run_escalation(
         return Ok(());
     }
 
-    // Find max overhead for bar scaling.
-    let max_overhead = rows
-        .iter()
-        .filter_map(|r| r.overhead)
-        .max()
-        .unwrap_or(Duration::ZERO);
-    let max_overhead_us = max_overhead.as_secs_f64() * 1_000_000.0;
+    print_escalation_table(&rows);
 
-    const BAR_WIDTH: usize = 8;
-
-    // Print escalation table header.
-    println!(
-        "  {:<28} {:>9} {:>9} {:>10}  {:>10}",
-        "Feature Escalation", "P50", "RPS", "", "Overhead"
-    );
-    println!("  {}", "\u{2500}".repeat(70));
-
-    for row in &rows {
-        let p50_str = format_us(row.p50);
-        let rps_str = row
-            .rps
-            .map(format_rps)
-            .unwrap_or_else(|| "\u{2014}".to_string());
-
-        let (bar_str, overhead_str) = match row.overhead {
-            Some(oh) => {
-                let oh_us = oh.as_secs_f64() * 1_000_000.0;
-                let proportion = if max_overhead_us > 0.0 {
-                    oh_us / max_overhead_us
-                } else {
-                    0.0
-                };
-                let bar = render_bar(proportion, BAR_WIDTH);
-                let label = format!(
-                    "+{}",
-                    format_us(Duration::from_secs_f64(oh_us / 1_000_000.0))
-                );
-                (bar, label)
-            }
-            None => (" ".repeat(BAR_WIDTH), "\u{2014}".to_string()),
-        };
-
-        let label = if row.name == "ALL (everything)" {
-            "ALL (everything)".to_string()
-        } else {
-            format!("{} {}", row.step, row.name)
-        };
-
-        println!(
-            "  {:<28} {:>9} {:>9}    {}  {:>10}",
-            label, p50_str, rps_str, bar_str, overhead_str,
-        );
-    }
-
-    // ── Overhead breakdown ──────────────────────────────────────────
-    println!();
-    println!("  Overhead breakdown:");
-
-    // Compute per-feature cost as delta between consecutive steps.
+    // Compute per-feature costs as delta between consecutive steps.
     let mut feature_costs: Vec<(&str, Duration)> = Vec::new();
     for i in 1..rows.len() {
-        // Skip the ALL row — it validates the sum, not an incremental cost.
-        if rows[i].name == "ALL (everything)" {
+        if rows[i].label == "ALL (everything)" {
             continue;
         }
-        let prev_p50 = rows[i - 1].p50;
-        let curr_p50 = rows[i].p50;
-        let delta = curr_p50.saturating_sub(prev_p50);
-        feature_costs.push((rows[i].name, delta));
+        let delta = rows[i].p50.saturating_sub(rows[i - 1].p50);
+        feature_costs.push((&rows[i].label, delta));
     }
 
-    let max_feature_cost = feature_costs
-        .iter()
-        .map(|(_, d)| *d)
-        .max()
-        .unwrap_or(Duration::ZERO);
     let total_overhead = rows
         .iter()
         .rev()
-        .find(|r| r.name != "ALL (everything)")
+        .find(|r| r.label != "ALL (everything)")
         .and_then(|r| r.overhead)
         .unwrap_or(Duration::ZERO);
-    let total_overhead_us = total_overhead.as_secs_f64() * 1_000_000.0;
-    let max_feature_us = max_feature_cost.as_secs_f64() * 1_000_000.0;
 
-    const BREAKDOWN_BAR_WIDTH: usize = 40;
-
-    for (name, cost) in &feature_costs {
-        let cost_us = cost.as_secs_f64() * 1_000_000.0;
-        let pct = if total_overhead_us > 0.0 {
-            (cost_us / total_overhead_us * 100.0).round() as u32
-        } else {
-            0
-        };
-        let proportion = if max_feature_us > 0.0 {
-            cost_us / max_feature_us
-        } else {
-            0.0
-        };
-        let bar = render_bar(proportion, BREAKDOWN_BAR_WIDTH);
-        let clean_name = name.strip_prefix("+ ").unwrap_or(name);
-        println!(
-            "    {:<18} {}  {:>3}%  {}",
-            clean_name,
-            bar,
-            pct,
-            format_us(Duration::from_secs_f64(cost_us / 1_000_000.0)),
-        );
-    }
+    print_overhead_breakdown(&feature_costs, total_overhead);
 
     println!();
-    let rss = current_rss_mb();
-    println!("  Memory: {} RSS", rss);
+    println!("  Memory: {} RSS", current_rss_mb());
     println!();
 
     Ok(())

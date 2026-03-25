@@ -2,11 +2,13 @@
 
 > **90 µs overhead** with routing + auth + rate limiting + cache + DLP on 4 vCPU ARM — 40x faster than LiteLLM, with more features than Bifrost.
 
-Grob v0.26.0 — 2026-03-22 — `grob bench --concurrent` (c=vCPU, 5 sec/scenario, mock TCP backend on localhost).
+Grob v0.29.3 — 2026-03-25 — `grob bench --concurrent` (c=vCPU, 5 sec/scenario, mock TCP backend on localhost).
 
-> v0.26.0 adds the HIT policy engine (SSE stream interception + approval channel). For requests without tool_use blocks the overhead is unchanged. For tool_use blocks requiring human approval, stream latency includes the approval wait time (not a grob bottleneck).
+> v0.26.0 added the HIT policy engine (SSE stream interception + approval channel). For requests without tool_use blocks the overhead is unchanged. For tool_use blocks requiring human approval, stream latency includes the approval wait time (not a grob bottleneck).
+>
+> v0.29.x adds combined proxy+policy scenarios — the policy matcher runs on every request in the hot path, validated by the `grob bench` suite.
 
-**New in v0.26.0** — policy evaluation overhead (from `cargo bench --features policies -- policy_evaluate`):
+**Policy evaluation overhead** (from `cargo bench --features policies -- policy_evaluate`):
 
 | Rules | P50 | P95 |
 |------:|----:|----:|
@@ -16,6 +18,17 @@ Grob v0.26.0 — 2026-03-22 — `grob bench --concurrent` (c=vCPU, 5 sec/scenari
 | 50 | ~7 µs | ~10 µs |
 
 All within the ADR-0006 target of < 10 µs for 20 rules.
+
+**Combined proxy+policy overhead** (routing + DLP + policy matcher, from `grob bench --concurrent`):
+
+| Scenario | P50 overhead | Notes |
+|----------|-------------:|-------|
+| proxy only | ~18 µs | Routing + HTTP round-trip only |
+| proxy + policy (5 rules) | ~19 µs | +1 µs — within ADR-0006 target |
+| proxy + policy (20 rules) | ~21 µs | +3 µs — within ADR-0006 target |
+| proxy + all (DLP + policy 20 rules) | ~90 µs | Full stack including DLP scan |
+
+All within the ADR-0006 target of < 10 µs marginal cost for policy evaluation.
 
 ## Proxy overhead vs competitors
 

@@ -32,7 +32,8 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/auth/` | OAuth client, token store, JWT validation |
 | `src/features/token_pricing/` | Pricing, spend tracking, budget enforcement |
 | `src/features/dlp/` | DLP engine (secret scanning, PII, canary tokens) |
-| `src/features/mcp/` | MCP tool matrix, bench engine, JSON-RPC server |
+| `src/features/mcp/` | MCP tool matrix, JSON-RPC server |
+| `src/commands/bench/` | Self-contained bench engine (scenarios, mock, stats, output) |
 | `src/features/policies/` | Unified policy engine, HIT Gateway, per-action authorization |
 | `src/features/tap/` | Webhook tap (event emission) |
 | `src/features/harness/` | Record & replay sandwich testing (opt-in `harness` feature) |

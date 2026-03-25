@@ -38,6 +38,20 @@ Per-provider circuit breaker pattern prevents cascading failures:
 | Open | After 5 consecutive failures. Requests fail-fast for 30 seconds. |
 | HalfOpen | After timeout. Allows up to 3 probe requests. 3 successes = Closed, 1 failure = Open. |
 
+```mermaid
+stateDiagram-v2
+    [*] --> Closed
+
+    Closed --> Open : 5 consecutive failures
+    Open --> HalfOpen : timeout (30 s)
+    HalfOpen --> Closed : 3 successful probes
+    HalfOpen --> Open : 1 failure during probe
+
+    Closed : Closed\nNormal operation
+    Open : Open\nFail-fast, skip provider
+    HalfOpen : HalfOpen\nUp to 3 probe requests
+```
+
 When a circuit breaker opens, requests skip that provider and fall through to the next priority mapping. This ensures one degraded provider does not block the entire request pipeline.
 
 ### DLP (Data Loss Prevention)
