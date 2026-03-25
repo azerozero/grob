@@ -1,0 +1,25 @@
+# Preset: perf — Performance-optimised routing
+# Anthropic claude-3-5-sonnet as primary, OpenRouter as fallback.
+# Maximises throughput; no spend cap, no DLP redaction overhead.
+#
+# Required environment variables:
+#   ANTHROPIC_API_KEY  — Anthropic API key
+#   OPENROUTER_API_KEY — OpenRouter API key (fallback)
+
+[server]
+host = "127.0.0.1"
+port = 13456
+
+[router]
+default_provider = "anthropic"
+fallback_providers = ["openrouter"]
+
+[[providers]]
+name = "anthropic"
+kind = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+
+[[providers]]
+name = "openrouter"
+kind = "openrouter"
+api_key_env = "OPENROUTER_API_KEY"

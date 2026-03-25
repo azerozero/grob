@@ -1,0 +1,225 @@
+# Grob E2E test suite — just recipes
+# Requires: just, hurl, podman, python3, openssl, pict (optional)
+
+# ---------------------------------------------------------------------------
+# Variables
+# ---------------------------------------------------------------------------
+
+host            := "127.0.0.1:13456"
+toxiproxy_api   := "127.0.0.1:8474"
+
+jwt_default         := `cat auth/tokens/jwt-default.txt 2>/dev/null || echo ""`
+jwt_hospital_eu     := `cat auth/tokens/jwt-hospital-eu.txt 2>/dev/null || echo ""`
+jwt_team_perf       := `cat auth/tokens/jwt-team-perf.txt 2>/dev/null || echo ""`
+jwt_project_gdpr    := `cat auth/tokens/jwt-project-gdpr.txt 2>/dev/null || echo ""`
+jwt_expired         := `cat auth/tokens/jwt-expired.txt 2>/dev/null || echo ""`
+jwt_wrong_issuer    := `cat auth/tokens/jwt-wrong-issuer.txt 2>/dev/null || echo ""`
+jwt_wrong_audience  := `cat auth/tokens/jwt-wrong-audience.txt 2>/dev/null || echo ""`
+jwt_tampered        := `cat auth/tokens/jwt-tampered.txt 2>/dev/null || echo ""`
+jwt_self_signed     := `cat auth/tokens/jwt-self-signed.txt 2>/dev/null || echo ""`
+
+hurl_opts := "--test --color"
+
+# ---------------------------------------------------------------------------
+# Infrastructure
+# ---------------------------------------------------------------------------
+
+# Start the e2e pod and wait for Grob to be healthy
+up:
+    @bash up.sh
+
+# Stop and remove the e2e pod
+down:
+    @bash down.sh
+
+# ---------------------------------------------------------------------------
+# Generation
+# ---------------------------------------------------------------------------
+
+# Generate EC keypair + JWKS + all JWT fixtures
+generate-auth:
+    @bash auth/generate.sh
+
+# Generate age encryption keypairs (rssi, dpo, intruder)
+generate-crypto:
+    @bash crypto/generate-age-keys.sh
+
+# Generate PICT pairwise test matrix
+generate-pairwise:
+    @bash pict/generate.sh
+
+# Run all generators
+generate-all: generate-auth generate-crypto generate-pairwise
+
+# ---------------------------------------------------------------------------
+# Test suites
+# ---------------------------------------------------------------------------
+
+# Run entire mock-backed suite
+test: test-auth test-failover test-budget test-cache test-cb test-policies test-negative test-audit test-mock-all
+
+# Failover + provider loop tests
+test-failover:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        tests/failover/*.hurl
+
+# Fuzz / malformed input tests
+test-fuzz:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        tests/fuzz/*.hurl
+
+# Security header + injection tests
+test-secu:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        tests/secu/*.hurl
+
+# Spend / budget enforcement tests
+test-budget:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        tests/budget/*.hurl
+
+# Semantic cache hit/miss tests
+test-cache:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        tests/cache/*.hurl
+
+# Circuit-breaker open/half-open/close tests
+test-cb:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        tests/circuit-breaker/*.hurl
+
+# JWT auth happy path + rejection tests
+test-auth:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt_default={{jwt_default}} \
+        --variable jwt_expired={{jwt_expired}} \
+        --variable jwt_wrong_issuer={{jwt_wrong_issuer}} \
+        --variable jwt_wrong_audience={{jwt_wrong_audience}} \
+        --variable jwt_tampered={{jwt_tampered}} \
+        --variable jwt_self_signed={{jwt_self_signed}} \
+        tests/auth/*.hurl
+
+# Policy engine tests (hospital-eu, team-perf)
+test-policies:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt_hospital_eu={{jwt_hospital_eu}} \
+        --variable jwt_team_perf={{jwt_team_perf}} \
+        --variable jwt_project_gdpr={{jwt_project_gdpr}} \
+        tests/policies/*.hurl
+
+# Negative / error path tests (4xx, 5xx expectations)
+test-negative:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        tests/negative/*.hurl
+
+# Pairwise matrix tests (generated from PICT)
+test-pairwise:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt_default={{jwt_default}} \
+        --variable jwt_expired={{jwt_expired}} \
+        --variable jwt_tampered={{jwt_tampered}} \
+        tests/pairwise/*.hurl
+
+# Audit log emission tests
+test-audit:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        tests/audit/*.hurl
+
+# Full mock-backend smoke (happy path, all providers)
+test-mock-all:
+    @hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        tests/happy/*.hurl
+
+# Live test: GDPR compliance headers (requires GROB_SIEGE_ANTHROPIC_KEY)
+test-live-gdpr:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${GROB_SIEGE_ANTHROPIC_KEY:-}" ]]; then
+        echo "SKIP: GROB_SIEGE_ANTHROPIC_KEY not set"
+        exit 0
+    fi
+    hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_hospital_eu}} \
+        --variable anthropic_key="${GROB_SIEGE_ANTHROPIC_KEY}" \
+        tests/live/dlp/*.hurl
+
+# Live test: EU-AI Act transparency headers (requires GROB_SIEGE_ANTHROPIC_KEY)
+test-live-euai:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "${GROB_SIEGE_ANTHROPIC_KEY:-}" ]]; then
+        echo "SKIP: GROB_SIEGE_ANTHROPIC_KEY not set"
+        exit 0
+    fi
+    hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_default}} \
+        --variable anthropic_key="${GROB_SIEGE_ANTHROPIC_KEY}" \
+        tests/live/routing/*.hurl
+
+# Live test: performance baseline (requires at least one live key)
+test-live-perf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    key="${GROB_SIEGE_ANTHROPIC_KEY:-${GROB_SIEGE_OPENAI_KEY:-}}"
+    if [[ -z "${key}" ]]; then
+        echo "SKIP: no live API key set"
+        exit 0
+    fi
+    hurl {{hurl_opts}} \
+        --variable host={{host}} \
+        --variable jwt={{jwt_team_perf}} \
+        tests/live/presets/*.hurl
+
+# ---------------------------------------------------------------------------
+# Load tests
+# ---------------------------------------------------------------------------
+
+# Smoke load: 10 VUs for 30s
+load-smoke:
+    @k6 run --vus 10 --duration 30s load/smoke.js \
+        -e HOST={{host}} \
+        -e JWT={{jwt_default}}
+
+# Stress load: ramp to 200 VUs
+load-stress:
+    @k6 run load/stress.js \
+        -e HOST={{host}} \
+        -e JWT={{jwt_default}}
+
+# Soak load: 50 VUs for 10 minutes
+load-soak:
+    @k6 run --vus 50 --duration 10m load/soak.js \
+        -e HOST={{host}} \
+        -e JWT={{jwt_default}}
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+
+# Generate HTML report from last hurl run (requires --report-html flag)
+report:
+    @echo "Re-run with: hurl --report-html report/ ..."
+    @echo "Or open report/index.html if it already exists."
+    @[ -f report/index.html ] && open report/index.html || true

@@ -1,0 +1,29 @@
+# Preset: cheap — Cost-optimised routing
+# Routes to the lowest-cost provider available.
+# Prioritises DeepSeek and OpenRouter haiku-class models.
+# Hard budget cap at $5/month to prevent runaway spend.
+#
+# Required environment variables:
+#   DEEPSEEK_API_KEY   — DeepSeek API key
+#   OPENROUTER_API_KEY — OpenRouter API key (fallback)
+
+[server]
+host = "127.0.0.1"
+port = 13456
+
+[router]
+default_provider = "deepseek"
+fallback_providers = ["openrouter"]
+
+[budget]
+monthly_limit_usd = 5.0
+
+[[providers]]
+name = "deepseek"
+kind = "deepseek"
+api_key_env = "DEEPSEEK_API_KEY"
+
+[[providers]]
+name = "openrouter"
+kind = "openrouter"
+api_key_env = "OPENROUTER_API_KEY"

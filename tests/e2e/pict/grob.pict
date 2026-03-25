@@ -1,0 +1,28 @@
+# PICT pairwise model for Grob e2e test matrix
+# Run: pict grob.pict > grob-pairwise.txt
+#
+# Dimensions:
+#   Auth     - authentication method / token validity
+#   Provider - upstream provider availability / fault condition
+#   DLP      - data-loss prevention mode
+#   Policy   - active tenant policy
+#   Format   - request format (OpenAI compat vs Anthropic native)
+#   Payload  - content type of the request body
+
+Auth:     none, api_key, jwt_valid, jwt_expired, jwt_tampered
+Provider: up, down_primary, all_down, slow, rate429
+DLP:      disabled, redact, block
+Policy:   none, hospital_eu, team_perf
+Format:   openai, anthropic
+Payload:  clean, secrets, pii, injection
+
+# Unauthenticated requests cannot have a tenant policy applied
+IF [Auth] = "none" THEN [Policy] = "none"
+
+# Expired and tampered tokens are rejected before policy evaluation
+IF [Auth] = "jwt_expired" THEN [Policy] = "none"
+IF [Auth] = "jwt_tampered" THEN [Policy] = "none"
+
+# When all providers are down the DLP pipeline is still invoked but we cannot
+# test DLP output mutations through a real response, so keep DLP simple
+IF [Provider] = "all_down" THEN [DLP] = "disabled"

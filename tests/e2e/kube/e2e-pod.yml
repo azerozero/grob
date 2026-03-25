@@ -1,0 +1,133 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: e2e-pod
+  labels:
+    app: grob-e2e
+spec:
+  # All containers share a single network namespace — they reach each other
+  # via 127.0.0.1 on their respective ports.
+
+  containers:
+
+    # -------------------------------------------------------------------------
+    # Grob proxy under test
+    # -------------------------------------------------------------------------
+    - name: grob
+      image: ghcr.io/azerozero/grob:latest
+      ports:
+        - containerPort: 13456
+          hostPort: 13456
+          protocol: TCP
+      env:
+        - name: GROB_CONFIG
+          value: /etc/grob/config.toml
+        - name: RUST_LOG
+          value: debug
+      volumeMounts:
+        - name: grob-config
+          mountPath: /etc/grob/config.toml
+          subPath: grob-test.toml
+          readOnly: true
+        - name: grob-audit
+          mountPath: /tmp/grob-audit
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: 13456
+        initialDelaySeconds: 5
+        periodSeconds: 5
+        failureThreshold: 6
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 13456
+        initialDelaySeconds: 3
+        periodSeconds: 2
+        failureThreshold: 10
+
+    # -------------------------------------------------------------------------
+    # MockLLM — returns scripted OpenAI-compatible responses
+    # -------------------------------------------------------------------------
+    - name: mockllm
+      image: ghcr.io/stackloklabs/mockllm:latest
+      ports:
+        - containerPort: 8000
+          hostPort: 8000
+          protocol: TCP
+      volumeMounts:
+        - name: mockllm-responses
+          mountPath: /app/responses.yml
+          subPath: responses.yml
+          readOnly: true
+
+    # -------------------------------------------------------------------------
+    # Toxiproxy — fault injection in front of MockLLM
+    # Exposes:
+    #   8474  Toxiproxy REST API
+    #   9001  anthropic-mock → MockLLM:8000
+    #   9002  openai-mock    → MockLLM:8000
+    #   9003  gemini-mock    → MockLLM:8000
+    # Proxies are created at runtime by config/mock/init-proxies.sh
+    # -------------------------------------------------------------------------
+    - name: toxiproxy
+      image: ghcr.io/shopify/toxiproxy:latest
+      ports:
+        - containerPort: 8474
+          hostPort: 8474
+          protocol: TCP
+        - containerPort: 9001
+          hostPort: 9001
+          protocol: TCP
+        - containerPort: 9002
+          hostPort: 9002
+          protocol: TCP
+        - containerPort: 9003
+          hostPort: 9003
+          protocol: TCP
+
+    # -------------------------------------------------------------------------
+    # mock-jwks — nginx serving a static JWKS document
+    # Grob fetches this to validate JWT signatures
+    # -------------------------------------------------------------------------
+    - name: mock-jwks
+      image: nginx:alpine
+      ports:
+        - containerPort: 8443
+          hostPort: 8443
+          protocol: TCP
+      volumeMounts:
+        - name: jwks-document
+          mountPath: /usr/share/nginx/html/.well-known/jwks.json
+          subPath: jwks.json
+          readOnly: true
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d/default.conf
+          subPath: nginx.conf
+          readOnly: true
+
+  volumes:
+    - name: grob-config
+      hostPath:
+        path: ./config/mock
+        type: Directory
+
+    - name: mockllm-responses
+      hostPath:
+        path: ./config/mock
+        type: Directory
+
+    - name: grob-audit
+      hostPath:
+        path: /tmp/grob-audit
+        type: DirectoryOrCreate
+
+    - name: jwks-document
+      hostPath:
+        path: ./auth
+        type: Directory
+
+    - name: nginx-conf
+      hostPath:
+        path: ./auth
+        type: Directory

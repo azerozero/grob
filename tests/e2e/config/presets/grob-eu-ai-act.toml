@@ -1,0 +1,34 @@
+# Preset: eu-ai-act — EU AI Act compliance (Art. 12 + Art. 50)
+# Injects mandatory transparency headers on every response:
+#   x-ai-provider   — provider name
+#   x-ai-model      — exact model identifier used
+#   x-ai-generated  — "true" to signal AI-generated content (Art. 50)
+# Audit log includes model name and token counts as required by Art. 12.
+#
+# Required environment variables:
+#   ANTHROPIC_API_KEY  — Anthropic API key
+#   GROB_RSSI_AGE_KEY  — age public key for RSSI audit recipient
+#   GROB_DPO_AGE_KEY   — age public key for DPO audit recipient
+
+[server]
+host = "127.0.0.1"
+port = 13456
+
+[router]
+default_provider = "anthropic"
+fallback_providers = []
+
+[compliance]
+eu_ai_act = true
+transparency_headers = true
+
+[audit]
+enabled = true
+encrypt = true
+include_model = true
+include_token_counts = true
+
+[[providers]]
+name = "anthropic"
+kind = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"

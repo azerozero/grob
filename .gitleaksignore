@@ -95,3 +95,15 @@ src/commands/bench/payloads.rs:github-pat:165
 src/commands/bench/payloads.rs:private-key:168
 src/commands/bench/payloads.rs:aws-access-token:161
 src/commands/bench/payloads.rs:aws-access-token:164
+
+# e2e DLP fixture payloads (intentional fake secrets for DLP validation tests)
+tests/e2e/fixtures/dlp/prompt-with-aws-key.json:aws-access-token:1
+tests/e2e/fixtures/dlp/prompt-with-jwt.json:jwt:1
+tests/e2e/tests/auth/96-jwt-tenant-hospital.hurl:aws-access-token:10
+tests/e2e/tests/policies/B2-valid-jwt-no-policy-dlp-redact.hurl:aws-access-token:9
+tests/e2e/tests/policies/B4-hospital-policy-dlp-block.hurl:aws-access-token:8
+tests/e2e/tests/policies/B3-valid-jwt-no-policy-dlp-block.hurl:aws-access-token:9
+tests/e2e/tests/secu/31-dlp-aws-key.hurl:aws-access-token:12
+# e2e negative tests — intentional wrong/fake keys for brute-force resistance test
+tests/e2e/tests/negative/N6-api-key-brute.hurl:generic-api-key:4
+tests/e2e/tests/negative/N6-api-key-brute.hurl:generic-api-key:12

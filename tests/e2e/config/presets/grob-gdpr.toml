@@ -1,0 +1,33 @@
+# Preset: gdpr — GDPR / EU data residency
+# Restricts routing to EU-hosted providers only (no US data transfers).
+# DLP enabled with PII blocking. Audit log encrypted to RSSI + DPO keys.
+# Intended for healthcare and financial tenants subject to GDPR Art. 44-49.
+#
+# Required environment variables:
+#   ANTHROPIC_API_KEY  — Anthropic API key (EU endpoint)
+#   GROB_RSSI_AGE_KEY  — age public key for RSSI audit recipient
+#   GROB_DPO_AGE_KEY   — age public key for DPO audit recipient
+
+[server]
+host = "127.0.0.1"
+port = 13456
+
+[router]
+default_provider = "anthropic-eu"
+fallback_providers = []
+
+[dlp]
+enabled = true
+action = "block"
+pii = true
+
+[audit]
+enabled = true
+encrypt = true
+
+[[providers]]
+name = "anthropic-eu"
+kind = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+# NOTE: EU data residency requires routing through eu.anthropic.com when available.
+base_url = "https://api.anthropic.com"

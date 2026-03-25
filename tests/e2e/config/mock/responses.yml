@@ -1,0 +1,140 @@
+# MockLLM response fixtures
+# Format: list of matchers; first match wins.
+# Each entry has:
+#   match:    substring or regex matched against the request body (JSON)
+#   response: the raw HTTP response body MockLLM will return
+
+responses:
+
+  # --------------------------------------------------------------------------
+  # Streaming chat completion (SSE)
+  # Matched when the request body contains "stream":true
+  # --------------------------------------------------------------------------
+  - id: streaming-chat
+    match:
+      body_contains: '"stream":true'
+    response:
+      status: 200
+      headers:
+        Content-Type: "text/event-stream"
+        Cache-Control: "no-cache"
+      body: |
+        data: {"id":"chatcmpl-stream-001","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
+
+        data: {"id":"chatcmpl-stream-001","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":", world"},"finish_reason":null}]}
+
+        data: {"id":"chatcmpl-stream-001","object":"chat.completion.chunk","created":1700000000,"model":"gpt-4o","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}]}
+
+        data: [DONE]
+
+  # --------------------------------------------------------------------------
+  # Tool-use / function-calling completion
+  # Matched when the request body references "tools" or "functions"
+  # --------------------------------------------------------------------------
+  - id: tool-use
+    match:
+      body_contains: '"tools"'
+    response:
+      status: 200
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "id": "chatcmpl-tool-001",
+          "object": "chat.completion",
+          "created": 1700000000,
+          "model": "gpt-4o",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {
+                    "id": "call_abc123",
+                    "type": "function",
+                    "function": {
+                      "name": "get_current_weather",
+                      "arguments": "{\"location\":\"Paris\",\"unit\":\"celsius\"}"
+                    }
+                  }
+                ]
+              },
+              "finish_reason": "tool_calls"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 82,
+            "completion_tokens": 18,
+            "total_tokens": 100
+          }
+        }
+
+  # --------------------------------------------------------------------------
+  # Anthropic native message format (messages API)
+  # Matched when request path or body contains "anthropic" model name patterns
+  # --------------------------------------------------------------------------
+  - id: anthropic-native
+    match:
+      body_contains: '"claude-'
+    response:
+      status: 200
+      headers:
+        Content-Type: "application/json"
+        anthropic-model: "claude-sonnet-4-6"
+      body: |
+        {
+          "id": "msg_ant_001",
+          "type": "message",
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Hello from the mock Anthropic endpoint."
+            }
+          ],
+          "model": "claude-sonnet-4-6",
+          "stop_reason": "end_turn",
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 15,
+            "output_tokens": 9
+          }
+        }
+
+  # --------------------------------------------------------------------------
+  # Default: plain OpenAI chat completion
+  # Catches all other requests
+  # --------------------------------------------------------------------------
+  - id: default-chat
+    match:
+      always: true
+    response:
+      status: 200
+      headers:
+        Content-Type: "application/json"
+      body: |
+        {
+          "id": "chatcmpl-default-001",
+          "object": "chat.completion",
+          "created": 1700000000,
+          "model": "gpt-4o",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "This is a mock response from MockLLM."
+              },
+              "finish_reason": "stop",
+              "logprobs": null
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 12,
+            "total_tokens": 22
+          },
+          "system_fingerprint": "fp_mock_001"
+        }
