@@ -1,0 +1,269 @@
+[server]
+port = 13456
+host = "0.0.0.0"
+log_level = "debug"
+api_key = "grob-siege-master-key"
+
+[server.timeouts]
+api_timeout_ms = 5000
+connect_timeout_ms = 2000
+
+[auth]
+mode = "jwt"
+
+[auth.jwt]
+jwks_url = "http://127.0.0.1:8443/.well-known/jwks.json"
+jwks_refresh_interval = 5
+issuer = "https://openbao.test"
+audience = "grob-siege"
+
+[budget]
+monthly_limit_usd = 100.0
+warn_at_percent = 80
+
+[router]
+default = "default"
+think = "think-model"
+background = "background"
+background_regex = "(?i)claude.*haiku"
+auto_map_regex = "^claude-"
+
+[[router.prompt_rules]]
+pattern = "(?i)translate|翻译"
+model = "default"
+
+[security]
+enabled = true
+rate_limit_rps = 10000
+rate_limit_burst = 20000
+max_body_size = 10485760
+circuit_breaker = true
+audit_dir = "/tmp/grob-audit"
+
+[dlp]
+enabled = true
+scan_input = true
+scan_output = true
+
+[[dlp.secrets]]
+name = "internal_token"
+prefix = "itk_"
+pattern = "itk_[A-Za-z0-9]{40}"
+action = "canary"
+
+[dlp.pii]
+credit_cards = true
+iban = true
+action = "redact"
+
+[cache]
+enabled = true
+max_capacity = 100
+ttl_secs = 60
+
+[compliance]
+enabled = true
+transparency_headers = true
+audit_model_name = true
+audit_token_counts = true
+
+[[policies]]
+name = "hospital-eu"
+[policies.match]
+tenant = "hospital-*"
+compliance = ["gdpr"]
+[policies.dlp]
+secrets = "block"
+[policies.rate_limit]
+rps = 10
+[policies.budget]
+monthly_usd = 50.0
+
+[[policies]]
+name = "team-perf"
+[policies.match]
+tenant = "team-perf*"
+[policies.rate_limit]
+rps = 500
+[policies.budget]
+monthly_usd = 500.0
+
+[[providers]]
+name = "anthropic-mock"
+provider_type = "anthropic"
+api_key = "sk-mock-anthropic"
+base_url = "http://127.0.0.1:9001"
+models = []
+enabled = true
+budget_usd = 50.0
+
+[[providers]]
+name = "openai-mock"
+provider_type = "openai"
+api_key = "sk-mock-openai"
+base_url = "http://127.0.0.1:9002"
+models = []
+enabled = true
+budget_usd = 30.0
+
+[[providers]]
+name = "gemini-mock"
+provider_type = "gemini"
+api_key = "mock-gemini-key"
+base_url = "http://127.0.0.1:9003"
+models = []
+enabled = true
+
+[[models]]
+name = "default"
+
+[[models.mappings]]
+provider = "anthropic-mock"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "openai-mock"
+actual_model = "gpt-4o"
+priority = 2
+
+[[models.mappings]]
+provider = "gemini-mock"
+actual_model = "gemini-2.5-pro"
+priority = 3
+
+[[models]]
+name = "think-model"
+
+[[models.mappings]]
+provider = "anthropic-mock"
+actual_model = "claude-opus-4-6"
+priority = 1
+
+[[models]]
+name = "background"
+
+[[models.mappings]]
+provider = "openai-mock"
+actual_model = "gpt-4o-mini"
+priority = 1
+
+[[providers]]
+name = "tool-mock"
+provider_type = "anthropic"
+api_key = "mock"
+base_url = "http://127.0.0.1:8102"
+models = []
+enabled = true
+
+[[models]]
+name = "hit-test"
+
+[[models.mappings]]
+provider = "tool-mock"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[policies]]
+name = "hit-approval"
+[policies.match]
+tenant = "*"
+[policies.hit]
+require_approval = ["bash"]
+auth_method = "prompt"
+
+[[providers]]
+name = "url-mock"
+provider_type = "anthropic"
+api_key = "mock"
+base_url = "http://127.0.0.1:8101"
+models = []
+enabled = true
+
+[[models]]
+name = "url-test"
+
+[[models.mappings]]
+provider = "url-mock"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[providers]]
+name = "tool-mock"
+provider_type = "anthropic"
+api_key = "mock"
+base_url = "http://127.0.0.1:8102"
+models = []
+enabled = true
+
+[[models]]
+name = "tool-test"
+
+[[models.mappings]]
+provider = "tool-mock"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[providers]]
+name = "tool-mock"
+provider_type = "anthropic"
+api_key = "mock"
+base_url = "http://127.0.0.1:8102"
+models = []
+enabled = true
+
+[[models]]
+name = "hit-test"
+
+[[models.mappings]]
+provider = "tool-mock"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[policies]]
+name = "hit-approval"
+[policies.match]
+tenant = "*"
+[policies.hit]
+require_approval = ["bash"]
+auth_method = "prompt"
+
+[[providers]]
+name = "url-mock"
+provider_type = "anthropic"
+api_key = "mock"
+base_url = "http://127.0.0.1:8101"
+models = []
+enabled = true
+
+[[models]]
+name = "url-test"
+
+[[models.mappings]]
+provider = "url-mock"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[providers]]
+name = "tool-mock"
+provider_type = "anthropic"
+api_key = "mock"
+base_url = "http://127.0.0.1:8102"
+models = []
+enabled = true
+
+[[models]]
+name = "hit-test"
+
+[[models.mappings]]
+provider = "tool-mock"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[policies]]
+name = "hit-approval"
+[policies.match]
+tenant = "*"
+[policies.hit]
+require_approval = ["bash"]
+auth_method = "prompt"

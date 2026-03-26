@@ -152,16 +152,11 @@ fi
 echo ""
 echo "--- S5: HIT Gateway endpoint ---"
 
-hit_status=$(curl -sf -o /dev/null -w '%{http_code}' -X POST "http://$HOST/api/hit/approve" \
-    -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
-    -d '{"request_id":"test","tool_name":"test","approved":false}' 2>/dev/null || echo "000")
-
-case "$hit_status" in
-    200|400|422) pass "S5 — HIT endpoint responds ($hit_status)" ;;
-    404) skip "S5 — HIT endpoint not compiled in (404)" ;;
-    401) pass "S5 — HIT endpoint exists (requires different auth)" ;;
-    *) skip "S5 — HIT returned $hit_status" ;;
-esac
+if curl -sf "http://127.0.0.1:8102/v1/models" >/dev/null 2>&1; then
+    bash "$(dirname "$0")/S5-hit-flow.sh" && pass "S5" || skip "S5 — HIT flow incomplete"
+else
+    skip "S5 — vidaimock-tool (port 8102) not available"
+fi
 
 # ── S6: Adaptive scoring endpoint ───────────────────────────────────────────
 echo ""
