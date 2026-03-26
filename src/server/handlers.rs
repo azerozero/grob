@@ -152,16 +152,6 @@ where
     F: FnOnce(crate::providers::ProviderResponse) -> Response,
 {
     match result {
-        dispatch::DispatchResult::CacheHit(mut resp) => {
-            // Cache hit: entire elapsed time is overhead (no provider call).
-            let overhead_ms = start_time.elapsed().as_millis() as u64;
-            resp.headers_mut().insert(
-                "x-grob-overhead-duration-ms",
-                axum::http::HeaderValue::from(overhead_ms),
-            );
-            Ok(resp)
-        }
-
         dispatch::DispatchResult::Streaming {
             stream,
             provider,

@@ -18,9 +18,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use super::{
-    apply_transparency_headers, calculate_cost, is_provider_subscription, log_audit,
-    record_request_metrics, resolve_provider_mappings, sanitize_provider_response_reported,
-    AppError, AppState, AuditCompliance, AuditParams, ReloadableState, RequestMetrics,
+    calculate_cost, is_provider_subscription, log_audit, record_request_metrics,
+    resolve_provider_mappings, sanitize_provider_response_reported, AppError, AppState,
+    AuditCompliance, AuditParams, ReloadableState, RequestMetrics,
 };
 use crate::features::watch::events::{DlpDirection, WatchEvent};
 
@@ -155,8 +155,6 @@ impl DispatchContext<'_> {
 
 /// Result of a successful dispatch — the handler decides how to format this.
 pub(crate) enum DispatchResult {
-    /// Cache hit — pre-built HTTP response.
-    CacheHit(axum::response::Response),
     /// Streaming response from a provider.
     Streaming {
         /// DLP + Tap wrapped stream (Anthropic SSE format).
@@ -243,6 +241,9 @@ pub(crate) async fn dispatch(
 }
 
 /// Check the response cache for a hit (non-streaming requests only).
+///
+/// Returns `DispatchResult::Complete` with the deserialized `ProviderResponse`
+/// so the handler can apply format translation (e.g. Anthropic → OpenAI).
 async fn check_cache(
     ctx: &DispatchContext<'_>,
     cache_key: &Option<String>,
@@ -254,22 +255,16 @@ async fn check_cache(
     let key = cache_key.as_ref()?;
     let cached = cache.get(key).await?;
 
-    // Body is controlled (from our own cache), so the builder cannot fail.
-    let mut resp = axum::response::Response::builder()
-        .status(200)
-        .header("content-type", &cached.content_type)
-        .header("x-grob-cache", "hit")
-        .body(axum::body::Body::from(cached.body.clone()))
-        .ok()?;
-    if super::should_apply_transparency(&ctx.inner.config) {
-        apply_transparency_headers(
-            resp.headers_mut(),
-            &cached.provider,
-            &cached.model,
-            ctx.req_id,
-        );
-    }
-    Some(DispatchResult::CacheHit(resp))
+    // Deserialize cached bytes back into ProviderResponse so the handler
+    // can apply endpoint-specific format translation (e.g. OpenAI compat).
+    let response: ProviderResponse = serde_json::from_slice(&cached.body).ok()?;
+
+    Some(DispatchResult::Complete {
+        response,
+        provider: cached.provider.clone(),
+        actual_model: cached.model.clone(),
+        provider_duration_ms: 0,
+    })
 }
 
 /// DLP input scanning with risk assessment and audit logging.
