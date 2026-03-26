@@ -1,6 +1,6 @@
 [package]
 name = "grob"
-version = "0.29.10"
+version = "0.29.11"
 edition = "2021"
 license = "AGPL-3.0-only"
 description = "High-performance LLM routing proxy — routes to Anthropic, OpenAI, Gemini, DeepSeek, Ollama & more with streaming, tool calling, and multi-provider fallback"
