@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.4](https://github.com/azerozero/grob/compare/v0.29.3...v0.29.4) - 2026-03-26
+
+### Added
+
+- *(e2e)* VidaiMock + Makefile + 69 passing tests
+- *(e2e)* black-box test suite under tests/e2e/
+
+### Other
+
+- cli-cycle improvements — sync, diagrams, bench split
+
 ## [0.29.3](https://github.com/azerozero/grob/compare/v0.29.2...v0.29.3) - 2026-03-24
 
 ### Fixed
