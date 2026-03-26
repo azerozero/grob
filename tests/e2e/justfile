@@ -147,12 +147,9 @@ test-pairwise:
         --variable jwt_tampered={{jwt_tampered}} \
         tests/pairwise/*.hurl
 
-# Audit log emission tests
+# Audit log emission + encryption tests (shell-orchestrated)
 test-audit:
-    @hurl {{hurl_opts}} \
-        --variable host={{host}} \
-        --variable jwt={{jwt_default}} \
-        tests/audit/*.hurl
+    @bash tests/audit/run-audit-tests.sh
 
 # Full mock-backend smoke (happy path, all providers)
 test-mock-all:
