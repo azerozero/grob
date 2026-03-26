@@ -6,5 +6,5 @@ Content-Type: application/json
 `{"model":"llama3","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}`
 HTTP 200
 [Asserts]
-jsonpath "$.choices" exists
+jsonpath "$.content" exists
 header "x-ai-provider" == "ollama"

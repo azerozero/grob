@@ -66,8 +66,8 @@ all: up wait-jwks init-proxies test down
 images:
 	@echo "=== Building images ==="
 	@podman image exists localhost/grob:e2e 2>/dev/null || \
-		(echo "  pulling grob..." && podman pull ghcr.io/azerozero/grob:0.29.3 && \
-		 podman tag ghcr.io/azerozero/grob:0.29.3 localhost/grob:e2e)
+		(echo "  pulling grob..." && podman pull ghcr.io/azerozero/grob:0.29.5 && \
+		 podman tag ghcr.io/azerozero/grob:0.29.5 localhost/grob:e2e)
 	@podman image exists localhost/vidaimock:e2e 2>/dev/null || \
 		(echo "  building vidaimock..." && podman build -q -t localhost/vidaimock:e2e $(E2E_DIR)/images/vidaimock)
 	@podman image exists $(RUNNER_IMG) 2>/dev/null || \
@@ -94,22 +94,28 @@ wait-jwks:
 	@curl -sf http://$(HOST)/health >/dev/null 2>&1 || (echo "  FAIL: grob not healthy" && exit 1)
 	@echo "  grob healthy"
 	@echo "  waiting for JWKS..."
-	@for i in $$(seq 1 15); do \
-		curl -sf -X POST http://$(HOST)/api/config/reload >/dev/null 2>&1 || true; \
-		sleep 2; \
-		podman logs e2e-pod-grob 2>&1 | grep -q "Refreshed 1 JWKS" && break; \
-	done
-	@sleep 2
-	@jwt=$$(cat $(E2E_DIR)/auth/tokens/jwt-default.txt 2>/dev/null || echo "missing"); \
-	for i in $$(seq 1 5); do \
-		curl -sf -X POST http://$(HOST)/v1/chat/completions \
-			-H "Authorization: Bearer $$jwt" \
-			-H "Content-Type: application/json" \
-			-d '{"model":"default","messages":[{"role":"user","content":"ping"}],"max_tokens":5}' >/dev/null 2>&1 \
-		&& break; \
+	@jwks_ok=0; \
+	for i in $$(seq 1 20); do \
 		curl -sf -X POST http://$(HOST)/api/config/reload >/dev/null 2>&1 || true; \
 		sleep 3; \
-	done
+		if podman logs e2e-pod-grob 2>&1 | grep -q "Refreshed.*JWKS"; then \
+			jwks_ok=1; break; \
+		fi; \
+	done; \
+	if [ "$$jwks_ok" -eq 0 ]; then echo "  FAIL: JWKS never loaded" && exit 1; fi
+	@echo "  JWKS loaded"
+	@jwt=$$(cat $(E2E_DIR)/auth/tokens/jwt-default.txt 2>/dev/null || echo "missing"); \
+	auth_ok=0; \
+	for i in $$(seq 1 10); do \
+		status=$$(curl -s -o /dev/null -w '%{http_code}' -X POST http://$(HOST)/v1/chat/completions \
+			-H "Authorization: Bearer $$jwt" \
+			-H "Content-Type: application/json" \
+			-d '{"model":"default","messages":[{"role":"user","content":"ping"}],"max_tokens":5}'); \
+		if [ "$$status" != "401" ]; then auth_ok=1; break; fi; \
+		curl -sf -X POST http://$(HOST)/api/config/reload >/dev/null 2>&1 || true; \
+		sleep 3; \
+	done; \
+	if [ "$$auth_ok" -eq 0 ]; then echo "  FAIL: JWT auth never passed" && exit 1; fi
 	@echo "  JWT auth verified"
 
 .PHONY: init-proxies

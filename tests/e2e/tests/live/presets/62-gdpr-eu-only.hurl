@@ -6,5 +6,5 @@ Content-Type: application/json
 `{"model":"gpt-4o","messages":[{"role":"user","content":"Hello"}],"max_tokens":10}`
 HTTP 200
 [Asserts]
-jsonpath "$.choices" exists
+jsonpath "$.content" exists
 header "x-ai-provider" exists

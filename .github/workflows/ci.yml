@@ -153,7 +153,7 @@ jobs:
         run: |
           VERSION=6.1.0
           curl -sSfL "https://github.com/Orange-OpenSource/hurl/releases/download/${VERSION}/hurl-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C /usr/local/bin --strip-components=1 "hurl-${VERSION}-x86_64-unknown-linux-gnu/hurl"
+            | tar xz -C /usr/local/bin --strip-components=2 "hurl-${VERSION}-x86_64-unknown-linux-gnu/bin/hurl"
       - name: Install age + python deps
         run: sudo apt-get install -y -qq age python3-jwt python3-cryptography
       - name: Install just
@@ -198,7 +198,7 @@ jobs:
         run: |
           VERSION=6.1.0
           curl -sSfL "https://github.com/Orange-OpenSource/hurl/releases/download/${VERSION}/hurl-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" \
-            | tar xz -C /usr/local/bin --strip-components=1 "hurl-${VERSION}-x86_64-unknown-linux-gnu/hurl"
+            | tar xz -C /usr/local/bin --strip-components=2 "hurl-${VERSION}-x86_64-unknown-linux-gnu/bin/hurl"
       - name: Install just
         uses: taiki-e/install-action@just
       - name: Build grob from source
