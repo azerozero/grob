@@ -357,11 +357,15 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   feature-check:
-    name: Feature Powerset
+    name: Feature Powerset (${{ matrix.shard }}/4)
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -370,13 +374,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: hack
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          shared-key: hack-${{ matrix.shard }}
+          save-if: ${{ github.ref == 'refs/heads/develop' && matrix.shard == 1 }}
           enableCrossOsArchive: true
           restore-keys: |
+            hack-${{ matrix.shard }}-
             hack-
       - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps
+      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --partition count:${{ matrix.shard }}/4
 
   # =========================================================================
   # Stage 2: Tests (gate for everything below)
