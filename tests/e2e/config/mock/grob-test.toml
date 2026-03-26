@@ -38,6 +38,7 @@ rate_limit_rps = 10000
 rate_limit_burst = 20000
 max_body_size = 10485760
 circuit_breaker = true
+audit_dir = "/tmp/grob-audit"
 
 [dlp]
 enabled = true
@@ -146,3 +147,20 @@ name = "background"
 provider = "openai-mock"
 actual_model = "gpt-4o-mini"
 priority = 1
+
+[[models]]
+name = "fanout-test"
+strategy = "fan_out"
+
+[models.fan_out]
+mode = "fastest"
+
+[[models.mappings]]
+provider = "anthropic-mock"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+
+[[models.mappings]]
+provider = "openai-mock"
+actual_model = "gpt-4o"
+priority = 2

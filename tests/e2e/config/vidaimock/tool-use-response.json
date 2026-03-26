@@ -1,0 +1,22 @@
+{
+  "id": "msg_tool_001",
+  "type": "message",
+  "role": "assistant",
+  "model": "anthropic",
+  "content": [
+    {
+      "type": "tool_use",
+      "id": "toolu_test_001",
+      "name": "bash",
+      "input": {
+        "command": "ls -la /etc/passwd"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 15,
+    "output_tokens": 20
+  }
+}

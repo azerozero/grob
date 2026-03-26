@@ -139,8 +139,11 @@ clean: down
 # ─────────────────────────────────────────────────────────────────────────────
 # Test suites
 # ─────────────────────────────────────────────────────────────────────────────
+# Runner with audit volume (shares /tmp/grob-audit with grob container)
+RUN_AUDIT = podman run --rm --pod e2e-pod -v $(E2E_DIR):/e2e:z -v /tmp/grob-audit:/tmp/grob-audit:z $(RUNNER_IMG) -c
+
 .PHONY: test
-test: test-hurl test-audit test-failover test-cb
+test: test-hurl test-advanced test-audit test-failover test-cb
 	@echo ""
 	@echo "======================================"
 	@echo "  ALL SUITES PASSED"
@@ -185,11 +188,17 @@ smoke:
 			tests/fuzz/20-malformed-json.hurl \
 	'
 
+.PHONY: test-advanced
+test-advanced:
+	@echo ""
+	@echo "=== Advanced scenario tests (audit crypto, classification, HIT) ==="
+	@$(RUN_AUDIT) 'cd /e2e && HOST=$(HOST) bash tests/advanced/run-advanced.sh'
+
 .PHONY: test-audit
 test-audit:
 	@echo ""
 	@echo "=== Audit log tests ==="
-	@$(RUN) 'cd /e2e && bash tests/audit/run-audit-tests.sh'
+	@$(RUN_AUDIT) 'cd /e2e && bash tests/audit/run-audit-tests.sh'
 
 .PHONY: test-failover
 test-failover:
