@@ -50,10 +50,18 @@ printf '  ║    • "Token itk_AAAA...AAAA for internal API"            ║\n'
 printf '  ║  Watch the other 3 panes light up.                       ║\n'
 printf '  ╚═══════════════════════════════════════════════════════════╝\n'
 printf '\033[0m\n'
+printf '\033[1;38;5;46m  → Waiting for grob server (bottom-left pane)...\033[0m\n'
+# Wait for grob to be started by the logs pane
+for i in $(seq 1 30); do
+    curl -sf http://127.0.0.1:13456/health >/dev/null 2>&1 && break
+    sleep 1
+done
 printf '\033[1;38;5;46m  → Launching Claude Code behind grob...\033[0m\n\n'
-sleep 2
-# grob exec starts grob if not running, then launches claude
-exec grob exec --no-stop -- claude 2>/tmp/grob-demo.log
+sleep 1
+# Set the proxy env vars manually (grob exec would start grob, but it's already running)
+export ANTHROPIC_BASE_URL="http://127.0.0.1:13456"
+export OPENAI_BASE_URL="http://127.0.0.1:13456/v1"
+exec claude
 EOF
 chmod +x "$P1"
 
@@ -78,31 +86,11 @@ cat > "$P3" << 'EOF'
 #!/usr/bin/env bash
 export TERM=xterm-256color
 clear
-printf '\033[1;38;5;208m  📤 GROB SERVER LOGS\033[0m\n'
-printf '\033[38;5;245m  DLP actions, routing decisions, provider calls\033[0m\n\n'
-# Wait for grob log file
-LOG="/tmp/grob-demo.log"
-for i in $(seq 1 30); do
-    [ -f "$LOG" ] && [ -s "$LOG" ] && break
-    sleep 1
-done
-if [ -f "$LOG" ]; then
-    # Colorize DLP lines in red, routing in cyan, errors in yellow
-    tail -f "$LOG" 2>/dev/null | while IFS= read -r line; do
-        if echo "$line" | grep -qi "dlp\|redact\|block\|canary"; then
-            printf '\033[1;31m%s\033[0m\n' "$line"
-        elif echo "$line" | grep -qi "route\|provider\|fallback"; then
-            printf '\033[36m%s\033[0m\n' "$line"
-        elif echo "$line" | grep -qi "error\|warn"; then
-            printf '\033[33m%s\033[0m\n' "$line"
-        else
-            printf '\033[38;5;245m%s\033[0m\n' "$line"
-        fi
-    done
-else
-    printf '\033[38;5;245m  Waiting for grob log...\033[0m\n'
-    while true; do [ -f "$LOG" ] && exec tail -f "$LOG"; sleep 2; done
-fi
+printf '\033[1;38;5;208m  📤 GROB SERVER — debug mode\033[0m\n'
+printf '\033[38;5;245m  DLP swaps visible in real-time (stderr)\033[0m\n\n'
+# Run grob in foreground with debug logging — this IS the grob server
+# Claude Code in the other pane will connect to it
+RUST_LOG=info,grob::features::dlp=debug,grob::server::dispatch=debug exec grob start
 EOF
 chmod +x "$P3"
 
@@ -133,8 +121,8 @@ while true; do
     [ -n "$AUDIT_FILE" ] && break
     sleep 2
 done
-printf '\033[38;5;245m  Tailing %s\033[0m\n\n' "$AUDIT_FILE"
-tail -f "$AUDIT_FILE" 2>/dev/null | while IFS= read -r line; do
+printf '\033[38;5;245m  Tailing %s (new entries only)\033[0m\n\n' "$AUDIT_FILE"
+tail -f -n 0 "$AUDIT_FILE" 2>/dev/null | while IFS= read -r line; do
     cls=$(echo "$line" | python3 -c "import json,sys; e=json.load(sys.stdin); print(e.get('classification','?'))" 2>/dev/null || echo "?")
     model=$(echo "$line" | python3 -c "import json,sys; print(json.load(sys.stdin).get('model_name','?')[:20])" 2>/dev/null || echo "?")
     dlp=$(echo "$line" | python3 -c "import json,sys; r=json.load(sys.stdin).get('dlp_rules_triggered',[]); print(' '.join(r) if r else '-')" 2>/dev/null || echo "-")
@@ -150,15 +138,15 @@ chmod +x "$P4"
 
 # ── Build 4-pane tmux ────────────────────────────────────────────────
 launch() {
-    # Top-left: Claude Code
-    tmux new-session -d -s "$SESSION" -x 200 -y 50 "bash $P1"
+    # Bottom-left: grob server (starts FIRST — other panes wait for it)
+    tmux new-session -d -s "$SESSION" -x 200 -y 50 "bash $P3"
+    # Top-left: Claude Code (waits for grob health, then launches)
+    tmux split-window -v -b -t "$SESSION:0.0" "bash $P1"
     # Top-right: grob watch
     tmux split-window -h -t "$SESSION:0.0" "bash $P2"
-    # Bottom-left: server logs
-    tmux split-window -v -t "$SESSION:0.0" "bash $P3"
     # Bottom-right: audit log
-    tmux split-window -v -t "$SESSION:0.1" "bash $P4"
-    # Focus Claude Code pane
+    tmux split-window -h -t "$SESSION:0.2" "bash $P4"
+    # Focus Claude Code pane (top-left)
     tmux select-pane -t "$SESSION:0.0"
 
     # Auto-type demo prompts into Claude Code after it starts
