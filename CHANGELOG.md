@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.8](https://github.com/azerozero/grob/compare/v0.29.7...v0.29.8) - 2026-03-26
+
+### Fixed
+
+- *(ci)* single e2e job using GHCR image + podman pod
+
 ## [0.29.7](https://github.com/azerozero/grob/compare/v0.29.6...v0.29.7) - 2026-03-26
 
 ### Fixed
