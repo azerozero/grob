@@ -71,16 +71,6 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --profile ci
       - run: cargo test --doc
-      - name: Upload binary for e2e
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo build --release
-      - name: Upload grob binary
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
-        with:
-          name: grob-binary
-          path: target/release/grob
-          retention-days: 1
 
   coverage:
     name: Coverage
@@ -152,19 +142,16 @@ jobs:
     needs: [test]
     steps:
       - uses: actions/checkout@v4
-      - name: Install podman
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq podman
-      - name: Download grob binary
-        uses: actions/download-artifact@v4
-        with:
-          name: grob-binary
-          path: /tmp/grob-bin
-      - name: Build grob image from CI binary
+      - name: Install podman + crane
         run: |
-          chmod +x /tmp/grob-bin/grob
-          printf 'FROM debian:bookworm-slim\nCOPY grob /usr/local/bin/grob\nENTRYPOINT ["grob"]\nCMD ["run","--json-logs","--host","0.0.0.0","--port","13456"]\n' \
-            > /tmp/Containerfile
-          podman build -t localhost/grob:e2e -f /tmp/Containerfile /tmp/grob-bin
+          sudo apt-get update -qq && sudo apt-get install -y -qq podman
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin crane
+      - name: Pull grob image (GHCR via crane)
+        run: |
+          crane pull ghcr.io/${{ github.repository }}:latest /tmp/grob-oci.tar
+          podman load -i /tmp/grob-oci.tar
+          podman tag ghcr.io/${{ github.repository }}:latest localhost/grob:e2e
       - name: Build test images
         working-directory: tests/e2e
         run: |
@@ -191,19 +178,16 @@ jobs:
     needs: [e2e]
     steps:
       - uses: actions/checkout@v4
-      - name: Install podman
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq podman
-      - name: Download grob binary
-        uses: actions/download-artifact@v4
-        with:
-          name: grob-binary
-          path: /tmp/grob-bin
-      - name: Build grob image from CI binary
+      - name: Install podman + crane
         run: |
-          chmod +x /tmp/grob-bin/grob
-          printf 'FROM debian:bookworm-slim\nCOPY grob /usr/local/bin/grob\nENTRYPOINT ["grob"]\nCMD ["run","--json-logs","--host","0.0.0.0","--port","13456"]\n' \
-            > /tmp/Containerfile
-          podman build -t localhost/grob:e2e -f /tmp/Containerfile /tmp/grob-bin
+          sudo apt-get update -qq && sudo apt-get install -y -qq podman
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin crane
+      - name: Pull grob image (GHCR via crane)
+        run: |
+          crane pull ghcr.io/${{ github.repository }}:latest /tmp/grob-oci.tar
+          podman load -i /tmp/grob-oci.tar
+          podman tag ghcr.io/${{ github.repository }}:latest localhost/grob:e2e
       - name: Build test images
         working-directory: tests/e2e
         run: |
