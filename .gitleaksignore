@@ -118,6 +118,6 @@ tests/e2e/tests/secu/35-dlp-multi-rule.hurl:aws-access-token:11
 tests/e2e/tests/secu/38-dlp-streaming-secrets.hurl:aws-access-token:8
 tests/e2e/tests/secu/38-dlp-streaming-secrets.hurl:aws-access-token:12
 # Demo script — intentional fake AWS keys for DLP demonstration
-demo/run.sh:aws-access-token:107
-demo/run.sh:aws-access-token:110
-demo/run.sh:aws-access-token:168
+demo/run.sh:aws-access-token:152
+demo/run.sh:aws-access-token:153
+demo/run.sh:aws-access-token:192

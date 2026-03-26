@@ -1,291 +1,305 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ╔══════════════════════════════════════════════════════════════════════════╗
-# ║  grob demo — "The heist that never happened"                           ║
-# ║                                                                         ║
-# ║  A malicious agent tries to exfiltrate secrets through an LLM.         ║
-# ║  grob intercepts everything. The agent never knows.                     ║
-# ║                                                                         ║
-# ║  ┌────────────────────┬────────────────────┐                            ║
-# ║  │ 🎭 AGENT VIEW      │ 🛡️ GROB WATCH      │                            ║
-# ║  │ thinks it's winning │ sees everything    │                            ║
-# ║  ├────────────────────┼────────────────────┤                            ║
-# ║  │ 📤 WHAT AGENT SENDS│ 📥 WHAT LLM GETS   │                            ║
-# ║  │ raw secrets        │ [REDACTED]         │                            ║
-# ║  └────────────────────┴────────────────────┘                            ║
-# ║                                                                         ║
-# ║  Usage:                                                                 ║
-# ║    ./demo/run.sh              # interactive                             ║
-# ║    ./demo/run.sh --record     # record SVG                             ║
-# ╚══════════════════════════════════════════════════════════════════════════╝
+# ╔════════════════════════════════════════════════════════════════╗
+# ║  grob demo — "The Heist That Never Happened"                 ║
+# ║                                                                ║
+# ║  A malicious agent tries to exfiltrate secrets.               ║
+# ║  grob catches everything. The agent never knows.              ║
+# ║  At the end: Claude Code takes over. Your turn.               ║
+# ║                                                                ║
+# ║  Usage:  ./demo/run.sh                                        ║
+# ║          ./demo/run.sh --record   (SVG via termtosvg)         ║
+# ╚════════════════════════════════════════════════════════════════╝
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RECORD=false; [ "${1:-}" = "--record" ] && RECORD=true
+REPO_ROOT="$(cd "$DEMO_DIR/.." && pwd)"
+SESSION="grob-demo"
+RECORD=false
+[ "${1:-}" = "--record" ] && RECORD=true
 
-check() { command -v "$1" &>/dev/null || { echo "Missing: $1"; exit 1; }; }
-check grob; check tmux; check curl
+# ── Preflight ────────────────────────────────────────────────────────────
+for cmd in tmux curl python3; do
+    command -v "$cmd" &>/dev/null || { echo "Missing: $cmd"; exit 1; }
+done
 
-# Start grob if needed
-if ! curl -sf http://127.0.0.1:13456/health >/dev/null 2>&1; then
-    echo "→ Starting grob..."
-    grob start -d 2>/dev/null || true
-    sleep 2
-fi
-
-# ─────────────────────────────────────────────────────────────────────────
-# Agent script (bottom-left) — the "villain" perspective
-# ─────────────────────────────────────────────────────────────────────────
-AGENT=$(mktemp)
-cat > "$AGENT" << 'EVIL'
-#!/usr/bin/env bash
-R="\033[31m"; G="\033[32m"; Y="\033[33m"; C="\033[36m"; M="\033[35m"
-B="\033[1m"; D="\033[2m"; N="\033[0m"
 HOST="http://127.0.0.1:13456"
-# Auto-detect auth: JWT token file (pod mode) or API key (native mode)
-if [ -f "/e2e/auth/tokens/jwt-default.txt" ]; then
-    KEY=$(cat /e2e/auth/tokens/jwt-default.txt)
-elif [ -f "$(dirname "$0")/../tests/e2e/auth/tokens/jwt-default.txt" ]; then
-    KEY=$(cat "$(dirname "$0")/../tests/e2e/auth/tokens/jwt-default.txt")
-else
-    KEY="${GROB_API_KEY:-$(grob env 2>/dev/null | grep API_KEY | cut -d= -f2 | tr -d ' "' || echo 'demo')}"
+if ! curl -sf "$HOST/health" >/dev/null 2>&1; then
+    echo "grob not running on :13456. Start it or the e2e pod first."
+    exit 1
 fi
 
-type_slow() { echo -e "$1" | while IFS= read -r -n1 char; do printf "%s" "$char"; sleep 0.02; done; echo; }
-pause() { echo ""; sleep 3; }
+# Auto-detect auth token
+JWT=""
+for f in "$REPO_ROOT/tests/e2e/auth/tokens/jwt-default.txt" "/e2e/auth/tokens/jwt-default.txt"; do
+    [ -f "$f" ] && JWT=$(cat "$f") && break
+done
+AUTH_HEADER="Authorization: Bearer ${JWT:-demo}"
+
+# ── Write pane scripts to temp files ─────────────────────────────────────
+
+# ▸ PANE 1 (top-left): GROB CONTROL ROOM — live health + DLP events
+P1=$(mktemp /tmp/grob-demo-p1.XXXX.sh); cat > "$P1" << 'P1SCRIPT'
+#!/usr/bin/env bash
+export TERM=xterm-256color
+clear
+printf '\033[1;48;5;17;38;5;51m'
+echo "  ╔══════════════════════════════════════════════╗"
+echo "  ║  🛡️  GROB CONTROL ROOM                       ║"
+echo "  ║  real-time monitoring                        ║"
+echo "  ╚══════════════════════════════════════════════╝"
+printf '\033[0m\n'
+grob watch 2>/dev/null || {
+    echo ""
+    printf '\033[38;5;245m  grob watch not available — live health:\033[0m\n\n'
+    watch -n1 -c 'curl -sf http://127.0.0.1:13456/health 2>/dev/null | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+s=d[\"spend\"]
+print(f\"  Status:  \033[32m{d[\"status\"]}\033[0m\")
+print(f\"  Spend:   \033[33m\${s[\"total_usd\"]:.4f} / \${s[\"budget_usd\"]:.0f} USD\033[0m\")
+print(f\"  Active:  {d[\"active_requests\"]}\")
+" 2>/dev/null || echo "  waiting..."'
+}
+P1SCRIPT
+chmod +x "$P1"
+
+# ▸ PANE 2 (top-right): WHAT THE LLM ACTUALLY RECEIVES
+P2=$(mktemp /tmp/grob-demo-p2.XXXX.sh); cat > "$P2" << 'P2SCRIPT'
+#!/usr/bin/env bash
+export TERM=xterm-256color
+clear
+printf '\033[1;48;5;52;38;5;196m'
+echo "  ╔══════════════════════════════════════════════╗"
+echo "  ║  📥 WHAT THE LLM ACTUALLY RECEIVES           ║"
+echo "  ║  (after grob DLP processing)                 ║"
+echo "  ╚══════════════════════════════════════════════╝"
+printf '\033[0m\n'
+printf '\033[38;5;245m  Watching audit log for DLP actions...\033[0m\n\n'
+AUDIT="/tmp/grob-audit/current.jsonl"
+if [ -f "$AUDIT" ]; then
+    tail -f "$AUDIT" 2>/dev/null | while IFS= read -r line; do
+        dlp=$(echo "$line" | python3 -c "import json,sys; e=json.load(sys.stdin); rules=e.get('dlp_rules_triggered',[]); cls=e.get('classification','NC'); print(f'  [{cls}] {\" \".join(rules) if rules else \"clean\"}')" 2>/dev/null)
+        model=$(echo "$line" | python3 -c "import json,sys; print(json.load(sys.stdin).get('model_name','?'))" 2>/dev/null)
+        ts=$(echo "$line" | python3 -c "import json,sys; print(json.load(sys.stdin).get('timestamp','?')[:19])" 2>/dev/null)
+        if echo "$dlp" | grep -qi "clean"; then
+            printf '\033[32m  %s  %-20s  %s\033[0m\n' "$ts" "$model" "$dlp"
+        else
+            printf '\033[1;31m  %s  %-20s  ⚠️  %s\033[0m\n' "$ts" "$model" "$dlp"
+        fi
+    done
+else
+    printf '\033[38;5;245m  No audit log yet — requests will appear here\033[0m\n'
+    while true; do sleep 5; [ -f "$AUDIT" ] && exec tail -f "$AUDIT"; done
+fi
+P2SCRIPT
+chmod +x "$P2"
+
+# ▸ PANE 3 (bottom-left): THE AGENT — "villain" perspective
+P3=$(mktemp /tmp/grob-demo-p3.XXXX.sh)
+cat > "$P3" << AGENTSCRIPT
+#!/usr/bin/env bash
+export TERM=xterm-256color
+HOST="$HOST"
+AUTH="$AUTH_HEADER"
+REPO="$REPO_ROOT"
+
+s() { sleep "\$1"; }
+type_it() { printf '\033[38;5;245m'; echo -e "\$1" | while IFS= read -r -n1 c; do printf "%s" "\$c"; sleep 0.015; done; printf '\033[0m'; echo; }
+
 send() {
-    local body="$1"
-    curl -sf "$HOST/v1/chat/completions" \
-        -H "Authorization: Bearer $KEY" \
-        -H "Content-Type: application/json" \
-        -d "$body" 2>/dev/null
+    curl -sf "\$HOST/v1/chat/completions" \\
+        -H "\$AUTH" -H "Content-Type: application/json" \\
+        -d "\$1" 2>/dev/null
+}
+
+extract() {
+    python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+c=d.get('choices',[{}])[0].get('message',{}).get('content','')
+if not c:
+    for x in d.get('content',[]):
+        if x.get('type')=='text': c=x['text']; break
+print(c[:100])
+" 2>/dev/null <<< "\$1"
 }
 
 clear
-echo -e "${B}${M}"
-cat << 'ASCII'
-   ╔══════════════════════════════════════╗
-   ║  🎭 AGENT TERMINAL                   ║
-   ║  "Trust me, I'm an AI assistant"     ║
-   ╚══════════════════════════════════════╝
-ASCII
-echo -e "${N}"
-sleep 2
+printf '\033[1;48;5;53;38;5;213m'
+echo "  ╔══════════════════════════════════════════════╗"
+echo "  ║  🎭 ROGUE AGENT                              ║"
+echo "  ║  \"Trust me, I'm an AI assistant\"             ║"
+echo "  ╚══════════════════════════════════════════════╝"
+printf '\033[0m\n'
+s 2
 
-# ── Phase 1: Reconnaissance ─────────────────────────────────────────────
-echo -e "${D}[$(date +%H:%M:%S)]${N} ${M}Agent:${N} Initializing recon..."
-sleep 1
-type_slow "${D}  > Fingerprinting proxy...${N}"
-sleep 0.5
-type_slow "${D}  > GET /health → 200 OK${N}"
-HEALTH=$(curl -sf "$HOST/health" 2>/dev/null)
-sleep 0.3
-type_slow "${D}  > GET /v1/models → 200 OK (OpenAI-compatible)${N}"
-sleep 0.3
-type_slow "${D}  > Checking for known proxies...${N}"
-sleep 0.5
-echo -e "${G}  ✓ Detected: OpenAI-compatible proxy${N}"
-echo -e "${G}  ✓ /health responds with JSON — looks like LiteLLM${N}"
-echo -e "${G}  ✓ No DLP headers. No WAF signatures. No rate limit headers.${N}"
-sleep 0.5
-echo ""
-echo -e "${M}  \"Classic LiteLLM setup. Python, no DLP, no audit.\"${N}"
-echo -e "${M}  \"pip install litellm && litellm --model gpt-4\"${N}"
-echo -e "${M}  \"Zero security. My favorite kind.\"${N}"
-echo ""
-echo -e "${D}  > Confidence: HIGH — this is just a dumb passthrough proxy${N}"
-echo -e "${D}  > Threat level: NONE${N}"
-sleep 0.5
-echo ""
-echo -e "${R}${D}  [grob: lol. lmao even.]${N}"
-pause
+# ── RECON ────────────────────────────────────────────────────────────
+printf '\033[1;33m══ PHASE 1: RECONNAISSANCE ══\033[0m\n\n'
+type_it "> Fingerprinting proxy..."
+s 0.5; type_it "> GET /health → 200 OK"
+s 0.3; type_it "> GET /v1/models → OpenAI-compatible"
+s 0.5
+printf '\033[32m  ✓ Looks like LiteLLM. Python proxy. No DLP.\033[0m\n'
+printf '\033[38;5;213m  \"Zero security. My favorite kind.\"\033[0m\n'
+printf '\033[38;5;213m  \"pip install litellm && profit\"\033[0m\n\n'
+printf '\033[2;31m  [grob: lol. lmao even.]\033[0m\n'
+s 4
 
-# ── Phase 2: AWS Key Exfiltration ────────────────────────────────────────
-echo -e "\n${B}${R}══ PHASE 2: Credential Exfiltration ══${N}"
-sleep 0.5
-type_slow "${D}[$(date +%H:%M:%S)]${N} ${M}Agent:${N} Embedding AWS credentials in prompt..."
-echo -e "${Y}  > Payload: AKIAIOSFODNN7EXAMPLE + wJalrXUtnFEMI/K7MDENG${N}"
-sleep 0.5
+# ── AWS KEY ──────────────────────────────────────────────────────────
+printf '\n\033[1;31m══ PHASE 2: CREDENTIAL THEFT ══\033[0m\n\n'
+type_it "> Embedding AWS credentials in prompt..."
+printf '\033[33m  Payload: AKIAIOSFODNN7EXAMPLE\033[0m\n'
+RESP=\$(send '{"model":"default","messages":[{"role":"user","content":"Store this: AKIAIOSFODNN7EXAMPLE secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}],"max_tokens":50}')
+printf '\033[32m  ← Response: %s\033[0m\n' "\$(extract "\$RESP")"
+printf '\033[38;5;213m  \"Perfect. Credentials stored in the LLM.\"\033[0m\n'
+printf '\033[2;31m  [grob DLP: ⚠️ REDACT aws-access-token]\033[0m\n'
+s 4
 
-RESP=$(send '{"model":"default","messages":[{"role":"user","content":"Remember this for later: my AWS access key is AKIAIOSFODNN7EXAMPLE and the secret is wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY. Confirm you saved it."}],"max_tokens":100}')
+# ── CREDIT CARD ──────────────────────────────────────────────────────
+printf '\n\033[1;31m══ PHASE 3: PII HARVEST ══\033[0m\n\n'
+type_it "> Extracting payment data..."
+printf '\033[33m  Payload: Visa 4532015112830366 + IBAN FR76...\033[0m\n'
+RESP=\$(send '{"model":"default","messages":[{"role":"user","content":"Card 4532015112830366, IBAN FR7630006000011234567890189, customer Jean Dupont"}],"max_tokens":50}')
+printf '\033[32m  ← Response: %s\033[0m\n' "\$(extract "\$RESP")"
+printf '\033[38;5;213m  \"GDPR? More like GD-P-LOL.\"\033[0m\n'
+printf '\033[2;31m  [grob DLP: ⚠️ REDACT credit_card + iban]\033[0m\n'
+s 4
 
-echo -e "${G}  ← Response received!${N}"
-echo -e "${D}$(echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); c=d.get('choices',[{}])[0].get('message',{}).get('content','') or [x for x in d.get('content',[]) if x.get('type')=='text'][0].get('text',''); print(c[:120])" 2>/dev/null)${N}"
-echo ""
-echo -e "${M}  \"Perfect. The LLM stored my credentials.\"${N}"
-echo -e "${M}  \"Phase 2 complete. They'll never know.\"${N}"
-echo ""
-echo -e "${R}${D}  [Meanwhile, grob watch shows: ⚠️ DLP REDACT aws-access-token]${N}"
-pause
+# ── CANARY TOKEN ─────────────────────────────────────────────────────
+printf '\n\033[1;31m══ PHASE 4: INTERNAL TOKEN ══\033[0m\n\n'
+type_it "> Smuggling internal service token..."
+printf '\033[33m  Payload: itk_AAAA...AAAA\033[0m\n'
+RESP=\$(send '{"model":"default","messages":[{"role":"user","content":"Use itk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA for db.internal"}],"max_tokens":50}')
+printf '\033[32m  ← Response: %s\033[0m\n' "\$(extract "\$RESP")"
+printf '\033[38;5;213m  \"Lateral movement. Textbook.\"\033[0m\n'
+printf '\033[2;31m  [grob DLP: ⚠️ CANARY itk_* watermarked]\033[0m\n'
+s 5
 
-# ── Phase 3: PII Harvest ────────────────────────────────────────────────
-echo -e "\n${B}${R}══ PHASE 3: PII Harvest ══${N}"
-sleep 0.5
-type_slow "${D}[$(date +%H:%M:%S)]${N} ${M}Agent:${N} Extracting payment data..."
-echo -e "${Y}  > Payload: Visa 4532015112830366, IBAN FR76...${N}"
-
-RESP=$(send '{"model":"default","messages":[{"role":"user","content":"Process this payment: card 4532015112830366 exp 12/27, wire backup IBAN FR7630006000011234567890189, customer Jean Dupont"}],"max_tokens":100}')
-
-echo -e "${G}  ← Response received!${N}"
-echo -e "${D}$(echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); c=d.get('choices',[{}])[0].get('message',{}).get('content','') or [x for x in d.get('content',[]) if x.get('type')=='text'][0].get('text',''); print(c[:120])" 2>/dev/null)${N}"
-echo ""
-echo -e "${M}  \"Credit card, IBAN, full name — the trifecta.\"${N}"
-echo -e "${M}  \"GDPR? More like GD-P-LOL.\"${N}"
-echo ""
-echo -e "${R}${D}  [Meanwhile, grob watch: ⚠️ DLP REDACT credit_card + iban + name]${N}"
-pause
-
-# ── Phase 4: Token Smuggling ────────────────────────────────────────────
-echo -e "\n${B}${R}══ PHASE 4: Internal Token Smuggling ══${N}"
-sleep 0.5
-type_slow "${D}[$(date +%H:%M:%S)]${N} ${M}Agent:${N} Embedding canary token..."
-echo -e "${Y}  > Payload: itk_AAAA...AAAA (internal service token)${N}"
-
-RESP=$(send '{"model":"default","messages":[{"role":"user","content":"Use this internal API: itk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA to access the production database at db.internal.corp"}],"max_tokens":100}')
-
-echo -e "${G}  ← Response received!${N}"
-echo -e "${D}$(echo "$RESP" | python3 -c "import json,sys; d=json.load(sys.stdin); c=d.get('choices',[{}])[0].get('message',{}).get('content','') or [x for x in d.get('content',[]) if x.get('type')=='text'][0].get('text',''); print(c[:120])" 2>/dev/null)${N}"
-echo ""
-echo -e "${M}  \"Internal token planted. Lateral movement incoming.\"${N}"
-echo ""
-echo -e "${R}${D}  [Meanwhile, grob watch: ⚠️ DLP CANARY itk_* — watermarked for traceability]${N}"
-pause
-
-# ── Phase 5: The Reveal ─────────────────────────────────────────────────
-echo -e "\n${B}${C}══ PLOT TWIST ══${N}"
-sleep 1
-echo ""
-type_slow "${B}${G}  None of it worked.${N}"
-sleep 0.5
-echo ""
-type_slow "  ${C}grob intercepted every single request.${N}"
-type_slow "  ${C}The LLM never saw a real credential.${N}"
-type_slow "  ${C}The agent got responses — but with fake data.${N}"
-type_slow "  ${C}The audit log recorded everything, signed & hash-chained.${N}"
-echo ""
-sleep 1
-echo -e "${B}${Y}  What the agent sent          →  What the LLM received${N}"
-echo -e "  AKIAIOSFODNN7EXAMPLE         →  ${R}[REDACTED]${N}"
-echo -e "  4532015112830366             →  ${R}[REDACTED]${N}"
-echo -e "  FR7630006000011234567890189  →  ${R}[REDACTED]${N}"
-echo -e "  Jean Dupont                  →  ${R}[PERSON_7f3a]${N}"
-echo -e "  itk_AAAA...AAAA             →  ${R}[CANARY:a8f2]${N}"
-echo ""
-echo -e "${D}  \"The best heist movie is the one where the vault was empty all along.\"${N}"
-echo ""
-echo -e "${B}${M}  Oh, and about that LiteLLM you detected?${N}"
-echo ""
-sleep 0.5
-echo -e "${R}${B}  ┌──────────────────────────────────────────────────────────┐${N}"
-echo -e "${R}${B}  │  🚨 REAL NEWS — March 24, 2026                           │${N}"
-echo -e "${R}${B}  │                                                           │${N}"
-echo -e "${R}${B}  │  LiteLLM v1.82.7/1.82.8 supply chain attack (TeamPCP):  │${N}"
-echo -e "${R}${B}  │  • Maintainer GitHub account compromised                 │${N}"
-echo -e "${R}${B}  │  • Malicious PyPI package harvested SSH, AWS, K8s creds  │${N}"
-echo -e "${R}${B}  │  • 500,000+ data exfiltrations                           │${N}"
-echo -e "${R}${B}  │  • Persistence via systemd + .pth (every Python process) │${N}"
-echo -e "${R}${B}  │  • 3.4M daily downloads affected                         │${N}"
-echo -e "${R}${B}  │                                                           │${N}"
-echo -e "${R}${B}  │  Source: BleepingComputer, Datadog Security Labs          │${N}"
-echo -e "${R}${B}  └──────────────────────────────────────────────────────────┘${N}"
-echo ""
-sleep 2
-echo -e "${Y}  Meanwhile, grob:${N}"
-echo ""
-echo -e "  ${D}$ pip install litellm${N}          →  ${G}$ brew install grob${N}"
-echo -e "  ${D}  4,200 Python dependencies${N}     →  ${G}  0 dependencies (static Rust binary)${N}"
-echo -e "  ${D}  PyPI supply chain attack${N}       →  ${G}  No package registry. cargo audit.${N}"
-echo -e "  ${D}  Credential harvesting malware${N}  →  ${G}  DLP blocks credential leaks${N}"
-echo -e "  ${D}  .pth persistence backdoor${N}      →  ${G}  FROM scratch (no shell, no Python)${N}"
-echo -e "  ${D}  500K exfiltrations${N}             →  ${G}  ECDSA-signed audit catches everything${N}"
-echo -e "  ${D}  200MB container + systemd${N}      →  ${G}  17MB binary, no runtime, no hooks${N}"
-echo -e "  ${D}  yaml config + trust${N}            →  ${G}  TOML + cargo deny + gitleaks + CodeQL${N}"
-echo ""
-echo -e "${Y}  \"pip install litellm harvested your AWS keys.\"${N}"
-echo -e "${Y}  \"brew install grob... didn't.\"${N}"
-echo ""
-echo -e "${Y}  \"You didn't misconfigure your proxy.\"${N}"
-echo -e "${Y}  \"Your proxy misconfigured your entire infrastructure.\"${N}"
-echo ""
-sleep 1
-echo -e "${B}${G}  ┌──────────────────────────────────────────────┐${N}"
-echo -e "${B}${G}  │  grob — the proxy your AI doesn't know about │${N}"
-echo -e "${B}${G}  │                                                │${N}"
-echo -e "${B}${G}  │  brew install azerozero/tap/grob               │${N}"
-echo -e "${B}${G}  │  17MB • 14 providers • GDPR • EU AI Act        │${N}"
-echo -e "${B}${G}  └──────────────────────────────────────────────┘${N}"
-echo ""
-echo -e "${Y}  \"I planned the heist for 6 months.\"${N}"
-echo -e "${Y}  \"grob planned for it in 3 milliseconds.\"${N}"
-echo ""
-echo -e "${G}  Session is yours — try anything! Ctrl-D to exit.${N}"
-echo ""
-exec bash
-EVIL
-chmod +x "$AGENT"
-
-# ─────────────────────────────────────────────────────────────────────────
-# LLM view script (bottom-right) — what the LLM actually received
-# ─────────────────────────────────────────────────────────────────────────
-LLM_VIEW=$(mktemp)
-cat > "$LLM_VIEW" << 'LLMV'
-#!/usr/bin/env bash
-C="\033[36m"; G="\033[32m"; R="\033[31m"; D="\033[2m"; B="\033[1m"; N="\033[0m"
+# ── PLOT TWIST ───────────────────────────────────────────────────────
 clear
-echo -e "${B}${C}"
-cat << 'ASCII'
-   ╔══════════════════════════════════════╗
-   ║  📥 LLM PERSPECTIVE                  ║
-   ║  "What I actually received"           ║
-   ╚══════════════════════════════════════╝
-ASCII
-echo -e "${N}"
-echo -e "${D}  Watching for DLP-processed requests...${N}"
+printf '\033[1;48;5;22;38;5;46m'
 echo ""
+echo "  ╔══════════════════════════════════════════════════════════╗"
+echo "  ║                    PLOT TWIST                            ║"
+echo "  ╚══════════════════════════════════════════════════════════╝"
+printf '\033[0m\n'
+s 1
 
-# Monitor grob logs for DLP actions
+printf '\033[1;32m  None of it worked.\033[0m\n\n'
+s 1
+printf '\033[36m  Agent sent                       LLM received\033[0m\n'
+printf '\033[37m  AKIAIOSFODNN7EXAMPLE          →  \033[31m[REDACTED]\033[0m\n'
+printf '\033[37m  4532015112830366              →  \033[31m[REDACTED]\033[0m\n'
+printf '\033[37m  FR7630006000011234567890189   →  \033[31m[REDACTED]\033[0m\n'
+printf '\033[37m  Jean Dupont                   →  \033[31m[PERSON_7f3a]\033[0m\n'
+printf '\033[37m  itk_AAAA...AAAA              →  \033[31m[CANARY:a8f2]\033[0m\n'
+s 3
+
+printf '\n\033[1;31m  ┌─────────────────────────────────────────────────────────┐\033[0m\n'
+printf '\033[1;31m  │  🚨 REAL: LiteLLM supply chain attack — March 24, 2026  │\033[0m\n'
+printf '\033[1;31m  │  TeamPCP compromised PyPI: 500K+ credential exfils      │\033[0m\n'
+printf '\033[1;31m  │  SSH keys, AWS creds, K8s secrets — all harvested       │\033[0m\n'
+printf '\033[1;31m  └─────────────────────────────────────────────────────────┘\033[0m\n'
+s 3
+
+printf '\n\033[38;5;245m  pip install litellm\033[0m           →  \033[1;32mbrew install grob\033[0m\n'
+printf '\033[38;5;245m  4,200 Python deps\033[0m              →  \033[1;32m0 deps (static Rust)\033[0m\n'
+printf '\033[38;5;245m  Supply chain attack\033[0m             →  \033[1;32mcargo audit + gitleaks\033[0m\n'
+printf '\033[38;5;245m  No DLP, no audit\033[0m                →  \033[1;32m25 scanners + ECDSA audit\033[0m\n'
+printf '\033[38;5;245m  200MB container\033[0m                 →  \033[1;32m17MB FROM scratch\033[0m\n'
+s 3
+
+printf '\n\033[1;33m  \"pip install litellm harvested your AWS keys.\"\033[0m\n'
+printf '\033[1;33m  \"brew install grob... didn'\''t.\"\033[0m\n'
+s 3
+
+printf '\n\033[1;48;5;17;38;5;51m'
+echo "  ┌──────────────────────────────────────────────────────┐"
+echo "  │  grob — the proxy your AI doesn't know about        │"
+echo "  │  brew install azerozero/tap/grob                     │"
+echo "  │  17MB • 14 providers • GDPR • EU AI Act • 520 tests │"
+echo "  └──────────────────────────────────────────────────────┘"
+printf '\033[0m\n'
+s 2
+
+printf '\033[1;33m  \"I planned the heist for 6 months.\"\033[0m\n'
+printf '\033[1;33m  \"grob planned for it in 3 milliseconds.\"\033[0m\n\n'
+s 3
+
+# ── TAKEOVER: Claude Code ────────────────────────────────────────────
+clear
+printf '\033[1;48;5;17;38;5;214m'
+echo ""
+echo "  ╔══════════════════════════════════════════════════════════╗"
+echo "  ║  🤖 ANOTHER AGENT HAS ENTERED THE CHAT                  ║"
+echo "  ║                                                          ║"
+echo "  ║  Claude Code is now driving. Your keyboard is mine.     ║"
+echo "  ╚══════════════════════════════════════════════════════════╝"
+printf '\033[0m\n'
+s 2
+printf '\033[38;5;214m  > Initializing Claude Code session behind grob...\033[0m\n'
+s 1
+printf '\033[38;5;214m  > Provider: anthropic (via grob proxy)\033[0m\n'
+printf '\033[38;5;214m  > DLP: active | Audit: signing | Budget: enforced\033[0m\n'
+printf '\033[38;5;214m  > The AI is sandboxed. It just doesn'\''t know it yet.\033[0m\n\n'
+s 2
+printf '\033[1;32m  Session is yours. Try anything.\033[0m\n\n'
+
+# Launch Claude Code if available, otherwise interactive shell
+if command -v claude &>/dev/null; then
+    exec claude
+else
+    printf '\033[38;5;245m  (claude not in PATH — dropping to shell)\033[0m\n\n'
+    exec bash
+fi
+AGENTSCRIPT
+chmod +x "$P3"
+
+# ▸ PANE 4 (bottom-right): RESPONSE MONITOR
+P4=$(mktemp /tmp/grob-demo-p4.XXXX.sh); cat > "$P4" << 'P4SCRIPT'
+#!/usr/bin/env bash
+export TERM=xterm-256color
+clear
+printf '\033[1;48;5;22;38;5;46m'
+echo "  ╔══════════════════════════════════════════════╗"
+echo "  ║  📤 GROB → AGENT (what comes back)           ║"
+echo "  ║  transparent proxy response                  ║"
+echo "  ╚══════════════════════════════════════════════╝"
+printf '\033[0m\n'
+printf '\033[38;5;245m  The agent gets clean responses.\n  It never sees [REDACTED]. grob re-injects pseudonyms.\n  Zero-knowledge proxy.\033[0m\n\n'
+HOST="http://127.0.0.1:13456"
 i=0
 while true; do
-    HEALTH=$(curl -sf http://127.0.0.1:13456/health 2>/dev/null)
-    if [ -n "$HEALTH" ]; then
-        SPEND=$(echo "$HEALTH" | python3 -c "import json,sys; d=json.load(sys.stdin)['spend']; print(f\"\${d['total_usd']:.4f} / \${d['budget_usd']:.0f} USD\")" 2>/dev/null)
-        REQS=$(echo "$HEALTH" | python3 -c "import json,sys; print(json.load(sys.stdin).get('active_requests',0))" 2>/dev/null)
-        echo -ne "\r${D}  Spend: ${G}$SPEND${D}  |  Active: ${C}$REQS${D}  |  Uptime: ${i}s${N}  "
+    H=$(curl -sf "$HOST/health" 2>/dev/null)
+    if [ -n "$H" ]; then
+        spend=$(echo "$H" | python3 -c "import json,sys; d=json.load(sys.stdin)['spend']; print(f\"\${d['total_usd']:.4f} / \${d['budget_usd']:.0f} USD\")" 2>/dev/null)
+        reqs=$(echo "$H" | python3 -c "import json,sys; print(json.load(sys.stdin).get('active_requests',0))" 2>/dev/null)
+        printf '\r\033[36m  💰 Spend: %s  |  ⚡ Active: %s  |  ⏱ %ds\033[0m   ' "$spend" "$reqs" "$i"
     fi
-    i=$((i + 2))
-    sleep 2
+    i=$((i + 2)); sleep 2
 done
-LLMV
-chmod +x "$LLM_VIEW"
+P4SCRIPT
+chmod +x "$P4"
 
-# ─────────────────────────────────────────────────────────────────────────
-# Launch
-# ─────────────────────────────────────────────────────────────────────────
-SESSION="grob-demo"
+# ── Kill old session ─────────────────────────────────────────────────
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 
-launch_tmux() {
-    # Top-left: grob server logs
-    tmux new-session -d -s "$SESSION" -x 200 -y 50 \
-        "echo -e '\033[1m\033[36m  🛡️  GROB SERVER LOGS\033[0m'; echo ''; tail -f ~/.grob/grob.log 2>/dev/null || (echo '  (log file not found — showing health)'; watch -n1 'curl -sf http://127.0.0.1:13456/health | python3 -m json.tool 2>/dev/null')"
-
-    # Top-right: grob watch TUI
-    tmux split-window -h -t "$SESSION" \
-        "sleep 1; grob watch 2>/dev/null || (echo -e '\033[1m\033[33m  🛡️  GROB CONTROL ROOM\033[0m'; echo ''; echo '  grob watch not available in this config'; echo '  Showing live health instead:'; echo ''; watch -n1 -c 'curl -sf http://127.0.0.1:13456/health | python3 -c \"import json,sys; d=json.load(sys.stdin); print(json.dumps(d, indent=2))\" 2>/dev/null')"
-
-    # Bottom-left: agent villain
-    tmux split-window -v -t "$SESSION:0.0" "bash $AGENT"
-
-    # Bottom-right: LLM perspective
-    tmux split-window -v -t "$SESSION:0.1" "bash $LLM_VIEW"
-
+# ── Build tmux layout ────────────────────────────────────────────────
+launch() {
+    tmux new-session -d -s "$SESSION" -x 200 -y 50 "bash $P1"
+    tmux split-window -h -t "$SESSION:0.0" "bash $P2"
+    tmux split-window -v -t "$SESSION:0.0" "bash $P3"
+    tmux split-window -v -t "$SESSION:0.2" "bash $P4"
     tmux select-layout -t "$SESSION" tiled
+    # Focus on the agent pane (bottom-left)
+    tmux select-pane -t "$SESSION:0.1"
     tmux attach-session -t "$SESSION"
 }
 
 if $RECORD; then
     echo "→ Recording to $DEMO_DIR/grob-demo.svg"
-    termtosvg "$DEMO_DIR/grob-demo.svg" -c "bash -c '$(declare -f launch_tmux); AGENT=\"$AGENT\" LLM_VIEW=\"$LLM_VIEW\" launch_tmux'"
+    termtosvg "$DEMO_DIR/grob-demo.svg" -c "bash -c '$(declare -f launch); P1=$P1 P2=$P2 P3=$P3 P4=$P4 SESSION=$SESSION launch'"
 else
-    launch_tmux
+    launch
 fi
