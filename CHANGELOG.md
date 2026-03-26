@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.12](https://github.com/azerozero/grob/compare/v0.29.11...v0.29.12) - 2026-03-26
+
+### Fixed
+
+- *(ci)* e2e tests use binary artifact from test job, not GHCR
+- *(ci)* build grob from current commit via rust-cache, not GHCR latest
+
+### Other
+
+- *(deps)* update aws-lc-sys 0.39.0, aws-lc-rs 1.16.2, rustls 0.23.37
+
 ## [0.29.11](https://github.com/azerozero/grob/compare/v0.29.10...v0.29.11) - 2026-03-26
 
 ### Fixed
