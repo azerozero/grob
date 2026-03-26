@@ -4,7 +4,8 @@
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
-file,../../fixtures/dlp/prompt-with-jwt.json;
-HTTP [200, 400]
+file,fixtures/dlp/prompt-with-jwt.json;
+HTTP 200
 [Asserts]
 body not contains "TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
+jsonpath "$.content" exists

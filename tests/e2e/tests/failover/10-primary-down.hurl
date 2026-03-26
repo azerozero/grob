@@ -5,7 +5,7 @@
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
-file,../../fixtures/chat-simple.json;
+file,fixtures/chat-simple.json;
 HTTP 200
 [Asserts]
-jsonpath "$.choices[0].message.content" exists
+jsonpath "$.content[0].text" exists

@@ -4,8 +4,9 @@
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
-file,../../fixtures/chat-simple.json;
+file,fixtures/chat-simple.json;
 HTTP 200
 [Asserts]
-jsonpath "$.choices" exists
+jsonpath "$.content" exists
+jsonpath "$.usage" exists
 # When close to budget limit, a warning header may be present

@@ -1,0 +1,46 @@
+# E2E test runner — all test tooling in one image
+# Contains: hurl, k6, python3+PyJWT+cryptography, openssl, age, curl, bash
+#
+# Usage:
+#   podman build -t localhost/e2e-runner:latest tests/e2e/images/runner/
+#   podman run --pod e2e-pod -v ./tests/e2e:/e2e:z localhost/e2e-runner:latest
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    ca-certificates \
+    openssl \
+    python3 \
+    python3-pip \
+    python3-venv \
+    jq \
+    libxml2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Hurl — HTTP test runner
+ARG HURL_VERSION=6.1.1
+RUN curl -fsSL "https://github.com/Orange-OpenSource/hurl/releases/download/${HURL_VERSION}/hurl_${HURL_VERSION}_amd64.deb" \
+      -o /tmp/hurl.deb && \
+    dpkg -i /tmp/hurl.deb && rm /tmp/hurl.deb
+
+# k6 — load testing
+ARG K6_VERSION=0.56.0
+RUN curl -fsSL "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k6-v${K6_VERSION}-linux-amd64.tar.gz" \
+      | tar xz -C /tmp && \
+    mv /tmp/k6-v${K6_VERSION}-linux-amd64/k6 /usr/local/bin/k6 && \
+    chmod +x /usr/local/bin/k6
+
+# age — encryption for audit tests
+RUN curl -fsSL "https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-amd64.tar.gz" \
+      | tar xz -C /tmp && \
+    mv /tmp/age/age /usr/local/bin/age && \
+    mv /tmp/age/age-keygen /usr/local/bin/age-keygen && \
+    chmod +x /usr/local/bin/age /usr/local/bin/age-keygen
+
+# Python deps for JWT generation
+RUN pip3 install --break-system-packages --no-cache-dir PyJWT cryptography
+
+WORKDIR /e2e
+ENTRYPOINT ["bash"]

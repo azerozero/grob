@@ -5,4 +5,4 @@ POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: text/plain
 `{"model":"gpt-4o","messages":[{"role":"user","content":"test"}],"max_tokens":10}`
-HTTP [400, 415]
+HTTP 415

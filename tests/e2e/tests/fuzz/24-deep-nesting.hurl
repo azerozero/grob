@@ -5,5 +5,5 @@
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
-file,../../fixtures/malformed/nested-1000.json;
-HTTP [200, 400, 413]
+file,fixtures/malformed/nested-1000.json;
+HTTP 422

@@ -2,18 +2,19 @@
 set -euo pipefail
 
 # Creates three Toxiproxy proxies that forward incoming connections on the
-# provider mock ports to MockLLM on port 8000.
+# provider mock ports to VidaiMock on port 8100.
 #
 # Proxy layout:
-#   anthropic-mock  0.0.0.0:9001 → 127.0.0.1:8000
-#   openai-mock     0.0.0.0:9002 → 127.0.0.1:8000
-#   gemini-mock     0.0.0.0:9003 → 127.0.0.1:8000
+#   anthropic-mock  0.0.0.0:9001 → VidaiMock:8100
+#   openai-mock     0.0.0.0:9002 → VidaiMock:8100
+#   gemini-mock     0.0.0.0:9003 → VidaiMock:8100
 #
 # All containers share the pod network namespace, so 127.0.0.1 resolves to
-# MockLLM running in the same pod.
+# VidaiMock running in the same pod.
 
 TOXIPROXY_API="${TOXIPROXY_API:-http://127.0.0.1:8474}"
-MOCKLLM_UPSTREAM="127.0.0.1:8000"
+# VidaiMock serves all LLM provider formats on a single port.
+VIDAIMOCK_UPSTREAM="127.0.0.1:8100"
 WAIT_TIMEOUT=30
 WAIT_INTERVAL=2
 
@@ -73,9 +74,9 @@ create_proxy() {
 # ---------------------------------------------------------------------------
 echo "→ Creating Toxiproxy proxies…"
 
-create_proxy "anthropic-mock" "0.0.0.0:9001" "${MOCKLLM_UPSTREAM}"
-create_proxy "openai-mock"    "0.0.0.0:9002" "${MOCKLLM_UPSTREAM}"
-create_proxy "gemini-mock"    "0.0.0.0:9003" "${MOCKLLM_UPSTREAM}"
+create_proxy "anthropic-mock" "0.0.0.0:9001" "${VIDAIMOCK_UPSTREAM}"
+create_proxy "openai-mock"    "0.0.0.0:9002" "${VIDAIMOCK_UPSTREAM}"
+create_proxy "gemini-mock"    "0.0.0.0:9003" "${VIDAIMOCK_UPSTREAM}"
 
 echo "✓ Toxiproxy proxies ready"
 echo "  anthropic-mock → ${TOXIPROXY_API}/proxies/anthropic-mock"

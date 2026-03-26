@@ -1,0 +1,11 @@
+# Generated at runtime by auth/generate.sh (never commit secrets)
+auth/keys/
+auth/tokens/
+auth/jwks.json
+auth/nginx.conf
+
+# Hurl reports
+report/
+
+# k6 output
+*.json.gz

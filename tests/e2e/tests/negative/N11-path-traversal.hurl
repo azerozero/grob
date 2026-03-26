@@ -1,6 +1,6 @@
 # Path traversal attempt
 GET http://{{host}}/../../../etc/passwd
-HTTP [400, 404]
+HTTP 401
 [Asserts]
 body not contains "root:"
 body not contains "/bin/sh"

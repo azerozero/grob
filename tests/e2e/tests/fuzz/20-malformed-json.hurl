@@ -4,5 +4,5 @@
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
-file,../../fixtures/malformed/broken-json.txt;
+file,fixtures/malformed/broken-json.txt;
 HTTP 400

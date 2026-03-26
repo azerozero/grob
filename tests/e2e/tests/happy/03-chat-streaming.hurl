@@ -3,7 +3,7 @@
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
-file,../../fixtures/chat-streaming.json;
+file,fixtures/chat-streaming.json;
 HTTP 200
 [Asserts]
 header "content-type" contains "text/event-stream"

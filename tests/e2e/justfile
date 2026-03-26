@@ -58,12 +58,25 @@ generate-all: generate-auth generate-crypto generate-pairwise
 # Run entire mock-backed suite
 test: test-auth test-failover test-budget test-cache test-cb test-policies test-negative test-audit test-mock-all
 
-# Failover + provider loop tests
-test-failover:
+# Smoke subset: 7 critical tests, must complete in <10s
+test-smoke:
     @hurl {{hurl_opts}} \
         --variable host={{host}} \
         --variable jwt={{jwt_default}} \
-        tests/failover/*.hurl
+        --variable jwt_default={{jwt_default}} \
+        --variable jwt_self_signed={{jwt_self_signed}} \
+        tests/happy/01-health.hurl \
+        tests/happy/02-chat-simple.hurl \
+        tests/auth/90-valid-jwt-succeeds.hurl \
+        tests/auth/91-no-auth-header.hurl \
+        tests/secu/30-no-key-in-errors.hurl \
+        tests/negative/N0-jwt-self-signed.hurl \
+        tests/fuzz/20-malformed-json.hurl
+
+# Failover + provider loop tests (shell-orchestrated Toxiproxy)
+test-failover:
+    @HOST={{host}} TOXIPROXY_API=http://{{toxiproxy_api}} JWT={{jwt_default}} \
+        bash tests/failover/run-failover.sh
 
 # Fuzz / malformed input tests
 test-fuzz:
@@ -92,12 +105,10 @@ test-cache:
         --variable jwt={{jwt_default}} \
         tests/cache/*.hurl
 
-# Circuit-breaker open/half-open/close tests
+# Circuit-breaker open/half-open/close tests (shell-orchestrated Toxiproxy)
 test-cb:
-    @hurl {{hurl_opts}} \
-        --variable host={{host}} \
-        --variable jwt={{jwt_default}} \
-        tests/circuit-breaker/*.hurl
+    @HOST={{host}} TOXIPROXY_API=http://{{toxiproxy_api}} JWT={{jwt_default}} \
+        bash tests/circuit-breaker/run-cb.sh
 
 # JWT auth happy path + rejection tests
 test-auth:

@@ -1,0 +1,27 @@
+# VidaiMock — physics-accurate LLM mock server
+# Single binary, supports OpenAI/Anthropic/Gemini/Bedrock/Vertex/Azure
+# https://github.com/vidaiUK/VidaiMock
+#
+# Binary is glibc-linked → debian-slim base required (not Alpine/musl).
+
+FROM debian:bookworm-slim AS fetch
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+ARG TARGETARCH=amd64
+RUN case "${TARGETARCH}" in \
+      amd64) ARCH="x64" ;; \
+      arm64) ARCH="arm64" ;; \
+      *) echo "unsupported arch: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    mkdir /tmp/extract && \
+    curl -fsSL \
+      "https://github.com/vidaiUK/VidaiMock/releases/download/v0.1.3/vidaimock-linux-${ARCH}.tar.gz" \
+      | tar xz -C /tmp/extract && \
+    find /tmp/extract -name vidaimock -type f -exec cp {} /tmp/vidaimock \; && \
+    chmod +x /tmp/vidaimock
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends libgcc-s1 && rm -rf /var/lib/apt/lists/*
+COPY --from=fetch /tmp/vidaimock /usr/local/bin/vidaimock
+EXPOSE 8100
+ENTRYPOINT ["vidaimock"]
+CMD ["--host", "0.0.0.0", "--port", "8100"]

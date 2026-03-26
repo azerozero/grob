@@ -107,3 +107,6 @@ tests/e2e/tests/secu/31-dlp-aws-key.hurl:aws-access-token:12
 # e2e negative tests — intentional wrong/fake keys for brute-force resistance test
 tests/e2e/tests/negative/N6-api-key-brute.hurl:generic-api-key:4
 tests/e2e/tests/negative/N6-api-key-brute.hurl:generic-api-key:12
+# e2e pairwise tests — intentional fake AWS keys for DLP cross-feature tests
+tests/e2e/tests/pairwise/PW-02-jwt-valid-up-redact-none-openai-secrets.hurl:aws-access-token:8
+tests/e2e/tests/pairwise/PW-08-jwt-valid-up-block-hospital-anthropic-secrets.hurl:aws-access-token:9

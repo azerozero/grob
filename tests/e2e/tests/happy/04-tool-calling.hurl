@@ -1,10 +1,12 @@
 # Verifies that tool-calling requests are forwarded correctly.
-# The model should respond with a tool_calls entry or a choices array;
-# either way the top-level choices key must be present.
+# The mock backend returns a generic Anthropic-format response with a
+# content array (it does not actually invoke tools).
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
-file,../../fixtures/chat-tool-calling.json;
+file,fixtures/chat-tool-calling.json;
 HTTP 200
 [Asserts]
-jsonpath "$.choices" exists
+jsonpath "$.content" exists
+jsonpath "$.content[0].text" exists
+header "x-ai-provider" exists

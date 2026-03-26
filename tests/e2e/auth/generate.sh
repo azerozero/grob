@@ -10,12 +10,15 @@ set -euo pipefail
 # Dependencies: openssl, python3, pip packages: cryptography, PyJWT
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-KEYS_DIR="${SCRIPT_DIR}/keys"
-TOKENS_DIR="${SCRIPT_DIR}/tokens"
+# AUTH_OUTPUT_DIR allows writing to a shared volume (e.g. emptyDir in pod).
+# Falls back to SCRIPT_DIR for local/host usage.
+OUT_DIR="${AUTH_OUTPUT_DIR:-${SCRIPT_DIR}}"
+KEYS_DIR="${OUT_DIR}/keys"
+TOKENS_DIR="${OUT_DIR}/tokens"
 PRIVATE_KEY="${KEYS_DIR}/test-signing.key"
 PUBLIC_KEY="${KEYS_DIR}/test-signing.pub"
-JWKS_FILE="${SCRIPT_DIR}/jwks.json"
-NGINX_CONF="${SCRIPT_DIR}/nginx.conf"
+JWKS_FILE="${OUT_DIR}/jwks.json"
+NGINX_CONF="${OUT_DIR}/nginx.conf"
 
 ISSUER="https://openbao.test"
 AUDIENCE="grob-siege"
@@ -40,7 +43,7 @@ check_deps() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Generate EC P-256 keypair
+# 1. Generate RSA 2048 keypair (grob JWKS parser only supports RSA)
 # ---------------------------------------------------------------------------
 generate_keypair() {
     mkdir -p "${KEYS_DIR}"
@@ -50,9 +53,9 @@ generate_keypair() {
         return
     fi
 
-    echo "→ Generating EC P-256 signing keypair…"
-    openssl ecparam -name prime256v1 -genkey -noout -out "${PRIVATE_KEY}"
-    openssl ec -in "${PRIVATE_KEY}" -pubout -out "${PUBLIC_KEY}" 2>/dev/null
+    echo "→ Generating RSA 2048 signing keypair…"
+    openssl genrsa -out "${PRIVATE_KEY}" 2048 2>/dev/null
+    openssl rsa -in "${PRIVATE_KEY}" -pubout -out "${PUBLIC_KEY}" 2>/dev/null
     chmod 600 "${PRIVATE_KEY}"
     echo "   private: ${PRIVATE_KEY}"
     echo "   public:  ${PUBLIC_KEY}"
@@ -68,7 +71,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.serialization import (
     load_pem_private_key, Encoding, PublicFormat, NoEncryption, PrivateFormat
 )
-from cryptography.hazmat.primitives.asymmetric.ec import generate_private_key, SECP256R1
+from cryptography.hazmat.primitives.asymmetric.rsa import generate_private_key as rsa_generate
 from cryptography.hazmat.backends import default_backend
 import jwt as pyjwt
 
@@ -80,31 +83,30 @@ audience         = sys.argv[5]
 
 tokens_dir.mkdir(parents=True, exist_ok=True)
 
-# Load the EC private key
+# Load the RSA private key
 with open(private_key_path, "rb") as f:
     private_key = load_pem_private_key(f.read(), password=None, backend=default_backend())
 
 public_key = private_key.public_key()
+pub_numbers = public_key.public_numbers()
 
 # --------------------------------------------------------------------------
-# Build JWKS from the public key
+# Build JWKS from the RSA public key
 # --------------------------------------------------------------------------
-pub_der = public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
-# pub_der is 0x04 || x (32 bytes) || y (32 bytes)
-x_bytes = pub_der[1:33]
-y_bytes = pub_der[33:65]
-
 def b64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
 
+def int_to_b64url(n: int) -> str:
+    length = (n.bit_length() + 7) // 8
+    return b64url(n.to_bytes(length, byteorder="big"))
+
 jwk = {
-    "kty": "EC",
-    "crv": "P-256",
+    "kty": "RSA",
     "use": "sig",
-    "alg": "ES256",
+    "alg": "RS256",
     "kid": "grob-e2e-signing-key-v1",
-    "x": b64url(x_bytes),
-    "y": b64url(y_bytes),
+    "n": int_to_b64url(pub_numbers.n),
+    "e": int_to_b64url(pub_numbers.e),
 }
 jwks = {"keys": [jwk]}
 
@@ -115,12 +117,13 @@ print(f"   JWKS written to {jwks_path}")
 # --------------------------------------------------------------------------
 # Helper: sign a JWT
 # --------------------------------------------------------------------------
-def sign_jwt(payload: dict, key=None, algorithm="ES256", headers=None) -> str:
+def sign_jwt(payload: dict, key=None, algorithm="RS256", headers=None) -> str:
     if key is None:
         key = private_key
-    kw = {}
-    if headers:
-        kw["headers"] = headers
+    # Default: include kid so JWKS lookup works
+    if headers is None:
+        headers = {"kid": "grob-e2e-signing-key-v1"}
+    kw = {"headers": headers}
     return pyjwt.encode(payload, key, algorithm=algorithm, **kw)
 
 now = int(time.time())
@@ -252,7 +255,7 @@ print("   jwt-tampered         ✓")
 # --------------------------------------------------------------------------
 # jwt-self-signed: signed with a freshly generated random key (not in JWKS)
 # --------------------------------------------------------------------------
-rogue_key = generate_private_key(SECP256R1(), default_backend())
+rogue_key = rsa_generate(public_exponent=65537, key_size=2048, backend=default_backend())
 tok = sign_jwt(
     {
         "iss": issuer,

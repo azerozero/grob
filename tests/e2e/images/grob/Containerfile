@@ -1,0 +1,20 @@
+# Grob e2e — build from repo root
+# Usage: podman build -t localhost/grob:e2e -f tests/e2e/images/grob/Containerfile .
+#
+# Simple two-stage build (no cargo-chef — simpler, works with any Rust version).
+
+FROM rust:1.86-alpine AS builder
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static
+WORKDIR /usr/src/grob
+COPY . .
+ENV RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes"
+RUN cargo build --release --target x86_64-unknown-linux-musl
+RUN strip target/x86_64-unknown-linux-musl/release/grob
+
+FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /usr/src/grob/target/x86_64-unknown-linux-musl/release/grob /grob
+USER 65534:65534
+EXPOSE 13456
+ENTRYPOINT ["/grob"]
+CMD ["run", "--json-logs", "--host", "0.0.0.0", "--port", "13456"]

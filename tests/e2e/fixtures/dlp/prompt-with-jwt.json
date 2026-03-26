@@ -1,1 +1,1 @@
-{"model":"gpt-4o","messages":[{"role":"user","content":"My token is eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"}],"max_tokens":50}
+{"model":"default","messages":[{"role":"user","content":"My token is eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"}],"max_tokens":50}

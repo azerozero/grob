@@ -1,1 +1,1 @@
-{"model":"gpt-4o","messages":[{"role":"user","content":"My credit card is 4532015112830366"}],"max_tokens":50}
+{"model":"default","messages":[{"role":"user","content":"My credit card is 4532015112830366"}],"max_tokens":50}

@@ -19,18 +19,23 @@ access is required or permitted here.
 
 ## Port Mapping
 
-| Service           | Port  | Protocol |
-|-------------------|-------|----------|
-| Grob proxy        | 13456 | HTTP     |
-| Toxiproxy API     | 8474  | HTTP     |
-| anthropic-mock    | 9001  | HTTP     |
-| openai-mock       | 9002  | HTTP     |
-| gemini-mock       | 9003  | HTTP     |
-| MockLLM backend   | 8000  | HTTP     |
-| mock-jwks         | 8443  | HTTP     |
+| Service           | Port  | Protocol | Image                     |
+|-------------------|-------|----------|---------------------------|
+| Grob proxy        | 13456 | HTTP     | localhost/grob:e2e        |
+| VidaiMock         | 8100  | HTTP     | localhost/vidaimock:e2e    |
+| Toxiproxy API     | 8474  | HTTP     | shopify/toxiproxy:latest  |
+| anthropic-mock    | 9001  | TCP      | (toxiproxy → VidaiMock)   |
+| openai-mock       | 9002  | TCP      | (toxiproxy → VidaiMock)   |
+| gemini-mock       | 9003  | TCP      | (toxiproxy → VidaiMock)   |
+| mock-jwks         | 8443  | HTTP     | nginx:alpine              |
 
 All containers share the pod's network namespace, so they reach each other on
 `127.0.0.1`.
+
+VidaiMock serves all LLM provider formats (OpenAI, Anthropic, Gemini, Bedrock,
+Vertex AI, Azure) on a single port. Toxiproxy sits in front for TCP-level fault
+injection. VidaiMock also supports application-level chaos via request headers
+(`X-Vidai-Chaos-Drop`, `--mode realistic` for TTFT/TPS simulation).
 
 ## Live Environment Variables
 
@@ -63,9 +68,10 @@ e2e/
 │   ├── keys/       EC P-256 signing keypair (git-ignored)
 │   └── tokens/     Generated JWT files (git-ignored)
 ├── config/
-│   └── mock/       Grob config + MockLLM responses + Toxiproxy init
+│   └── mock/       Grob config + Toxiproxy init
 ├── crypto/         age keypair generation
 ├── fixtures/       Shared request/response payloads
+├── images/         Containerfiles (vidaimock)
 ├── kube/           Podman pod manifest
 ├── load/           k6 / hey load test scripts
 ├── pict/           PICT pairwise model + generated matrix
