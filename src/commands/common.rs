@@ -32,13 +32,30 @@ pub async fn poll_health(base_url: &str, max_attempts: u32, interval_ms: u64) ->
     false
 }
 
-/// Sends SIGTERM to the given process and waits for the grace period.
+/// Sends SIGTERM to the given process and waits until it exits (up to 5s).
 #[cfg(unix)]
 pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
-    kill(Pid::from_raw(pid as i32), Signal::SIGTERM)
-        .map_err(|e| anyhow::anyhow!("Failed to stop service: {}", e))?;
+    let nix_pid = Pid::from_raw(pid as i32);
+    kill(nix_pid, Signal::SIGTERM).map_err(|e| anyhow::anyhow!("Failed to stop service: {}", e))?;
+
+    // Wait for the process to actually exit (not just grace period).
+    // Check every 100ms for up to 5 seconds.
+    for _ in 0..50 {
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        if kill(nix_pid, None).is_err() {
+            // Process is gone — signal 0 failed means PID doesn't exist.
+            return Ok(());
+        }
+    }
+
+    // Still alive after 5s — send SIGKILL as last resort.
+    tracing::warn!(
+        "Process {} did not exit after SIGTERM, sending SIGKILL",
+        pid
+    );
+    let _ = kill(nix_pid, Signal::SIGKILL);
     tokio::time::sleep(tokio::time::Duration::from_millis(
         PROCESS_TRANSITION_GRACE_MS,
     ))
