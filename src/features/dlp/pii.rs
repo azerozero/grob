@@ -166,25 +166,32 @@ impl PiiScanner {
         detections.sort_by_key(|d| d.start);
 
         if self.action == PiiAction::Log {
-            // Log-only mode: don't modify text
             return Some((text.to_string(), detections));
         }
 
-        // Build redacted output
         let mut result = String::with_capacity(text.len());
         let mut last_end = 0;
 
         for det in &detections {
             if det.start < last_end {
-                continue; // skip overlapping
+                continue;
             }
             result.push_str(&text[last_end..det.start]);
-            let label = match det.pii_type {
-                PiiType::CreditCard => "[CARD REDACTED]",
-                PiiType::Iban => "[IBAN REDACTED]",
-                PiiType::Bic => "[BIC REDACTED]",
-            };
-            result.push_str(label);
+            match self.action {
+                PiiAction::Canary => {
+                    let fake = generate_pii_canary(&det.pii_type, &text[det.start..det.end]);
+                    result.push_str(&fake);
+                }
+                PiiAction::Redact => {
+                    let label = match det.pii_type {
+                        PiiType::CreditCard => "[CARD REDACTED]",
+                        PiiType::Iban => "[IBAN REDACTED]",
+                        PiiType::Bic => "[BIC REDACTED]",
+                    };
+                    result.push_str(label);
+                }
+                PiiAction::Log => unreachable!(),
+            }
             last_end = det.end;
         }
         result.push_str(&text[last_end..]);
@@ -304,6 +311,95 @@ fn is_valid_country_code(code: &str) -> bool {
         "VN", "VU", "WF", "WS", "XK", "YE", "YT", "ZA", "ZM", "ZW",
     ];
     COUNTRY_CODES.contains(&code)
+}
+
+/// Generates a syntactically valid fake PII value (canary) for transparent replacement.
+/// The fake value has the same length and format as the original but different digits.
+fn generate_pii_canary(pii_type: &PiiType, original: &str) -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+
+    match pii_type {
+        PiiType::CreditCard => generate_canary_cc(original, id),
+        PiiType::Iban => generate_canary_iban(original, id),
+        PiiType::Bic => format!("GROB{}{}", &original[4..6], &original[6..]),
+    }
+}
+
+/// Generates a Luhn-valid fake credit card number with the same length.
+fn generate_canary_cc(original: &str, id: u64) -> String {
+    let digits_only: String = original.chars().filter(|c| c.is_ascii_digit()).collect();
+    let len = digits_only.len();
+    if len < 2 {
+        return "0".repeat(len);
+    }
+
+    // Keep the first digit (card network) but replace the rest with id-derived digits.
+    let first = digits_only.chars().next().unwrap_or('4');
+    let seed = format!("{}{:0>width$}", first, id, width = len - 2);
+    let mut partial: Vec<u8> = seed
+        .chars()
+        .take(len - 1)
+        .map(|c| c.to_digit(10).unwrap_or(0) as u8)
+        .collect();
+
+    // Pad if needed
+    while partial.len() < len - 1 {
+        partial.push(0);
+    }
+
+    // Compute Luhn check digit
+    let check = luhn_check_digit(&partial);
+    partial.push(check);
+
+    partial.iter().map(|d| (b'0' + d) as char).collect()
+}
+
+/// Computes the Luhn check digit for a sequence of digits.
+fn luhn_check_digit(digits: &[u8]) -> u8 {
+    let mut sum: u32 = 0;
+    for (i, &d) in digits.iter().rev().enumerate() {
+        let mut val = d as u32;
+        if i % 2 == 0 {
+            val *= 2;
+            if val > 9 {
+                val -= 9;
+            }
+        }
+        sum += val;
+    }
+    ((10 - (sum % 10)) % 10) as u8
+}
+
+/// Generates a fake IBAN with the same country code and length.
+fn generate_canary_iban(original: &str, id: u64) -> String {
+    let country = if original.len() >= 2 {
+        &original[..2]
+    } else {
+        "XX"
+    };
+    let body_len = original.len().saturating_sub(4); // minus country(2) + check(2)
+    let body = format!("{:0>width$}", id, width = body_len);
+
+    // Compute mod97 check digits (ISO 7064)
+    let rearranged = format!("{}{}00", body, country);
+    let mut remainder: u64 = 0;
+    for ch in rearranged.chars() {
+        let val = if ch.is_ascii_uppercase() {
+            (ch as u64) - 55 // A=10, B=11, ...
+        } else {
+            ch.to_digit(10).unwrap_or(0) as u64
+        };
+        if val >= 10 {
+            remainder = (remainder * 100 + val) % 97;
+        } else {
+            remainder = (remainder * 10 + val) % 97;
+        }
+    }
+    let check = 98 - remainder;
+
+    format!("{}{:02}{}", country, check, body)
 }
 
 #[cfg(test)]
@@ -498,6 +594,45 @@ mod tests {
         // Log mode: text unchanged but detection still reported
         assert!(result.contains("4532015112830366"));
         assert_eq!(detections.len(), 1);
+    }
+
+    #[test]
+    fn test_canary_credit_card_is_luhn_valid() {
+        let fake = generate_pii_canary(&PiiType::CreditCard, "4532015112830366");
+        assert_eq!(fake.len(), 16, "Canary CC must be 16 digits");
+        assert!(luhn_check(&fake), "Canary CC must pass Luhn: {fake}");
+        assert_ne!(fake, "4532015112830366", "Canary must differ from original");
+    }
+
+    #[test]
+    fn test_canary_iban_is_valid() {
+        let fake = generate_pii_canary(&PiiType::Iban, "FR7630006000011234567890189");
+        assert!(fake.starts_with("FR"), "Canary IBAN keeps country code");
+        assert_eq!(fake.len(), 27, "Canary IBAN same length as original");
+    }
+
+    #[test]
+    fn test_canary_mode_replaces_with_fake() {
+        let config = PiiConfig {
+            credit_cards: true,
+            iban: true,
+            bic: false,
+            action: PiiAction::Canary,
+        };
+        let scanner = PiiScanner::from_config(&config).expect("scanner");
+        let text = "Pay with 4532015112830366 please";
+        let r = scanner.redact(text);
+        assert!(r.is_some(), "Expected canary CC detection");
+        let r = r.unwrap();
+        assert!(
+            !r.0.contains("4532015112830366"),
+            "Original CC must be gone"
+        );
+        assert!(
+            !r.0.contains("[CARD REDACTED]"),
+            "Must not use redaction label"
+        );
+        assert!(Vec::len(&r.1) == 1);
     }
 
     #[test]

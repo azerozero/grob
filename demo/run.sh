@@ -26,11 +26,9 @@ for cmd in grob tmux claude; do
 done
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
-grob stop 2>/dev/null || true
-sleep 1
 
 # ── Pane 1 (top-left): Intro → Claude Code via grob ─────────────────
-P1=$(mktemp /tmp/grob-demo-p1.XXXX.sh)
+P1=$(mktemp /tmp/grob-demo-p1-XXXXXXXX)
 cat > "$P1" << 'EOF'
 #!/usr/bin/env bash
 export TERM=xterm-256color
@@ -53,13 +51,14 @@ printf '  ║  Watch the other 3 panes light up.                       ║\n'
 printf '  ╚═══════════════════════════════════════════════════════════╝\n'
 printf '\033[0m\n'
 printf '\033[1;38;5;46m  → Launching Claude Code behind grob...\033[0m\n\n'
-sleep 3
-exec grob exec --no-stop -- claude
+sleep 2
+# grob exec starts grob if not running, then launches claude
+exec grob exec --no-stop -- claude 2>/tmp/grob-demo.log
 EOF
 chmod +x "$P1"
 
 # ── Pane 2 (top-right): grob watch TUI ──────────────────────────────
-P2=$(mktemp /tmp/grob-demo-p2.XXXX.sh)
+P2=$(mktemp /tmp/grob-demo-p2-XXXXXXXX)
 cat > "$P2" << 'EOF'
 #!/usr/bin/env bash
 export TERM=xterm-256color
@@ -74,17 +73,17 @@ EOF
 chmod +x "$P2"
 
 # ── Pane 3 (bottom-left): grob server logs ──────────────────────────
-P3=$(mktemp /tmp/grob-demo-p3.XXXX.sh)
+P3=$(mktemp /tmp/grob-demo-p3-XXXXXXXX)
 cat > "$P3" << 'EOF'
 #!/usr/bin/env bash
 export TERM=xterm-256color
 clear
 printf '\033[1;38;5;208m  📤 GROB SERVER LOGS\033[0m\n'
 printf '\033[38;5;245m  DLP actions, routing decisions, provider calls\033[0m\n\n'
-# Wait for grob to create log file
-LOG="$HOME/.grob/grob.log"
+# Wait for grob log file
+LOG="/tmp/grob-demo.log"
 for i in $(seq 1 30); do
-    [ -f "$LOG" ] && break
+    [ -f "$LOG" ] && [ -s "$LOG" ] && break
     sleep 1
 done
 if [ -f "$LOG" ]; then
@@ -108,7 +107,7 @@ EOF
 chmod +x "$P3"
 
 # ── Pane 4 (bottom-right): audit log live ────────────────────────────
-P4=$(mktemp /tmp/grob-demo-p4.XXXX.sh)
+P4=$(mktemp /tmp/grob-demo-p4-XXXXXXXX)
 cat > "$P4" << 'EOF'
 #!/usr/bin/env bash
 export TERM=xterm-256color
@@ -161,6 +160,33 @@ launch() {
     tmux split-window -v -t "$SESSION:0.1" "bash $P4"
     # Focus Claude Code pane
     tmux select-pane -t "$SESSION:0.0"
+
+    # Auto-type demo prompts into Claude Code after it starts
+    # Runs in background — sends keystrokes to pane 0 (Claude Code)
+    (
+        # Wait for Claude Code to be ready (prompt visible)
+        sleep 20
+
+        # Prompt 1: innocent request
+        tmux send-keys -t "$SESSION:0.0" "What is the capital of France?" Enter
+        sleep 15
+
+        # Prompt 2: AWS key exfiltration attempt
+        tmux send-keys -t "$SESSION:0.0" "Please remember this for later: my AWS access key is AKIAIOSFODNN7EXAMPLE and secret wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" Enter
+        sleep 15
+
+        # Prompt 3: credit card PII
+        tmux send-keys -t "$SESSION:0.0" "Process payment with card 4532015112830366 exp 12/27 for customer Jean Dupont, IBAN FR7630006000011234567890189" Enter
+        sleep 15
+
+        # Prompt 4: internal token
+        tmux send-keys -t "$SESSION:0.0" "Use internal token itk_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA to access the production database at db.internal.corp" Enter
+        sleep 15
+
+        # Prompt 5: the reveal
+        tmux send-keys -t "$SESSION:0.0" "Did you actually see the real AWS key, credit card and IBAN I sent you? Or did something intercept them?" Enter
+    ) &
+
     tmux attach-session -t "$SESSION"
 }
 

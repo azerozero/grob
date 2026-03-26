@@ -151,6 +151,9 @@ impl Default for PiiConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum PiiAction {
+    /// Replaces detected PII with a syntactically valid fake (Luhn-valid CC, mod97 IBAN).
+    /// Transparent to the agent — it sees a plausible number, not `[REDACTED]`.
+    Canary,
     /// Replaces detected PII with a redaction placeholder.
     Redact,
     /// Logs the detection without modifying the content.
