@@ -171,27 +171,3 @@ tenant = "*"
 [policies.hit]
 require_approval = ["bash"]
 auth_method = "prompt"
-
-[[providers]]
-name = "tool-mock"
-provider_type = "anthropic"
-api_key = "mock"
-base_url = "http://127.0.0.1:8102"
-models = []
-enabled = true
-
-[[models]]
-name = "hit-test"
-
-[[models.mappings]]
-provider = "tool-mock"
-actual_model = "claude-sonnet-4-6"
-priority = 1
-
-[[policies]]
-name = "hit-approval"
-[policies.match]
-tenant = "*"
-[policies.hit]
-require_approval = ["bash"]
-auth_method = "prompt"
