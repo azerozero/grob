@@ -8,4 +8,4 @@ file,fixtures/dlp/prompt-with-jwt.json;
 HTTP 200
 [Asserts]
 body not contains "TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ"
-jsonpath "$.content" exists
+jsonpath "$.choices" exists

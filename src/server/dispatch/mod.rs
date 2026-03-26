@@ -175,8 +175,6 @@ pub(crate) enum DispatchResult {
         response: ProviderResponse,
         provider: String,
         actual_model: String,
-        /// Pre-serialized JSON bytes (serialized once, used for cache + response).
-        response_bytes: Option<Vec<u8>>,
         /// Time spent inside the provider call (ms), used for overhead calculation.
         provider_duration_ms: u64,
     },

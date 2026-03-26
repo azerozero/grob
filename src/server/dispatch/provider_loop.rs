@@ -327,7 +327,6 @@ async fn try_direct_provider_lookup(
         response,
         provider: model_name.to_string(),
         actual_model: model_name.to_string(),
-        response_bytes: None,
         provider_duration_ms: 0,
     }))
 }
@@ -564,7 +563,7 @@ async fn dispatch_non_streaming(
                 let cost_usd =
                     calculate_and_record_metrics(ctx, &outcome, attempt.is_subscription).await;
                 record_success_telemetry(ctx, &outcome, cost_usd).await;
-                let response_bytes =
+                let cached_bytes =
                     store_response_cache(ctx, attempt.mapping, attempt.cache_key, &response).await;
 
                 // Emit RequestEnd event for `grob watch`.
@@ -582,9 +581,8 @@ async fn dispatch_non_streaming(
 
                 // Emit to external log sinks.
                 if let Some(ref exporter) = ctx.state.log_exporter {
-                    // Optionally encrypt content based on policy.
                     let (encrypted_content, content_recipients) =
-                        build_encrypted_content(ctx, &response_bytes);
+                        build_encrypted_content(ctx, &cached_bytes);
 
                     exporter.emit(&crate::features::log_export::LogEntry {
                         request_id: ctx.req_id.to_string(),
@@ -607,7 +605,6 @@ async fn dispatch_non_streaming(
                     response,
                     provider: attempt.mapping.provider.clone(),
                     actual_model: attempt.mapping.actual_model.clone(),
-                    response_bytes,
                     provider_duration_ms,
                 });
             }

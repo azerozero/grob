@@ -5,6 +5,6 @@ Content-Type: application/json
 file,fixtures/chat-simple.json;
 HTTP 200
 [Asserts]
-jsonpath "$.content" exists
+jsonpath "$.choices" exists
 header "x-ai-provider" exists
 header "x-ai-model" exists

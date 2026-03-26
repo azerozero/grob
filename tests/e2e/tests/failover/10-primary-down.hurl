@@ -8,4 +8,4 @@ Content-Type: application/json
 file,fixtures/chat-simple.json;
 HTTP 200
 [Asserts]
-jsonpath "$.content[0].text" exists
+jsonpath "$.choices[0].message.content" exists

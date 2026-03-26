@@ -7,6 +7,6 @@ Content-Type: application/json
 file,fixtures/chat-simple.json;
 HTTP 200
 [Asserts]
-jsonpath "$.content" exists
+jsonpath "$.choices" exists
 jsonpath "$.usage" exists
 # When close to budget limit, a warning header may be present

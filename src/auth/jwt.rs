@@ -45,19 +45,21 @@ pub enum AuthError {
     Expired,
 }
 
-/// JWT validator supporting HMAC-SHA256 and optional JWKS (RS256).
+/// JWT validator supporting HMAC-SHA256 and optional JWKS (RS256 + ES256).
 ///
-/// Uses separate Validation objects for HMAC and RSA because jsonwebtoken
+/// Uses separate Validation objects per algorithm family because jsonwebtoken
 /// requires ALL algorithms in the list to be compatible with the key family.
 ///
 /// Includes an in-memory cache for validated tokens to avoid repeated
 /// signature verification overhead (5 min TTL).
 pub struct JwtValidator {
     hmac_key: Option<DecodingKey>,
-    jwks_keys: RwLock<Vec<DecodingKey>>,
+    jwks_rsa_keys: RwLock<Vec<DecodingKey>>,
+    jwks_ec_keys: RwLock<Vec<DecodingKey>>,
     jwks_url: Option<String>,
     hmac_validation: Validation,
     rsa_validation: Validation,
+    ec_validation: Validation,
     /// Cache for validated tokens (avoids repeated signature verification)
     validation_cache: JwtValidationCache,
 }
@@ -98,10 +100,12 @@ impl JwtValidator {
 
         Ok(Self {
             hmac_key,
-            jwks_keys: RwLock::new(Vec::new()),
+            jwks_rsa_keys: RwLock::new(Vec::new()),
+            jwks_ec_keys: RwLock::new(Vec::new()),
             jwks_url,
             hmac_validation: make_validation(Algorithm::HS256),
             rsa_validation: make_validation(Algorithm::RS256),
+            ec_validation: make_validation(Algorithm::ES256),
             validation_cache: jwt_validation_cache(10_000),
         })
     }
@@ -150,10 +154,19 @@ impl JwtValidator {
             }
         }
 
-        // Try JWKS keys (RS256)
-        let keys = self.jwks_keys.read().unwrap_or_else(|e| e.into_inner());
-        for key in keys.iter() {
+        // Try JWKS RSA keys (RS256)
+        let rsa_keys = self.jwks_rsa_keys.read().unwrap_or_else(|e| e.into_inner());
+        for key in rsa_keys.iter() {
             if let Ok(data) = decode::<GrobClaims>(token, key, &self.rsa_validation) {
+                return Ok(data.claims);
+            }
+        }
+        drop(rsa_keys);
+
+        // Try JWKS EC keys (ES256)
+        let ec_keys = self.jwks_ec_keys.read().unwrap_or_else(|e| e.into_inner());
+        for key in ec_keys.iter() {
+            if let Ok(data) = decode::<GrobClaims>(token, key, &self.ec_validation) {
                 return Ok(data.claims);
             }
         }
@@ -164,8 +177,13 @@ impl JwtValidator {
     }
 
     fn has_jwks_keys(&self) -> bool {
-        let keys = self.jwks_keys.read().unwrap_or_else(|e| e.into_inner());
-        !keys.is_empty()
+        let rsa = self.jwks_rsa_keys.read().unwrap_or_else(|e| e.into_inner());
+        if !rsa.is_empty() {
+            return true;
+        }
+        drop(rsa);
+        let ec = self.jwks_ec_keys.read().unwrap_or_else(|e| e.into_inner());
+        !ec.is_empty()
     }
 
     /// Refresh JWKS keys from the configured URL.
@@ -182,21 +200,45 @@ impl JwtValidator {
             .await?;
 
         let jwks: JwksResponse = resp.json().await?;
-        let mut new_keys = Vec::new();
+        let mut new_rsa_keys = Vec::new();
+        let mut new_ec_keys = Vec::new();
 
         for key in &jwks.keys {
-            if key.kty == "RSA" {
-                if let (Some(n), Some(e)) = (&key.n, &key.e) {
-                    if let Ok(dk) = DecodingKey::from_rsa_components(n, e) {
-                        new_keys.push(dk);
+            match key.kty.as_str() {
+                "RSA" => {
+                    if let (Some(n), Some(e)) = (&key.n, &key.e) {
+                        if let Ok(dk) = DecodingKey::from_rsa_components(n, e) {
+                            new_rsa_keys.push(dk);
+                        }
                     }
                 }
+                "EC" => {
+                    if let (Some(x), Some(y)) = (&key.x, &key.y) {
+                        if let Ok(dk) = DecodingKey::from_ec_components(x, y) {
+                            new_ec_keys.push(dk);
+                        }
+                    }
+                }
+                _ => {}
             }
         }
 
-        tracing::info!("Refreshed {} JWKS keys from {}", new_keys.len(), url);
-        let mut keys = self.jwks_keys.write().unwrap_or_else(|e| e.into_inner());
-        *keys = new_keys;
+        let total = new_rsa_keys.len() + new_ec_keys.len();
+        tracing::info!(
+            "Refreshed {} JWKS keys ({} RSA, {} EC) from {}",
+            total,
+            new_rsa_keys.len(),
+            new_ec_keys.len(),
+            url
+        );
+        let mut rsa = self
+            .jwks_rsa_keys
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        *rsa = new_rsa_keys;
+        drop(rsa);
+        let mut ec = self.jwks_ec_keys.write().unwrap_or_else(|e| e.into_inner());
+        *ec = new_ec_keys;
 
         Ok(())
     }
@@ -224,8 +266,14 @@ struct JwksResponse {
 #[derive(Deserialize)]
 struct JwkKey {
     kty: String,
+    /// RSA modulus (base64url)
     n: Option<String>,
+    /// RSA exponent (base64url)
     e: Option<String>,
+    /// EC x coordinate (base64url)
+    x: Option<String>,
+    /// EC y coordinate (base64url)
+    y: Option<String>,
 }
 
 /// JWT configuration (deserialized from TOML)

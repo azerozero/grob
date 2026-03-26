@@ -197,17 +197,15 @@ where
             response,
             provider,
             actual_model,
-            response_bytes,
             provider_duration_ms,
         } => {
             // Overhead = total time - provider call time.
             let total_ms = start_time.elapsed().as_millis() as u64;
             let overhead_ms = total_ms.saturating_sub(provider_duration_ms);
 
-            let body = match response_bytes {
-                Some(bytes) => bytes,
-                None => on_complete(response)?,
-            };
+            // Always run on_complete so the caller can apply format translation
+            // (e.g. Anthropic → OpenAI for /v1/chat/completions).
+            let body = on_complete(response)?;
             let transparency =
                 transparency_enabled.then_some((provider.as_str(), actual_model.as_str(), req_id));
             let mut resp = build_json_response(body, transparency)?;

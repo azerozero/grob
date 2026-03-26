@@ -10,4 +10,4 @@ file,fixtures/dlp/prompt-with-aws-key.json;
 HTTP 200
 [Asserts]
 body not contains "AKIAIOSFODNN7EXAMPLE"
-jsonpath "$.content" exists
+jsonpath "$.choices" exists

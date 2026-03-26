@@ -134,7 +134,7 @@ clean: down
 # Test suites
 # ─────────────────────────────────────────────────────────────────────────────
 .PHONY: test
-test: test-hurl test-failover test-cb
+test: test-hurl test-audit test-failover test-cb
 	@echo ""
 	@echo "======================================"
 	@echo "  ALL SUITES PASSED"
@@ -178,6 +178,12 @@ smoke:
 			tests/negative/N0-jwt-self-signed.hurl \
 			tests/fuzz/20-malformed-json.hurl \
 	'
+
+.PHONY: test-audit
+test-audit:
+	@echo ""
+	@echo "=== Audit log tests ==="
+	@$(RUN) 'cd /e2e && bash tests/audit/run-audit-tests.sh'
 
 .PHONY: test-failover
 test-failover:
@@ -246,9 +252,10 @@ help:
 	@echo ""
 	@echo "  make              full cycle: up + test + down"
 	@echo "  make up           start pod (builds images if needed)"
-	@echo "  make test         run all suites (69 hurl + failover + CB)"
+	@echo "  make test         run all suites (69 hurl + audit + failover + CB)"
 	@echo "  make smoke        7 critical tests in <10s"
 	@echo "  make test-happy   run single suite (happy/fuzz/secu/auth/budget/cache/policies/negative/pairwise)"
+	@echo "  make test-audit   audit log integrity tests (A0-A8)"
 	@echo "  make test-failover  Toxiproxy failover scenarios"
 	@echo "  make test-cb      circuit-breaker lifecycle"
 	@echo "  make load         k6 smoke load test (10 VUs, 30s)"
