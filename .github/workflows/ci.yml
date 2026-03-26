@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [develop]
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
     paths-ignore:
       - "docs/**"
       - "**.md"
@@ -15,17 +17,47 @@ on:
       - "LICENSE*"
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
-  contents: read
+  contents: write
   checks: write
+  packages: write
 
 env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUST_BACKTRACE: short
   RUSTFLAGS: "-D warnings"
+  BINARY_NAME: grob
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
+# ---------------------------------------------------------------------------
+# Stage 0: Extract version from Cargo.toml (used by later jobs)
+# ---------------------------------------------------------------------------
 jobs:
+  version:
+    name: Extract version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read version from Cargo.toml
+        id: ver
+        run: |
+          V=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
+          echo "version=${V}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${V}" >> "$GITHUB_OUTPUT"
+          echo "Cargo.toml version: ${V}"
+
+  # =========================================================================
+  # Stage 1: Parallel lint / check gate
+  # =========================================================================
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -53,44 +85,6 @@ jobs:
           shared-key: clippy-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - run: cargo clippy --all-targets -- -D warnings
-
-  test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: test-${{ matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --profile ci
-      - run: cargo test --doc
-
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: coverage
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --lcov --output-path lcov.info
-      - uses: codecov/codecov-action@v5
-        with:
-          files: lcov.info
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
 
   audit:
     name: Security Audit
@@ -122,87 +116,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
-
-  feature-check:
-    name: Feature Powerset
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: hack
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps
-
-  e2e:
-    name: E2E tests
-    runs-on: ubuntu-latest
-    needs: [test]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install podman + crane
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq podman
-          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
-            | sudo tar xz -C /usr/local/bin crane
-      - name: Pull grob image (GHCR via crane)
-        run: |
-          crane pull ghcr.io/${{ github.repository }}:latest /tmp/grob-oci.tar
-          podman load -i /tmp/grob-oci.tar
-          podman tag ghcr.io/${{ github.repository }}:latest localhost/grob:e2e
-      - name: Build test images
-        working-directory: tests/e2e
-        run: |
-          podman build -t localhost/vidaimock:e2e images/vidaimock/
-          podman build -t localhost/e2e-runner:latest images/runner/
-      - name: Start pod
-        working-directory: tests/e2e
-        run: make up wait-jwks init-proxies
-      - name: Run hurl tests
-        working-directory: tests/e2e
-        run: make test-hurl
-      - name: Collect logs
-        if: failure()
-        run: podman pod exists e2e-pod && podman logs e2e-pod-grob 2>&1 | tail -100 || true
-      - name: Teardown
-        if: always()
-        working-directory: tests/e2e
-        run: make down
-
-  load:
-    name: Load test (smoke)
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    needs: [e2e]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install podman + crane
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq podman
-          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
-            | sudo tar xz -C /usr/local/bin crane
-      - name: Pull grob image (GHCR via crane)
-        run: |
-          crane pull ghcr.io/${{ github.repository }}:latest /tmp/grob-oci.tar
-          podman load -i /tmp/grob-oci.tar
-          podman tag ghcr.io/${{ github.repository }}:latest localhost/grob:e2e
-      - name: Build test images
-        working-directory: tests/e2e
-        run: |
-          podman build -t localhost/vidaimock:e2e images/vidaimock/
-          podman build -t localhost/e2e-runner:latest images/runner/
-      - name: Start pod
-        working-directory: tests/e2e
-        run: make up wait-jwks init-proxies
-      - name: Run k6 smoke load test
-        working-directory: tests/e2e
-        run: make load
-      - name: Teardown
-        if: always()
-        working-directory: tests/e2e
-        run: make down
 
   docs:
     name: Doc Coverage
@@ -260,3 +173,457 @@ jobs:
       - name: Check semver compatibility
         if: steps.baseline.outputs.tag != ''
         run: cargo semver-checks --baseline-rev ${{ steps.baseline.outputs.tag }}
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: coverage
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  feature-check:
+    name: Feature Powerset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: hack
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps
+
+  # =========================================================================
+  # Stage 2: Tests (gate for everything below)
+  # =========================================================================
+  test:
+    name: Test (${{ matrix.os }})
+    needs:
+      - fmt
+      - clippy
+      - audit
+      - gitleaks
+      - deny
+      - docs
+      - machete
+      - semver
+      - coverage
+      - feature-check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --profile ci
+      - run: cargo test --doc
+
+  # =========================================================================
+  # Stage 3: Cross build (develop push + tag push only, not PRs)
+  # =========================================================================
+  build:
+    name: Build ${{ matrix.target }}
+    if: github.event_name == 'push'
+    needs: [version, test]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            use-cross: true
+
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            use-cross: true
+
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            use-cross: false
+
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            use-cross: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.use-cross
+        run: |
+          curl -fsSL https://github.com/cross-rs/cross/releases/latest/download/cross-x86_64-unknown-linux-musl.tar.gz \
+            | tar xz -C /usr/local/bin
+          cross --version
+
+      - name: Build
+        shell: bash
+        run: |
+          if [[ "${{ matrix.use-cross }}" == "true" ]]; then
+            cross build --locked --release --target ${{ matrix.target }}
+          else
+            cargo build --locked --release --target ${{ matrix.target }}
+          fi
+
+      - name: Package
+        run: |
+          VERSION="v${{ needs.version.outputs.version }}"
+          ARCHIVE="${BINARY_NAME}-${VERSION}-${{ matrix.target }}.tar.gz"
+          tar czf "${ARCHIVE}" \
+            -C target/${{ matrix.target }}/release "${BINARY_NAME}" \
+            -C "${GITHUB_WORKSPACE}" README.md LICENSE
+          shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
+          if-no-files-found: error
+
+  # =========================================================================
+  # Stage 4: Push GHCR multi-arch image (develop push + tag push only)
+  # =========================================================================
+  container:
+    name: Container image
+    if: github.event_name == 'push'
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: x86_64-unknown-linux-musl
+          path: artifacts/amd64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: aarch64-unknown-linux-musl
+          path: artifacts/arm64
+
+      - name: Extract binaries
+        run: |
+          VERSION="v${{ needs.version.outputs.version }}"
+          mkdir -p bin/amd64 bin/arm64
+          tar xzf "artifacts/amd64/${BINARY_NAME}-${VERSION}-x86_64-unknown-linux-musl.tar.gz" -C bin/amd64 "${BINARY_NAME}"
+          tar xzf "artifacts/arm64/${BINARY_NAME}-${VERSION}-aarch64-unknown-linux-musl.tar.gz" -C bin/arm64 "${BINARY_NAME}"
+          chmod +x bin/amd64/${BINARY_NAME} bin/arm64/${BINARY_NAME}
+
+      - name: Install crane
+        run: |
+          VERSION=0.21.2
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v${VERSION}/go-containerregistry_Linux_x86_64.tar.gz" \
+            | tar xz -C /usr/local/bin crane
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Build and push multi-arch image
+        run: |
+          VERSION="v${{ needs.version.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+          # Build per-arch images (static musl binary, no OS needed)
+          for ARCH in amd64 arm64; do
+            mkdir -p "image-root-${ARCH}/usr/local/bin"
+            cp "bin/${ARCH}/${BINARY_NAME}" "image-root-${ARCH}/usr/local/bin/${BINARY_NAME}"
+            tar -cf "layer-${ARCH}.tar" -C "image-root-${ARCH}" .
+
+            crane append -t "${IMAGE}:${VERSION#v}-${ARCH}" -f "layer-${ARCH}.tar"
+
+            # Set platform metadata and OCI annotations
+            crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
+              --set-platform "linux/${ARCH}" \
+              --entrypoint /usr/local/bin/${BINARY_NAME} \
+              --cmd run \
+              --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
+              --annotation org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+              --annotation org.opencontainers.image.version="${VERSION#v}" \
+              --annotation org.opencontainers.image.licenses="AGPL-3.0-only"
+          done
+
+          # Create multi-arch manifest list
+          crane index append \
+            -t "${IMAGE}:${VERSION#v}" \
+            -m "${IMAGE}:${VERSION#v}-amd64" \
+            -m "${IMAGE}:${VERSION#v}-arm64"
+
+          # Tag additional versions
+          MAJOR_MINOR="$(echo "${VERSION#v}" | cut -d. -f1-2)"
+          crane tag "${IMAGE}:${VERSION#v}" "${MAJOR_MINOR}"
+          if [[ ! "$VERSION" =~ - ]]; then
+            crane tag "${IMAGE}:${VERSION#v}" latest
+          fi
+
+  # =========================================================================
+  # Stage 5: Update Homebrew tap (develop push + tag push only)
+  # =========================================================================
+  homebrew:
+    name: Update Homebrew tap
+    if: github.event_name == 'push'
+    needs: [version, container]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update formula
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          VERSION="v${{ needs.version.outputs.version }}"
+          V="${VERSION#v}"
+
+          # Download and hash all 4 tarballs from the build artifacts via GHCR
+          # On tag push the release job will have run; on develop push we pull
+          # from the uploaded artifacts directly. Since artifacts are not publicly
+          # URL-addressable we download the release assets (tag push) or skip
+          # homebrew on develop (no release assets yet).
+          for TARGET in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
+            URL="https://github.com/azerozero/grob/releases/download/${VERSION}/grob-${VERSION}-${TARGET}.tar.gz"
+            SHA=$(curl -sSL "$URL" | sha256sum | cut -d' ' -f1)
+            eval "SHA_${TARGET//-/_}=$SHA"
+          done
+
+          # Generate formula
+          cat > /tmp/grob.rb << RUBY
+          class Grob < Formula
+            desc "High-performance LLM routing proxy with built-in DLP"
+            homepage "https://github.com/azerozero/grob"
+            version "${V}"
+            license "AGPL-3.0-only"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/azerozero/grob/releases/download/v#{version}/grob-v#{version}-aarch64-apple-darwin.tar.gz"
+                sha256 "${SHA_aarch64_apple_darwin}"
+              else
+                url "https://github.com/azerozero/grob/releases/download/v#{version}/grob-v#{version}-x86_64-apple-darwin.tar.gz"
+                sha256 "${SHA_x86_64_apple_darwin}"
+              end
+            end
+
+            on_linux do
+              if Hardware::CPU.arm?
+                url "https://github.com/azerozero/grob/releases/download/v#{version}/grob-v#{version}-aarch64-unknown-linux-musl.tar.gz"
+                sha256 "${SHA_aarch64_unknown_linux_musl}"
+              else
+                url "https://github.com/azerozero/grob/releases/download/v#{version}/grob-v#{version}-x86_64-unknown-linux-musl.tar.gz"
+                sha256 "${SHA_x86_64_unknown_linux_musl}"
+              end
+            end
+
+            def install
+              bin.install "grob"
+            end
+
+            test do
+              assert_match "grob #{version}", shell_output("#{bin}/grob --version")
+            end
+          end
+          RUBY
+
+          # Remove leading whitespace from heredoc
+          sed -i 's/^          //' /tmp/grob.rb
+
+          # Clone tap, update formula, push
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/azerozero/homebrew-tap.git" /tmp/tap
+          cp /tmp/grob.rb /tmp/tap/Formula/grob.rb
+          cd /tmp/tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/grob.rb
+          git commit -m "grob ${V}"
+          git push
+
+  # =========================================================================
+  # Stage 6: E2E tests (develop push + tag push only)
+  # Pulls the SPECIFIC version image just pushed by container job.
+  # =========================================================================
+  e2e:
+    name: E2E tests
+    if: github.event_name == 'push'
+    needs: [version, container]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install podman + crane
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq podman
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin crane
+
+      - name: Pull grob image (specific version via crane)
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          crane pull "${IMAGE}:${VERSION}" /tmp/grob-oci.tar
+          podman load -i /tmp/grob-oci.tar
+          podman tag "${IMAGE}:${VERSION}" localhost/grob:e2e
+
+      - name: Build test images
+        working-directory: tests/e2e
+        run: |
+          podman build -t localhost/vidaimock:e2e images/vidaimock/
+          podman build -t localhost/e2e-runner:latest images/runner/
+
+      - name: Start pod
+        working-directory: tests/e2e
+        run: make up wait-jwks init-proxies
+
+      - name: Run hurl tests
+        working-directory: tests/e2e
+        run: make test-hurl
+
+      - name: Collect logs
+        if: failure()
+        run: podman pod exists e2e-pod && podman logs e2e-pod-grob 2>&1 | tail -100 || true
+
+      - name: Teardown
+        if: always()
+        working-directory: tests/e2e
+        run: make down
+
+  # =========================================================================
+  # Stage 7: Load test (manual trigger only)
+  # =========================================================================
+  load:
+    name: Load test (smoke)
+    if: github.event_name == 'workflow_dispatch'
+    needs: [version, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install podman + crane
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq podman
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
+            | sudo tar xz -C /usr/local/bin crane
+
+      - name: Pull grob image (specific version via crane)
+        run: |
+          VERSION="${{ needs.version.outputs.version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          crane pull "${IMAGE}:${VERSION}" /tmp/grob-oci.tar
+          podman load -i /tmp/grob-oci.tar
+          podman tag "${IMAGE}:${VERSION}" localhost/grob:e2e
+
+      - name: Build test images
+        working-directory: tests/e2e
+        run: |
+          podman build -t localhost/vidaimock:e2e images/vidaimock/
+          podman build -t localhost/e2e-runner:latest images/runner/
+
+      - name: Start pod
+        working-directory: tests/e2e
+        run: make up wait-jwks init-proxies
+
+      - name: Run k6 smoke load test
+        working-directory: tests/e2e
+        run: make load
+
+      - name: Teardown
+        if: always()
+        working-directory: tests/e2e
+        run: make down
+
+  # =========================================================================
+  # Stage 8: GitHub Release (tag push only, after e2e passes)
+  # =========================================================================
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, build, container, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd artifacts
+          echo "## SHA256 Checksums" > ../CHECKSUMS.md
+          echo '```' >> ../CHECKSUMS.md
+          cat *.sha256 >> ../CHECKSUMS.md
+          echo '```' >> ../CHECKSUMS.md
+
+      - name: Validate tag matches Cargo.toml
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/}"
+          CARGO_VERSION="v${{ needs.version.outputs.version }}"
+          if [[ "$TAG_VERSION" != "$CARGO_VERSION" && ! "$TAG_VERSION" =~ ^${CARGO_VERSION}- ]]; then
+            echo "::error::Tag $TAG_VERSION does not match Cargo.toml version $CARGO_VERSION"
+            exit 1
+          fi
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="v${{ needs.version.outputs.version }}"
+
+          PRERELEASE=""
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE="--prerelease"
+          fi
+
+          # Release workflow is the sole creator of GitHub Releases.
+          # release-plz only creates the tag (git_release_enable = false).
+          gh release create "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$VERSION" \
+            --generate-notes \
+            --notes-file CHECKSUMS.md \
+            $PRERELEASE \
+            artifacts/*.tar.gz artifacts/*.sha256
+
+  homebrew-test:
+    name: Test Homebrew install
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, homebrew]
+    runs-on: macos-latest
+    steps:
+      - name: Install via brew
+        run: |
+          brew install azerozero/tap/grob
+          grob --version
+          INSTALLED=$(grob --version | awk '{print $2}')
+          EXPECTED="${{ needs.version.outputs.version }}"
+          if [[ "$INSTALLED" != "$EXPECTED" ]]; then
+            echo "::error::Version mismatch: installed=$INSTALLED expected=$EXPECTED"
+            exit 1
+          fi
+
+      - name: Test brew upgrade (reinstall simulates upgrade)
+        run: |
+          brew reinstall azerozero/tap/grob
+          grob --version
