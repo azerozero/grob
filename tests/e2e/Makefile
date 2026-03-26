@@ -66,8 +66,8 @@ all: up wait-jwks init-proxies test down
 images:
 	@echo "=== Building images ==="
 	@podman image exists localhost/grob:e2e 2>/dev/null || \
-		(echo "  pulling grob..." && podman pull ghcr.io/azerozero/grob:0.29.5 && \
-		 podman tag ghcr.io/azerozero/grob:0.29.5 localhost/grob:e2e)
+		(echo "  pulling grob..." && podman pull ghcr.io/azerozero/grob:latest && \
+		 podman tag ghcr.io/azerozero/grob:latest localhost/grob:e2e)
 	@podman image exists localhost/vidaimock:e2e 2>/dev/null || \
 		(echo "  building vidaimock..." && podman build -q -t localhost/vidaimock:e2e $(E2E_DIR)/images/vidaimock)
 	@podman image exists $(RUNNER_IMG) 2>/dev/null || \

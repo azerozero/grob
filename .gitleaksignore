@@ -112,3 +112,8 @@ tests/e2e/tests/pairwise/PW-02-jwt-valid-up-redact-none-openai-secrets.hurl:aws-
 tests/e2e/tests/pairwise/PW-08-jwt-valid-up-block-hospital-anthropic-secrets.hurl:aws-access-token:9
 # PICT template references fixture paths containing fake AWS keys
 tests/e2e/pict/generate.sh:aws-access-token:141
+# e2e DLP multi-rule and streaming tests — intentional fake AWS keys
+tests/e2e/fixtures/dlp/prompt-with-multi-secrets.json:aws-access-token:1
+tests/e2e/tests/secu/35-dlp-multi-rule.hurl:aws-access-token:11
+tests/e2e/tests/secu/38-dlp-streaming-secrets.hurl:aws-access-token:8
+tests/e2e/tests/secu/38-dlp-streaming-secrets.hurl:aws-access-token:12
