@@ -63,12 +63,13 @@ pass_filenames = false
 stages = ["pre-push"]
 
 # Cargo deny — license & advisory & dependency checks
+# Only runs when Cargo.toml/lock or Rust files change.
 [[repos.hooks]]
 id = "cargo-deny"
 name = "cargo deny"
 language = "system"
 entry = "cargo deny check"
-always_run = true
+types_or = ["rust", "toml"]
 pass_filenames = false
 stages = ["pre-push"]
 
@@ -94,23 +95,25 @@ pass_filenames = false
 stages = ["pre-push"]
 
 # Security audit — known vulnerabilities
+# Only runs when Cargo.toml/lock changes.
 [[repos.hooks]]
 id = "cargo-audit"
 name = "cargo audit"
 language = "system"
 entry = "cargo audit"
-always_run = true
+types_or = ["rust", "toml"]
 pass_filenames = false
 stages = ["pre-push"]
 
 # Semver compatibility — compare against latest git tag (not crates.io)
+# Only runs when Rust source changes.
 [[repos.hooks]]
 id = "cargo-semver-checks"
 name = "cargo semver-checks"
 language = "system"
 entry = "sh"
 args = ["-c", "TAG=$(git tag --sort=-v:refname | head -1) && [ -n \"$TAG\" ] && cargo semver-checks --baseline-rev \"$TAG\" || echo 'No tags found, skipping semver check'"]
-always_run = true
+types = ["rust"]
 pass_filenames = false
 stages = ["pre-push"]
 
