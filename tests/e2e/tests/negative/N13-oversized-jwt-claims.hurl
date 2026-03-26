@@ -10,5 +10,5 @@ HTTP 401
 jsonpath "$.error.type" exists
 
 # Follow-up: server still healthy after oversized token.
-GET http://{{host}}/healthz
+GET http://{{host}}/health
 HTTP 200
