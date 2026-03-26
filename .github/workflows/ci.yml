@@ -71,6 +71,16 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --profile ci
       - run: cargo test --doc
+      - name: Upload binary for e2e
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo build --release
+      - name: Upload grob binary
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: grob-binary
+          path: target/release/grob
+          retention-days: 1
 
   coverage:
     name: Coverage
@@ -142,18 +152,19 @@ jobs:
     needs: [test]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: test-ubuntu-latest
-          save-if: false
       - name: Install podman
         run: sudo apt-get update -qq && sudo apt-get install -y -qq podman
-      - name: Build grob image from current commit
+      - name: Download grob binary
+        uses: actions/download-artifact@v4
+        with:
+          name: grob-binary
+          path: /tmp/grob-bin
+      - name: Build grob image from CI binary
         run: |
-          cargo build --release
-          printf 'FROM debian:bookworm-slim\nCOPY target/release/grob /grob\nENTRYPOINT ["/grob"]\nCMD ["run","--json-logs","--host","0.0.0.0","--port","13456"]\n' \
-            | podman build -t localhost/grob:e2e -f - .
+          chmod +x /tmp/grob-bin/grob
+          printf 'FROM debian:bookworm-slim\nCOPY grob /usr/local/bin/grob\nENTRYPOINT ["grob"]\nCMD ["run","--json-logs","--host","0.0.0.0","--port","13456"]\n' \
+            > /tmp/Containerfile
+          podman build -t localhost/grob:e2e -f /tmp/Containerfile /tmp/grob-bin
       - name: Build test images
         working-directory: tests/e2e
         run: |
@@ -180,18 +191,19 @@ jobs:
     needs: [e2e]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: test-ubuntu-latest
-          save-if: false
       - name: Install podman
         run: sudo apt-get update -qq && sudo apt-get install -y -qq podman
-      - name: Build grob image from current commit
+      - name: Download grob binary
+        uses: actions/download-artifact@v4
+        with:
+          name: grob-binary
+          path: /tmp/grob-bin
+      - name: Build grob image from CI binary
         run: |
-          cargo build --release
-          printf 'FROM debian:bookworm-slim\nCOPY target/release/grob /grob\nENTRYPOINT ["/grob"]\nCMD ["run","--json-logs","--host","0.0.0.0","--port","13456"]\n' \
-            | podman build -t localhost/grob:e2e -f - .
+          chmod +x /tmp/grob-bin/grob
+          printf 'FROM debian:bookworm-slim\nCOPY grob /usr/local/bin/grob\nENTRYPOINT ["grob"]\nCMD ["run","--json-logs","--host","0.0.0.0","--port","13456"]\n' \
+            > /tmp/Containerfile
+          podman build -t localhost/grob:e2e -f /tmp/Containerfile /tmp/grob-bin
       - name: Build test images
         working-directory: tests/e2e
         run: |
