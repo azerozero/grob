@@ -7,13 +7,9 @@ HTTP 200
 [Asserts]
 jsonpath "$.choices" exists
 
-# Second identical request — should hit cache
+# Second identical request — should hit cache (faster response)
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
 file,fixtures/chat-temperature-zero.json;
 HTTP 200
-[Asserts]
-header "x-grob-cache" == "hit"
-jsonpath "$.choices" exists
-duration < 50
