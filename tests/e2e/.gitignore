@@ -10,3 +10,4 @@ report/
 # k6 output
 *.json.gz
 crypto/keys/
+.venv/
