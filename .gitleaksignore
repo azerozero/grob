@@ -120,3 +120,7 @@ tests/e2e/tests/secu/38-dlp-streaming-secrets.hurl:aws-access-token:12
 # Demo script — intentional fake AWS keys for DLP demonstration
 demo/run.sh:aws-access-token:49
 demo/run.sh:aws-access-token:175
+# DLP unit tests — intentional fake tokens for scanner validation
+src/features/dlp/tests.rs:github-pat:55
+src/features/dlp/tests.rs:github-pat:56
+src/features/dlp/tests.rs:private-key:132

@@ -1,0 +1,44 @@
+name: Setup E2E Pod
+description: Pulls grob image, builds test images, and starts the e2e pod.
+
+inputs:
+  version:
+    description: Grob version to pull (without v prefix)
+    required: true
+  registry:
+    description: Container registry
+    required: true
+  image_name:
+    description: Full image name (org/repo)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install podman + crane
+      shell: bash
+      run: |
+        sudo apt-get update -qq && sudo apt-get install -y -qq podman
+        curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
+          | sudo tar xz -C /usr/local/bin crane
+
+    - name: Pull grob image (specific version via crane)
+      shell: bash
+      run: |
+        VERSION="${{ inputs.version }}"
+        IMAGE="${{ inputs.registry }}/${{ inputs.image_name }}"
+        crane pull "${IMAGE}:${VERSION}" /tmp/grob-oci.tar
+        podman load -i /tmp/grob-oci.tar
+        podman tag "${IMAGE}:${VERSION}" localhost/grob:e2e
+
+    - name: Build test images
+      shell: bash
+      working-directory: tests/e2e
+      run: |
+        podman build -t localhost/vidaimock:e2e images/vidaimock/
+        podman build -t localhost/e2e-runner:latest images/runner/
+
+    - name: Start pod
+      shell: bash
+      working-directory: tests/e2e
+      run: make up wait-jwks init-proxies

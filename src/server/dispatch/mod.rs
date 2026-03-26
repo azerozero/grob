@@ -94,8 +94,8 @@ impl DispatchContext<'_> {
             self.state.event_bus.emit(WatchEvent::DlpAction {
                 request_id: self.req_id.to_string(),
                 direction: direction.clone(),
-                action: report.action.clone(),
-                rule_type: report.rule_type.clone(),
+                action: report.action.to_string(),
+                rule_type: report.rule_type.to_string(),
                 detail: report.detail.clone(),
                 timestamp: chrono::Utc::now(),
             });

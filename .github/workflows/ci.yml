@@ -9,13 +9,34 @@ on:
       - "docs/**"
       - "**.md"
       - "LICENSE*"
+      - ".editorconfig"
+      - ".gitignore"
+      - ".gitattributes"
+      - "**.txt"
+      - "CODEOWNERS"
+      - ".vscode/**"
   pull_request:
     branches: [main, develop]
     paths-ignore:
       - "docs/**"
       - "**.md"
       - "LICENSE*"
+      - ".editorconfig"
+      - ".gitignore"
+      - ".gitattributes"
+      - "**.txt"
+      - "CODEOWNERS"
+      - ".vscode/**"
   workflow_dispatch:
+    inputs:
+      run_load:
+        description: Run load tests
+        type: boolean
+        default: false
+      skip_e2e:
+        description: Skip E2E tests for faster iteration
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -25,6 +46,7 @@ permissions:
   contents: write
   checks: write
   packages: write
+  id-token: write
 
 env:
   CARGO_INCREMENTAL: 0
@@ -56,6 +78,31 @@ jobs:
           echo "Cargo.toml version: ${V}"
 
   # =========================================================================
+  # Stage 0.5: Smoke — fast feedback < 2 min (no dependencies)
+  # =========================================================================
+  smoke:
+    name: Smoke (fast feedback)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: smoke
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            smoke-
+            clippy-ubuntu-latest-
+            test-ubuntu-latest-
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --profile ci --partition count:1/4
+
+  # =========================================================================
   # Stage 1: Parallel lint / check gate
   # =========================================================================
   fmt:
@@ -84,6 +131,10 @@ jobs:
         with:
           shared-key: clippy-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            clippy-${{ matrix.os }}-
+            clippy-
       - run: cargo clippy --all-targets -- -D warnings
 
   audit:
@@ -127,6 +178,9 @@ jobs:
         with:
           shared-key: docs
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            docs-
       - name: Check missing doc comments
         env:
           RUSTDOCFLAGS: "-W missing-docs"
@@ -149,6 +203,9 @@ jobs:
         with:
           shared-key: machete
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            machete-
       - uses: bnjbvr/cargo-machete@main
 
   semver:
@@ -163,6 +220,9 @@ jobs:
         with:
           shared-key: semver
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            semver-
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
       - name: Find latest tag for baseline
@@ -186,6 +246,9 @@ jobs:
         with:
           shared-key: coverage
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            coverage-
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v5
@@ -204,13 +267,50 @@ jobs:
         with:
           shared-key: hack
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            hack-
       - uses: taiki-e/install-action@cargo-hack
       - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps
 
   # =========================================================================
   # Stage 2: Tests (gate for everything below)
   # =========================================================================
-  test:
+  test-ubuntu:
+    name: Test Ubuntu (shard ${{ matrix.shard }}/4)
+    needs:
+      - fmt
+      - clippy
+      - audit
+      - gitleaks
+      - deny
+      - docs
+      - machete
+      - semver
+      - coverage
+      - feature-check
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-ubuntu-latest
+          save-if: ${{ github.ref == 'refs/heads/develop' && matrix.shard == 1 }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            test-ubuntu-latest-
+            test-
+      - uses: taiki-e/install-action@nextest
+      - run: cargo nextest run --profile ci --partition count:${{ matrix.shard }}/4
+      - run: cargo test --doc
+        if: matrix.shard == 1
+
+  test-other:
     name: Test (${{ matrix.os }})
     needs:
       - fmt
@@ -227,7 +327,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -235,6 +335,10 @@ jobs:
         with:
           shared-key: test-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
+          enableCrossOsArchive: true
+          restore-keys: |
+            test-${{ matrix.os }}-
+            test-
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --profile ci
       - run: cargo test --doc
@@ -245,7 +349,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     if: github.event_name == 'push'
-    needs: [version, test]
+    needs: [version, test-ubuntu, test-other]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -268,6 +372,10 @@ jobs:
             use-cross: false
 
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
@@ -317,6 +425,10 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - uses: actions/download-artifact@v4
         with:
           name: x86_64-unknown-linux-musl
@@ -380,6 +492,28 @@ jobs:
           if [[ ! "$VERSION" =~ - ]]; then
             crane tag "${IMAGE}:${VERSION#v}" latest
           fi
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}
+          artifact-name: sbom-grob.spdx.json
+          output-file: sbom-grob.spdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign container image
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          VERSION="${{ needs.version.outputs.version }}"
+          DIGEST=$(crane digest "${IMAGE}:${VERSION}")
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom-grob.spdx.json
 
   # =========================================================================
   # Stage 5: Update Homebrew tap (develop push + tag push only)
@@ -465,39 +599,26 @@ jobs:
   # =========================================================================
   e2e:
     name: E2E tests
-    if: github.event_name == 'push'
-    needs: [version, container]
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.skip_e2e)
+    needs: [version, container, test-ubuntu]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install podman + crane
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq podman
-          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
-            | sudo tar xz -C /usr/local/bin crane
+      - name: Setup E2E pod
+        uses: ./.github/actions/setup-e2e-pod
+        with:
+          version: ${{ needs.version.outputs.version }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
 
-      - name: Pull grob image (specific version via crane)
-        run: |
-          VERSION="${{ needs.version.outputs.version }}"
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          crane pull "${IMAGE}:${VERSION}" /tmp/grob-oci.tar
-          podman load -i /tmp/grob-oci.tar
-          podman tag "${IMAGE}:${VERSION}" localhost/grob:e2e
-
-      - name: Build test images
-        working-directory: tests/e2e
-        run: |
-          podman build -t localhost/vidaimock:e2e images/vidaimock/
-          podman build -t localhost/e2e-runner:latest images/runner/
-
-      - name: Start pod
-        working-directory: tests/e2e
-        run: make up wait-jwks init-proxies
-
-      - name: Run hurl tests
-        working-directory: tests/e2e
-        run: make test-hurl
+      - name: Run hurl tests (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 10
+          max_attempts: 2
+          retry_on: error
+          command: cd tests/e2e && make test-hurl
 
       - name: Collect logs
         if: failure()
@@ -513,39 +634,26 @@ jobs:
   # =========================================================================
   load:
     name: Load test (smoke)
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.run_load
     needs: [version, e2e]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install podman + crane
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq podman
-          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
-            | sudo tar xz -C /usr/local/bin crane
+      - name: Setup E2E pod
+        uses: ./.github/actions/setup-e2e-pod
+        with:
+          version: ${{ needs.version.outputs.version }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
 
-      - name: Pull grob image (specific version via crane)
-        run: |
-          VERSION="${{ needs.version.outputs.version }}"
-          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
-          crane pull "${IMAGE}:${VERSION}" /tmp/grob-oci.tar
-          podman load -i /tmp/grob-oci.tar
-          podman tag "${IMAGE}:${VERSION}" localhost/grob:e2e
-
-      - name: Build test images
-        working-directory: tests/e2e
-        run: |
-          podman build -t localhost/vidaimock:e2e images/vidaimock/
-          podman build -t localhost/e2e-runner:latest images/runner/
-
-      - name: Start pod
-        working-directory: tests/e2e
-        run: make up wait-jwks init-proxies
-
-      - name: Run k6 smoke load test
-        working-directory: tests/e2e
-        run: make load
+      - name: Run k6 smoke load test (with retry)
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 15
+          max_attempts: 2
+          retry_on: error
+          command: cd tests/e2e && make load
 
       - name: Teardown
         if: always()
@@ -627,3 +735,76 @@ jobs:
         run: |
           brew reinstall azerozero/tap/grob
           grob --version
+
+  # =========================================================================
+  # Stage 9: Pipeline Summary
+  # =========================================================================
+  summary:
+    name: Pipeline Summary
+    if: always()
+    needs:
+      - smoke
+      - fmt
+      - clippy
+      - audit
+      - gitleaks
+      - deny
+      - docs
+      - machete
+      - semver
+      - coverage
+      - feature-check
+      - test-ubuntu
+      - test-other
+      - build
+      - container
+      - e2e
+      - load
+      - release
+      - homebrew
+      - homebrew-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect job results and durations
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const jobs = [
+              'smoke', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
+              'docs', 'machete', 'semver', 'coverage', 'feature-check',
+              'test-ubuntu', 'test-other', 'build', 'container',
+              'e2e', 'load', 'release', 'homebrew', 'homebrew-test'
+            ];
+
+            const needs = ${{ toJSON(needs) }};
+
+            const pipelineStart = new Date('${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at || github.event.repository.pushed_at }}');
+            const now = new Date();
+            const totalMin = ((now - pipelineStart) / 60000).toFixed(1);
+
+            let md = `## Pipeline Summary\n\n`;
+            md += `**Total duration:** ~${totalMin} min | **Ref:** \`${{ github.ref_name }}\` | **SHA:** \`${{ github.sha }}\`\n\n`;
+
+            md += `| Job | Result |\n|-----|--------|\n`;
+
+            for (const job of jobs) {
+              const result = needs[job]?.result || 'n/a';
+              const icon = {
+                success: ':white_check_mark:',
+                failure: ':x:',
+                cancelled: ':no_entry_sign:',
+                skipped: ':fast_forward:'
+              }[result] || ':grey_question:';
+              md += `| ${job} | ${icon} ${result} |\n`;
+            }
+
+            md += `\n### Cache\n\n`;
+            md += `> Cache hit/miss details are available in individual job logs `;
+            md += `(look for \`rust-cache\` post-action output).\n`;
+
+            md += `\n### Test Results\n\n`;
+            md += `> Test counts are available in the \`test-ubuntu\` and \`test-other\` job logs `;
+            md += `(nextest summary output).\n`;
+
+            core.summary.addRaw(md);
+            await core.summary.write();

@@ -35,13 +35,76 @@ use config::DlpConfig;
 use std::borrow::Cow;
 use std::sync::Arc;
 
+/// Action performed by the DLP engine during sanitization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DlpAction {
+    /// Strips or masks the offending content in-place.
+    Redact,
+    /// Replaces a secret with a traceable canary token.
+    Canary,
+    /// Rejects the entire request or response.
+    Block,
+    /// Logs the finding without altering the payload.
+    Log,
+    /// Replaces a real name with a reversible pseudonym.
+    Pseudonym,
+    /// Emits a warning without blocking.
+    Warn,
+    /// Restores pseudonyms back to real names in responses.
+    Deanonymize,
+}
+
+impl std::fmt::Display for DlpAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DlpAction::Redact => write!(f, "redact"),
+            DlpAction::Canary => write!(f, "canary"),
+            DlpAction::Block => write!(f, "block"),
+            DlpAction::Log => write!(f, "log"),
+            DlpAction::Pseudonym => write!(f, "pseudonym"),
+            DlpAction::Warn => write!(f, "warn"),
+            DlpAction::Deanonymize => write!(f, "deanonymize"),
+        }
+    }
+}
+
+/// Rule category that triggered a DLP action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DlpRuleType {
+    /// API keys, tokens, PEM blocks, and other secrets.
+    Secret,
+    /// Personally identifiable information (credit cards, IBANs, BICs).
+    Pii,
+    /// Prompt injection attempts.
+    Injection,
+    /// URL-based data exfiltration (anti-EchoLeak).
+    UrlExfil,
+    /// Real-name anonymization or deanonymization.
+    Name,
+    /// SPRT entropy-based leak detection.
+    Entropy,
+}
+
+impl std::fmt::Display for DlpRuleType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DlpRuleType::Secret => write!(f, "secret"),
+            DlpRuleType::Pii => write!(f, "pii"),
+            DlpRuleType::Injection => write!(f, "injection"),
+            DlpRuleType::UrlExfil => write!(f, "url_exfil"),
+            DlpRuleType::Name => write!(f, "name"),
+            DlpRuleType::Entropy => write!(f, "entropy"),
+        }
+    }
+}
+
 /// Describes a single DLP action taken during sanitization.
 #[derive(Debug, Clone)]
 pub struct DlpActionReport {
-    /// Action performed: "redact", "canary", "pseudonym", "block", "log".
-    pub action: String,
-    /// Rule category: "name", "secret", "pii", "injection", "url_exfil", "entropy".
-    pub rule_type: String,
+    /// Action performed by the DLP engine.
+    pub action: DlpAction,
+    /// Rule category that triggered the action.
+    pub rule_type: DlpRuleType,
     /// Human-readable detail (rule name, PII type, etc.).
     pub detail: String,
 }
@@ -186,46 +249,11 @@ impl DlpEngine {
         }))
     }
 
-    /// Sanitize an outgoing request (prompt → LLM).
+    /// Sanitizes an outgoing request (prompt to LLM).
+    ///
     /// Caller must check `config.scan_input` before calling.
     pub fn sanitize_request(&self, request: &mut CanonicalRequest) {
-        // Sanitize system prompt
-        if let Some(ref mut system) = request.system {
-            match system {
-                SystemPrompt::Text(text) => {
-                    if let Cow::Owned(s) = self.sanitize_text(text) {
-                        *text = s;
-                    }
-                }
-                SystemPrompt::Blocks(blocks) => {
-                    for block in blocks {
-                        if let Cow::Owned(s) = self.sanitize_text(&block.text) {
-                            block.text = s;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Sanitize messages
-        for msg in &mut request.messages {
-            match &mut msg.content {
-                MessageContent::Text(text) => {
-                    if let Cow::Owned(s) = self.sanitize_text(text) {
-                        *text = s;
-                    }
-                }
-                MessageContent::Blocks(blocks) => {
-                    for block in blocks {
-                        if let ContentBlock::Known(KnownContentBlock::Text { text, .. }) = block {
-                            if let Cow::Owned(s) = self.sanitize_text(text) {
-                                *text = s;
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        let _ = self.sanitize_request_reported(request);
     }
 
     /// Sanitizes an outgoing request and collects action reports.
@@ -339,12 +367,23 @@ impl DlpEngine {
         texts
     }
 
-    /// Sanitize a single text string: names → pseudonyms, secrets → canary/redact.
+    /// Sanitizes a single text string: names to pseudonyms, secrets to canary/redact.
     ///
     /// Returns `Cow::Borrowed` if no modifications were needed (zero allocation).
     /// Returns `Cow::Owned` only when text was actually modified.
     pub fn sanitize_text<'a>(&self, text: &'a str) -> Cow<'a, str> {
+        self.sanitize_text_reported(text).0
+    }
+
+    /// Sanitizes a single text string and collects action reports.
+    ///
+    /// Returns the sanitized text and a list of [`DlpActionReport`]s.
+    pub fn sanitize_text_reported<'a>(
+        &self,
+        text: &'a str,
+    ) -> (Cow<'a, str>, Vec<DlpActionReport>) {
         let mut modified: Option<String> = None;
+        let mut reports = Vec::new();
 
         // 1. Anonymize names first (before secret scan, in case names overlap)
         if !self.anonymizer.is_empty() {
@@ -359,6 +398,11 @@ impl DlpEngine {
                         "action" => "pseudonym"
                     )
                     .increment(1);
+                    reports.push(DlpActionReport {
+                        action: DlpAction::Pseudonym,
+                        rule_type: DlpRuleType::Name,
+                        detail: format!("'{}' → '{}'", real, pseudo),
+                    });
                 }
                 modified = Some(anonymized);
             }
@@ -382,6 +426,11 @@ impl DlpEngine {
                             "action" => event.action.clone()
                         )
                         .increment(1);
+                        reports.push(DlpActionReport {
+                            action: secret_action_to_dlp_action(&event.action),
+                            rule_type: DlpRuleType::Secret,
+                            detail: format!("rule={}", event.rule_name),
+                        });
                     }
                     modified = Some(redacted);
                 }
@@ -402,97 +451,9 @@ impl DlpEngine {
                             "action" => "redact"
                         )
                         .increment(1);
-                    }
-                    modified = Some(redacted);
-                }
-            }
-        }
-
-        match modified {
-            Some(s) => Cow::Owned(s),
-            None => Cow::Borrowed(text),
-        }
-    }
-
-    /// Sanitizes a single text string and collects action reports.
-    ///
-    /// Returns the sanitized text and a list of [`DlpActionReport`]s.
-    pub fn sanitize_text_reported<'a>(
-        &self,
-        text: &'a str,
-    ) -> (Cow<'a, str>, Vec<DlpActionReport>) {
-        let mut modified: Option<String> = None;
-        let mut reports = Vec::new();
-
-        // 1. Anonymize names
-        if !self.anonymizer.is_empty() {
-            let current = modified.as_deref().unwrap_or(text);
-            if let Some((anonymized, replacements)) = self.anonymizer.anonymize_if_match(current) {
-                for (real, pseudo) in &replacements {
-                    tracing::debug!("DLP name anonymized: '{}' → '{}'", real, pseudo);
-                    metrics::counter!(
-                        "grob_dlp_detections_total",
-                        "type" => "name",
-                        "rule" => real.clone(),
-                        "action" => "pseudonym"
-                    )
-                    .increment(1);
-                    reports.push(DlpActionReport {
-                        action: "pseudonym".into(),
-                        rule_type: "name".into(),
-                        detail: format!("'{}' → '{}'", real, pseudo),
-                    });
-                }
-                modified = Some(anonymized);
-            }
-        }
-
-        // 2. Scan and replace secrets
-        if !self.scanner.is_empty() {
-            let current = modified.as_deref().unwrap_or(text);
-            if self.scanner.might_contain_secret(current) {
-                if let Some((redacted, events)) = self.scanner.redact(current, &self.canary_gen) {
-                    for event in &events {
-                        tracing::debug!(
-                            "DLP secret detected: rule='{}' action='{}'",
-                            event.rule_name,
-                            event.action
-                        );
-                        metrics::counter!(
-                            "grob_dlp_detections_total",
-                            "type" => "secret",
-                            "rule" => event.rule_name.clone(),
-                            "action" => event.action.clone()
-                        )
-                        .increment(1);
                         reports.push(DlpActionReport {
-                            action: event.action.clone(),
-                            rule_type: "secret".into(),
-                            detail: format!("rule={}", event.rule_name),
-                        });
-                    }
-                    modified = Some(redacted);
-                }
-            }
-        }
-
-        // 3. Scan for PII
-        if let Some(ref pii) = self.pii_scanner {
-            let current = modified.as_deref().unwrap_or(text);
-            if pii.might_contain_pii(current) {
-                if let Some((redacted, detections)) = pii.redact(current) {
-                    for det in &detections {
-                        tracing::debug!("DLP PII detected: type='{}'", det.pii_type);
-                        metrics::counter!(
-                            "grob_dlp_detections_total",
-                            "type" => "pii",
-                            "rule" => det.pii_type.to_string(),
-                            "action" => "redact"
-                        )
-                        .increment(1);
-                        reports.push(DlpActionReport {
-                            action: "redact".into(),
-                            rule_type: "pii".into(),
+                            action: DlpAction::Redact,
+                            rule_type: DlpRuleType::Pii,
                             detail: format!("type={}", det.pii_type),
                         });
                     }
@@ -508,17 +469,33 @@ impl DlpEngine {
         (result, reports)
     }
 
-    /// De-anonymize response text: pseudonyms → real names (for LLM → user).
+    /// De-anonymizes response text: pseudonyms to real names (for LLM to user).
     /// Also scans for secrets leaked in the response.
     ///
     /// Returns `Cow::Borrowed` if no modifications were needed (zero allocation).
     pub fn sanitize_response_text<'a>(&self, text: &'a str) -> Cow<'a, str> {
+        self.sanitize_response_text_reported(text).0
+    }
+
+    /// De-anonymizes response text and collects action reports.
+    ///
+    /// Returns the sanitized text and a list of [`DlpActionReport`]s.
+    pub fn sanitize_response_text_reported<'a>(
+        &self,
+        text: &'a str,
+    ) -> (Cow<'a, str>, Vec<DlpActionReport>) {
         let mut modified: Option<String> = None;
+        let mut reports = Vec::new();
 
         // 1. De-anonymize names (pseudonyms back to real names)
         if !self.anonymizer.is_empty() {
             let current = modified.as_deref().unwrap_or(text);
             if let Some(deanonymized) = self.anonymizer.deanonymize_if_match(current) {
+                reports.push(DlpActionReport {
+                    action: DlpAction::Deanonymize,
+                    rule_type: DlpRuleType::Name,
+                    detail: "pseudonyms restored".into(),
+                });
                 modified = Some(deanonymized);
             }
         }
@@ -541,90 +518,9 @@ impl DlpEngine {
                             "action" => event.action.clone()
                         )
                         .increment(1);
-                    }
-                    modified = Some(redacted);
-                }
-            }
-        }
-
-        // 3. Scan response for PII
-        if let Some(ref pii) = self.pii_scanner {
-            let current = modified.as_deref().unwrap_or(text);
-            if pii.might_contain_pii(current) {
-                if let Some((redacted, detections)) = pii.redact(current) {
-                    for det in &detections {
-                        tracing::warn!("DLP PII in response: type='{}'", det.pii_type);
-                        metrics::counter!(
-                            "grob_dlp_detections_total",
-                            "type" => "pii",
-                            "rule" => det.pii_type.to_string(),
-                            "action" => "redact"
-                        )
-                        .increment(1);
-                    }
-                    modified = Some(redacted);
-                }
-            }
-        }
-
-        // 4. URL exfiltration scan (anti-EchoLeak)
-        if let Some(ref exfil) = self.url_exfil_scanner {
-            let current = modified.as_deref().unwrap_or(text);
-            if let Cow::Owned(sanitized) = exfil.sanitize_response(current) {
-                modified = Some(sanitized);
-            }
-        }
-
-        match modified {
-            Some(s) => Cow::Owned(s),
-            None => Cow::Borrowed(text),
-        }
-    }
-
-    /// De-anonymizes response text and collects action reports.
-    ///
-    /// Returns the sanitized text and a list of [`DlpActionReport`]s.
-    pub fn sanitize_response_text_reported<'a>(
-        &self,
-        text: &'a str,
-    ) -> (Cow<'a, str>, Vec<DlpActionReport>) {
-        let mut modified: Option<String> = None;
-        let mut reports = Vec::new();
-
-        // 1. De-anonymize names
-        if !self.anonymizer.is_empty() {
-            let current = modified.as_deref().unwrap_or(text);
-            if let Some(deanonymized) = self.anonymizer.deanonymize_if_match(current) {
-                reports.push(DlpActionReport {
-                    action: "deanonymize".into(),
-                    rule_type: "name".into(),
-                    detail: "pseudonyms restored".into(),
-                });
-                modified = Some(deanonymized);
-            }
-        }
-
-        // 2. Scan response for secrets
-        if !self.scanner.is_empty() {
-            let current = modified.as_deref().unwrap_or(text);
-            if self.scanner.might_contain_secret(current) {
-                if let Some((redacted, events)) = self.scanner.redact(current, &self.canary_gen) {
-                    for event in &events {
-                        tracing::warn!(
-                            "DLP secret in response: rule='{}' action='{}'",
-                            event.rule_name,
-                            event.action
-                        );
-                        metrics::counter!(
-                            "grob_dlp_detections_total",
-                            "type" => "secret",
-                            "rule" => event.rule_name.clone(),
-                            "action" => event.action.clone()
-                        )
-                        .increment(1);
                         reports.push(DlpActionReport {
-                            action: event.action.clone(),
-                            rule_type: "secret".into(),
+                            action: secret_action_to_dlp_action(&event.action),
+                            rule_type: DlpRuleType::Secret,
                             detail: format!("rule={}", event.rule_name),
                         });
                     }
@@ -648,8 +544,8 @@ impl DlpEngine {
                         )
                         .increment(1);
                         reports.push(DlpActionReport {
-                            action: "redact".into(),
-                            rule_type: "pii".into(),
+                            action: DlpAction::Redact,
+                            rule_type: DlpRuleType::Pii,
                             detail: format!("type={}", det.pii_type),
                         });
                     }
@@ -658,13 +554,13 @@ impl DlpEngine {
             }
         }
 
-        // 4. URL exfiltration scan
+        // 4. URL exfiltration scan (anti-EchoLeak)
         if let Some(ref exfil) = self.url_exfil_scanner {
             let current = modified.as_deref().unwrap_or(text);
             if let Cow::Owned(sanitized) = exfil.sanitize_response(current) {
                 reports.push(DlpActionReport {
-                    action: "redact".into(),
-                    rule_type: "url_exfil".into(),
+                    action: DlpAction::Redact,
+                    rule_type: DlpRuleType::UrlExfil,
                     detail: "suspicious URL sanitized".into(),
                 });
                 modified = Some(sanitized);
@@ -756,6 +652,18 @@ impl DlpEngine {
     }
 }
 
+/// Maps a secret scanner action string to the corresponding [`DlpAction`] enum variant.
+fn secret_action_to_dlp_action(action: &str) -> DlpAction {
+    match action {
+        "canary" => DlpAction::Canary,
+        "redact" => DlpAction::Redact,
+        "log" => DlpAction::Log,
+        "block" => DlpAction::Block,
+        "warn" => DlpAction::Warn,
+        _ => DlpAction::Redact,
+    }
+}
+
 // ── Trait implementation ──
 
 #[cfg(feature = "dlp")]
@@ -793,144 +701,4 @@ impl crate::traits::DlpPipeline for DlpEngine {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use config::*;
-
-    fn test_config() -> DlpConfig {
-        DlpConfig {
-            enabled: true,
-            scan_input: true,
-            scan_output: true,
-            rules_file: String::new(),
-            no_builtins: true, // disable builtins for focused unit tests
-            secrets: vec![SecretRule {
-                name: "github_token".into(),
-                prefix: "ghp_".into(),
-                pattern: "ghp_[A-Za-z0-9]{36}".into(),
-                action: SecretAction::Canary,
-            }],
-            custom_prefixes: vec![],
-            names: vec![NameRule {
-                term: "Thales".into(),
-                action: NameAction::Pseudonym,
-            }],
-            entropy: EntropyConfig::default(),
-            pii: Default::default(),
-            enable_sessions: false,
-            url_exfil: Default::default(),
-            prompt_injection: Default::default(),
-            signed_config: Default::default(),
-            key_rotation_hours: 24,
-        }
-    }
-
-    #[test]
-    fn test_sanitize_text_names() {
-        let config = test_config();
-        let engine = DlpEngine::from_config(config).unwrap();
-        let result = engine.sanitize_text("Working at Thales");
-        assert!(!result.contains("Thales"));
-        assert!(matches!(result, Cow::Owned(_)));
-    }
-
-    #[test]
-    fn test_sanitize_text_no_match_is_borrowed() {
-        let config = test_config();
-        let engine = DlpEngine::from_config(config).unwrap();
-        let result = engine.sanitize_text("Hello world, nothing secret here");
-        // No name, no secret prefix → should be Cow::Borrowed (zero alloc)
-        assert!(matches!(result, Cow::Borrowed(_)));
-    }
-
-    #[test]
-    fn test_sanitize_text_secrets() {
-        let config = test_config();
-        let engine = DlpEngine::from_config(config).unwrap();
-        let result = engine.sanitize_text("token: ghp_abcdefghijklmnopqrstuvwxyz1234567890");
-        assert!(!result.contains("ghp_abcdefghijklmnopqrstuvwxyz1234567890"));
-        assert!(result.contains("ghp_~CANARY"));
-    }
-
-    #[test]
-    fn test_response_deanonymize() {
-        let config = test_config();
-        let engine = DlpEngine::from_config(config).unwrap();
-
-        let anonymized = engine.sanitize_text("Working at Thales");
-        assert!(!anonymized.contains("Thales"));
-
-        let restored = engine.sanitize_response_text(&anonymized);
-        assert!(restored.contains("Thales"));
-    }
-
-    #[test]
-    fn test_disabled_returns_none() {
-        let config = DlpConfig {
-            enabled: false,
-            ..Default::default()
-        };
-        assert!(DlpEngine::from_config(config).is_none());
-    }
-
-    #[test]
-    fn test_builtins_loaded_by_default() {
-        let config = DlpConfig {
-            enabled: true,
-            ..Default::default()
-        };
-        let engine = DlpEngine::from_config(config).unwrap();
-        // Should have loaded builtin rules (at least 20)
-        assert!(
-            engine.scanner.rules.len() >= 20,
-            "Expected >= 20 builtin rules, got {}",
-            engine.scanner.rules.len()
-        );
-    }
-
-    #[test]
-    fn test_builtins_opt_out() {
-        let config = DlpConfig {
-            enabled: true,
-            no_builtins: true,
-            ..Default::default()
-        };
-        let engine = DlpEngine::from_config(config).unwrap();
-        assert_eq!(engine.scanner.rules.len(), 0);
-    }
-
-    #[test]
-    fn test_builtin_detects_openai_key() {
-        let config = DlpConfig {
-            enabled: true,
-            ..Default::default()
-        };
-        let engine = DlpEngine::from_config(config).unwrap();
-        let text = "my key is sk-proj-abcdefghijklmnopqrstuvwxyz1234567890ABCD";
-        let result = engine.sanitize_text(text);
-        // Redact action now uses canary tokens for traceability.
-        assert!(
-            result.contains("~CANARY"),
-            "OpenAI key should be replaced with a canary token, got: {}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_builtin_detects_pem_header() {
-        let config = DlpConfig {
-            enabled: true,
-            ..Default::default()
-        };
-        let engine = DlpEngine::from_config(config).unwrap();
-        let text =
-            "-----BEGIN RSA PRIVATE KEY-----\nMIIBogIBAAJBALRiMLAHudeSA/x3hB2f-----END RSA PRIVATE KEY-----";
-        let result = engine.sanitize_text(text);
-        // Redact action now uses canary tokens for traceability.
-        assert!(
-            result.contains("~CANARY"),
-            "PEM key should be replaced with a canary token, got: {}",
-            result
-        );
-    }
-}
+mod tests;
