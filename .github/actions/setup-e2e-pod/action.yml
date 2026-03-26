@@ -22,12 +22,23 @@ runs:
         curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
           | sudo tar xz -C /usr/local/bin crane
 
-    - name: Pull grob image (specific version via crane)
+    - name: Pull grob image (multi-registry fallback)
       shell: bash
       run: |
         VERSION="${{ inputs.version }}"
         IMAGE="${{ inputs.registry }}/${{ inputs.image_name }}"
-        crane pull "${IMAGE}:${VERSION}" /tmp/grob-oci.tar
+        IMAGE_SHORT="${{ inputs.image_name }}"
+
+        echo "Trying primary registry: ${IMAGE}:${VERSION}"
+        if crane pull "${IMAGE}:${VERSION}" /tmp/grob-oci.tar; then
+          echo "Pulled from primary registry"
+        elif crane pull "docker.io/${IMAGE_SHORT}:${VERSION}" /tmp/grob-oci.tar; then
+          echo "Pulled from Docker Hub fallback"
+        else
+          echo "::error::All registries failed for ${IMAGE_SHORT}:${VERSION}"
+          exit 1
+        fi
+
         podman load -i /tmp/grob-oci.tar
         podman tag "${IMAGE}:${VERSION}" localhost/grob:e2e
 

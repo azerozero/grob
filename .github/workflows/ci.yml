@@ -1,6 +1,17 @@
+# CI Pipeline for Grob
+#
+# Local testing with `act` (https://github.com/nektos/act):
+#   act push -j smoke                       # run smoke job only
+#   act push -j fmt                         # run fmt check
+#   act pull_request --secret-file .secrets  # simulate PR (needs .secrets file)
+#   act -l                                  # list all jobs
+#
+# Note: some jobs (container, release) require secrets not available locally.
+
 name: CI
 
 on:
+  merge_group:
   push:
     branches: [develop]
     tags:
@@ -58,16 +69,53 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 # ---------------------------------------------------------------------------
-# Stage 0: Extract version from Cargo.toml (used by later jobs)
+# Stage -1: Path-based DAG pruning (dorny/paths-filter)
 # ---------------------------------------------------------------------------
 jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      e2e: ${{ steps.filter.outputs.e2e }}
+      ci: ${{ steps.filter.outputs.ci }}
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'src/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+            e2e:
+              - 'tests/e2e/**'
+            ci:
+              - '.github/**'
+            docs:
+              - 'docs/**'
+              - '**.md'
+
+  # ---------------------------------------------------------------------------
+  # Stage 0: Extract version from Cargo.toml (used by later jobs)
+  # ---------------------------------------------------------------------------
   version:
     name: Extract version
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       version: ${{ steps.ver.outputs.version }}
       tag: ${{ steps.ver.outputs.tag }}
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - name: Read version from Cargo.toml
         id: ver
@@ -82,8 +130,14 @@ jobs:
   # =========================================================================
   smoke:
     name: Smoke (fast feedback)
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -107,8 +161,14 @@ jobs:
   # =========================================================================
   fmt:
     name: Rustfmt
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -117,7 +177,10 @@ jobs:
 
   clippy:
     name: Clippy (${{ matrix.os }})
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -140,7 +203,11 @@ jobs:
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: rustsec/audit-check@v2.0.0
         with:
@@ -149,7 +216,11 @@ jobs:
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -164,14 +235,24 @@ jobs:
   deny:
     name: Cargo Deny
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   docs:
     name: Doc Coverage
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -195,8 +276,14 @@ jobs:
 
   machete:
     name: Unused Dependencies
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -210,8 +297,14 @@ jobs:
 
   semver:
     name: API Compatibility
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -236,8 +329,14 @@ jobs:
 
   coverage:
     name: Coverage
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -259,8 +358,14 @@ jobs:
 
   feature-check:
     name: Feature Powerset
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -279,6 +384,7 @@ jobs:
   test-ubuntu:
     name: Test Ubuntu (shard ${{ matrix.shard }}/4)
     needs:
+      - changes
       - fmt
       - clippy
       - audit
@@ -289,12 +395,21 @@ jobs:
       - semver
       - coverage
       - feature-check
+    if: |
+      always() &&
+      (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -313,6 +428,7 @@ jobs:
   test-other:
     name: Test (${{ matrix.os }})
     needs:
+      - changes
       - fmt
       - clippy
       - audit
@@ -323,7 +439,13 @@ jobs:
       - semver
       - coverage
       - feature-check
+    if: |
+      always() &&
+      (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -349,8 +471,9 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     if: github.event_name == 'push'
-    needs: [version, test-ubuntu, test-other]
+    needs: [changes, version, test-ubuntu, test-other]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -410,11 +533,12 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}
+          name: ${{ matrix.target }}-${{ github.sha }}
           path: |
             ${{ env.ARCHIVE }}
             ${{ env.ARCHIVE }}.sha256
           if-no-files-found: error
+          compression-level: 9
 
   # =========================================================================
   # Stage 4: Push GHCR multi-arch image (develop push + tag push only)
@@ -424,6 +548,7 @@ jobs:
     if: github.event_name == 'push'
     needs: [version, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -431,12 +556,12 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: x86_64-unknown-linux-musl
+          name: x86_64-unknown-linux-musl-${{ github.sha }}
           path: artifacts/amd64
 
       - uses: actions/download-artifact@v4
         with:
-          name: aarch64-unknown-linux-musl
+          name: aarch64-unknown-linux-musl-${{ github.sha }}
           path: artifacts/arm64
 
       - name: Extract binaries
@@ -512,8 +637,9 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: sbom
+          name: sbom-${{ github.sha }}
           path: sbom-grob.spdx.json
+          compression-level: 9
 
   # =========================================================================
   # Stage 5: Update Homebrew tap (develop push + tag push only)
@@ -523,7 +649,11 @@ jobs:
     if: github.event_name == 'push'
     needs: [version, container]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - name: Update formula
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
@@ -599,10 +729,16 @@ jobs:
   # =========================================================================
   e2e:
     name: E2E tests
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.skip_e2e)
-    needs: [version, container, test-ubuntu]
+    if: |
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.skip_e2e)) &&
+      (needs.changes.outputs.e2e == 'true' || needs.changes.outputs.rust == 'true')
+    needs: [changes, version, container, test-ubuntu]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
 
       - name: Setup E2E pod
@@ -637,7 +773,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.run_load
     needs: [version, e2e]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
 
       - name: Setup E2E pod
@@ -668,7 +808,11 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [version, build, container, e2e]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
       - uses: actions/checkout@v4
 
       - uses: actions/download-artifact@v4
@@ -719,6 +863,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [version, homebrew]
     runs-on: macos-latest
+    timeout-minutes: 10
     steps:
       - name: Install via brew
         run: |
@@ -737,12 +882,83 @@ jobs:
           grob --version
 
   # =========================================================================
-  # Stage 9: Pipeline Summary
+  # Stage 9.1: Validate YAML (DX — catches syntax errors early)
+  # =========================================================================
+  validate-yaml:
+    name: Validate CI YAML
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v4
+      - name: Install actionlint
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-bash.sh)
+      - name: Lint workflow files
+        run: ./actionlint -color
+
+  # =========================================================================
+  # Stage 9.2: Required — merge queue gate (aggregates all required checks)
+  # =========================================================================
+  required:
+    name: Required checks
+    if: always()
+    needs:
+      - changes
+      - smoke
+      - fmt
+      - clippy
+      - audit
+      - gitleaks
+      - deny
+      - docs
+      - machete
+      - semver
+      - coverage
+      - feature-check
+      - test-ubuntu
+      - test-other
+      - validate-yaml
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check required jobs
+        run: |
+          # Fail if any required job failed (skipped is OK for pruned paths).
+          results=( \
+            "${{ needs.smoke.result }}" \
+            "${{ needs.fmt.result }}" \
+            "${{ needs.clippy.result }}" \
+            "${{ needs.audit.result }}" \
+            "${{ needs.gitleaks.result }}" \
+            "${{ needs.deny.result }}" \
+            "${{ needs.docs.result }}" \
+            "${{ needs.machete.result }}" \
+            "${{ needs.semver.result }}" \
+            "${{ needs.coverage.result }}" \
+            "${{ needs.feature-check.result }}" \
+            "${{ needs.test-ubuntu.result }}" \
+            "${{ needs.test-other.result }}" \
+            "${{ needs.validate-yaml.result }}" \
+          )
+          for r in "${results[@]}"; do
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "::error::Required job failed or was cancelled: $r"
+              exit 1
+            fi
+          done
+          echo "All required checks passed (or were skipped by path pruning)."
+
+  # =========================================================================
+  # Stage 10: Pipeline Summary
   # =========================================================================
   summary:
     name: Pipeline Summary
     if: always()
     needs:
+      - changes
       - smoke
       - fmt
       - clippy
@@ -763,17 +979,25 @@ jobs:
       - release
       - homebrew
       - homebrew-test
+      - validate-yaml
+      - required
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+
       - name: Collect job results and durations
         uses: actions/github-script@v7
         with:
           script: |
             const jobs = [
-              'smoke', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
+              'changes', 'smoke', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
               'docs', 'machete', 'semver', 'coverage', 'feature-check',
               'test-ubuntu', 'test-other', 'build', 'container',
-              'e2e', 'load', 'release', 'homebrew', 'homebrew-test'
+              'e2e', 'load', 'release', 'homebrew', 'homebrew-test',
+              'validate-yaml', 'required'
             ];
 
             const needs = ${{ toJSON(needs) }};
@@ -808,3 +1032,32 @@ jobs:
 
             core.summary.addRaw(md);
             await core.summary.write();
+
+      - name: Export pipeline duration for trend tracking (D9)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const pipelineStart = new Date('${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at || github.event.repository.pushed_at }}');
+            const now = new Date();
+            const data = {
+              sha: '${{ github.sha }}',
+              ref: '${{ github.ref_name }}',
+              event: '${{ github.event_name }}',
+              run_id: '${{ github.run_id }}',
+              duration_sec: Math.round((now - pipelineStart) / 1000),
+              timestamp: now.toISOString(),
+              jobs: {}
+            };
+            const needs = ${{ toJSON(needs) }};
+            for (const [k, v] of Object.entries(needs)) {
+              data.jobs[k] = v.result;
+            }
+            fs.writeFileSync('/tmp/ci-benchmark.json', JSON.stringify(data, null, 2));
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-benchmark-${{ github.sha }}
+          path: /tmp/ci-benchmark.json
+          retention-days: 90
+          compression-level: 9
