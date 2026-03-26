@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0](https://github.com/azerozero/grob/compare/v0.29.13...v0.30.0) - 2026-03-26
+
+### Added
+
+- *(dlp)* PiiAction::Canary + fix deny.toml + clippy
+
+### Fixed
+
+- *(e2e)* restore clean grob-test.toml (remove config-swap pollution)
+
+### Other
+
+- *(demo)* 4-pane tmux — Claude Code + grob watch + logs + audit
+- *(demo)* 2-pane real demo — grob exec claude + grob watch
+- *(demo)* 4-pane tmux demo + Claude Code takeover at end
+- *(demo)* auto-play demo + gitleaks ignore for fake AWS keys
+- *(ci)* fix push race — scope pre-push hooks + release-plz paths filter
+- *(e2e)* gitignore .bak files, remove tracked backup
+- *(deps)* remove resolved advisories from deny.toml ignore list
+- *(e2e)* S5 HIT flow script + fix config corruption
+- *(e2e)* 100% feature coverage — output DLP + HIT + 3 VidaiMock instances
+- *(e2e)* advanced audit/compliance tests + fix key leak in git
+- *(e2e)* 98 hurl + fan-out/audit/compliance scripts — 90%+ coverage
+- *(e2e)* 94 hurl tests + 12 audit scripts — full feature matrix
+
 ## [0.29.13](https://github.com/azerozero/grob/compare/v0.29.12...v0.29.13) - 2026-03-26
 
 ### Fixed
