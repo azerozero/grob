@@ -13,6 +13,7 @@ mode = "jwt"
 
 [auth.jwt]
 jwks_url = "http://127.0.0.1:8443/.well-known/jwks.json"
+jwks_refresh_interval = 5
 issuer = "https://openbao.test"
 audience = "grob-siege"
 
