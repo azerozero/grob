@@ -142,12 +142,18 @@ jobs:
     needs: [test]
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-ubuntu-latest
+          save-if: false
       - name: Install podman
         run: sudo apt-get update -qq && sudo apt-get install -y -qq podman
-      - name: Pull grob image (GHCR)
+      - name: Build grob image from current commit
         run: |
-          podman pull ghcr.io/azerozero/grob:latest
-          podman tag ghcr.io/azerozero/grob:latest localhost/grob:e2e
+          cargo build --release
+          printf 'FROM debian:bookworm-slim\nCOPY target/release/grob /grob\nENTRYPOINT ["/grob"]\nCMD ["run","--json-logs","--host","0.0.0.0","--port","13456"]\n' \
+            | podman build -t localhost/grob:e2e -f - .
       - name: Build test images
         working-directory: tests/e2e
         run: |
@@ -174,12 +180,18 @@ jobs:
     needs: [e2e]
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: test-ubuntu-latest
+          save-if: false
       - name: Install podman
         run: sudo apt-get update -qq && sudo apt-get install -y -qq podman
-      - name: Pull grob image (GHCR)
+      - name: Build grob image from current commit
         run: |
-          podman pull ghcr.io/azerozero/grob:latest
-          podman tag ghcr.io/azerozero/grob:latest localhost/grob:e2e
+          cargo build --release
+          printf 'FROM debian:bookworm-slim\nCOPY target/release/grob /grob\nENTRYPOINT ["/grob"]\nCMD ["run","--json-logs","--host","0.0.0.0","--port","13456"]\n' \
+            | podman build -t localhost/grob:e2e -f - .
       - name: Build test images
         working-directory: tests/e2e
         run: |

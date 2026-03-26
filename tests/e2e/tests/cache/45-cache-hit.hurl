@@ -7,7 +7,7 @@ HTTP 200
 [Asserts]
 jsonpath "$.choices" exists
 
-# Second identical request — should hit cache and still be OpenAI format
+# Second identical request — should hit cache (format-translated)
 POST http://{{host}}/v1/chat/completions
 Authorization: Bearer {{jwt_default}}
 Content-Type: application/json
