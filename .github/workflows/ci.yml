@@ -142,16 +142,30 @@ jobs:
     needs: [test]
     steps:
       - uses: actions/checkout@v4
-      - name: Install podman + crane
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: e2e-musl
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Install podman + musl tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq podman musl-tools
+      - name: Build grob (static musl, current commit)
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq podman
-          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
-            | sudo tar xz -C /usr/local/bin crane
-      - name: Pull grob image (GHCR via crane)
+          RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-unknown-linux-musl
+          strip target/x86_64-unknown-linux-musl/release/grob
+      - name: Create grob container image
         run: |
-          crane pull ghcr.io/${{ github.repository }}:latest /tmp/grob-oci.tar
-          podman load -i /tmp/grob-oci.tar
-          podman tag ghcr.io/${{ github.repository }}:latest localhost/grob:e2e
+          mkdir -p /tmp/grob-ctx
+          cp target/x86_64-unknown-linux-musl/release/grob /tmp/grob-ctx/
+          cat > /tmp/grob-ctx/Containerfile << 'CFILE'
+          FROM scratch
+          COPY grob /grob
+          ENTRYPOINT ["/grob"]
+          CMD ["run", "--json-logs", "--host", "0.0.0.0", "--port", "13456"]
+          CFILE
+          podman build -t localhost/grob:e2e /tmp/grob-ctx
       - name: Build test images
         working-directory: tests/e2e
         run: |
@@ -178,16 +192,30 @@ jobs:
     needs: [e2e]
     steps:
       - uses: actions/checkout@v4
-      - name: Install podman + crane
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: e2e-musl
+          save-if: false
+      - name: Install podman + musl tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq podman musl-tools
+      - name: Build grob (static musl)
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq podman
-          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
-            | sudo tar xz -C /usr/local/bin crane
-      - name: Pull grob image (GHCR via crane)
+          RUSTFLAGS="-C target-feature=+crt-static" cargo build --release --target x86_64-unknown-linux-musl
+          strip target/x86_64-unknown-linux-musl/release/grob
+      - name: Create grob container image
         run: |
-          crane pull ghcr.io/${{ github.repository }}:latest /tmp/grob-oci.tar
-          podman load -i /tmp/grob-oci.tar
-          podman tag ghcr.io/${{ github.repository }}:latest localhost/grob:e2e
+          mkdir -p /tmp/grob-ctx
+          cp target/x86_64-unknown-linux-musl/release/grob /tmp/grob-ctx/
+          cat > /tmp/grob-ctx/Containerfile << 'CFILE'
+          FROM scratch
+          COPY grob /grob
+          ENTRYPOINT ["/grob"]
+          CMD ["run", "--json-logs", "--host", "0.0.0.0", "--port", "13456"]
+          CFILE
+          podman build -t localhost/grob:e2e /tmp/grob-ctx
       - name: Build test images
         working-directory: tests/e2e
         run: |
