@@ -10,8 +10,9 @@ git_tag_name = "v{{ version }}"
 git_tag_enable = true
 changelog_update = true
 pr_labels = ["release"]
-# Only bump on meaningful commits (feat/fix/refactor/perf)
-release_commits = "^(feat|fix|refactor|perf)"
+# Only bump on commits that change Rust source code.
+# Negative lookahead excludes e2e, ci, docs scopes to avoid release spam.
+release_commits = "^(feat|fix|refactor|perf)(?!\\((e2e|ci|docs)\\))"
 
 [[package]]
 name = "grob"
