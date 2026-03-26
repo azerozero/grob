@@ -178,6 +178,24 @@ else
     skip "S6 — /api/scores returned $scores_status"
 fi
 
+# ── S7: Output-side DLP ─────────────────────────────────────────────────────
+echo ""
+echo "--- S7: Output-side DLP ---"
+if curl -sf "http://127.0.0.1:8101/v1/models" >/dev/null 2>&1; then
+    bash "$(dirname "$0")/S7-output-dlp.sh" && pass "S7" || fail "S7"
+else
+    skip "S7 — vidaimock-url (port 8101) not available"
+fi
+
+# ── S8: HIT Gateway + tool_use ──────────────────────────────────────────────
+echo ""
+echo "--- S8: HIT Gateway + tool_use ---"
+if curl -sf "http://127.0.0.1:8102/v1/models" >/dev/null 2>&1; then
+    bash "$(dirname "$0")/S8-hit-gateway.sh" && pass "S8" || fail "S8"
+else
+    skip "S8 — vidaimock-tool (port 8102) not available"
+fi
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 echo ""
 echo "========================================"

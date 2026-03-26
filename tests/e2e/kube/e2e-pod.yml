@@ -79,6 +79,38 @@ spec:
           protocol: TCP
 
     # -------------------------------------------------------------------------
+    # VidaiMock (URL response) — returns responses containing suspicious URLs
+    # Used for output-side DLP testing (URL exfiltration, entropy detection)
+    # -------------------------------------------------------------------------
+    - name: vidaimock-url
+      image: localhost/vidaimock:e2e
+      args: ["--host", "0.0.0.0", "--port", "8101", "--response-file", "/etc/vidaimock/echo-with-url.json"]
+      ports:
+        - containerPort: 8101
+          hostPort: 8101
+          protocol: TCP
+      volumeMounts:
+        - name: vidaimock-config
+          mountPath: /etc/vidaimock
+          readOnly: true
+
+    # -------------------------------------------------------------------------
+    # VidaiMock (tool_use response) — returns tool_use content blocks
+    # Used for HIT Gateway approval flow testing
+    # -------------------------------------------------------------------------
+    - name: vidaimock-tool
+      image: localhost/vidaimock:e2e
+      args: ["--host", "0.0.0.0", "--port", "8102", "--response-file", "/etc/vidaimock/tool-use-response.json"]
+      ports:
+        - containerPort: 8102
+          hostPort: 8102
+          protocol: TCP
+      volumeMounts:
+        - name: vidaimock-config
+          mountPath: /etc/vidaimock
+          readOnly: true
+
+    # -------------------------------------------------------------------------
     # Toxiproxy — TCP fault injection in front of VidaiMock
     # -------------------------------------------------------------------------
     - name: toxiproxy
@@ -132,3 +164,8 @@ spec:
       hostPath:
         path: /tmp/grob-audit
         type: DirectoryOrCreate
+
+    - name: vidaimock-config
+      hostPath:
+        path: ${E2E_DIR}/config/vidaimock
+        type: Directory
