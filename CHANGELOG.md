@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.13](https://github.com/azerozero/grob/compare/v0.29.12...v0.29.13) - 2026-03-26
+
+### Fixed
+
+- *(ci)* build static musl binary from current commit for e2e
+- *(ci)* use crane to pull GHCR image for e2e tests
+
 ## [0.29.12](https://github.com/azerozero/grob/compare/v0.29.11...v0.29.12) - 2026-03-26
 
 ### Fixed
