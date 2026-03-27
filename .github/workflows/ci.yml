@@ -357,7 +357,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   feature-check:
-    name: Feature Powerset (${{ matrix.shard }}/4)
+    name: Feature Powerset (${{ matrix.group }})
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
@@ -365,7 +365,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        include:
+          - group: core
+            features: "dlp,oauth,tap,compliance,policies"
+          - group: optional
+            features: "mcp,harness,otel,acme,tls"
+          - group: minimal
+            features: "test-util,watch"
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -374,14 +380,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: hack-${{ matrix.shard }}
-          save-if: ${{ github.ref == 'refs/heads/develop' && matrix.shard == 1 }}
+          shared-key: hack-${{ matrix.group }}
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
           enableCrossOsArchive: true
           restore-keys: |
-            hack-${{ matrix.shard }}-
+            hack-${{ matrix.group }}-
             hack-
       - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --partition count:${{ matrix.shard }}/4
+      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --group-features ${{ matrix.features }}
 
   # =========================================================================
   # Stage 2: Tests (gate for everything below)
@@ -898,11 +904,11 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@v4
-      - name: Install actionlint
+      - name: Install and run actionlint
         run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-bash.sh)
-      - name: Lint workflow files
-        run: ./actionlint -color
+          curl -fsSL https://github.com/rhysd/actionlint/releases/latest/download/actionlint_linux_amd64.tar.gz \
+            | tar xz -C /usr/local/bin actionlint
+          actionlint -color
 
   # =========================================================================
   # Stage 9.2: Required — merge queue gate (aggregates all required checks)
