@@ -332,7 +332,7 @@ jobs:
       - uses: codecov/codecov-action@v6
         with:
           files: lcov.info
-          fail_ci_if_error: true
+          fail_ci_if_error: ${{ secrets.CODECOV_TOKEN != '' }}
           token: ${{ secrets.CODECOV_TOKEN }}
 
   feature-check:
