@@ -904,11 +904,9 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@v4
-      - name: Install and run actionlint
-        run: |
-          curl -fsSL https://github.com/rhysd/actionlint/releases/latest/download/actionlint_linux_amd64.tar.gz \
-            | tar xz -C /usr/local/bin actionlint
-          actionlint -color
+      - uses: rhysd/actionlint@v1
+        with:
+          flags: -color
 
   # =========================================================================
   # Stage 9.2: Required — merge queue gate (aggregates all required checks)
