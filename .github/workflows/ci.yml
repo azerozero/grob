@@ -332,7 +332,7 @@ jobs:
       - uses: codecov/codecov-action@v6
         with:
           files: lcov.info
-          fail_ci_if_error: false
+          fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
   feature-check:
@@ -446,6 +446,43 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --profile ci
       - run: cargo test --doc
+
+  # =========================================================================
+  # Stage 2.5: Mutation testing (develop push only, informational)
+  # =========================================================================
+  mutants:
+    name: Mutation Testing
+    if: github.ref == 'refs/heads/develop'
+    needs: [test-ubuntu, test-other]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mutants
+          save-if: ${{ github.ref == 'refs/heads/develop' }}
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants --locked
+      - name: Run mutation testing on critical paths
+        run: |
+          cargo mutants --package grob -- --lib -j 2 --timeout 120 \
+            --file src/router/mod.rs \
+            --file src/features/dlp/mod.rs \
+            --file src/features/dlp/pii.rs \
+            --file src/features/dlp/dfa.rs
+      - name: Upload mutation testing results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutants-results-${{ github.sha }}
+          path: mutants.out/
+          if-no-files-found: ignore
 
   # =========================================================================
   # Stage 3: Cross build (develop push + tag push only, not PRs)
@@ -954,6 +991,7 @@ jobs:
       - feature-check
       - test-ubuntu
       - test-other
+      - mutants
       - build
       - container
       - e2e
@@ -977,7 +1015,7 @@ jobs:
             const jobs = [
               'changes', 'smoke', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
               'docs', 'machete', 'semver', 'coverage', 'feature-check',
-              'test-ubuntu', 'test-other', 'build', 'container',
+              'test-ubuntu', 'test-other', 'mutants', 'build', 'container',
               'e2e', 'load', 'release', 'homebrew', 'homebrew-test',
               'validate-yaml', 'required'
             ];

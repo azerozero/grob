@@ -1,0 +1,15 @@
+---
+source: src/server/openai_compat/mod.rs
+assertion_line: 337
+expression: canonical
+---
+{
+  "model": "claude-3",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hello, world!"
+    }
+  ],
+  "max_tokens": 1024
+}

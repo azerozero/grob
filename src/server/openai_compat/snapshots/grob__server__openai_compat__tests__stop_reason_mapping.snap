@@ -1,0 +1,13 @@
+---
+source: src/server/openai_compat/mod.rs
+assertion_line: 498
+expression: mapped
+---
+- - end_turn
+  - stop
+- - max_tokens
+  - length
+- - stop_sequence
+  - stop
+- - tool_use
+  - tool_calls

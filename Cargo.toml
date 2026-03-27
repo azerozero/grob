@@ -139,7 +139,7 @@ tokio-test = "0.4"
 mockito = "1"
 criterion = { version = "0.5", features = ["async_tokio"] }  # Benchmarking
 tempfile = "3"             # Temporary directory testing
-insta = { version = "1", features = ["json", "yaml"] }  # Snapshot testing
+insta = { version = "1", features = ["json", "yaml", "redactions"] }  # Snapshot testing
 tracing-test = "0.2"       # Capture tracing logs in tests
 
 # Property Testing

@@ -1,0 +1,26 @@
+---
+source: src/server/openai_compat/mod.rs
+assertion_line: 439
+expression: openai_resp
+---
+{
+  "id": "msg_test",
+  "object": "chat.completion",
+  "created": "[timestamp]",
+  "model": "gpt-4o",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Hello! How can I help you today?"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 20,
+    "total_tokens": 30
+  }
+}

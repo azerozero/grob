@@ -1,0 +1,6 @@
+---
+source: src/features/dlp/tests.rs
+assertion_line: 218
+expression: result.as_ref()
+---
+This is a perfectly normal sentence with no secrets.

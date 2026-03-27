@@ -1,0 +1,6 @@
+---
+source: src/features/dlp/tests.rs
+assertion_line: 190
+expression: result.as_ref()
+---
+Pay with card [CARD REDACTED]please.

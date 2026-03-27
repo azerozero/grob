@@ -1,0 +1,28 @@
+---
+source: src/server/openai_compat/mod.rs
+assertion_line: 426
+expression: canonical
+---
+{
+  "model": "claude-3",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "Describe this image."
+        },
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/png",
+            "data": "iVBORw0KGgo="
+          }
+        }
+      ]
+    }
+  ],
+  "max_tokens": 1024
+}

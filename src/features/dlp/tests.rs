@@ -140,6 +140,99 @@ fn test_builtin_detects_pem_header() {
     );
 }
 
+// ── Insta snapshot tests ─────────────────────────────────────
+
+#[test]
+fn snap_canary_github_token() {
+    let config = test_config();
+    let engine = DlpEngine::from_config(config).unwrap();
+    let input = "My token is ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+    let result = engine.sanitize_text(input);
+    // Structural assertion: canary replaces token, prefix preserved.
+    // Cannot use insta snapshot here because the canary pattern triggers gitleaks.
+    assert!(
+        result.starts_with("My token is ghp_~CANARY"),
+        "Expected canary prefix, got: {result}"
+    );
+    assert!(
+        !result.contains("abcdefghijklmnopqrstuvwxyz1234567890"),
+        "Original token must be removed"
+    );
+}
+
+#[test]
+fn snap_name_pseudonymization_structure() {
+    let config = test_config();
+    let engine = DlpEngine::from_config(config).unwrap();
+    let input = "Contact Thales for the update.";
+    let anonymized = engine.sanitize_text(input);
+    // Pseudonym is HMAC-derived and nondeterministic across runs.
+    // Verify structural properties instead of exact value.
+    assert!(!anonymized.contains("Thales"), "Real name must be removed");
+    assert!(
+        anonymized.starts_with("Contact ") && anonymized.ends_with(" for the update."),
+        "Surrounding text must be preserved, got: {anonymized}"
+    );
+}
+
+#[test]
+fn snap_name_deanonymize_roundtrip() {
+    let config = test_config();
+    let engine = DlpEngine::from_config(config).unwrap();
+    let input = "Contact Thales for the update.";
+    let anonymized = engine.sanitize_text(input);
+    let restored = engine.sanitize_response_text(&anonymized);
+    // Roundtrip must restore the original text exactly.
+    insta::assert_snapshot!("dlp_name_deanonymize_roundtrip", restored.as_ref());
+}
+
+#[test]
+fn snap_pii_credit_card_redaction() {
+    let config = DlpConfig {
+        enabled: true,
+        no_builtins: true,
+        pii: config::PiiConfig {
+            credit_cards: true,
+            iban: false,
+            bic: false,
+            action: config::PiiAction::Redact,
+        },
+        ..Default::default()
+    };
+    let engine = DlpEngine::from_config(config).unwrap();
+    let input = "Pay with card 4532015112830366 please.";
+    let result = engine.sanitize_text(input);
+    insta::assert_snapshot!("dlp_pii_credit_card_redaction", result.as_ref());
+}
+
+#[test]
+fn snap_pii_iban_redaction() {
+    let config = DlpConfig {
+        enabled: true,
+        no_builtins: true,
+        pii: config::PiiConfig {
+            credit_cards: false,
+            iban: true,
+            bic: false,
+            action: config::PiiAction::Redact,
+        },
+        ..Default::default()
+    };
+    let engine = DlpEngine::from_config(config).unwrap();
+    let input = "Transfer to FR7630006000011234567890189 now.";
+    let result = engine.sanitize_text(input);
+    insta::assert_snapshot!("dlp_pii_iban_redaction", result.as_ref());
+}
+
+#[test]
+fn snap_clean_text_unchanged() {
+    let config = test_config();
+    let engine = DlpEngine::from_config(config).unwrap();
+    let input = "This is a perfectly normal sentence with no secrets.";
+    let result = engine.sanitize_text(input);
+    insta::assert_snapshot!("dlp_clean_text_unchanged", result.as_ref());
+}
+
 // ── Property-based tests ─────────────────────────────────────
 
 proptest! {

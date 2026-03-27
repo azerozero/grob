@@ -123,4 +123,8 @@ demo/run.sh:aws-access-token:175
 # DLP unit tests — intentional fake tokens for scanner validation
 src/features/dlp/tests.rs:github-pat:55
 src/features/dlp/tests.rs:github-pat:56
+src/features/dlp/tests.rs:github-pat:57
+src/features/dlp/tests.rs:github-pat:58
+src/features/dlp/tests.rs:github-pat:149
+src/features/dlp/tests.rs:github-pat:153
 src/features/dlp/tests.rs:private-key:132

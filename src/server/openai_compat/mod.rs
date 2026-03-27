@@ -320,4 +320,211 @@ mod tests {
             other => panic!("Expected Blocks content, got {:?}", other),
         }
     }
+
+    // ── Insta snapshot tests ─────────────────────────────────
+
+    #[test]
+    fn snap_simple_user_message_to_canonical() {
+        let req = simple_openai_request(vec![OpenAIMessage {
+            role: "user".to_string(),
+            content: Some(OpenAIContent::String("Hello, world!".to_string())),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }]);
+
+        let canonical = transform_openai_to_canonical(req).unwrap();
+        insta::assert_json_snapshot!("openai_simple_user_to_canonical", canonical);
+    }
+
+    #[test]
+    fn snap_system_plus_user_to_canonical() {
+        let req = simple_openai_request(vec![
+            OpenAIMessage {
+                role: "system".to_string(),
+                content: Some(OpenAIContent::String(
+                    "You are a helpful coding assistant.".to_string(),
+                )),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            OpenAIMessage {
+                role: "user".to_string(),
+                content: Some(OpenAIContent::String("Write a Rust function.".to_string())),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ]);
+
+        let canonical = transform_openai_to_canonical(req).unwrap();
+        insta::assert_json_snapshot!("openai_system_user_to_canonical", canonical);
+    }
+
+    #[test]
+    fn snap_tool_call_roundtrip_to_canonical() {
+        let req = simple_openai_request(vec![
+            OpenAIMessage {
+                role: "user".to_string(),
+                content: Some(OpenAIContent::String("What's the weather?".to_string())),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            OpenAIMessage {
+                role: "assistant".to_string(),
+                content: None,
+                name: None,
+                tool_calls: Some(vec![OpenAIToolCallInput {
+                    id: "call_abc123".to_string(),
+                    r#type: Some("function".to_string()),
+                    function: OpenAIFunctionInput {
+                        name: "get_weather".to_string(),
+                        arguments: r#"{"location":"Paris","units":"celsius"}"#.to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+            },
+            OpenAIMessage {
+                role: "tool".to_string(),
+                content: Some(OpenAIContent::String(
+                    r#"{"temperature": 22, "condition": "sunny"}"#.to_string(),
+                )),
+                name: None,
+                tool_calls: None,
+                tool_call_id: Some("call_abc123".to_string()),
+            },
+        ]);
+
+        let canonical = transform_openai_to_canonical(req).unwrap();
+        insta::assert_json_snapshot!("openai_tool_call_roundtrip_to_canonical", canonical);
+    }
+
+    #[test]
+    fn snap_multipart_image_to_canonical() {
+        let req = simple_openai_request(vec![OpenAIMessage {
+            role: "user".to_string(),
+            content: Some(OpenAIContent::Parts(vec![
+                OpenAIContentPart::Text {
+                    text: "Describe this image.".to_string(),
+                },
+                OpenAIContentPart::ImageUrl {
+                    image_url: OpenAIImageUrl {
+                        url: "data:image/png;base64,iVBORw0KGgo=".to_string(),
+                    },
+                },
+            ])),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }]);
+
+        let canonical = transform_openai_to_canonical(req).unwrap();
+        insta::assert_json_snapshot!("openai_multipart_image_to_canonical", canonical);
+    }
+
+    #[test]
+    fn snap_canonical_text_response_to_openai() {
+        let resp = mock_response(vec![ContentBlock::Known(KnownContentBlock::Text {
+            text: "Hello! How can I help you today?".to_string(),
+            cache_control: None,
+        })]);
+
+        let openai_resp = transform_canonical_to_openai(resp, "gpt-4o".to_string());
+
+        // Redact the timestamp which changes every run.
+        insta::assert_json_snapshot!("canonical_text_to_openai", openai_resp, {
+            ".created" => "[timestamp]"
+        });
+    }
+
+    #[test]
+    fn snap_canonical_tool_use_response_to_openai() {
+        let resp = mock_response(vec![
+            ContentBlock::Known(KnownContentBlock::Text {
+                text: "Let me search for that.".to_string(),
+                cache_control: None,
+            }),
+            ContentBlock::Known(KnownContentBlock::ToolUse {
+                id: "toolu_01XYZ".to_string(),
+                name: "web_search".to_string(),
+                input: serde_json::json!({"query": "Rust async runtime"}),
+            }),
+        ]);
+
+        let openai_resp = transform_canonical_to_openai(resp, "gpt-4o".to_string());
+
+        insta::assert_json_snapshot!("canonical_tool_use_to_openai", openai_resp, {
+            ".created" => "[timestamp]"
+        });
+    }
+
+    #[test]
+    fn snap_stop_reason_mapping() {
+        // Verify each Anthropic stop reason maps correctly to OpenAI format.
+        let reasons = vec![
+            ("end_turn", "stop"),
+            ("max_tokens", "length"),
+            ("stop_sequence", "stop"),
+            ("tool_use", "tool_calls"),
+        ];
+
+        let mut mapped: Vec<(&str, &str)> = Vec::new();
+        for (anthropic, expected_openai) in &reasons {
+            let resp = ProviderResponse {
+                id: "msg_test".to_string(),
+                r#type: "message".to_string(),
+                role: "assistant".to_string(),
+                content: vec![ContentBlock::text("ok".to_string(), None)],
+                model: "claude-3".to_string(),
+                stop_reason: Some(anthropic.to_string()),
+                stop_sequence: None,
+                usage: Usage {
+                    input_tokens: 1,
+                    output_tokens: 1,
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                },
+            };
+            let oai = transform_canonical_to_openai(resp, "gpt-4o".to_string());
+            let actual = oai.choices[0].finish_reason.as_deref().unwrap();
+            assert_eq!(actual, *expected_openai);
+            mapped.push((anthropic, expected_openai));
+        }
+
+        insta::assert_yaml_snapshot!("stop_reason_mapping", mapped);
+    }
+
+    #[test]
+    fn snap_openai_tools_to_canonical() {
+        let mut req = simple_openai_request(vec![OpenAIMessage {
+            role: "user".to_string(),
+            content: Some(OpenAIContent::String("Call the tool.".to_string())),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        }]);
+        req.tools = Some(vec![serde_json::json!({
+            "type": "function",
+            "function": {
+                "name": "get_stock_price",
+                "description": "Retrieves the current stock price.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                            "type": "string",
+                            "description": "Ticker symbol"
+                        }
+                    },
+                    "required": ["symbol"]
+                }
+            }
+        })]);
+        req.tool_choice = Some(serde_json::json!("required"));
+
+        let canonical = transform_openai_to_canonical(req).unwrap();
+        insta::assert_json_snapshot!("openai_tools_to_canonical", canonical);
+    }
 }

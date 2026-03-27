@@ -1,0 +1,36 @@
+---
+source: src/server/openai_compat/mod.rs
+assertion_line: 530
+expression: canonical
+---
+{
+  "model": "claude-3",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Call the tool."
+    }
+  ],
+  "max_tokens": 1024,
+  "tools": [
+    {
+      "name": "get_stock_price",
+      "description": "Retrieves the current stock price.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "description": "Ticker symbol"
+          }
+        },
+        "required": [
+          "symbol"
+        ]
+      }
+    }
+  ],
+  "tool_choice": {
+    "type": "any"
+  }
+}

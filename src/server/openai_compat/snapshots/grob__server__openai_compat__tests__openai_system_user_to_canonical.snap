@@ -1,0 +1,16 @@
+---
+source: src/server/openai_compat/mod.rs
+assertion_line: 364
+expression: canonical
+---
+{
+  "model": "claude-3",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Write a Rust function."
+    }
+  ],
+  "max_tokens": 1024,
+  "system": "You are a helpful coding assistant."
+}
