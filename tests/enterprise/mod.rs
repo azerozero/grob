@@ -7,6 +7,8 @@ mod preset_snapshot_test;
 mod property_audit_test;
 mod property_budget_test;
 mod property_dlp_test;
+mod property_routing_test;
 mod scenario_budget_test;
 mod scenario_dlp_bypass_test;
 mod scenario_failover_test;
+mod snapshot_error_test;

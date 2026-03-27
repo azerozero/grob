@@ -1,0 +1,5 @@
+---
+source: tests/enterprise/snapshot_error_test.rs
+expression: snap
+---
+status=400 body={"error":{"type":"dlp_block","message":"secret detected in prompt: sk-***"}}

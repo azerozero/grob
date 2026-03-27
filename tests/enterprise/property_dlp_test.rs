@@ -158,6 +158,49 @@ proptest! {
         );
     }
 
+    /// Invariant: deanonymize(anonymize(text)) restores the original text.
+    #[test]
+    fn dlp_deanonymize_is_inverse_of_anonymize(
+        name_idx in 0_usize..5,
+        prefix in "[A-Za-z ]{5,30}",
+        suffix in "[A-Za-z ]{5,30}",
+    ) {
+        use grob::features::dlp::config::{NameRule, NameAction};
+        use grob::features::dlp::names::NameAnonymizer;
+
+        let names = ["Alice Dupont", "Bob Martin", "Carlos Rivera", "Diana Chen", "Erika Müller"];
+        let name = names[name_idx % names.len()];
+
+        let rules: Vec<NameRule> = names.iter().map(|n| NameRule {
+            term: n.to_string(),
+            action: NameAction::Pseudonym,
+        }).collect();
+
+        let anon = NameAnonymizer::new_with_session(&rules, b"test-stable-seed");
+        let input = format!("{} {} {}", prefix, name, suffix);
+
+        if let Some((anonymized, _)) = anon.anonymize_if_match(&input) {
+            // Anonymized text must NOT contain the original name.
+            prop_assert!(
+                !anonymized.contains(name),
+                "Anonymized text still contains original name '{}'",
+                name
+            );
+
+            // Deanonymize must restore the original.
+            if let Some(restored) = anon.deanonymize_if_match(&anonymized) {
+                prop_assert_eq!(
+                    &input, &restored,
+                    "deanonymize(anonymize(x)) != x"
+                );
+            } else {
+                // If deanonymize returns None, the pseudonym wasn't found — this is a bug.
+                prop_assert!(false, "deanonymize_if_match returned None for anonymized text");
+            }
+        }
+        // If anonymize returns None, the name wasn't matched — skip (no assertion needed).
+    }
+
     /// Invariant: output length is bounded — DLP replacement never explodes output size.
     #[test]
     fn dlp_output_length_is_bounded(

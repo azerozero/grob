@@ -171,6 +171,63 @@ proptest! {
         );
     }
 
+    /// Invariant: calculated cost is always non-negative for any valid token counts.
+    #[test]
+    fn budget_cost_always_non_negative(
+        input_tokens in 0_u32..1_000_000,
+        output_tokens in 0_u32..1_000_000,
+    ) {
+        use grob::features::token_pricing::ModelPricing;
+
+        let pricing = ModelPricing {
+            model: "test-model",
+            input_per_million: 3.0,
+            output_per_million: 15.0,
+        };
+        let cost = pricing.calculate(input_tokens, output_tokens);
+        prop_assert!(
+            cost >= 0.0,
+            "Cost must be non-negative, got {}",
+            cost
+        );
+    }
+
+    /// Invariant: remaining budget = limit - total spend, always consistent.
+    #[test]
+    fn budget_remaining_equals_limit_minus_total(
+        costs in prop::collection::vec(0.01_f64..5.0, 1..30),
+        limit in 10.0_f64..500.0,
+    ) {
+        let (mut tracker, _dir) = temp_tracker();
+        let mut expected_total = 0.0;
+
+        for cost in &costs {
+            tracker.record("p", "m", *cost);
+            expected_total += cost;
+        }
+
+        let actual_total = tracker.total();
+        let remaining = limit - actual_total;
+
+        // Remaining must equal limit minus total (within f64 epsilon).
+        let expected_remaining = limit - expected_total;
+        let diff = (remaining - expected_remaining).abs();
+        prop_assert!(
+            diff < 0.01,
+            "Remaining mismatch: got={:.6} expected={:.6}",
+            remaining,
+            expected_remaining
+        );
+
+        // If total >= limit, check_budget must reject.
+        if actual_total >= limit {
+            prop_assert!(
+                tracker.check_budget("p", "m", limit, None, None).is_err(),
+                "Should reject when remaining <= 0"
+            );
+        }
+    }
+
     /// Invariant: zero global_limit means unlimited — check_budget always passes
     /// when global_limit is 0.0 and no provider/model limits are set.
     #[test]

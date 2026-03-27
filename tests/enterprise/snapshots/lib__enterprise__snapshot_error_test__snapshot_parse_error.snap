@@ -1,0 +1,5 @@
+---
+source: tests/enterprise/snapshot_error_test.rs
+expression: snap
+---
+status=400 body={"error":{"type":"invalid_request_error","message":"invalid JSON at line 1, column 42"}}
