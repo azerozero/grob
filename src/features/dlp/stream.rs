@@ -419,6 +419,8 @@ mod tests {
             prompt_injection: Default::default(),
             signed_config: Default::default(),
             key_rotation_hours: 24,
+            names_mode: NamesMode::Manual,
+            auto_detect_cache_limit: 64,
         };
         DlpEngine::from_config(config).unwrap()
     }
@@ -574,6 +576,8 @@ mod tests {
             prompt_injection: Default::default(),
             signed_config: Default::default(),
             key_rotation_hours: 24,
+            names_mode: NamesMode::Manual,
+            auto_detect_cache_limit: 64,
         };
         let engine = DlpEngine::from_config(config).unwrap();
         let mut canary_count: usize = 0;
@@ -656,6 +660,8 @@ mod tests {
             prompt_injection: Default::default(),
             signed_config: Default::default(),
             key_rotation_hours: 24,
+            names_mode: NamesMode::Manual,
+            auto_detect_cache_limit: 64,
         };
         let engine = DlpEngine::from_config(config).unwrap();
 
