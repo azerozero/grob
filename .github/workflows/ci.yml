@@ -146,11 +146,6 @@ jobs:
         with:
           shared-key: smoke
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            smoke-
-            clippy-ubuntu-latest-
-            test-ubuntu-latest-
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
       - uses: taiki-e/install-action@nextest
@@ -194,10 +189,6 @@ jobs:
         with:
           shared-key: clippy-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            clippy-${{ matrix.os }}-
-            clippy-
       - run: cargo clippy --all-targets -- -D warnings
 
   audit:
@@ -259,14 +250,11 @@ jobs:
         with:
           shared-key: docs
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            docs-
       - name: Check missing doc comments
         env:
           RUSTDOCFLAGS: "-W missing-docs"
         run: |
-          WARNINGS=$(cargo doc --no-deps 2>&1 | grep "^warning: missing documentation" | wc -l)
+          WARNINGS=$(cargo doc --no-deps 2>&1 | grep -c "^warning: missing documentation" || true)
           if [ "$WARNINGS" -gt 0 ]; then
             echo "::error::Found $WARNINGS undocumented public items"
             cargo doc --no-deps 2>&1 | grep "^warning: missing documentation" -A2
@@ -290,9 +278,6 @@ jobs:
         with:
           shared-key: machete
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            machete-
       - uses: bnjbvr/cargo-machete@main
 
   semver:
@@ -313,9 +298,6 @@ jobs:
         with:
           shared-key: semver
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            semver-
       - name: Install cargo-semver-checks
         run: cargo install cargo-semver-checks --locked
       - name: Find latest tag for baseline
@@ -345,9 +327,6 @@ jobs:
         with:
           shared-key: coverage
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            coverage-
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v6
@@ -382,10 +361,6 @@ jobs:
         with:
           shared-key: hack-${{ matrix.group }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            hack-${{ matrix.group }}-
-            hack-
       - uses: taiki-e/install-action@cargo-hack
       - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --group-features ${{ matrix.features }}
 
@@ -427,10 +402,6 @@ jobs:
         with:
           shared-key: test-ubuntu-latest
           save-if: ${{ github.ref == 'refs/heads/develop' && matrix.shard == 1 }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            test-ubuntu-latest-
-            test-
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --profile ci --partition count:${{ matrix.shard }}/4
       - run: cargo test --doc
@@ -468,10 +439,6 @@ jobs:
         with:
           shared-key: test-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-          enableCrossOsArchive: true
-          restore-keys: |
-            test-${{ matrix.os }}-
-            test-
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --profile ci
       - run: cargo test --doc
@@ -537,10 +504,10 @@ jobs:
           VERSION="v${{ needs.version.outputs.version }}"
           ARCHIVE="${BINARY_NAME}-${VERSION}-${{ matrix.target }}.tar.gz"
           tar czf "${ARCHIVE}" \
-            -C target/${{ matrix.target }}/release "${BINARY_NAME}" \
+            -C "target/${{ matrix.target }}/release" "${BINARY_NAME}" \
             -C "${GITHUB_WORKSPACE}" README.md LICENSE
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
-          echo "ARCHIVE=${ARCHIVE}" >> $GITHUB_ENV
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -581,7 +548,7 @@ jobs:
           mkdir -p bin/amd64 bin/arm64
           tar xzf "artifacts/amd64/${BINARY_NAME}-${VERSION}-x86_64-unknown-linux-musl.tar.gz" -C bin/amd64 "${BINARY_NAME}"
           tar xzf "artifacts/arm64/${BINARY_NAME}-${VERSION}-aarch64-unknown-linux-musl.tar.gz" -C bin/arm64 "${BINARY_NAME}"
-          chmod +x bin/amd64/${BINARY_NAME} bin/arm64/${BINARY_NAME}
+          chmod +x "bin/amd64/${BINARY_NAME}" "bin/arm64/${BINARY_NAME}"
 
       - name: Install crane
         run: |
@@ -608,7 +575,7 @@ jobs:
             # Set platform metadata and OCI annotations
             crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
               --set-platform "linux/${ARCH}" \
-              --entrypoint /usr/local/bin/${BINARY_NAME} \
+              --entrypoint "/usr/local/bin/${BINARY_NAME}" \
               --cmd run \
               --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
               --annotation org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
@@ -834,10 +801,12 @@ jobs:
       - name: Checksums
         run: |
           cd artifacts
-          echo "## SHA256 Checksums" > ../CHECKSUMS.md
-          echo '```' >> ../CHECKSUMS.md
-          cat *.sha256 >> ../CHECKSUMS.md
-          echo '```' >> ../CHECKSUMS.md
+          {
+            echo "## SHA256 Checksums"
+            echo '```'
+            cat ./*.sha256
+            echo '```'
+          } > ../CHECKSUMS.md
 
       - name: Validate tag matches Cargo.toml
         run: |
