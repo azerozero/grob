@@ -421,4 +421,113 @@ mod tests {
             "max_pattern_str_len should be > 0 with rules loaded"
         );
     }
+
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// Generates a valid 40-character GitHub PAT (ghp_ + 36 alnum).
+        fn github_pat_strategy() -> impl Strategy<Value = String> {
+            prop::collection::vec(
+                prop::sample::select(
+                    b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".to_vec(),
+                ),
+                36..=36,
+            )
+            .prop_map(|chars| {
+                let suffix: String = chars.into_iter().map(|b| b as char).collect();
+                format!("ghp_{}", suffix)
+            })
+        }
+
+        /// Generates a valid 20-character AWS access key (AKIA + 16 uppercase alnum).
+        fn aws_key_strategy() -> impl Strategy<Value = String> {
+            prop::collection::vec(
+                prop::sample::select(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".to_vec()),
+                16..=16,
+            )
+            .prop_map(|chars| {
+                let suffix: String = chars.into_iter().map(|b| b as char).collect();
+                format!("AKIA{}", suffix)
+            })
+        }
+
+        /// Generates arbitrary lowercase ASCII text without secret prefixes.
+        fn safe_text_strategy() -> impl Strategy<Value = String> {
+            "[a-z ]{0,200}"
+        }
+
+        proptest! {
+            #[test]
+            fn any_github_pat_is_detected(token in github_pat_strategy()) {
+                let scanner = SecretScanner::new(&test_rules(), &[]);
+                let text = format!("token: {} end", token);
+                let matches = scanner.scan(&text);
+                prop_assert!(
+                    !matches.is_empty(),
+                    "GitHub PAT '{}' should be detected", token
+                );
+                prop_assert_eq!(
+                    &scanner.rules[matches[0].rule_idx].name,
+                    "github_token"
+                );
+            }
+
+            #[test]
+            fn any_aws_key_is_detected(key in aws_key_strategy()) {
+                let scanner = SecretScanner::new(&test_rules(), &[]);
+                let text = format!("key={} done", key);
+                let matches = scanner.scan(&text);
+                prop_assert!(
+                    !matches.is_empty(),
+                    "AWS key '{}' should be detected", key
+                );
+                prop_assert_eq!(
+                    &scanner.rules[matches[0].rule_idx].name,
+                    "aws_access_key"
+                );
+            }
+
+            #[test]
+            fn safe_text_never_matches(text in safe_text_strategy()) {
+                let scanner = SecretScanner::new(&test_rules(), &[]);
+                let matches = scanner.scan(&text);
+                prop_assert!(
+                    matches.is_empty(),
+                    "Safe text '{}' should not trigger any rule", text
+                );
+            }
+
+            #[test]
+            fn redact_never_leaks_original_secret(token in github_pat_strategy()) {
+                let scanner = SecretScanner::new(&test_rules(), &[]);
+                let canary_gen = CanaryGenerator::new();
+                let text = format!("secret: {} end", token);
+                if let Some((redacted, _)) = scanner.redact(&text, &canary_gen) {
+                    prop_assert!(
+                        !redacted.contains(&token),
+                        "Redacted output must not contain original token"
+                    );
+                    prop_assert!(
+                        redacted.contains("~CANARY"),
+                        "Redacted output must contain canary marker"
+                    );
+                }
+            }
+
+            #[test]
+            fn scan_is_idempotent(token in github_pat_strategy()) {
+                let scanner = SecretScanner::new(&test_rules(), &[]);
+                let text = format!("x {} y", token);
+                let m1 = scanner.scan(&text);
+                let m2 = scanner.scan(&text);
+                prop_assert_eq!(m1.len(), m2.len());
+                for (a, b) in m1.iter().zip(m2.iter()) {
+                    prop_assert_eq!(a.start, b.start);
+                    prop_assert_eq!(a.end, b.end);
+                    prop_assert_eq!(a.rule_idx, b.rule_idx);
+                }
+            }
+        }
+    }
 }

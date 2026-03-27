@@ -1,5 +1,6 @@
 use super::*;
 use config::*;
+use proptest::prelude::*;
 use std::borrow::Cow;
 
 fn test_config() -> DlpConfig {
@@ -137,4 +138,59 @@ fn test_builtin_detects_pem_header() {
         "PEM key should be replaced with a canary token, got: {}",
         result
     );
+}
+
+// ── Property-based tests ─────────────────────────────────────
+
+proptest! {
+    /// Name anonymization roundtrip: anonymize then deanonymize restores original text.
+    #[test]
+    fn prop_name_anonymize_roundtrip(text in "[a-z ]{0,20}") {
+        let rules = vec![NameRule {
+            term: "alice".into(),
+            action: NameAction::Pseudonym,
+        }];
+        let anon = names::NameAnonymizer::new(&rules);
+        let input = format!("Hello alice, {text}");
+        let (anonymized, _) = anon.anonymize_if_match(&input).unwrap();
+        let restored = anon.deanonymize_if_match(&anonymized).unwrap();
+        prop_assert_eq!(restored, input);
+    }
+
+    /// Text without configured names passes through unchanged (zero-copy).
+    #[test]
+    fn prop_no_false_positive_names(text in "[b-z0-9 ]{1,100}") {
+        let rules = vec![NameRule {
+            term: "alice".into(),
+            action: NameAction::Pseudonym,
+        }];
+        let anon = names::NameAnonymizer::new(&rules);
+        prop_assert!(anon.anonymize_if_match(&text).is_none());
+    }
+
+    /// Random lowercase strings should never trigger PII pre-filter.
+    #[test]
+    fn prop_no_pii_in_lowercase(text in "[a-z ]{1,200}") {
+        let scanner = pii::PiiScanner::from_config(&PiiConfig {
+            credit_cards: true,
+            iban: true,
+            bic: true,
+            action: PiiAction::Redact,
+        }).unwrap();
+        prop_assert!(!scanner.might_contain_pii(&text));
+    }
+
+    /// Sanitize on clean text returns Cow::Borrowed (zero allocation).
+    #[test]
+    fn prop_clean_text_zero_alloc(text in "[a-z ]{1,100}") {
+        let config = DlpConfig {
+            enabled: true,
+            no_builtins: true,
+            ..Default::default()
+        };
+        let engine = DlpEngine::from_config(config).unwrap();
+        let result = engine.sanitize_text(&text);
+        prop_assert!(matches!(result, Cow::Borrowed(_)),
+            "Clean text should be zero-copy, got Owned");
+    }
 }

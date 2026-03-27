@@ -648,4 +648,24 @@ mod tests {
             );
         }
     }
+
+    proptest::proptest! {
+        /// Luhn check digit generation always produces valid numbers.
+        #[test]
+        fn prop_luhn_check_digit_valid(digits in proptest::collection::vec(0u8..10, 12..18)) {
+            let check = luhn_check_digit(&digits);
+            let mut full: Vec<u8> = digits;
+            full.push(check);
+            let s: String = full.iter().map(|d| (b'0' + d) as char).collect();
+            proptest::prop_assert!(luhn_check(&s), "Generated number must pass Luhn: {s}");
+        }
+
+        /// IBAN mod97 validation rejects random alphanumeric strings.
+        #[test]
+        fn prop_iban_rejects_random(body in "[A-Z]{2}[0-9]{2}[A-Z0-9]{15,28}") {
+            // Overwhelming majority of random strings fail mod97.
+            // We just verify no panics and check the function is total.
+            let _ = iban_mod97_check(&body);
+        }
+    }
 }

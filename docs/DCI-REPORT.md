@@ -1,6 +1,6 @@
 # Documentation Completeness Index (DCI) Report
 
-**Project**: Grob v0.25+
+**Project**: Grob v0.30.0
 **Date**: 2026-03-18
 **Auditor**: Doc Forge (automated)
 **Scope**: Full project audit (9th pass)

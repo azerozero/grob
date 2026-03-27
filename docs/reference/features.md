@@ -1,6 +1,6 @@
 # Feature Matrix
 
-Exhaustive list of grob capabilities, extracted from the codebase (v0.25+).
+Exhaustive list of grob capabilities, extracted from the codebase (v0.30.0).
 
 ## Core Proxy
 
