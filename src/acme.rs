@@ -11,11 +11,11 @@ use std::path::PathBuf;
 /// Defaults to `~/.grob/certs/` if not specified.
 pub fn resolve_cache_dir(config: &AcmeConfig) -> Result<PathBuf> {
     let dir = if config.cache_dir.is_empty() {
-        let home = dirs::home_dir().context("Failed to get home directory")?;
-        home.join(".grob").join("certs")
+        crate::grob_home()
+            .context("Failed to get home directory (set GROB_HOME)")?
+            .join("certs")
     } else if config.cache_dir.starts_with('~') {
-        let home = dirs::home_dir().context("Failed to get home directory")?;
-        home.join(&config.cache_dir[2..])
+        crate::expand_tilde(&config.cache_dir)
     } else {
         PathBuf::from(&config.cache_dir)
     };

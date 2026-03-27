@@ -33,7 +33,7 @@ pub async fn poll_health(base_url: &str, max_attempts: u32, interval_ms: u64) ->
 }
 
 /// Sends SIGTERM to the given process and waits until it exits (up to 5s).
-#[cfg(unix)]
+#[cfg(feature = "unix-signals")]
 pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
@@ -61,6 +61,12 @@ pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     ))
     .await;
     Ok(())
+}
+
+/// Fallback when unix-signals is unavailable (unikernel or non-unix).
+#[cfg(all(unix, not(feature = "unix-signals")))]
+pub async fn stop_service(_pid: u32) -> anyhow::Result<()> {
+    anyhow::bail!("stop_service is not supported without unix-signals feature")
 }
 
 /// Terminates the given process via `taskkill` and waits for the grace period.
@@ -153,7 +159,7 @@ pub fn spawn_background_service(port: Option<u16>, config: Option<String>) -> an
         cmd.arg("--config").arg(config);
     }
 
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "unix-signals"))]
     {
         use std::os::unix::process::CommandExt;
         // SAFETY: setsid() is async-signal-safe and called in pre_exec (after fork,

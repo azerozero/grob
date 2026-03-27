@@ -397,8 +397,7 @@ impl DlpConfig {
 
         // Expand ~ to home dir
         let path = if self.rules_file.starts_with('~') {
-            let home = dirs::home_dir().context("Failed to get home directory")?;
-            home.join(self.rules_file.trim_start_matches("~/"))
+            crate::expand_tilde(&self.rules_file)
         } else {
             std::path::PathBuf::from(&self.rules_file)
         };

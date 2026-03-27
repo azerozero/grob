@@ -34,7 +34,7 @@ pub async fn find_instance_pid(host: &str, port: u16) -> Option<u32> {
 }
 
 /// Stop a running instance by finding its PID and sending SIGTERM.
-#[cfg(unix)]
+#[cfg(feature = "unix-signals")]
 pub async fn stop_instance(host: &str, port: u16) -> anyhow::Result<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
@@ -50,6 +50,12 @@ pub async fn stop_instance(host: &str, port: u16) -> anyhow::Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     Ok(())
+}
+
+/// Fallback when unix-signals is unavailable.
+#[cfg(all(unix, not(feature = "unix-signals")))]
+pub async fn stop_instance(_host: &str, _port: u16) -> anyhow::Result<()> {
+    anyhow::bail!("stop_instance is not supported without unix-signals feature")
 }
 
 /// Stops a running instance by finding its PID and terminating it via taskkill.

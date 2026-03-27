@@ -98,8 +98,7 @@ async fn fetch_content(source: &str) -> Result<Vec<u8>> {
     } else {
         // File path (expand ~)
         let path = if source.starts_with('~') {
-            let home = dirs::home_dir().context("Failed to get home directory")?;
-            home.join(source.trim_start_matches("~/"))
+            crate::expand_tilde(source)
         } else {
             std::path::PathBuf::from(source)
         };

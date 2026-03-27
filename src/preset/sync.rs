@@ -149,8 +149,9 @@ fn install_from_local(source: &str) -> Result<()> {
 
 /// Sync presets from a git repository (requires git installed).
 fn sync_from_git(repo_url: &str) -> Result<()> {
-    let home = dirs::home_dir().context("Failed to get home directory")?;
-    let repo_dir = home.join(".grob").join("presets-repo");
+    let repo_dir = crate::grob_home()
+        .context("Failed to get home directory (set GROB_HOME)")?
+        .join("presets-repo");
     let dest_dir = preset_dir()?;
 
     if repo_dir.exists() {

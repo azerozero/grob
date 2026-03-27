@@ -1,5 +1,60 @@
 //! Grob: multi-provider LLM routing proxy with automatic fallback and format translation.
 
+use std::path::PathBuf;
+
+/// Returns the Grob home directory (`~/.grob`).
+///
+/// When the `unikernel` feature is active, `dirs` is unavailable so this
+/// reads `GROB_HOME` from the environment. Without the feature it falls
+/// back to `dirs::home_dir()` as before, but still honours `GROB_HOME` if
+/// set (useful for containers).
+pub fn grob_home() -> Option<PathBuf> {
+    if let Ok(val) = std::env::var("GROB_HOME") {
+        return Some(PathBuf::from(val));
+    }
+
+    #[cfg(not(feature = "unikernel"))]
+    {
+        dirs::home_dir().map(|h| h.join(".grob"))
+    }
+
+    #[cfg(feature = "unikernel")]
+    {
+        None
+    }
+}
+
+/// Returns the user home directory.
+///
+/// Honours `GROB_HOME`'s parent when set; otherwise delegates to
+/// `dirs::home_dir()` (disabled under the `unikernel` feature).
+pub fn home_dir() -> Option<PathBuf> {
+    if let Ok(val) = std::env::var("GROB_HOME") {
+        // GROB_HOME typically points to ~/.grob — parent is home
+        return PathBuf::from(val).parent().map(|p| p.to_path_buf());
+    }
+
+    #[cfg(not(feature = "unikernel"))]
+    {
+        dirs::home_dir()
+    }
+
+    #[cfg(feature = "unikernel")]
+    {
+        None
+    }
+}
+
+/// Expand a leading `~` to the user home directory.
+pub fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(path)
+}
+
 /// Automatic TLS certificate provisioning via ACME.
 #[cfg(feature = "acme")]
 pub mod acme;

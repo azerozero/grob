@@ -1,5 +1,9 @@
+#[cfg(any(feature = "unix-signals", windows))]
 use super::common::*;
-use crate::{cli, instance, pid};
+use crate::cli;
+use crate::instance;
+#[cfg(any(feature = "unix-signals", windows))]
+use crate::pid;
 
 /// Performs a zero-downtime upgrade by replacing the running instance.
 pub async fn cmd_upgrade(
@@ -28,13 +32,19 @@ pub async fn cmd_upgrade(
         cmd_upgrade_windows(config, &cli_config, &base_url, old_pid).await
     }
     // Unix: spawn new (SO_REUSEPORT) → signal old → drain — zero downtime.
-    #[cfg(unix)]
+    #[cfg(feature = "unix-signals")]
     {
         cmd_upgrade_unix(config, cli_config, &base_url, old_pid).await
     }
+    // Fallback when unix-signals is unavailable.
+    #[cfg(all(unix, not(feature = "unix-signals")))]
+    {
+        let _ = (config, cli_config, &base_url, old_pid);
+        anyhow::bail!("Hot upgrade requires the unix-signals feature")
+    }
 }
 
-#[cfg(unix)]
+#[cfg(feature = "unix-signals")]
 async fn cmd_upgrade_unix(
     _config: &cli::AppConfig,
     cli_config: Option<String>,

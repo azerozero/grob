@@ -58,7 +58,7 @@ thiserror = "1"
 # Utilities
 async-trait = "0.1"        # Async trait support (needed for dyn Provider dispatch)
 async-stream = "0.3"       # SSE event streaming for `grob watch`
-dirs = "5"                 # User directories
+dirs = { version = "5", optional = true }  # User directories (disabled under unikernel)
 regex = "1"                # Regular expressions
 uuid = { version = "1.0", features = ["v4", "serde"] }  # UUID generation for streaming
 
@@ -115,7 +115,7 @@ ratatui = { version = "0.30", optional = true }
 crossterm = { version = "0.28", optional = true }
 
 # Socket options (SO_REUSEPORT for zero-downtime restarts)
-socket2 = { version = "0.5", features = ["all"] }
+socket2 = { version = "0.5", features = ["all"], optional = true }
 
 # TLS (optional, for native HTTPS without reverse proxy)
 axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
@@ -127,11 +127,14 @@ rustls-acme = { version = "0.12", features = ["axum"], optional = true }
 regex-syntax = "0.8.10"
 
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { version = "0.6", optional = true }
+# Unix signals (SIGTERM, SIGUSR1) for graceful shutdown and hot restart
+nix = { version = "0.29", features = ["signal"], optional = true }
 
-[target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["signal"] }  # Unix signals
+# Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
+# NOTE: tikv-jemallocator and nix are in [dependencies] as optional; enabled
+# by default via the `jemalloc` and `unix-signals` features respectively.
+# The `unikernel` feature does not include them.
 
 [dev-dependencies]
 # Testing
@@ -170,7 +173,11 @@ harness = false
 required-features = ["policies"]
 
 [features]
-default = ["dlp", "oauth", "tap", "compliance", "mcp", "watch", "policies"]
+default = ["dlp", "oauth", "tap", "compliance", "mcp", "watch", "policies", "socket-opts", "dirs", "jemalloc", "unix-signals"]
+unikernel = []
+jemalloc = ["tikv-jemallocator"]
+unix-signals = ["nix"]
+socket-opts = ["socket2"]
 watch = ["ratatui", "crossterm"]
 otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
 tls = ["axum-server", "rustls", "rustls-pemfile"]
@@ -190,7 +197,7 @@ test-util = []
 # rustls/rustls-pemfile: behind optional "tls" feature flag
 # insta: snapshot testing — used incrementally as tests are converted
 # tracing-test: used via #[traced_test] attribute on individual tests
-ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "rustls-acme", "insta", "tracing-test"]
+ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "rustls-acme", "insta", "tracing-test", "socket2", "tikv-jemallocator", "nix"]
 
 [profile.release]
 opt-level = 3

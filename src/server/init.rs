@@ -259,7 +259,7 @@ pub(crate) fn init_security(config: &AppConfig) -> anyhow::Result<SecurityServic
     #[cfg(feature = "compliance")]
     let audit_log = if !config.security.audit_dir.is_empty() {
         let audit_dir = if config.security.audit_dir.starts_with('~') {
-            let home = dirs::home_dir().unwrap_or_default();
+            let home = crate::home_dir().unwrap_or_default();
             home.join(&config.security.audit_dir[2..])
         } else {
             std::path::PathBuf::from(&config.security.audit_dir)

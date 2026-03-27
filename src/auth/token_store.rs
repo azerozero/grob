@@ -140,7 +140,7 @@ impl TokenStore {
 
     /// Get default token store path
     pub fn default_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Failed to get home directory")?;
+        let home = crate::home_dir().context("Failed to get home directory (set GROB_HOME)")?;
         let config_dir = home.join(".grob");
         fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
         Ok(config_dir.join("oauth_tokens.json"))

@@ -121,9 +121,8 @@ impl SpendTracker {
 
     /// Default path: ~/.grob/spend.json
     pub fn default_path() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".grob")
+        crate::grob_home()
+            .unwrap_or_else(|| PathBuf::from(".grob"))
             .join("spend.json")
     }
 

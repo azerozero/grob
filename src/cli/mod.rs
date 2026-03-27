@@ -100,8 +100,8 @@ impl AppConfig {
     /// Get default config file path
     /// Returns ~/.grob/config.toml (cross-platform)
     pub fn default_path() -> Result<PathBuf> {
-        let home = dirs::home_dir().context("Failed to get home directory")?;
-        let config_dir = home.join(".grob");
+        let config_dir =
+            crate::grob_home().context("Failed to get home directory (set GROB_HOME)")?;
         std::fs::create_dir_all(&config_dir).with_context(|| {
             format!(
                 "Failed to create config directory: {}",
@@ -241,7 +241,7 @@ impl AppConfig {
 /// Search for .grob.toml by walking up from CWD to home dir.
 /// Returns the path if found.
 pub fn find_project_config() -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
+    let home = crate::home_dir()?;
     let mut dir = std::env::current_dir().ok()?;
     loop {
         let candidate = dir.join(".grob.toml");

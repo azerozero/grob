@@ -39,8 +39,9 @@ pub struct PresetInfo {
 
 /// Get the presets directory: ~/.grob/presets/
 pub fn preset_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Failed to get home directory")?;
-    let dir = home.join(".grob").join("presets");
+    let dir = crate::grob_home()
+        .context("Failed to get home directory (set GROB_HOME)")?
+        .join("presets");
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create presets directory: {}", dir.display()))?;
     Ok(dir)

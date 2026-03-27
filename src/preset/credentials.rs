@@ -176,11 +176,11 @@ pub fn load_oauth_provider_list_pub() -> Vec<String> {
 
 /// Load the list of OAuth provider IDs that have tokens stored.
 fn load_oauth_provider_list() -> Vec<String> {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
+    let grob_dir = match crate::grob_home() {
+        Some(d) => d,
         None => return vec![],
     };
-    let tokens_path = home.join(".grob").join("oauth_tokens.json");
+    let tokens_path = grob_dir.join("oauth_tokens.json");
     if !tokens_path.exists() {
         return vec![];
     }

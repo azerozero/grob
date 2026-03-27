@@ -99,9 +99,8 @@ impl GrobStore {
 
     /// Default path: ~/.grob/grob.db
     pub fn default_path() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".grob")
+        crate::grob_home()
+            .unwrap_or_else(|| PathBuf::from(".grob"))
             .join("grob.db")
     }
 

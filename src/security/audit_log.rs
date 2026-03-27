@@ -205,7 +205,8 @@ fn default_audit_dir() -> PathBuf {
     }
     #[cfg(windows)]
     {
-        dirs::data_local_dir()
+        crate::home_dir()
+            .map(|h| h.join("AppData").join("Local"))
             .unwrap_or_else(|| PathBuf::from("C:\\ProgramData"))
             .join("grob")
             .join("audit")

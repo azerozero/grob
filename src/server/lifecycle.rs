@@ -40,10 +40,12 @@ pub(super) async fn bind_and_serve(
     }
 
     // Label reflects the actual socket option used per platform.
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "socket-opts"))]
     const REUSE_LABEL: &str = "SO_REUSEPORT";
-    #[cfg(not(unix))]
+    #[cfg(all(not(unix), feature = "socket-opts"))]
     const REUSE_LABEL: &str = "SO_REUSEADDR";
+    #[cfg(not(feature = "socket-opts"))]
+    const REUSE_LABEL: &str = "plain";
 
     if !tls_enabled {
         let listener = crate::net::bind_reuseport(&addr).await?;

@@ -169,7 +169,7 @@ impl ToolMatrix {
     pub fn load(path: impl AsRef<std::path::Path>) -> Self {
         let path = path.as_ref();
         let expanded = if path.starts_with("~") {
-            match dirs::home_dir() {
+            match crate::home_dir() {
                 Some(home) => match path.strip_prefix("~") {
                     Ok(rest) => home.join(rest),
                     Err(_) => path.to_path_buf(),

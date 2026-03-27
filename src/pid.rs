@@ -4,8 +4,9 @@ use std::path::PathBuf;
 
 /// Get the PID file path
 pub fn pid_file_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".grob").join("grob.pid")
+    crate::grob_home()
+        .unwrap_or_else(|| PathBuf::from(".grob"))
+        .join("grob.pid")
 }
 
 /// Write the current process PID to the PID file
@@ -63,7 +64,7 @@ pub fn cleanup_pid() -> io::Result<()> {
 /// Check if a grob process is running at the given PID.
 /// On Linux, additionally verifies via /proc that the process is actually grob
 /// (guards against stale PID files after PID reuse).
-#[cfg(unix)]
+#[cfg(feature = "unix-signals")]
 pub fn is_process_running(pid: u32) -> bool {
     use nix::sys::signal::kill;
     use nix::unistd::Pid;
@@ -87,6 +88,12 @@ pub fn is_process_running(pid: u32) -> bool {
     }
 
     true
+}
+
+/// Fallback when nix is unavailable: only our own PID is considered valid.
+#[cfg(all(unix, not(feature = "unix-signals")))]
+pub fn is_process_running(pid: u32) -> bool {
+    pid == std::process::id()
 }
 
 /// Checks if a process with the given PID exists via tasklist.

@@ -218,7 +218,7 @@ impl crate::traits::Tracer for MessageTracer {
 /// Expand ~ to home directory
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
+        if let Some(home) = crate::home_dir() {
             return home.join(rest);
         }
     }
