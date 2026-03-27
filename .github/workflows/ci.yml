@@ -608,7 +608,7 @@ jobs:
           output-file: sbom-grob.spdx.json
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v4.1.1
 
       - name: Sign container image
         run: |
