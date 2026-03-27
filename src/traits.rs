@@ -106,6 +106,9 @@ pub trait SpendTracking: Send {
     /// Persists the current spend data.
     fn save(&self);
 
+    /// Returns per-provider spend breakdown for the current period.
+    fn provider_breakdown(&self) -> Vec<(String, f64)>;
+
     /// Checks budget limits and returns a warning message if approaching limits.
     fn check_warnings(
         &self,
@@ -235,6 +238,9 @@ pub mod mocks {
         }
         fn total(&self) -> f64 {
             0.0
+        }
+        fn provider_breakdown(&self) -> Vec<(String, f64)> {
+            vec![]
         }
         fn save(&self) {}
         fn check_warnings(

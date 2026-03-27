@@ -107,6 +107,9 @@ tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
 unicode-normalization = "0.1"                       # Homoglyph attack prevention
 hex = { version = "0.4", features = ["serde"] }      # Hex encoding/decoding
 
+# JSON-RPC 2.0 Control Plane (types-only: ErrorObjectOwned for structured errors)
+jsonrpsee = { version = "0.25", default-features = false, features = ["server"] }
+
 # Security headers
 http = "1"
 
@@ -197,7 +200,7 @@ test-util = []
 # rustls/rustls-pemfile: behind optional "tls" feature flag
 # insta: snapshot testing — used incrementally as tests are converted
 # tracing-test: used via #[traced_test] attribute on individual tests
-ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "rustls-acme", "insta", "tracing-test", "socket2", "tikv-jemallocator", "nix"]
+ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "rustls-acme", "insta", "tracing-test", "socket2", "tikv-jemallocator", "nix", "jsonrpsee"]
 
 [profile.release]
 opt-level = 3
