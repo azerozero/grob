@@ -33,6 +33,7 @@ fn create_test_config() -> AppConfig {
         policies: vec![],
         #[cfg(feature = "mcp")]
         mcp: Default::default(),
+        tool_layer: Default::default(),
     }
 }
 

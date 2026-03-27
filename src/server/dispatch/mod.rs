@@ -220,6 +220,13 @@ pub(crate) async fn dispatch(
     // ── Step 4: Resolve provider mappings ──
     let sorted_mappings = resolve_provider_mappings(ctx.inner, ctx.headers, &decision)?;
 
+    // ── Step 4.5: Tool layer (aliasing, injection, capability gating) ──
+    if let Some(ref tool_layer) = ctx.state.security.tool_layer {
+        if let Some(primary) = sorted_mappings.first() {
+            tool_layer.process(request, &primary.provider, &primary.actual_model);
+        }
+    }
+
     // ── Step 5: Cache hit (non-streaming only) ──
     if let Some(hit) = check_cache(ctx, &cache_key).await {
         return Ok(hit);

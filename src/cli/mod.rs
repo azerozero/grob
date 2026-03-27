@@ -8,6 +8,7 @@ mod newtypes;
 mod validation;
 
 pub use crate::features::log_export::LogExportConfig;
+pub use crate::features::tool_layer::config::ToolLayerConfig;
 #[cfg(feature = "harness")]
 pub use config::HarnessConfig;
 pub use config::{
@@ -69,6 +70,9 @@ pub struct AppConfig {
     /// EU AI Act compliance configuration
     #[serde(default)]
     pub compliance: ComplianceConfig,
+    /// Universal tool layer (injection, aliasing, capability gating)
+    #[serde(default)]
+    pub tool_layer: ToolLayerConfig,
     /// MCP tool matrix configuration
     #[cfg(feature = "mcp")]
     #[serde(default)]
