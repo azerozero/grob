@@ -340,17 +340,21 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Each shard tests its own features individually, bundles the rest.
+          # core: oauth, tap, policies individual (dlp+compliance grouped) → 6 units → 22 combos
           - group: core
-            features: "dlp,oauth,tap,compliance,policies"
+            hack_args: "--group-features dlp,compliance --group-features mcp,harness,otel,acme,tls --group-features test-util,watch"
+          # optional: mcp, harness, otel individual (acme+tls grouped) → 6 units → 22 combos
           - group: optional
-            features: "mcp,harness,otel,acme,tls"
+            hack_args: "--group-features dlp,oauth,tap,compliance,policies --group-features acme,tls --group-features test-util,watch"
+          # minimal: test-util, watch individual, everything else in 2 bundles → 4 units → 11 combos
           - group: minimal
-            features: "test-util,watch"
+            hack_args: "--group-features dlp,oauth,tap,compliance,policies --group-features mcp,harness,otel,acme,tls"
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -362,7 +366,7 @@ jobs:
           shared-key: hack-${{ matrix.group }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --group-features ${{ matrix.features }}
+      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps ${{ matrix.hack_args }}
 
   # =========================================================================
   # Stage 2: Tests (gate for everything below)
