@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.1](https://github.com/azerozero/grob/compare/v0.30.0...v0.30.1) - 2026-03-27
+
+### Added
+
+- *(ci)* 48/48 pipeline score — all 12 dimensions maxed
+- *(ci+dlp)* 85% pipeline score + code audit fixes
+- *(ci)* unified pipeline — build→test→push→e2e→release (biomimetic)
+
+### Fixed
+
+- remove wrong crates.io badge, update doc versions to v0.30.0, add property-based DLP tests
+- *(ci)* pin cosign-installer to v4.1.1 (no v4 major tag yet)
+- *(ci)* bump powerset timeout 5→8 min to cover setup overhead
+- *(ci)* remove deprecated rust-cache inputs and fix shellcheck warnings
+- *(ci)* bump GitHub Actions to latest major versions
+- *(ci)* use rhysd/actionlint@v1 action instead of manual curl
+- *(ci)* cargo hack group-features (not partition) + actionlint URL
+
+### Other
+
+- *(ci)* aggressive feature grouping to fix powerset timeout
+- *(ci)* shard feature powerset into 4 parallel jobs
+- *(ci)* use crane pull from GHCR instead of musl build in e2e
+- *(demo)* grob foreground debug in logs pane + fresh audit tail
+- *(demo)* grob foreground debug in logs pane + fresh audit tail
+
 ## [0.30.0](https://github.com/azerozero/grob/compare/v0.29.13...v0.30.0) - 2026-03-26
 
 ### Added
