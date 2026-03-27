@@ -28,6 +28,8 @@ fn test_config() -> DlpConfig {
         prompt_injection: Default::default(),
         signed_config: Default::default(),
         key_rotation_hours: 24,
+        names_mode: NamesMode::Manual,
+        auto_detect_cache_limit: 64,
     }
 }
 

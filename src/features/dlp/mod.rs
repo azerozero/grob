@@ -183,7 +183,13 @@ impl DlpEngine {
         config.resolve_all_rules();
 
         let scanner = dfa::SecretScanner::new(&config.secrets, &config.custom_prefixes);
-        let anonymizer = names::NameAnonymizer::new(&config.names);
+        let anonymizer = match config.names_mode {
+            config::NamesMode::Manual => names::NameAnonymizer::new(&config.names),
+            config::NamesMode::AutoDetect => names::NameAnonymizer::new_auto_detect(
+                &config.names,
+                config.auto_detect_cache_limit,
+            ),
+        };
         let canary_gen = Arc::new(canary::CanaryGenerator::new());
         let sprt = if config.entropy.enabled {
             Some(sprt::SprtDetector::new())

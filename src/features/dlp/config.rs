@@ -28,6 +28,13 @@ pub struct DlpConfig {
     /// Name anonymization rules for PII name redaction.
     #[serde(default)]
     pub names: Vec<NameRule>,
+    /// Name detection mode: `manual` (default) or `auto-detect`.
+    #[serde(default)]
+    pub names_mode: NamesMode,
+    /// Maximum dynamic names cached before rebuilding the Aho-Corasick automaton.
+    /// Only used when `names_mode = "auto-detect"`. Default: 64.
+    #[serde(default = "default_auto_detect_cache_limit")]
+    pub auto_detect_cache_limit: usize,
     /// High-entropy string detection settings.
     #[serde(default)]
     pub entropy: EntropyConfig,
@@ -55,6 +62,10 @@ pub struct DlpConfig {
 
 fn default_key_rotation_hours() -> u64 {
     24
+}
+
+fn default_auto_detect_cache_limit() -> usize {
+    64
 }
 
 fn default_true() -> bool {
@@ -178,6 +189,17 @@ pub enum SecretAction {
 
 fn default_action_canary() -> SecretAction {
     SecretAction::Canary
+}
+
+/// Name detection mode.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum NamesMode {
+    /// Only detect names explicitly listed in `[[names]]` rules.
+    #[default]
+    Manual,
+    /// Detect names from rules AND auto-detect proper nouns via heuristics.
+    AutoDetect,
 }
 
 /// Action to take when a configured name is detected.

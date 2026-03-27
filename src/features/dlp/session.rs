@@ -148,10 +148,19 @@ impl DlpSessionManager {
     fn build_session_engine(&self, session_id: &str) -> Arc<DlpEngine> {
         let scanner =
             super::dfa::SecretScanner::new(&self.config.secrets, &self.config.custom_prefixes);
-        let anonymizer = super::names::NameAnonymizer::new_with_session(
-            &self.config.names,
-            session_id.as_bytes(),
-        );
+        let anonymizer = match self.config.names_mode {
+            super::config::NamesMode::Manual => super::names::NameAnonymizer::new_with_session(
+                &self.config.names,
+                session_id.as_bytes(),
+            ),
+            super::config::NamesMode::AutoDetect => {
+                super::names::NameAnonymizer::new_auto_detect_with_session(
+                    &self.config.names,
+                    session_id.as_bytes(),
+                    self.config.auto_detect_cache_limit,
+                )
+            }
+        };
         let canary_gen = Arc::new(super::canary::CanaryGenerator::new());
         let sprt = if self.config.entropy.enabled {
             Some(super::sprt::SprtDetector::new())
@@ -230,6 +239,8 @@ mod tests {
             prompt_injection: Default::default(),
             signed_config: Default::default(),
             key_rotation_hours: 24,
+            names_mode: NamesMode::Manual,
+            auto_detect_cache_limit: 64,
         }
     }
 
