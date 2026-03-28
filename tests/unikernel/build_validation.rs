@@ -10,8 +10,20 @@ use std::process::Command;
 /// Verifies that the project compiles with the unikernel feature flag.
 #[test]
 fn unikernel_feature_compiles() {
+    // On Windows, jemalloc (a default feature) cannot build, so use
+    // --no-default-features with the unikernel-compatible feature set.
+    let args: &[&str] = if cfg!(target_os = "windows") {
+        &[
+            "check",
+            "--no-default-features",
+            "--features",
+            "dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs,unikernel",
+        ]
+    } else {
+        &["check", "--features", "unikernel"]
+    };
     let status = Command::new("cargo")
-        .args(["check", "--features", "unikernel"])
+        .args(args)
         .status()
         .expect("failed to execute cargo check");
     assert!(status.success(), "cargo check --features unikernel failed");
