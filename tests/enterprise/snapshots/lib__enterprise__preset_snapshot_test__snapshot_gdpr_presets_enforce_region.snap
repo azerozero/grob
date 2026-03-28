@@ -1,0 +1,8 @@
+---
+source: tests/enterprise/preset_snapshot_test.rs
+expression: results
+---
+[
+    "gdpr: gdpr=true region=Some(\"eu\")",
+    "eu-ai-act: gdpr=true region=Some(\"eu\")",
+]

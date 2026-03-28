@@ -1,0 +1,13 @@
+---
+source: tests/enterprise/preset_snapshot_test.rs
+expression: results
+---
+[
+    "perf: model=default type=default",
+    "medium: model=default type=default",
+    "local: model=default type=default",
+    "cheap: model=default-model type=default",
+    "fast: model=default-model type=default",
+    "gdpr: model=eu-default type=default",
+    "eu-ai-act: model=eu-default type=default",
+]

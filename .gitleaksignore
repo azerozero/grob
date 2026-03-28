@@ -128,3 +128,10 @@ src/features/dlp/tests.rs:github-pat:58
 src/features/dlp/tests.rs:github-pat:149
 src/features/dlp/tests.rs:github-pat:153
 src/features/dlp/tests.rs:private-key:132
+# Enterprise E2E DLP bypass scenario tests — intentional fake secrets for DLP validation
+tests/enterprise/scenario_dlp_bypass_test.rs:generic-api-key:100
+tests/enterprise/scenario_dlp_bypass_test.rs:generic-api-key:125
+tests/enterprise/scenario_dlp_bypass_test.rs:github-pat:110
+tests/enterprise/scenario_dlp_bypass_test.rs:github-pat:152
+tests/enterprise/scenario_dlp_bypass_test.rs:gcp-api-key:120
+tests/enterprise/scenario_dlp_bypass_test.rs:stripe-access-token:115
