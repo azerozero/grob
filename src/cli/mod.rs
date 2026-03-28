@@ -23,6 +23,7 @@ use crate::auth::jwt::AuthConfig;
 use crate::features::dlp::config::DlpConfig;
 #[cfg(feature = "mcp")]
 use crate::features::mcp::config::McpConfig;
+use crate::features::pledge::config::PledgeConfig;
 use crate::features::tap::TapConfig;
 use crate::providers::ProviderConfig;
 use anyhow::{Context, Result};
@@ -86,6 +87,9 @@ pub struct AppConfig {
     /// External log sink configuration for structured request/response export
     #[serde(default)]
     pub log_export: LogExportConfig,
+    /// Pledge filter: structurally removes tools from LLM payloads.
+    #[serde(default)]
+    pub pledge: PledgeConfig,
     /// Policy engine rules for per-tenant/zone/compliance evaluation.
     #[serde(default)]
     pub policies: Vec<crate::features::policies::config::PolicyConfig>,

@@ -124,6 +124,7 @@ api_key = "my-secret-key"
             user: Default::default(),
             otel: Default::default(),
             log_export: Default::default(),
+            pledge: Default::default(),
             policies: vec![],
             tool_layer: Default::default(),
             #[cfg(feature = "mcp")]
@@ -184,6 +185,7 @@ api_key = "my-secret-key"
             user: Default::default(),
             otel: Default::default(),
             log_export: Default::default(),
+            pledge: Default::default(),
             policies: vec![],
             tool_layer: Default::default(),
             #[cfg(feature = "mcp")]

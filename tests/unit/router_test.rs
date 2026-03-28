@@ -33,6 +33,7 @@ mod tests {
             user: Default::default(),
             otel: Default::default(),
             log_export: Default::default(),
+            pledge: Default::default(),
             policies: vec![],
             tool_layer: Default::default(),
             #[cfg(feature = "mcp")]
