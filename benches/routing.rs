@@ -41,6 +41,7 @@ fn make_router() -> Router {
         user: Default::default(),
         otel: Default::default(),
         log_export: Default::default(),
+        pledge: Default::default(),
         policies: vec![],
     })
 }
