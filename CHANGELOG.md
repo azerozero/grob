@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0](https://github.com/azerozero/grob/compare/v0.30.1...v0.31.0) - 2026-03-28
+
+### Added
+
+- *(ci)* add unikernel build pipeline, tests, and documentation
+- *(pledge)* add structural tool filtering for LLM payloads (ADR-005)
+- add universal tool layer v1 (injection, aliasing, capability gating)
+- add unified JSON-RPC 2.0 Control Plane (Phase 1)
+- add unikernel feature flag for single-process deployment
+
+### Fixed
+
+- *(ci)* move --timeout flag before -- separator in cargo-mutants
+- *(ci)* make Codecov gate conditional on token availability
+
+### Other
+
+- add L2 property tests and L1 error snapshots
+- add 5-layer enterprise E2E test scaffolding
+- Merge feat/dlp-dynamic-names into develop
+- add insta snapshots, cargo-mutants CI, and enforce coverage gate
+
 ## [0.30.1](https://github.com/azerozero/grob/compare/v0.30.0...v0.30.1) - 2026-03-27
 
 ### Added
