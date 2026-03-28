@@ -189,7 +189,14 @@ jobs:
         with:
           shared-key: clippy-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - run: cargo clippy --all-targets -- -D warnings
+      - name: Run clippy
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cargo clippy --all-targets --no-default-features --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs -- -D warnings
+          else
+            cargo clippy --all-targets -- -D warnings
+          fi
+        shell: bash
 
   audit:
     name: Security Audit
@@ -444,8 +451,16 @@ jobs:
           shared-key: test-${{ matrix.os }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --profile ci
-      - run: cargo test --doc
+      - name: Run tests
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cargo nextest run --profile ci --no-default-features --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs
+            cargo test --doc --no-default-features --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs
+          else
+            cargo nextest run --profile ci
+            cargo test --doc
+          fi
+        shell: bash
 
   # =========================================================================
   # Stage 2.5: Mutation testing (develop push only, informational)

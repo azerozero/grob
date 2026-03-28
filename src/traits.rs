@@ -107,7 +107,9 @@ pub trait SpendTracking: Send {
     fn save(&self);
 
     /// Returns per-provider spend breakdown for the current period.
-    fn provider_breakdown(&self) -> Vec<(String, f64)>;
+    fn provider_breakdown(&self) -> Vec<(String, f64)> {
+        Vec::new()
+    }
 
     /// Checks budget limits and returns a warning message if approaching limits.
     fn check_warnings(
