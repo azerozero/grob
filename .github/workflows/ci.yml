@@ -77,10 +77,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      rust: ${{ steps.filter.outputs.rust }}
-      e2e: ${{ steps.filter.outputs.e2e }}
-      ci: ${{ steps.filter.outputs.ci }}
-      docs: ${{ steps.filter.outputs.docs }}
+      rust: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.rust }}
+      e2e: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.e2e }}
+      ci: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.ci }}
+      docs: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.docs }}
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -486,11 +486,12 @@ jobs:
         run: cargo install cargo-mutants --locked
       - name: Run mutation testing on critical paths
         run: |
-          cargo mutants --package grob --timeout 120 -- --lib -j 2 \
+          cargo mutants --package grob --timeout 120 -j 2 \
             --file src/router/mod.rs \
             --file src/features/dlp/mod.rs \
             --file src/features/dlp/pii.rs \
-            --file src/features/dlp/dfa.rs
+            --file src/features/dlp/dfa.rs \
+            -- --lib
       - name: Upload mutation testing results
         if: always()
         uses: actions/upload-artifact@v7
