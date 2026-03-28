@@ -615,6 +615,17 @@ const NOUNS: &[&str] = &[
 mod tests {
     use super::*;
 
+    /// Serializes tests that mutate `GROB_DLP_SECRET` to avoid env-var races.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Runs a closure with `GROB_DLP_SECRET` set, holding a lock to prevent races.
+    fn with_dlp_secret<F: FnOnce()>(secret: &str, f: F) {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        unsafe { std::env::set_var("GROB_DLP_SECRET", secret) };
+        f();
+        unsafe { std::env::remove_var("GROB_DLP_SECRET") };
+    }
+
     fn test_rules() -> Vec<NameRule> {
         vec![
             NameRule {
@@ -647,13 +658,13 @@ mod tests {
 
     #[test]
     fn test_deterministic_pseudonyms() {
-        std::env::set_var("GROB_DLP_SECRET", "test-deterministic");
-        let anon1 = NameAnonymizer::new(&test_rules());
-        let anon2 = NameAnonymizer::new(&test_rules());
-        let r1 = anon1.anonymize_if_match("Thales").unwrap().0;
-        let r2 = anon2.anonymize_if_match("Thales").unwrap().0;
-        assert_eq!(r1, r2, "Same name should always produce same pseudonym");
-        std::env::remove_var("GROB_DLP_SECRET");
+        with_dlp_secret("test-deterministic", || {
+            let anon1 = NameAnonymizer::new(&test_rules());
+            let anon2 = NameAnonymizer::new(&test_rules());
+            let r1 = anon1.anonymize_if_match("Thales").unwrap().0;
+            let r2 = anon2.anonymize_if_match("Thales").unwrap().0;
+            assert_eq!(r1, r2, "Same name should always produce same pseudonym");
+        });
     }
 
     #[test]
@@ -756,90 +767,87 @@ mod tests {
 
     #[test]
     fn test_auto_detect_anonymizes_dynamic_names() {
-        std::env::set_var("GROB_DLP_SECRET", "test-auto-detect");
-        let anon = NameAnonymizer::new_auto_detect(&[], 64);
+        with_dlp_secret("test-auto-detect", || {
+            let anon = NameAnonymizer::new_auto_detect(&[], 64);
 
-        let result = anon.anonymize_if_match("I met with Jean Dupont at the office");
-        assert!(result.is_some(), "Should detect Jean Dupont in auto-detect");
-        let (text, replacements) = result.unwrap();
-        assert!(
-            !text.contains("Jean Dupont"),
-            "Dynamic name should be replaced"
-        );
-        assert!(!replacements.is_empty());
-        std::env::remove_var("GROB_DLP_SECRET");
+            let result = anon.anonymize_if_match("I met with Jean Dupont at the office");
+            assert!(result.is_some(), "Should detect Jean Dupont in auto-detect");
+            let (text, replacements) = result.unwrap();
+            assert!(
+                !text.contains("Jean Dupont"),
+                "Dynamic name should be replaced"
+            );
+            assert!(!replacements.is_empty());
+        });
     }
 
     #[test]
     fn test_auto_detect_multi_turn_coherence() {
-        std::env::set_var("GROB_DLP_SECRET", "test-coherence");
-        let anon = NameAnonymizer::new_auto_detect(&[], 64);
+        with_dlp_secret("test-coherence", || {
+            let anon = NameAnonymizer::new_auto_detect(&[], 64);
 
-        let (text1, reps1) = anon
-            .anonymize_if_match("I met with Jean Dupont today")
-            .unwrap();
-        let (text2, reps2) = anon
-            .anonymize_if_match("Jean Dupont will call me back")
-            .unwrap();
+            let (text1, reps1) = anon
+                .anonymize_if_match("I met with Jean Dupont today")
+                .unwrap();
+            let (text2, reps2) = anon
+                .anonymize_if_match("Jean Dupont will call me back")
+                .unwrap();
 
-        // Same name should produce same pseudonym across turns
-        let pseudo1 = &reps1.iter().find(|(n, _)| n == "Jean Dupont").unwrap().1;
-        let pseudo2 = &reps2.iter().find(|(n, _)| n == "Jean Dupont").unwrap().1;
-        assert_eq!(
-            pseudo1, pseudo2,
-            "Same name across turns must produce same pseudonym"
-        );
-        assert!(text1.contains(pseudo1.as_str()));
-        assert!(text2.contains(pseudo2.as_str()));
-
-        std::env::remove_var("GROB_DLP_SECRET");
+            // Same name should produce same pseudonym across turns
+            let pseudo1 = &reps1.iter().find(|(n, _)| n == "Jean Dupont").unwrap().1;
+            let pseudo2 = &reps2.iter().find(|(n, _)| n == "Jean Dupont").unwrap().1;
+            assert_eq!(
+                pseudo1, pseudo2,
+                "Same name across turns must produce same pseudonym"
+            );
+            assert!(text1.contains(pseudo1.as_str()));
+            assert!(text2.contains(pseudo2.as_str()));
+        });
     }
 
     #[test]
     fn test_auto_detect_deanonymize_dynamic() {
-        std::env::set_var("GROB_DLP_SECRET", "test-deanon");
-        let anon = NameAnonymizer::new_auto_detect(&[], 64);
+        with_dlp_secret("test-deanon", || {
+            let anon = NameAnonymizer::new_auto_detect(&[], 64);
 
-        let (anonymized, _) = anon
-            .anonymize_if_match("I met with Pierre Martin yesterday")
-            .unwrap();
-        assert!(!anonymized.contains("Pierre Martin"));
+            let (anonymized, _) = anon
+                .anonymize_if_match("I met with Pierre Martin yesterday")
+                .unwrap();
+            assert!(!anonymized.contains("Pierre Martin"));
 
-        let restored = anon.deanonymize_if_match(&anonymized);
-        assert!(restored.is_some());
-        assert!(
-            restored.unwrap().contains("Pierre Martin"),
-            "Dynamic names should be deanonymizable"
-        );
-
-        std::env::remove_var("GROB_DLP_SECRET");
+            let restored = anon.deanonymize_if_match(&anonymized);
+            assert!(restored.is_some());
+            assert!(
+                restored.unwrap().contains("Pierre Martin"),
+                "Dynamic names should be deanonymizable"
+            );
+        });
     }
 
     #[test]
     fn test_auto_detect_with_static_rules() {
-        std::env::set_var("GROB_DLP_SECRET", "test-mixed");
-        let rules = vec![NameRule {
-            term: "Thales".into(),
-            action: NameAction::Pseudonym,
-        }];
-        let anon = NameAnonymizer::new_auto_detect(&rules, 64);
+        with_dlp_secret("test-mixed", || {
+            let rules = vec![NameRule {
+                term: "Thales".into(),
+                action: NameAction::Pseudonym,
+            }];
+            let anon = NameAnonymizer::new_auto_detect(&rules, 64);
 
-        let result = anon.anonymize_if_match("Working at Thales, I met Pierre Durand");
-        assert!(result.is_some());
-        let (text, replacements) = result.unwrap();
+            let result = anon.anonymize_if_match("Working at Thales, I met Pierre Durand");
+            assert!(result.is_some());
+            let (text, replacements) = result.unwrap();
 
-        assert!(!text.contains("Thales"), "Static rule should still work");
-        assert!(
-            !text.contains("Pierre Durand"),
-            "Dynamic name should be detected"
-        );
-        assert!(
-            replacements.len() >= 2,
-            "Should have replacements for both: {:?}",
-            replacements
-        );
-
-        std::env::remove_var("GROB_DLP_SECRET");
+            assert!(!text.contains("Thales"), "Static rule should still work");
+            assert!(
+                !text.contains("Pierre Durand"),
+                "Dynamic name should be detected"
+            );
+            assert!(
+                replacements.len() >= 2,
+                "Should have replacements for both: {:?}",
+                replacements
+            );
+        });
     }
 
     #[test]
@@ -853,41 +861,39 @@ mod tests {
 
     #[test]
     fn test_dynamic_cache_grows() {
-        std::env::set_var("GROB_DLP_SECRET", "test-cache-grow");
-        let anon = NameAnonymizer::new_auto_detect(&[], 64);
-        assert_eq!(anon.dynamic_cache_len(), 0);
+        with_dlp_secret("test-cache-grow", || {
+            let anon = NameAnonymizer::new_auto_detect(&[], 64);
+            assert_eq!(anon.dynamic_cache_len(), 0);
 
-        anon.anonymize_if_match("I met Jean Dupont today");
-        assert!(anon.dynamic_cache_len() > 0, "Cache should grow on detect");
-
-        std::env::remove_var("GROB_DLP_SECRET");
+            anon.anonymize_if_match("I met Jean Dupont today");
+            assert!(anon.dynamic_cache_len() > 0, "Cache should grow on detect");
+        });
     }
 
     #[test]
     fn test_rebuild_merged_promotes_dynamic() {
-        std::env::set_var("GROB_DLP_SECRET", "test-rebuild");
-        let anon = NameAnonymizer::new_auto_detect(&[], 4);
+        with_dlp_secret("test-rebuild", || {
+            let anon = NameAnonymizer::new_auto_detect(&[], 4);
 
-        anon.anonymize_if_match("I met Jean Dupont today");
-        assert!(anon.dynamic_cache_len() > 0);
+            anon.anonymize_if_match("I met Jean Dupont today");
+            assert!(anon.dynamic_cache_len() > 0);
 
-        let merged = anon.rebuild_merged();
-        assert!(
-            merged.rules.iter().any(|r| r.term == "Jean Dupont"),
-            "Rebuild should promote dynamic names to static rules"
-        );
-        assert_eq!(
-            merged.dynamic_cache_len(),
-            0,
-            "Cache should be empty after merge"
-        );
+            let merged = anon.rebuild_merged();
+            assert!(
+                merged.rules.iter().any(|r| r.term == "Jean Dupont"),
+                "Rebuild should promote dynamic names to static rules"
+            );
+            assert_eq!(
+                merged.dynamic_cache_len(),
+                0,
+                "Cache should be empty after merge"
+            );
 
-        // The merged anonymizer should still work for the promoted name
-        let result = merged.anonymize_if_match("Jean Dupont called again");
-        assert!(result.is_some());
-        assert!(!result.unwrap().0.contains("Jean Dupont"));
-
-        std::env::remove_var("GROB_DLP_SECRET");
+            // The merged anonymizer should still work for the promoted name
+            let result = merged.anonymize_if_match("Jean Dupont called again");
+            assert!(result.is_some());
+            assert!(!result.unwrap().0.contains("Jean Dupont"));
+        });
     }
 
     #[test]
