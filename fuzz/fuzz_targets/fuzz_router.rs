@@ -65,6 +65,7 @@ fn make_config() -> AppConfig {
         otel: Default::default(),
         log_export: Default::default(),
         policies: vec![],
+        tool_layer: Default::default(),
     }
 }
 

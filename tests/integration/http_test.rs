@@ -125,6 +125,7 @@ api_key = "my-secret-key"
             otel: Default::default(),
             log_export: Default::default(),
             policies: vec![],
+            tool_layer: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
         };
@@ -184,6 +185,7 @@ api_key = "my-secret-key"
             otel: Default::default(),
             log_export: Default::default(),
             policies: vec![],
+            tool_layer: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
         };

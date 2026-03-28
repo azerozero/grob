@@ -148,6 +148,7 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         otel: Default::default(),
         log_export: Default::default(),
         policies: vec![],
+        tool_layer: Default::default(),
         #[cfg(feature = "mcp")]
         mcp: Default::default(),
     }

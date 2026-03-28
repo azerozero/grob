@@ -1,0 +1,18 @@
+{
+  "name": "grep",
+  "description": "Search file contents for lines matching a pattern.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "pattern": {
+        "type": "string",
+        "description": "Regex pattern to search for."
+      },
+      "path": {
+        "type": "string",
+        "description": "File or directory to search in."
+      }
+    },
+    "required": ["pattern"]
+  }
+}

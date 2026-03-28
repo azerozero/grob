@@ -148,6 +148,8 @@ pub struct SecurityState {
     /// MCP tool matrix and JSON-RPC server state.
     #[cfg(feature = "mcp")]
     pub mcp: Option<Arc<crate::features::mcp::McpState>>,
+    /// Universal tool layer for injection, aliasing, and capability gating.
+    pub tool_layer: Option<Arc<crate::features::tool_layer::ToolLayer>>,
 }
 
 /// Application state shared across handlers
@@ -212,6 +214,19 @@ pub async fn start_server(
 
     #[cfg(feature = "mcp")]
     let mcp_state = init_mcp(&config, &provider_registry);
+
+    let tool_layer = if config.tool_layer.enabled {
+        info!(
+            "🔧 Tool layer enabled ({} inject rules, {} aliases)",
+            config.tool_layer.inject.len(),
+            config.tool_layer.aliases.len(),
+        );
+        Some(Arc::new(crate::features::tool_layer::ToolLayer::new(
+            config.tool_layer.clone(),
+        )))
+    } else {
+        None
+    };
 
     let router = Router::new(config.clone());
     let reloadable = Arc::new(ReloadableState::new(
@@ -278,6 +293,7 @@ pub async fn start_server(
             provider_scorer,
             #[cfg(feature = "mcp")]
             mcp: mcp_state,
+            tool_layer,
         },
     });
 
