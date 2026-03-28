@@ -342,6 +342,14 @@ impl crate::traits::SpendTracking for SpendTracker {
         self.total()
     }
 
+    fn provider_breakdown(&self) -> Vec<(String, f64)> {
+        self.data
+            .by_provider
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
+    }
+
     fn save(&self) {
         self.save();
     }

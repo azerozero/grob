@@ -21,6 +21,8 @@ mod oauth_handlers;
 pub mod openai_compat;
 /// OpenAI Responses API (`/v1/responses`) compatibility translation layer.
 pub mod responses_compat;
+/// Unified JSON-RPC 2.0 Control Plane.
+pub mod rpc;
 #[cfg(feature = "watch")]
 mod watch_sse;
 
@@ -385,6 +387,17 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
             post(oauth_handlers::oauth_refresh_token),
         );
 
+    // ── JSON-RPC 2.0 Control Plane ──
+    let rpc_state = state.clone();
+    let app = app.route(
+        "/rpc",
+        post(
+            move |headers: axum::http::HeaderMap, body: axum::body::Bytes| {
+                handle_rpc(rpc_state, headers, body)
+            },
+        ),
+    );
+
     // Live event stream — only available when the watch feature is compiled in.
     #[cfg(feature = "watch")]
     let app = app.route("/api/events", get(watch_sse::watch_events_sse));
@@ -578,6 +591,104 @@ async fn hit_approve_handler(
                 }
             }
         }
+    }
+}
+
+/// Handles a JSON-RPC 2.0 request by resolving caller identity and dispatching.
+async fn handle_rpc(
+    state: Arc<AppState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+
+    // Parse the JSON-RPC envelope
+    let req: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(_) => {
+            return axum::Json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": { "code": -32700, "message": "Parse error" },
+                "id": null
+            }))
+            .into_response();
+        }
+    };
+
+    let id = req.get("id").cloned().unwrap_or(serde_json::Value::Null);
+    let method = match req.get("method").and_then(|m| m.as_str()) {
+        Some(m) => m,
+        None => {
+            return axum::Json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": { "code": -32600, "message": "Invalid Request: missing method" },
+                "id": id
+            }))
+            .into_response();
+        }
+    };
+    let params = req.get("params");
+
+    // Resolve caller identity
+    let client_ip = extract_client_ip(&headers);
+    let auth_header = extract_api_credential(&headers);
+    let auth_mode = {
+        let inner = state.snapshot();
+        inner.config.auth.mode.clone()
+    };
+
+    let caller = match rpc::auth::resolve_caller(
+        &client_ip,
+        auth_header,
+        &auth_mode,
+        state.security.jwt_validator.as_deref(),
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            return axum::Json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": { "code": e.code(), "message": e.message() },
+                "id": id
+            }))
+            .into_response();
+        }
+    };
+
+    // Audit the RPC call
+    #[cfg(feature = "compliance")]
+    if let Some(ref audit_log) = state.security.audit_log {
+        let tenant = if caller.tenant_id.is_empty() {
+            &caller.ip
+        } else {
+            &caller.tenant_id
+        };
+        let entry = AuditEntryBuilder::new(
+            tenant,
+            crate::security::audit_log::AuditEvent::ConfigChange,
+            &format!("rpc:{method}"),
+            &caller.ip,
+            0,
+        )
+        .build();
+        if let Err(e) = audit_log.write(entry) {
+            tracing::error!(error = %e, "RPC audit write failed");
+        }
+    }
+
+    // Dispatch to the appropriate handler
+    match rpc::dispatch(&state, &caller, method, params).await {
+        Ok(result) => axum::Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "result": result,
+            "id": id
+        }))
+        .into_response(),
+        Err(e) => axum::Json(serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": { "code": e.code(), "message": e.message() },
+            "id": id
+        }))
+        .into_response(),
     }
 }
 
