@@ -4,4 +4,5 @@
 pub mod enterprise;
 pub mod helpers;
 pub mod integration;
+pub mod unikernel;
 pub mod unit;
