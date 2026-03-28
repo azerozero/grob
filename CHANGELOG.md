@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1](https://github.com/azerozero/grob/compare/v0.31.0...v0.31.1) - 2026-03-28
+
+### Fixed
+
+- guard dirs usage on feature flag instead of unikernel
+- *(test)* set GROB_HOME in preset test for unikernel compatibility
+- *(test)* serialize env-var-dependent DLP tests with mutex
+- *(ci)* disable jemalloc on Windows CI and add default impl for SpendTracking::provider_breakdown
+
 ## [0.31.0](https://github.com/azerozero/grob/compare/v0.30.1...v0.31.0) - 2026-03-28
 
 ### Added
