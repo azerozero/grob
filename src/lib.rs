@@ -4,21 +4,20 @@ use std::path::PathBuf;
 
 /// Returns the Grob home directory (`~/.grob`).
 ///
-/// When the `unikernel` feature is active, `dirs` is unavailable so this
-/// reads `GROB_HOME` from the environment. Without the feature it falls
-/// back to `dirs::home_dir()` as before, but still honours `GROB_HOME` if
-/// set (useful for containers).
+/// When the `dirs` feature is disabled (e.g. unikernel builds), falls back
+/// to reading `GROB_HOME` from the environment. With `dirs` enabled it uses
+/// `dirs::home_dir()` but still honours `GROB_HOME` if set (useful for containers).
 pub fn grob_home() -> Option<PathBuf> {
     if let Ok(val) = std::env::var("GROB_HOME") {
         return Some(PathBuf::from(val));
     }
 
-    #[cfg(not(feature = "unikernel"))]
+    #[cfg(feature = "dirs")]
     {
         dirs::home_dir().map(|h| h.join(".grob"))
     }
 
-    #[cfg(feature = "unikernel")]
+    #[cfg(not(feature = "dirs"))]
     {
         None
     }
@@ -27,19 +26,19 @@ pub fn grob_home() -> Option<PathBuf> {
 /// Returns the user home directory.
 ///
 /// Honours `GROB_HOME`'s parent when set; otherwise delegates to
-/// `dirs::home_dir()` (disabled under the `unikernel` feature).
+/// `dirs::home_dir()` (requires the `dirs` feature).
 pub fn home_dir() -> Option<PathBuf> {
     if let Ok(val) = std::env::var("GROB_HOME") {
         // GROB_HOME typically points to ~/.grob — parent is home
         return PathBuf::from(val).parent().map(|p| p.to_path_buf());
     }
 
-    #[cfg(not(feature = "unikernel"))]
+    #[cfg(feature = "dirs")]
     {
         dirs::home_dir()
     }
 
-    #[cfg(feature = "unikernel")]
+    #[cfg(not(feature = "dirs"))]
     {
         None
     }
