@@ -471,7 +471,7 @@ jobs:
         run: cargo install cargo-mutants --locked
       - name: Run mutation testing on critical paths
         run: |
-          cargo mutants --package grob -- --lib -j 2 --timeout 120 \
+          cargo mutants --package grob --timeout 120 -- --lib -j 2 \
             --file src/router/mod.rs \
             --file src/features/dlp/mod.rs \
             --file src/features/dlp/pii.rs \
