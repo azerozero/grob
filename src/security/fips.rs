@@ -85,22 +85,18 @@ pub fn detect_fips() -> FipsStatus {
 /// - Ed25519 (not in FIPS 186-5 until recent updates, still transitional)
 /// - ChaCha20-Poly1305 (not in FIPS)
 fn audit_algorithms() -> Vec<String> {
-    let mut issues = Vec::new();
-
     // Ed25519 is used for audit signing but is not yet universally FIPS-approved.
     // NIST SP 800-186 (2023) added EdDSA but CMVP validation lags.
-    issues.push("ed25519 (audit signing option — use ecdsa-p256 or hmac-sha256 for FIPS)".into());
-
+    //
     // Note: AES-256-GCM, ECDSA P-256, HMAC-SHA256, SHA-256 are all approved.
     // reqwest with rustls uses TLS 1.3 cipher suites that may include
     // ChaCha20-Poly1305 alongside AES-GCM. In FIPS mode, only AES-GCM
     // cipher suites should be negotiated.
-    issues.push(
+    vec![
+        "ed25519 (audit signing option — use ecdsa-p256 or hmac-sha256 for FIPS)".into(),
         "rustls TLS 1.3 (may negotiate ChaCha20-Poly1305 — restrict to AES-GCM suites in FIPS)"
             .into(),
-    );
-
-    issues
+    ]
 }
 
 // ── Startup enforcement ─────────────────────────────────────────────────────

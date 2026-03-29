@@ -43,6 +43,9 @@ fn make_router() -> Router {
         log_export: Default::default(),
         pledge: Default::default(),
         policies: vec![],
+        tee: Default::default(),
+        fips: Default::default(),
+        harness: Default::default(),
     })
 }
 

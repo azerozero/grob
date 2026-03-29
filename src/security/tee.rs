@@ -210,7 +210,11 @@ mod platform {
             .map(|s| s.trim().contains("snp"))
             .unwrap_or(false);
 
-        let qualifier = if confirmed { "" } else { " (sysfs unconfirmed)" };
+        let qualifier = if confirmed {
+            ""
+        } else {
+            " (sysfs unconfirmed)"
+        };
 
         Some(TeeStatus {
             detected: true,
@@ -229,7 +233,11 @@ mod platform {
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
 
-        let qualifier = if confirmed { "" } else { " (sysfs unconfirmed)" };
+        let qualifier = if confirmed {
+            ""
+        } else {
+            " (sysfs unconfirmed)"
+        };
 
         Some(TeeStatus {
             detected: true,
@@ -401,10 +409,12 @@ mod platform {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn detect_sev_snp() -> Option<TeeStatus> {
         None
     }
 
+    #[cfg(test)]
     pub(super) fn detect_arm_cca() -> Option<TeeStatus> {
         None
     }

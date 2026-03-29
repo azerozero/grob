@@ -127,6 +127,9 @@ api_key = "my-secret-key"
             pledge: Default::default(),
             policies: vec![],
             tool_layer: Default::default(),
+            tee: Default::default(),
+            fips: Default::default(),
+            harness: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
         };
@@ -188,6 +191,9 @@ api_key = "my-secret-key"
             pledge: Default::default(),
             policies: vec![],
             tool_layer: Default::default(),
+            tee: Default::default(),
+            fips: Default::default(),
+            harness: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
         };

@@ -244,9 +244,7 @@ pub async fn start_server(
     let (rate_limiter, circuit_breakers, audit_log, response_cache) = init_security(&config)?;
 
     // Emit TEE attestation report into the audit log (if both are available).
-    if let (Some(ref report), Some(ref audit)) =
-        (&tee_status.attestation_report, &audit_log)
-    {
+    if let (Some(ref report), Some(ref audit)) = (&tee_status.attestation_report, &audit_log) {
         use crate::security::audit_log::{AuditEntry, AuditEvent, Classification};
         let entry = AuditEntry {
             timestamp: chrono::Utc::now(),
