@@ -35,6 +35,8 @@ fn create_test_config() -> AppConfig {
         #[cfg(feature = "mcp")]
         mcp: Default::default(),
         tool_layer: Default::default(),
+        tee: Default::default(),
+        fips: Default::default(),
     }
 }
 

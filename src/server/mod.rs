@@ -63,7 +63,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::limit::RequestBodyLimitLayer;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
@@ -201,6 +201,12 @@ pub async fn start_server(
     config_source: crate::cli::ConfigSource,
     shutdown_signal: impl std::future::Future<Output = ()> + Send + 'static,
 ) -> anyhow::Result<()> {
+    // ── Pre-flight security enforcement ──
+    // TEE and FIPS checks run before any service initialization so the
+    // process refuses to start (or warns) before opening ports or loading secrets.
+    let tee_status = crate::security::tee::enforce_tee(config.tee.mode, &config.tee)?;
+    let _fips_status = crate::security::fips::enforce_fips(config.fips.mode)?;
+
     let (grob_store, token_store, provider_registry) = init_core_services(&config).await?;
     let (message_tracer, spend_tracker, pricing_table, metrics_handle) =
         init_observability(&config, &grob_store).await?;
@@ -236,6 +242,42 @@ pub async fn start_server(
     ));
 
     let (rate_limiter, circuit_breakers, audit_log, response_cache) = init_security(&config)?;
+
+    // Emit TEE attestation report into the audit log (if both are available).
+    if let (Some(ref report), Some(ref audit)) =
+        (&tee_status.attestation_report, &audit_log)
+    {
+        use crate::security::audit_log::{AuditEntry, AuditEvent, Classification};
+        let entry = AuditEntry {
+            timestamp: chrono::Utc::now(),
+            event_id: uuid::Uuid::new_v4().to_string(),
+            tenant_id: "system".to_string(),
+            user_id: None,
+            action: AuditEvent::TeeAttestation,
+            classification: Classification::C1,
+            backend_routed: tee_status.platform.clone(),
+            request_hash: Some(report.clone()),
+            dlp_rules_triggered: vec![],
+            ip_source: "localhost".to_string(),
+            duration_ms: 0,
+            previous_hash: String::new(),
+            signature: vec![],
+            signature_algorithm: String::new(),
+            model_name: None,
+            input_tokens: None,
+            output_tokens: None,
+            risk_level: None,
+            batch_id: None,
+            batch_index: None,
+            merkle_root: None,
+            merkle_proof: None,
+        };
+        if let Err(e) = audit.write(entry) {
+            warn!("⚠️  Failed to write TEE attestation to audit log: {e}");
+        } else {
+            info!("📜 TEE attestation written to audit log");
+        }
+    }
 
     let provider_scorer = if config.security.adaptive_scoring {
         let scorer_config = crate::security::provider_scorer::ScorerConfig {

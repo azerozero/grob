@@ -1719,6 +1719,7 @@ dependencies = [
  "insta",
  "jsonrpsee",
  "jsonwebtoken",
+ "libc",
  "memchr",
  "metrics",
  "metrics-exporter-prometheus",

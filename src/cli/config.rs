@@ -213,6 +213,68 @@ fn default_escalation_threshold() -> String {
     "high".to_string()
 }
 
+/// Enforcement policy for security features that can warn or block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EnforcementMode {
+    /// Feature disabled entirely.
+    #[default]
+    Off,
+    /// Log a warning at startup but allow the server to run.
+    Warn,
+    /// Refuse to start if the requirement is not met.
+    Enforce,
+}
+
+/// Trusted Execution Environment (TEE) configuration.
+///
+/// Controls whether grob requires, recommends, or ignores TEE attestation.
+/// When enabled, grob checks for AMD SEV-SNP at startup and can derive
+/// hardware-bound keys for secret sealing.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TeeConfig {
+    /// Whether TEE presence is off, warned, or enforced.
+    #[serde(default)]
+    pub mode: EnforcementMode,
+    /// Publish an attestation report in the audit log on startup.
+    #[serde(default = "default_true")]
+    pub attestation_audit: bool,
+    /// Derive encryption keys from TEE hardware (SNP_GET_DERIVED_KEY)
+    /// instead of random filesystem keys.
+    #[serde(default)]
+    pub sealed_keys: bool,
+}
+
+impl Default for TeeConfig {
+    fn default() -> Self {
+        Self {
+            mode: EnforcementMode::Off,
+            attestation_audit: true,
+            sealed_keys: false,
+        }
+    }
+}
+
+/// FIPS 140-3 compliance configuration.
+///
+/// When enabled, grob verifies that the crypto backend operates in FIPS
+/// mode (e.g. OpenSSL FIPS provider or SymCrypt) and restricts algorithms
+/// to FIPS-approved ones.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FipsConfig {
+    /// Whether FIPS mode is off, warned, or enforced.
+    #[serde(default)]
+    pub mode: EnforcementMode,
+}
+
+impl Default for FipsConfig {
+    fn default() -> Self {
+        Self {
+            mode: EnforcementMode::Off,
+        }
+    }
+}
+
 /// User-defined configuration section (preserved across preset applies)
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct UserConfig {
