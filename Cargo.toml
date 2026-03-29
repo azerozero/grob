@@ -69,6 +69,7 @@ rand = "0.8"               # Random generation for PKCE
 chrono = { version = "0.4", features = ["serde"] }  # Timestamps
 url = "2"                  # URL parsing
 secrecy = "0.8"            # Secure secret handling
+zeroize = { version = "1", features = ["derive"] }  # Zero secrets in memory on drop
 
 # Metrics
 metrics = "0.24"

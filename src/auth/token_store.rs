@@ -276,6 +276,7 @@ pub(crate) fn set_owner_only_permissions(path: &std::path::Path) -> Result<()> {
         // NOTE: Uses raw Win32 API to avoid heavy crate dependencies.
         // Sets a DACL with a single GENERIC_ALL ACE for the current user.
         #[allow(
+            unsafe_code,
             non_snake_case,
             non_upper_case_globals,
             dead_code,

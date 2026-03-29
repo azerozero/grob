@@ -164,6 +164,7 @@ pub fn spawn_background_service(port: Option<u16>, config: Option<String>) -> an
         use std::os::unix::process::CommandExt;
         // SAFETY: setsid() is async-signal-safe and called in pre_exec (after fork,
         // before exec) where only one thread exists in the child process.
+        #[allow(unsafe_code)]
         unsafe {
             cmd.pre_exec(|| {
                 nix::libc::setsid();

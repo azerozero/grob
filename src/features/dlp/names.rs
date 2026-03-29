@@ -621,9 +621,15 @@ mod tests {
     /// Runs a closure with `GROB_DLP_SECRET` set, holding a lock to prevent races.
     fn with_dlp_secret<F: FnOnce()>(secret: &str, f: F) {
         let _guard = ENV_MUTEX.lock().unwrap();
-        unsafe { std::env::set_var("GROB_DLP_SECRET", secret) };
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("GROB_DLP_SECRET", secret);
+        }
         f();
-        unsafe { std::env::remove_var("GROB_DLP_SECRET") };
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("GROB_DLP_SECRET");
+        }
     }
 
     fn test_rules() -> Vec<NameRule> {

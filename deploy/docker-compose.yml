@@ -1,0 +1,65 @@
+# Hardened docker-compose for grob
+# Enforces: read-only rootfs, no-new-privileges, dropped capabilities,
+# seccomp BPF allowlist, non-root user, tmpfs for /tmp.
+#
+# Usage:
+#   docker compose -f deploy/docker-compose.yml up -d
+#   podman-compose -f deploy/docker-compose.yml up -d
+
+services:
+  grob:
+    image: ghcr.io/azerozero/grob:latest
+    build:
+      context: ..
+      dockerfile: Containerfile
+
+    ports:
+      - "8080:8080"
+
+    # ── Security hardening ──
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=seccomp.json
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE    # Only if binding to port < 1024
+    user: "65534:65534"
+
+    # Writable scratch space (noexec for defense-in-depth)
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+
+    volumes:
+      # Config (read-only bind mount)
+      - ${GROB_CONFIG:-~/.grob/config}:/etc/grob:ro
+      # Persistent data (spend DB, encryption keys)
+      - grob-data:/var/lib/grob
+
+    environment:
+      - GROB_CONFIG_PATH=/etc/grob/config.toml
+      - GROB_HOME=/var/lib/grob
+      - RUST_LOG=info
+
+    healthcheck:
+      test: ["CMD", "/grob", "status"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    restart: unless-stopped
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "2.0"
+        reservations:
+          memory: 64M
+          cpus: "0.1"
+
+volumes:
+  grob-data:

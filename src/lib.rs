@@ -1,5 +1,8 @@
 //! Grob: multi-provider LLM routing proxy with automatic fallback and format translation.
 
+// NOTE: deny (not forbid) so that the few justified unsafe blocks can #[allow].
+#![deny(unsafe_code)]
+
 use std::path::PathBuf;
 
 /// Returns the Grob home directory (`~/.grob`).

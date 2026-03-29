@@ -8,6 +8,7 @@ use aes_gcm::aead::{Aead, KeyInit, OsRng};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use zeroize::Zeroize;
 
 /// Nonce length for AES-256-GCM (96 bits / 12 bytes).
 const NONCE_LEN: usize = 12;
@@ -26,7 +27,7 @@ impl StorageCipher {
     /// Key file path defaults to `<db_dir>/encryption.key` (sibling of `grob.db`).
     pub fn load_or_generate(db_path: &Path) -> Result<Self> {
         let key_path = Self::key_path(db_path);
-        let key_bytes = if key_path.exists() {
+        let mut key_bytes = if key_path.exists() {
             let data = std::fs::read(&key_path).with_context(|| {
                 format!("Failed to read encryption key: {}", key_path.display())
             })?;
@@ -45,6 +46,7 @@ impl StorageCipher {
 
         let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
         let cipher = Aes256Gcm::new(key);
+        key_bytes.zeroize();
         Ok(Self { cipher })
     }
 
@@ -107,6 +109,9 @@ impl StorageCipher {
     }
 
     /// Generates a random 256-bit key and saves it with owner-only permissions.
+    /// Generates a random 256-bit key and saves it with owner-only permissions.
+    ///
+    /// Caller is responsible for zeroizing the returned `Vec<u8>` after use.
     fn generate_key(path: &Path) -> Result<Vec<u8>> {
         use aes_gcm::aead::rand_core::RngCore;
         let mut key = vec![0u8; KEY_LEN];
