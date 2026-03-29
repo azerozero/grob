@@ -334,6 +334,9 @@ pub(crate) fn set_owner_only_permissions(path: &std::path::Path) -> Result<()> {
             }
         }
 
+        // SAFETY: Win32 ACL calls on owned file descriptor with correct buffer sizes.
+        // Sets file permissions to owner-only via SetNamedSecurityInfoA.
+        #[allow(unsafe_code)]
         unsafe {
             // Get current user SID.
             let mut token_handle: isize = 0;
