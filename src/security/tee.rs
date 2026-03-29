@@ -9,51 +9,20 @@
 //! The enforcement mode (off/warn/enforce) is configured via `[tee]`
 //! in `grob.toml`. Detection probes every supported backend and picks
 //! the first one available.
+//!
+//! TEE hardware is Linux-only (ioctl on `/dev/*-guest` devices).
+//! On other platforms, detection always returns "not available".
 
-use anyhow::{Context, Result};
-use sha2::{Digest, Sha256};
-use std::path::Path;
+use anyhow::Result;
 use tracing::{info, warn};
 use zeroize::Zeroize;
 
 use crate::cli::EnforcementMode;
 
-// ── Constants ───────────────────────────────────────────────────────────────
-
 /// Size of a derived key (32 bytes / 256 bits) for both platforms.
 const DERIVED_KEY_SIZE: usize = 32;
 
-// ── AMD SEV-SNP constants ───────────────────────────────────────────────────
-
-/// Path to the SEV-SNP guest device.
-const SEV_GUEST_DEVICE: &str = "/dev/sev-guest";
-
-/// Attestation report request magic (SNP_GET_REPORT).
-const SNP_GET_REPORT: u64 = 0xc018_0001;
-
-/// Derived key request magic (SNP_GET_DERIVED_KEY).
-const SNP_GET_DERIVED_KEY: u64 = 0xc018_0002;
-
-/// Size of an SNP attestation report (1184 bytes per AMD spec).
-const SNP_REPORT_SIZE: usize = 1184;
-
-// ── ARM CCA (Realm) constants ───────────────────────────────────────────────
-
-/// Path to the ARM CCA guest device (Realm Services Interface).
-const CCA_GUEST_DEVICE: &str = "/dev/arm-cca-guest";
-
-/// Attestation token request magic (CCA_GET_ATTESTATION_TOKEN).
-/// Defined in the kernel's `arm_cca_guest.h` — `_IOWR('R', 1, ...)`.
-const CCA_GET_ATTESTATION_TOKEN: u64 = 0xc010_5201;
-
-/// Key derivation request magic (CCA_GET_DERIVED_KEY).
-/// Defined as `_IOWR('R', 2, ...)`.
-const CCA_GET_DERIVED_KEY: u64 = 0xc010_5202;
-
-/// Maximum CCA attestation token size (4 KiB, CBOR-encoded CCA platform token).
-const CCA_TOKEN_MAX_SIZE: usize = 4096;
-
-// ── Public types ────────────────────────────────────────────────────────────
+// ── Public types (cross-platform) ───────────────────────────────────────────
 
 /// Detected TEE backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,304 +74,7 @@ impl Drop for SealedKey {
     }
 }
 
-// ── TEE detection ───────────────────────────────────────────────────────────
-
-/// Checks whether the process is running inside a TEE.
-///
-/// Probes backends in order: AMD SEV-SNP, ARM CCA. Returns the first
-/// match. Detection is passive — no state is modified.
-pub fn detect_tee() -> TeeStatus {
-    if let Some(status) = detect_sev_snp() {
-        return status;
-    }
-    if let Some(status) = detect_arm_cca() {
-        return status;
-    }
-
-    // No TEE detected — check for hardware capability without active enclave.
-    let cpuid_hint = std::fs::read_to_string("/proc/cpuinfo")
-        .map(|s| {
-            if s.contains("sev_snp") {
-                Some("AMD SEV-SNP capable (guest device missing)")
-            } else {
-                None
-            }
-        })
-        .unwrap_or(None);
-
-    if let Some(hint) = cpuid_hint {
-        return TeeStatus {
-            detected: false,
-            backend: None,
-            platform: hint.to_string(),
-            attestation_report: None,
-        };
-    }
-
-    TeeStatus {
-        detected: false,
-        backend: None,
-        platform: "none".to_string(),
-        attestation_report: None,
-    }
-}
-
-/// Probes for AMD SEV-SNP via `/dev/sev-guest`.
-fn detect_sev_snp() -> Option<TeeStatus> {
-    if !Path::new(SEV_GUEST_DEVICE).exists() {
-        return None;
-    }
-
-    // Verify SNP is active via sysfs (path varies across kernel versions).
-    let confirmed = std::fs::read_to_string("/sys/devices/system/cpu/sev")
-        .map(|s| s.trim().contains("snp"))
-        .unwrap_or(false);
-
-    let qualifier = if confirmed { "" } else { " (sysfs unconfirmed)" };
-
-    Some(TeeStatus {
-        detected: true,
-        backend: Some(TeeBackend::AmdSevSnp),
-        platform: format!("AMD SEV-SNP{qualifier}"),
-        attestation_report: None,
-    })
-}
-
-/// Probes for ARM CCA (Realm) via `/dev/arm-cca-guest`.
-fn detect_arm_cca() -> Option<TeeStatus> {
-    if !Path::new(CCA_GUEST_DEVICE).exists() {
-        return None;
-    }
-
-    // Sysfs confirmation: the Realm Management Monitor (RMM) exposes version.
-    let confirmed = std::fs::read_to_string("/sys/firmware/arm_cca/version")
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false);
-
-    let qualifier = if confirmed { "" } else { " (sysfs unconfirmed)" };
-
-    Some(TeeStatus {
-        detected: true,
-        backend: Some(TeeBackend::ArmCca),
-        platform: format!("ARM CCA Realm{qualifier}"),
-        attestation_report: None,
-    })
-}
-
-// ── Attestation report ──────────────────────────────────────────────────────
-
-/// Requests an attestation report/token from the detected TEE backend.
-///
-/// The report cryptographically binds `user_data` (challenge) into the
-/// signed attestation, proving the request originated from this VM
-/// with this specific context.
-///
-/// - **SEV-SNP**: `user_data` is placed in the 64-byte `report_data` field.
-/// - **ARM CCA**: `user_data` is hashed into the 64-byte challenge field of
-///   the Realm token request.
-///
-/// # Errors
-///
-/// Returns an error if the TEE guest device is unavailable or the
-/// firmware rejects the request.
-pub fn get_attestation_report(backend: TeeBackend, user_data: &[u8]) -> Result<Vec<u8>> {
-    match backend {
-        TeeBackend::AmdSevSnp => get_snp_attestation_report(user_data),
-        TeeBackend::ArmCca => get_cca_attestation_token(user_data),
-    }
-}
-
-/// SEV-SNP: `SNP_GET_REPORT` ioctl.
-fn get_snp_attestation_report(user_data: &[u8]) -> Result<Vec<u8>> {
-    use std::fs::OpenOptions;
-    use std::os::unix::io::AsRawFd;
-
-    let fd = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(SEV_GUEST_DEVICE)
-        .with_context(|| format!("Failed to open {SEV_GUEST_DEVICE}"))?;
-
-    // Pad or truncate user_data to 64 bytes (SNP report_data field).
-    let mut report_data = [0u8; 64];
-    let len = user_data.len().min(64);
-    report_data[..len].copy_from_slice(&user_data[..len]);
-
-    // Layout: report_data (64 bytes) | report (1184 bytes).
-    let mut buf = vec![0u8; 64 + SNP_REPORT_SIZE];
-    buf[..64].copy_from_slice(&report_data);
-
-    // SAFETY: ioctl on an owned fd with a correctly sized buffer.
-    // SNP_GET_REPORT writes the attestation report into buf[64..].
-    #[allow(unsafe_code)]
-    let ret = unsafe { libc::ioctl(fd.as_raw_fd(), SNP_GET_REPORT, buf.as_mut_ptr()) };
-
-    if ret != 0 {
-        let errno = std::io::Error::last_os_error();
-        anyhow::bail!("SNP_GET_REPORT ioctl failed: {errno}");
-    }
-
-    Ok(buf[64..].to_vec())
-}
-
-/// ARM CCA: `CCA_GET_ATTESTATION_TOKEN` ioctl.
-///
-/// Returns the CBOR-encoded CCA platform token (up to 4 KiB) which
-/// includes the Realm token and Platform token, both signed by the RMM
-/// and the HW Root of Trust respectively.
-fn get_cca_attestation_token(user_data: &[u8]) -> Result<Vec<u8>> {
-    use std::fs::OpenOptions;
-    use std::os::unix::io::AsRawFd;
-
-    let fd = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(CCA_GUEST_DEVICE)
-        .with_context(|| format!("Failed to open {CCA_GUEST_DEVICE}"))?;
-
-    // CCA challenge is 64 bytes. Hash user_data into it for uniform size.
-    let mut challenge = [0u8; 64];
-    let hash = Sha256::digest(user_data);
-    challenge[..32].copy_from_slice(&hash);
-
-    // Layout: challenge (64 bytes) | token_size (8 bytes, LE) | token buffer.
-    let buf_size = 64 + 8 + CCA_TOKEN_MAX_SIZE;
-    let mut buf = vec![0u8; buf_size];
-    buf[..64].copy_from_slice(&challenge);
-    // Tell the kernel the max token buffer size.
-    buf[64..72].copy_from_slice(&(CCA_TOKEN_MAX_SIZE as u64).to_le_bytes());
-
-    // SAFETY: ioctl on an owned fd with a correctly sized buffer.
-    // CCA_GET_ATTESTATION_TOKEN writes the CBOR token into buf[72..].
-    #[allow(unsafe_code)]
-    let ret =
-        unsafe { libc::ioctl(fd.as_raw_fd(), CCA_GET_ATTESTATION_TOKEN, buf.as_mut_ptr()) };
-
-    if ret != 0 {
-        let errno = std::io::Error::last_os_error();
-        anyhow::bail!("CCA_GET_ATTESTATION_TOKEN ioctl failed: {errno}");
-    }
-
-    // Read the actual token length from the response.
-    let token_len = u64::from_le_bytes(buf[64..72].try_into().unwrap_or([0; 8])) as usize;
-    let token_len = token_len.min(CCA_TOKEN_MAX_SIZE);
-
-    Ok(buf[72..72 + token_len].to_vec())
-}
-
-/// Generates an attestation report/token and returns a hex-encoded string
-/// suitable for embedding in audit logs.
-pub fn attestation_for_audit(backend: TeeBackend, user_data: &[u8]) -> Result<String> {
-    let report = get_attestation_report(backend, user_data)?;
-    Ok(hex::encode(&report))
-}
-
-// ── Hardware key derivation ─────────────────────────────────────────────────
-
-/// Derives a 256-bit key from the TEE hardware.
-///
-/// - **SEV-SNP**: Uses `SNP_GET_DERIVED_KEY` bound to the VCEK at VMPL 0.
-/// - **ARM CCA**: Uses `CCA_GET_DERIVED_KEY` bound to the Realm measurement.
-///
-/// The `label` is hashed into the derivation context to produce distinct
-/// keys for different purposes (e.g., "encryption", "audit-signing").
-/// The derived key is impossible to extract outside this specific TEE instance.
-///
-/// # Errors
-///
-/// Returns an error if the TEE guest device is unavailable.
-pub fn derive_sealed_key(backend: TeeBackend, label: &str) -> Result<SealedKey> {
-    match backend {
-        TeeBackend::AmdSevSnp => derive_snp_key(label),
-        TeeBackend::ArmCca => derive_cca_key(label),
-    }
-}
-
-/// SEV-SNP: `SNP_GET_DERIVED_KEY` ioctl.
-fn derive_snp_key(label: &str) -> Result<SealedKey> {
-    use std::fs::OpenOptions;
-    use std::os::unix::io::AsRawFd;
-
-    let fd = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(SEV_GUEST_DEVICE)
-        .with_context(|| format!("Failed to open {SEV_GUEST_DEVICE}"))?;
-
-    let mut context = [0u8; 32];
-    let hash = Sha256::digest(label.as_bytes());
-    context.copy_from_slice(&hash);
-
-    // Layout: context (32 bytes) | root_key_select (4 bytes, VCEK=0)
-    //         | padding (28 bytes) | output key (32 bytes).
-    let mut buf = vec![0u8; 32 + 4 + 28 + DERIVED_KEY_SIZE];
-    buf[..32].copy_from_slice(&context);
-    // root_key_select = 0 (VCEK — Versioned Chip Endorsement Key).
-    buf[32..36].copy_from_slice(&0u32.to_le_bytes());
-
-    // SAFETY: ioctl on an owned fd with a correctly sized buffer.
-    #[allow(unsafe_code)]
-    let ret = unsafe { libc::ioctl(fd.as_raw_fd(), SNP_GET_DERIVED_KEY, buf.as_mut_ptr()) };
-
-    if ret != 0 {
-        let errno = std::io::Error::last_os_error();
-        buf.zeroize();
-        anyhow::bail!("SNP_GET_DERIVED_KEY ioctl failed: {errno}");
-    }
-
-    let mut key = [0u8; DERIVED_KEY_SIZE];
-    key.copy_from_slice(&buf[64..64 + DERIVED_KEY_SIZE]);
-    buf.zeroize();
-
-    Ok(SealedKey { key })
-}
-
-/// ARM CCA: `CCA_GET_DERIVED_KEY` ioctl.
-///
-/// Derives a key bound to the Realm measurement (RIM + Realm Extensible
-/// Measurements). The key is unique to this Realm instance and the label
-/// context — it cannot be reproduced outside the Realm or after the Realm
-/// is destroyed.
-fn derive_cca_key(label: &str) -> Result<SealedKey> {
-    use std::fs::OpenOptions;
-    use std::os::unix::io::AsRawFd;
-
-    let fd = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(CCA_GUEST_DEVICE)
-        .with_context(|| format!("Failed to open {CCA_GUEST_DEVICE}"))?;
-
-    // Hash label into a 32-byte context (same approach as SNP).
-    let mut context = [0u8; 32];
-    let hash = Sha256::digest(label.as_bytes());
-    context.copy_from_slice(&hash);
-
-    // Layout: context (32 bytes) | flags (4 bytes, 0 = default derivation)
-    //         | padding (28 bytes) | output key (32 bytes).
-    let mut buf = vec![0u8; 32 + 4 + 28 + DERIVED_KEY_SIZE];
-    buf[..32].copy_from_slice(&context);
-    // flags = 0: derive from Realm Initial Measurement (RIM).
-    buf[32..36].copy_from_slice(&0u32.to_le_bytes());
-
-    // SAFETY: ioctl on an owned fd with a correctly sized buffer.
-    #[allow(unsafe_code)]
-    let ret = unsafe { libc::ioctl(fd.as_raw_fd(), CCA_GET_DERIVED_KEY, buf.as_mut_ptr()) };
-
-    if ret != 0 {
-        let errno = std::io::Error::last_os_error();
-        buf.zeroize();
-        anyhow::bail!("CCA_GET_DERIVED_KEY ioctl failed: {errno}");
-    }
-
-    let mut key = [0u8; DERIVED_KEY_SIZE];
-    key.copy_from_slice(&buf[64..64 + DERIVED_KEY_SIZE]);
-    buf.zeroize();
-
-    Ok(SealedKey { key })
-}
-
-// ── Startup enforcement ─────────────────────────────────────────────────────
+// ── Startup enforcement (cross-platform) ────────────────────────────────────
 
 /// Runs the TEE startup check according to the configured enforcement mode.
 ///
@@ -463,13 +135,339 @@ pub fn enforce_tee(mode: EnforcementMode, config: &crate::cli::TeeConfig) -> Res
     Ok(status)
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// Linux implementation — real TEE detection, attestation, and key derivation
+// via ioctl on /dev/sev-guest (AMD) and /dev/arm-cca-guest (ARM).
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(target_os = "linux")]
+mod platform {
+    use super::*;
+    use anyhow::Context;
+    use sha2::{Digest, Sha256};
+    use std::fs::OpenOptions;
+    use std::os::unix::io::AsRawFd;
+    use std::path::Path;
+
+    // ── AMD SEV-SNP constants ───────────────────────────────────────────────
+
+    const SEV_GUEST_DEVICE: &str = "/dev/sev-guest";
+    const SNP_GET_REPORT: u64 = 0xc018_0001;
+    const SNP_GET_DERIVED_KEY: u64 = 0xc018_0002;
+    const SNP_REPORT_SIZE: usize = 1184;
+
+    // ── ARM CCA (Realm) constants ───────────────────────────────────────────
+
+    const CCA_GUEST_DEVICE: &str = "/dev/arm-cca-guest";
+    const CCA_GET_ATTESTATION_TOKEN: u64 = 0xc010_5201;
+    const CCA_GET_DERIVED_KEY: u64 = 0xc010_5202;
+    const CCA_TOKEN_MAX_SIZE: usize = 4096;
+
+    // ── Detection ───────────────────────────────────────────────────────────
+
+    pub fn detect_tee() -> TeeStatus {
+        if let Some(status) = detect_sev_snp() {
+            return status;
+        }
+        if let Some(status) = detect_arm_cca() {
+            return status;
+        }
+
+        // No TEE detected — check for hardware capability without active enclave.
+        let cpuid_hint = std::fs::read_to_string("/proc/cpuinfo")
+            .map(|s| {
+                if s.contains("sev_snp") {
+                    Some("AMD SEV-SNP capable (guest device missing)")
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(None);
+
+        if let Some(hint) = cpuid_hint {
+            return TeeStatus {
+                detected: false,
+                backend: None,
+                platform: hint.to_string(),
+                attestation_report: None,
+            };
+        }
+
+        TeeStatus {
+            detected: false,
+            backend: None,
+            platform: "none".to_string(),
+            attestation_report: None,
+        }
+    }
+
+    pub(super) fn detect_sev_snp() -> Option<TeeStatus> {
+        if !Path::new(SEV_GUEST_DEVICE).exists() {
+            return None;
+        }
+
+        let confirmed = std::fs::read_to_string("/sys/devices/system/cpu/sev")
+            .map(|s| s.trim().contains("snp"))
+            .unwrap_or(false);
+
+        let qualifier = if confirmed { "" } else { " (sysfs unconfirmed)" };
+
+        Some(TeeStatus {
+            detected: true,
+            backend: Some(TeeBackend::AmdSevSnp),
+            platform: format!("AMD SEV-SNP{qualifier}"),
+            attestation_report: None,
+        })
+    }
+
+    pub(super) fn detect_arm_cca() -> Option<TeeStatus> {
+        if !Path::new(CCA_GUEST_DEVICE).exists() {
+            return None;
+        }
+
+        let confirmed = std::fs::read_to_string("/sys/firmware/arm_cca/version")
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
+        let qualifier = if confirmed { "" } else { " (sysfs unconfirmed)" };
+
+        Some(TeeStatus {
+            detected: true,
+            backend: Some(TeeBackend::ArmCca),
+            platform: format!("ARM CCA Realm{qualifier}"),
+            attestation_report: None,
+        })
+    }
+
+    // ── Attestation ─────────────────────────────────────────────────────────
+
+    pub fn get_attestation_report(backend: TeeBackend, user_data: &[u8]) -> Result<Vec<u8>> {
+        match backend {
+            TeeBackend::AmdSevSnp => get_snp_attestation_report(user_data),
+            TeeBackend::ArmCca => get_cca_attestation_token(user_data),
+        }
+    }
+
+    fn get_snp_attestation_report(user_data: &[u8]) -> Result<Vec<u8>> {
+        let fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(SEV_GUEST_DEVICE)
+            .with_context(|| format!("Failed to open {SEV_GUEST_DEVICE}"))?;
+
+        let mut report_data = [0u8; 64];
+        let len = user_data.len().min(64);
+        report_data[..len].copy_from_slice(&user_data[..len]);
+
+        let mut buf = vec![0u8; 64 + SNP_REPORT_SIZE];
+        buf[..64].copy_from_slice(&report_data);
+
+        // SAFETY: ioctl on an owned fd with a correctly sized buffer.
+        // SNP_GET_REPORT writes the attestation report into buf[64..].
+        #[allow(unsafe_code)]
+        let ret = unsafe { libc::ioctl(fd.as_raw_fd(), SNP_GET_REPORT, buf.as_mut_ptr()) };
+
+        if ret != 0 {
+            let errno = std::io::Error::last_os_error();
+            anyhow::bail!("SNP_GET_REPORT ioctl failed: {errno}");
+        }
+
+        Ok(buf[64..].to_vec())
+    }
+
+    fn get_cca_attestation_token(user_data: &[u8]) -> Result<Vec<u8>> {
+        let fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(CCA_GUEST_DEVICE)
+            .with_context(|| format!("Failed to open {CCA_GUEST_DEVICE}"))?;
+
+        let mut challenge = [0u8; 64];
+        let hash = Sha256::digest(user_data);
+        challenge[..32].copy_from_slice(&hash);
+
+        let buf_size = 64 + 8 + CCA_TOKEN_MAX_SIZE;
+        let mut buf = vec![0u8; buf_size];
+        buf[..64].copy_from_slice(&challenge);
+        buf[64..72].copy_from_slice(&(CCA_TOKEN_MAX_SIZE as u64).to_le_bytes());
+
+        // SAFETY: ioctl on an owned fd with a correctly sized buffer.
+        // CCA_GET_ATTESTATION_TOKEN writes the CBOR token into buf[72..].
+        #[allow(unsafe_code)]
+        let ret =
+            unsafe { libc::ioctl(fd.as_raw_fd(), CCA_GET_ATTESTATION_TOKEN, buf.as_mut_ptr()) };
+
+        if ret != 0 {
+            let errno = std::io::Error::last_os_error();
+            anyhow::bail!("CCA_GET_ATTESTATION_TOKEN ioctl failed: {errno}");
+        }
+
+        let token_len = u64::from_le_bytes(buf[64..72].try_into().unwrap_or([0; 8])) as usize;
+        let token_len = token_len.min(CCA_TOKEN_MAX_SIZE);
+
+        Ok(buf[72..72 + token_len].to_vec())
+    }
+
+    // ── Key derivation ──────────────────────────────────────────────────────
+
+    pub fn derive_sealed_key(backend: TeeBackend, label: &str) -> Result<SealedKey> {
+        match backend {
+            TeeBackend::AmdSevSnp => derive_snp_key(label),
+            TeeBackend::ArmCca => derive_cca_key(label),
+        }
+    }
+
+    fn derive_snp_key(label: &str) -> Result<SealedKey> {
+        let fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(SEV_GUEST_DEVICE)
+            .with_context(|| format!("Failed to open {SEV_GUEST_DEVICE}"))?;
+
+        let mut context = [0u8; 32];
+        let hash = Sha256::digest(label.as_bytes());
+        context.copy_from_slice(&hash);
+
+        let mut buf = vec![0u8; 32 + 4 + 28 + DERIVED_KEY_SIZE];
+        buf[..32].copy_from_slice(&context);
+        buf[32..36].copy_from_slice(&0u32.to_le_bytes());
+
+        // SAFETY: ioctl on an owned fd with a correctly sized buffer.
+        #[allow(unsafe_code)]
+        let ret = unsafe { libc::ioctl(fd.as_raw_fd(), SNP_GET_DERIVED_KEY, buf.as_mut_ptr()) };
+
+        if ret != 0 {
+            let errno = std::io::Error::last_os_error();
+            buf.zeroize();
+            anyhow::bail!("SNP_GET_DERIVED_KEY ioctl failed: {errno}");
+        }
+
+        let mut key = [0u8; DERIVED_KEY_SIZE];
+        key.copy_from_slice(&buf[64..64 + DERIVED_KEY_SIZE]);
+        buf.zeroize();
+
+        Ok(SealedKey { key })
+    }
+
+    fn derive_cca_key(label: &str) -> Result<SealedKey> {
+        let fd = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(CCA_GUEST_DEVICE)
+            .with_context(|| format!("Failed to open {CCA_GUEST_DEVICE}"))?;
+
+        let mut context = [0u8; 32];
+        let hash = Sha256::digest(label.as_bytes());
+        context.copy_from_slice(&hash);
+
+        let mut buf = vec![0u8; 32 + 4 + 28 + DERIVED_KEY_SIZE];
+        buf[..32].copy_from_slice(&context);
+        buf[32..36].copy_from_slice(&0u32.to_le_bytes());
+
+        // SAFETY: ioctl on an owned fd with a correctly sized buffer.
+        #[allow(unsafe_code)]
+        let ret = unsafe { libc::ioctl(fd.as_raw_fd(), CCA_GET_DERIVED_KEY, buf.as_mut_ptr()) };
+
+        if ret != 0 {
+            let errno = std::io::Error::last_os_error();
+            buf.zeroize();
+            anyhow::bail!("CCA_GET_DERIVED_KEY ioctl failed: {errno}");
+        }
+
+        let mut key = [0u8; DERIVED_KEY_SIZE];
+        key.copy_from_slice(&buf[64..64 + DERIVED_KEY_SIZE]);
+        buf.zeroize();
+
+        Ok(SealedKey { key })
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Non-Linux stub — TEE hardware is not available on macOS/Windows.
+// All functions return "not available" without error, so the enforcement
+// logic in enforce_tee() handles the policy (warn vs. enforce).
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[cfg(not(target_os = "linux"))]
+mod platform {
+    use super::*;
+
+    pub fn detect_tee() -> TeeStatus {
+        TeeStatus {
+            detected: false,
+            backend: None,
+            platform: "not available (requires Linux)".to_string(),
+            attestation_report: None,
+        }
+    }
+
+    pub(super) fn detect_sev_snp() -> Option<TeeStatus> {
+        None
+    }
+
+    pub(super) fn detect_arm_cca() -> Option<TeeStatus> {
+        None
+    }
+
+    pub fn get_attestation_report(_backend: TeeBackend, _user_data: &[u8]) -> Result<Vec<u8>> {
+        anyhow::bail!("TEE attestation not available on this platform")
+    }
+
+    pub fn derive_sealed_key(_backend: TeeBackend, _label: &str) -> Result<SealedKey> {
+        anyhow::bail!("TEE key derivation not available on this platform")
+    }
+}
+
+// ── Re-exports from platform module ─────────────────────────────────────────
+
+/// Checks whether the process is running inside a TEE.
+///
+/// Probes backends in order: AMD SEV-SNP, ARM CCA. Returns the first
+/// match. On non-Linux platforms, always returns "not available".
+pub fn detect_tee() -> TeeStatus {
+    platform::detect_tee()
+}
+
+/// Requests an attestation report/token from the detected TEE backend.
+///
+/// - **SEV-SNP**: binds `user_data` into the 64-byte `report_data` field.
+/// - **ARM CCA**: hashes `user_data` into the 64-byte challenge field.
+///
+/// # Errors
+///
+/// Returns an error if the TEE guest device is unavailable.
+pub fn get_attestation_report(backend: TeeBackend, user_data: &[u8]) -> Result<Vec<u8>> {
+    platform::get_attestation_report(backend, user_data)
+}
+
+/// Generates an attestation report and returns a hex-encoded string
+/// suitable for embedding in audit logs.
+pub fn attestation_for_audit(backend: TeeBackend, user_data: &[u8]) -> Result<String> {
+    let report = get_attestation_report(backend, user_data)?;
+    Ok(hex::encode(&report))
+}
+
+/// Derives a 256-bit key from the TEE hardware.
+///
+/// - **SEV-SNP**: `SNP_GET_DERIVED_KEY` bound to the VCEK at VMPL 0.
+/// - **ARM CCA**: `CCA_GET_DERIVED_KEY` bound to the Realm measurement.
+///
+/// The `label` is hashed into the derivation context to produce distinct
+/// keys for different purposes (e.g., "encryption", "audit-signing").
+///
+/// # Errors
+///
+/// Returns an error if the TEE guest device is unavailable.
+pub fn derive_sealed_key(backend: TeeBackend, label: &str) -> Result<SealedKey> {
+    platform::derive_sealed_key(backend, label)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn detect_tee_returns_status() {
-        // On non-TEE machines (CI), detection should return false gracefully.
         let status = detect_tee();
         assert!(!status.platform.is_empty());
     }
@@ -514,13 +512,11 @@ mod tests {
 
     #[test]
     fn detect_arm_cca_returns_none_without_device() {
-        // /dev/arm-cca-guest doesn't exist in CI.
-        assert!(detect_arm_cca().is_none());
+        assert!(platform::detect_arm_cca().is_none());
     }
 
     #[test]
     fn detect_sev_snp_returns_none_without_device() {
-        // /dev/sev-guest doesn't exist in CI.
-        assert!(detect_sev_snp().is_none());
+        assert!(platform::detect_sev_snp().is_none());
     }
 }

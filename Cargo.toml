@@ -134,12 +134,15 @@ regex-syntax = "0.8.10"
 tikv-jemallocator = { version = "0.6", optional = true }
 # Unix signals (SIGTERM, SIGUSR1) for graceful shutdown and hot restart
 nix = { version = "0.29", features = ["signal"], optional = true }
-libc = "0.2"
 
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
 # NOTE: tikv-jemallocator and nix are in [dependencies] as optional; enabled
 # by default via the `jemalloc` and `unix-signals` features respectively.
 # The `unikernel` feature does not include them.
+
+# TEE ioctl interface (Linux-only: /dev/sev-guest, /dev/arm-cca-guest)
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 # Testing
