@@ -273,7 +273,13 @@ mod platform {
         // SAFETY: ioctl on an owned fd with a correctly sized buffer.
         // SNP_GET_REPORT writes the attestation report into buf[64..].
         #[allow(unsafe_code)]
-        let ret = unsafe { libc::ioctl(fd.as_raw_fd(), SNP_GET_REPORT, buf.as_mut_ptr()) };
+        let ret = unsafe {
+            libc::ioctl(
+                fd.as_raw_fd(),
+                SNP_GET_REPORT as libc::Ioctl,
+                buf.as_mut_ptr(),
+            )
+        };
 
         if ret != 0 {
             let errno = std::io::Error::last_os_error();
@@ -302,8 +308,13 @@ mod platform {
         // SAFETY: ioctl on an owned fd with a correctly sized buffer.
         // CCA_GET_ATTESTATION_TOKEN writes the CBOR token into buf[72..].
         #[allow(unsafe_code)]
-        let ret =
-            unsafe { libc::ioctl(fd.as_raw_fd(), CCA_GET_ATTESTATION_TOKEN, buf.as_mut_ptr()) };
+        let ret = unsafe {
+            libc::ioctl(
+                fd.as_raw_fd(),
+                CCA_GET_ATTESTATION_TOKEN as libc::Ioctl,
+                buf.as_mut_ptr(),
+            )
+        };
 
         if ret != 0 {
             let errno = std::io::Error::last_os_error();
@@ -342,7 +353,13 @@ mod platform {
 
         // SAFETY: ioctl on an owned fd with a correctly sized buffer.
         #[allow(unsafe_code)]
-        let ret = unsafe { libc::ioctl(fd.as_raw_fd(), SNP_GET_DERIVED_KEY, buf.as_mut_ptr()) };
+        let ret = unsafe {
+            libc::ioctl(
+                fd.as_raw_fd(),
+                SNP_GET_DERIVED_KEY as libc::Ioctl,
+                buf.as_mut_ptr(),
+            )
+        };
 
         if ret != 0 {
             let errno = std::io::Error::last_os_error();
@@ -374,7 +391,13 @@ mod platform {
 
         // SAFETY: ioctl on an owned fd with a correctly sized buffer.
         #[allow(unsafe_code)]
-        let ret = unsafe { libc::ioctl(fd.as_raw_fd(), CCA_GET_DERIVED_KEY, buf.as_mut_ptr()) };
+        let ret = unsafe {
+            libc::ioctl(
+                fd.as_raw_fd(),
+                CCA_GET_DERIVED_KEY as libc::Ioctl,
+                buf.as_mut_ptr(),
+            )
+        };
 
         if ret != 0 {
             let errno = std::io::Error::last_os_error();
