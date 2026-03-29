@@ -45,6 +45,7 @@ fn make_router() -> Router {
         policies: vec![],
         tee: Default::default(),
         fips: Default::default(),
+        #[cfg(feature = "harness")]
         harness: Default::default(),
     })
 }

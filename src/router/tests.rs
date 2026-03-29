@@ -37,6 +37,7 @@ fn create_test_config() -> AppConfig {
         tool_layer: Default::default(),
         tee: Default::default(),
         fips: Default::default(),
+        #[cfg(feature = "harness")]
         harness: Default::default(),
     }
 }
