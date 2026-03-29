@@ -343,24 +343,37 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
 
   feature-check:
-    name: Feature Powerset (${{ matrix.group }})
+    name: Feature Powerset (${{ matrix.group }}/${{ matrix.partition }})
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         include:
           # Each shard tests its own features individually, bundles the rest.
-          # core: oauth, tap, policies individual (dlp+compliance grouped) → 6 units → 22 combos
+          # Partitioned 2-way for parallelism.
+          # core: oauth, tap, policies individual (dlp+compliance grouped)
           - group: core
+            partition: 1
             hack_args: "--group-features dlp,compliance --group-features mcp,harness,otel,acme,tls --group-features test-util,watch"
-          # optional: mcp, harness, otel individual (acme+tls grouped) → 6 units → 22 combos
+          - group: core
+            partition: 2
+            hack_args: "--group-features dlp,compliance --group-features mcp,harness,otel,acme,tls --group-features test-util,watch"
+          # optional: mcp, harness, otel individual (acme+tls grouped)
           - group: optional
+            partition: 1
             hack_args: "--group-features dlp,oauth,tap,compliance,policies --group-features acme,tls --group-features test-util,watch"
-          # minimal: test-util, watch individual, everything else in 2 bundles → 4 units → 11 combos
+          - group: optional
+            partition: 2
+            hack_args: "--group-features dlp,oauth,tap,compliance,policies --group-features acme,tls --group-features test-util,watch"
+          # minimal: test-util, watch individual, everything else in 2 bundles
           - group: minimal
+            partition: 1
+            hack_args: "--group-features dlp,oauth,tap,compliance,policies --group-features mcp,harness,otel,acme,tls"
+          - group: minimal
+            partition: 2
             hack_args: "--group-features dlp,oauth,tap,compliance,policies --group-features mcp,harness,otel,acme,tls"
     steps:
       - uses: step-security/harden-runner@v2
@@ -373,7 +386,7 @@ jobs:
           shared-key: hack-${{ matrix.group }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps ${{ matrix.hack_args }}
+      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --partition count:${{ matrix.partition }}/2 ${{ matrix.hack_args }}
 
   # =========================================================================
   # Stage 2: Tests (gate for everything below)
