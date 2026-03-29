@@ -386,7 +386,7 @@ jobs:
           shared-key: hack-${{ matrix.group }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --partition count:${{ matrix.partition }}/2 ${{ matrix.hack_args }}
+      - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --partition ${{ matrix.partition }}/2 ${{ matrix.hack_args }}
 
   # =========================================================================
   # Stage 2: Tests (gate for everything below)
