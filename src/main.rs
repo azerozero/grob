@@ -105,15 +105,13 @@ async fn main() -> anyhow::Result<()> {
                     std::process::exit(1);
                 }
             }
+        } else if use_json_logs {
+            tracing_subscriber::fmt()
+                .json()
+                .with_env_filter(filter)
+                .init();
         } else {
-            if use_json_logs {
-                tracing_subscriber::fmt()
-                    .json()
-                    .with_env_filter(filter)
-                    .init();
-            } else {
-                tracing_subscriber::fmt().with_env_filter(filter).init();
-            }
+            tracing_subscriber::fmt().with_env_filter(filter).init();
         }
     }
 

@@ -7,6 +7,7 @@
 use anyhow::{Context, Result};
 use sha2::Sha256;
 use std::path::Path;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Trait for audit log signature operations.
 pub trait AuditSigner: Send + Sync {
@@ -33,9 +34,11 @@ impl EcdsaP256Signer {
     pub fn load_or_generate(path: Option<&Path>) -> Result<Self> {
         let signing_key = if let Some(p) = path {
             if p.exists() {
-                let bytes = std::fs::read(p).context("Failed to read ECDSA key")?;
-                p256::ecdsa::SigningKey::from_slice(&bytes)
-                    .map_err(|e| anyhow::anyhow!("Invalid ECDSA key: {e}"))?
+                let mut bytes = std::fs::read(p).context("Failed to read ECDSA key")?;
+                let key = p256::ecdsa::SigningKey::from_slice(&bytes)
+                    .map_err(|e| anyhow::anyhow!("Invalid ECDSA key: {e}"));
+                bytes.zeroize();
+                key?
             } else {
                 let key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
                 std::fs::write(p, key.to_bytes()).context("Failed to save ECDSA key")?;
@@ -87,11 +90,15 @@ impl Ed25519Signer {
     pub fn load_or_generate(path: Option<&Path>) -> Result<Self> {
         let signing_key = if let Some(p) = path {
             if p.exists() {
-                let bytes = std::fs::read(p).context("Failed to read Ed25519 key")?;
-                let key_bytes: [u8; 32] = bytes
+                let mut bytes = std::fs::read(p).context("Failed to read Ed25519 key")?;
+                let mut key_bytes: [u8; 32] = bytes
+                    .as_slice()
                     .try_into()
                     .map_err(|_| anyhow::anyhow!("Ed25519 key must be 32 bytes"))?;
-                ed25519_dalek::SigningKey::from_bytes(&key_bytes)
+                bytes.zeroize();
+                let key = ed25519_dalek::SigningKey::from_bytes(&key_bytes);
+                key_bytes.zeroize();
+                key
             } else {
                 let key = ed25519_dalek::SigningKey::generate(&mut rand::thread_rng());
                 std::fs::write(p, key.to_bytes()).context("Failed to save Ed25519 key")?;
@@ -135,6 +142,9 @@ impl AuditSigner for Ed25519Signer {
 // ── HMAC-SHA256 ──
 
 /// HMAC-SHA256 symmetric signer with 32-byte MACs.
+///
+/// Key material is zeroed from memory on drop via [`ZeroizeOnDrop`].
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct HmacSha256Signer {
     key: [u8; 32],
 }
@@ -143,12 +153,14 @@ impl HmacSha256Signer {
     /// Loads a key from `path` or generates a new one.
     pub fn load_or_generate(path: &Path) -> Result<Self> {
         let key = if path.exists() {
-            let bytes = std::fs::read(path).context("Failed to read HMAC key")?;
+            let mut bytes = std::fs::read(path).context("Failed to read HMAC key")?;
             if bytes.len() != 32 {
+                bytes.zeroize();
                 anyhow::bail!("HMAC key must be 32 bytes, got {}", bytes.len());
             }
             let mut key = [0u8; 32]; // CodeQL: hard-coded-cryptographic-value — zero-initialized buffer, immediately overwritten from file.
             key.copy_from_slice(&bytes);
+            bytes.zeroize();
             key
         } else {
             let mut key = [0u8; 32]; // CodeQL: hard-coded-cryptographic-value — zero-initialized buffer, immediately overwritten with CSPRNG output.

@@ -580,9 +580,15 @@ mod tests {
     #[test]
     fn test_list_presets_contains_builtins() {
         let tmp = std::env::temp_dir().join("grob-test-presets");
-        unsafe { std::env::set_var("GROB_HOME", &tmp) };
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("GROB_HOME", &tmp);
+        }
         let presets = list_presets().unwrap();
-        unsafe { std::env::remove_var("GROB_HOME") };
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("GROB_HOME");
+        }
         let names: Vec<&str> = presets.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"perf"));
         assert!(names.contains(&"medium"));

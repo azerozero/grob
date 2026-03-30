@@ -12,10 +12,10 @@ pub use crate::features::tool_layer::config::ToolLayerConfig;
 #[cfg(feature = "harness")]
 pub use config::HarnessConfig;
 pub use config::{
-    AcmeConfig, BudgetConfig, CacheConfig, ComplianceConfig, FanOutConfig, FanOutMode, ModelConfig,
-    ModelMapping, ModelStrategy, OtelConfig, PoolConfig, PoolStrategy, PresetConfig, ProjectConfig,
-    ProjectRouterOverlay, PromptRule, RouterConfig, SecurityConfig, ServerConfig, TimeoutConfig,
-    TlsConfig, TracingConfig, UserConfig,
+    AcmeConfig, BudgetConfig, CacheConfig, ComplianceConfig, EnforcementMode, FanOutConfig,
+    FanOutMode, FipsConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig, PoolConfig,
+    PoolStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule, RouterConfig,
+    SecurityConfig, ServerConfig, TeeConfig, TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
@@ -90,6 +90,12 @@ pub struct AppConfig {
     /// Pledge filter: structurally removes tools from LLM payloads.
     #[serde(default)]
     pub pledge: PledgeConfig,
+    /// Trusted Execution Environment (TEE) attestation and key sealing.
+    #[serde(default)]
+    pub tee: TeeConfig,
+    /// FIPS 140-3 compliance enforcement.
+    #[serde(default)]
+    pub fips: FipsConfig,
     /// Policy engine rules for per-tenant/zone/compliance evaluation.
     #[serde(default)]
     pub policies: Vec<crate::features::policies::config::PolicyConfig>,

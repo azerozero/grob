@@ -1,0 +1,55 @@
+{
+  "_comment": "Seccomp BPF allowlist for grob. Only syscalls actually needed by the static musl binary + tokio runtime.",
+  "defaultAction": "SCMP_ACT_ERRNO",
+  "defaultErrnoRet": 1,
+  "architectures": [
+    "SCMP_ARCH_X86_64",
+    "SCMP_ARCH_AARCH64"
+  ],
+  "syscalls": [
+    {
+      "names": [
+        "read", "write", "readv", "writev",
+        "pread64", "pwrite64",
+        "close", "shutdown",
+        "fstat", "newfstatat", "statx",
+        "lseek",
+        "mmap", "mprotect", "munmap", "mremap", "brk",
+        "openat",
+        "fcntl",
+        "ioctl",
+        "epoll_create1", "epoll_ctl", "epoll_wait", "epoll_pwait",
+        "eventfd2",
+        "socket", "bind", "listen", "accept4", "connect",
+        "getsockopt", "setsockopt", "getsockname", "getpeername",
+        "sendto", "recvfrom", "sendmsg", "recvmsg",
+        "clone3", "futex", "set_robust_list",
+        "rt_sigaction", "rt_sigprocmask", "rt_sigreturn",
+        "sigaltstack",
+        "nanosleep", "clock_nanosleep", "clock_gettime", "clock_getres",
+        "gettid", "getpid",
+        "getrandom",
+        "exit", "exit_group",
+        "sched_getaffinity", "sched_yield",
+        "rseq",
+        "set_tid_address",
+        "prlimit64",
+        "rename", "renameat2",
+        "unlink", "unlinkat",
+        "mkdir", "mkdirat",
+        "flock",
+        "fsync", "fdatasync",
+        "ftruncate",
+        "access", "faccessat2",
+        "getcwd",
+        "umask",
+        "pipe2",
+        "dup", "dup3",
+        "prctl",
+        "madvise",
+        "poll", "ppoll"
+      ],
+      "action": "SCMP_ACT_ALLOW"
+    }
+  ]
+}

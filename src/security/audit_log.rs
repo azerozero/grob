@@ -84,6 +84,8 @@ pub enum AuditEvent {
     Error,
     /// HIT Gateway per-action authorization receipt.
     HitApproval,
+    /// TEE attestation report generated at startup.
+    TeeAttestation,
 }
 
 /// Immutable audit log entry.
