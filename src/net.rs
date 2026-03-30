@@ -4,8 +4,8 @@
 //! `SO_REUSEPORT` + `SO_REUSEADDR` so both old and new processes can bind
 //! the same port simultaneously during hot restart.
 //!
-//! Under the `unikernel` feature (no `socket-opts`), falls back to plain
-//! `tokio::net::TcpListener::bind` since there is only one process.
+//! When `socket-opts` is disabled, falls back to plain
+//! `tokio::net::TcpListener::bind`.
 
 use anyhow::{Context, Result};
 

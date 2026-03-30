@@ -17,7 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - *(ci)* add Test (ubuntu-latest) gate job for branch protection
-- *(test)* restore Windows jemalloc workaround in unikernel_feature_compiles
 - *(ci)* skip doc-tests on Windows to avoid ring linker failure
 - handle missing IPv6 gracefully in test_bind_reuseport_std_ipv6
 - *(ci)* correct cargo-hack partition syntax (M/N not count:M/N)
@@ -40,8 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- guard dirs usage on feature flag instead of unikernel
-- *(test)* set GROB_HOME in preset test for unikernel compatibility
+- guard dirs usage on feature flag
 - *(test)* serialize env-var-dependent DLP tests with mutex
 - *(ci)* disable jemalloc on Windows CI and add default impl for SpendTracking::provider_breakdown
 
@@ -49,11 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- *(ci)* add unikernel build pipeline, tests, and documentation
 - *(pledge)* add structural tool filtering for LLM payloads (ADR-005)
 - add universal tool layer v1 (injection, aliasing, capability gating)
 - add unified JSON-RPC 2.0 Control Plane (Phase 1)
-- add unikernel feature flag for single-process deployment
 
 ### Fixed
 

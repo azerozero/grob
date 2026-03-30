@@ -63,7 +63,7 @@ pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Fallback when unix-signals is unavailable (unikernel or non-unix).
+/// Fallback when unix-signals is unavailable (non-unix platforms).
 #[cfg(all(unix, not(feature = "unix-signals")))]
 pub async fn stop_service(_pid: u32) -> anyhow::Result<()> {
     anyhow::bail!("stop_service is not supported without unix-signals feature")

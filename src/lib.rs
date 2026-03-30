@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 /// Returns the Grob home directory (`~/.grob`).
 ///
-/// When the `dirs` feature is disabled (e.g. unikernel builds), falls back
-/// to reading `GROB_HOME` from the environment. With `dirs` enabled it uses
-/// `dirs::home_dir()` but still honours `GROB_HOME` if set (useful for containers).
+/// When the `dirs` feature is disabled, falls back to reading `GROB_HOME`
+/// from the environment. With `dirs` enabled it uses `dirs::home_dir()` but
+/// still honours `GROB_HOME` if set (useful for containers).
 pub fn grob_home() -> Option<PathBuf> {
     if let Ok(val) = std::env::var("GROB_HOME") {
         return Some(PathBuf::from(val));
