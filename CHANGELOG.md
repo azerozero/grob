@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0](https://github.com/azerozero/grob/compare/v0.32.0...v0.33.0) - 2026-03-30
+
+### Fixed
+
+- *(ci)* replace archived CLA action with github-script workflow
+- *(ci)* add Claude to CLA allowlist and force Node.js 24
+
+### Other
+
+- remove unikernel feature flag and related infrastructure
+- add automatic stale branch cleanup workflow
+- release v0.32.0 ([#77](https://github.com/azerozero/grob/pull/77))
+
 ## [0.32.0](https://github.com/azerozero/grob/compare/v0.31.1...v0.32.0) - 2026-03-30
 
 ### Added
