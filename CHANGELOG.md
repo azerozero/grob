@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0](https://github.com/azerozero/grob/compare/v0.31.1...v0.32.0) - 2026-03-30
+
+### Added
+
+- *(security)* add ARM CCA (Realm) TEE backend alongside AMD SEV-SNP
+- *(security)* add TEE attestation and FIPS enforcement modules
+
+### Fixed
+
+- *(ci)* add Test (ubuntu-latest) gate job for branch protection
+- *(test)* restore Windows jemalloc workaround in unikernel_feature_compiles
+- *(ci)* skip doc-tests on Windows to avoid ring linker failure
+- handle missing IPv6 gracefully in test_bind_reuseport_std_ipv6
+- *(ci)* correct cargo-hack partition syntax (M/N not count:M/N)
+- add #[allow(unsafe_code)] to Windows ACL block in token_store.rs
+- cast ioctl constants to libc::Ioctl for musl compatibility, bump to 0.32.0
+- gate harness field with #[cfg(feature = "harness")] in all AppConfig initializers
+- resolve clippy, rustfmt, and missing field errors for CI
+- *(security)* gate TEE ioctl code behind cfg(target_os = "linux")
+
+### Other
+
+- Merge remote-tracking branch 'origin/claude/rust-security-hardening-snCDl' into develop
+- increase feature-powerset timeout from 8 to 15 minutes
+
+### Security
+
+- add compile-time unsafe deny, zeroize secrets, and container hardening
+
 ## [0.31.1](https://github.com/azerozero/grob/compare/v0.31.0...v0.31.1) - 2026-03-28
 
 ### Fixed
