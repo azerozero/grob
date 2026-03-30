@@ -23,11 +23,12 @@ jobs:
         uses: contributor-assistant/github-action@v2.6.1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
         with:
           path-to-signatures: "signatures/cla.json"
           path-to-document: "https://github.com/azerozero/grob/blob/main/CLA.md"
           branch: "cla-signatures"
-          allowlist: "Destynova2,dependabot[bot],renovate[bot],github-actions[bot],release-plz[bot]"
+          allowlist: "Destynova2,dependabot[bot],renovate[bot],github-actions[bot],release-plz[bot],claude[bot],Claude"
 
           custom-notsigned-prcomment: |
             Thank you for your contribution! Before we can merge this PR, you need to sign our [Contributor License Agreement](https://github.com/azerozero/grob/blob/main/CLA.md).
