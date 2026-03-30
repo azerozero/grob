@@ -431,6 +431,23 @@ jobs:
       - run: cargo test --doc
         if: matrix.shard == 1
 
+  # Gate job so the branch-protection rule "Test (ubuntu-latest)" is satisfied
+  # by the sharded test-ubuntu matrix.
+  test-ubuntu-gate:
+    name: Test (ubuntu-latest)
+    if: always()
+    needs: [test-ubuntu]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check shard results
+        run: |
+          if [[ "${{ needs.test-ubuntu.result }}" == "failure" || "${{ needs.test-ubuntu.result }}" == "cancelled" ]]; then
+            echo "::error::Ubuntu test shards failed"
+            exit 1
+          fi
+          echo "All Ubuntu test shards passed."
+
   test-other:
     name: Test (${{ matrix.os }})
     needs:
