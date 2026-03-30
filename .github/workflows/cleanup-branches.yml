@@ -1,0 +1,90 @@
+name: Cleanup stale branches
+
+on:
+  # Run weekly on Monday at 06:00 UTC.
+  schedule:
+    - cron: "0 6 * * 1"
+  # Allow manual trigger.
+  workflow_dispatch:
+  # Delete head branch right after PR merge.
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  # Delete the PR head branch immediately after merge.
+  delete-pr-branch:
+    if: github.event_name == 'pull_request' && github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete merged branch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = context.payload.pull_request.head.ref;
+            const protectedPrefixes = ['main', 'develop'];
+            if (protectedPrefixes.includes(branch)) {
+              console.log(`Skipping protected branch: ${branch}`);
+              return;
+            }
+            try {
+              await github.rest.git.deleteRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${branch}`,
+              });
+              console.log(`Deleted branch: ${branch}`);
+            } catch (e) {
+              console.log(`Could not delete ${branch}: ${e.message}`);
+            }
+
+  # Weekly cleanup of old release-plz and claude/* branches.
+  sweep-stale:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const protectedBranches = ['main', 'develop'];
+            // Patterns for branches that should be auto-cleaned.
+            const stalePatterns = [/^release-plz-/, /^claude\//];
+
+            const { data: branches } = await github.rest.repos.listBranches({
+              owner, repo, per_page: 100,
+            });
+
+            let deleted = 0;
+            for (const branch of branches) {
+              if (protectedBranches.includes(branch.name)) continue;
+              if (!stalePatterns.some(p => p.test(branch.name))) continue;
+
+              // Only delete if fully merged into develop or main.
+              try {
+                const { status } = await github.rest.repos.compareCommits({
+                  owner, repo,
+                  base: 'develop',
+                  head: branch.name,
+                });
+                // ahead_by == 0 means all commits are in develop.
+                if (status !== 'behind' && status !== 'identical') continue;
+              } catch {
+                continue;
+              }
+
+              try {
+                await github.rest.git.deleteRef({
+                  owner, repo,
+                  ref: `heads/${branch.name}`,
+                });
+                console.log(`Deleted: ${branch.name}`);
+                deleted++;
+              } catch (e) {
+                console.log(`Failed to delete ${branch.name}: ${e.message}`);
+              }
+            }
+            console.log(`Cleaned up ${deleted} stale branches.`);
