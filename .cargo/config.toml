@@ -1,0 +1,10 @@
+# Default to static musl builds via cross (container-based).
+# `cargo build` uses glibc (fast dev cycle).
+# `cross build --target x86_64-unknown-linux-musl` for musl+jemalloc.
+# CI always uses cross for release builds.
+
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+
+[target.aarch64-unknown-linux-musl]
+linker = "aarch64-linux-musl-gcc"
