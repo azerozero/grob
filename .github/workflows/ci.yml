@@ -443,10 +443,9 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: Run tests
         run: |
-          WIN_FEATURES="--no-default-features --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cargo nextest run --profile ci $WIN_FEATURES
-            cargo test --doc $WIN_FEATURES
+            cargo nextest run --profile ci --no-default-features --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs
+            cargo test --doc --no-default-features --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs
           else
             cargo nextest run --profile ci
             cargo test --doc
