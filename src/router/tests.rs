@@ -563,3 +563,71 @@ fn test_prompt_rule_strip_match_in_multi_turn() {
         panic!("Expected text content in first message");
     }
 }
+
+// ---------- extract_trailing_literal_byte ----------
+
+#[test]
+fn trailing_literal_basic_extraction() {
+    // "haiku" is ≥ 3 alpha chars at end → first byte lowered = b'h'
+    assert_eq!(extract_trailing_literal_byte("(?i)claude.*haiku"), Some(b'h'));
+}
+
+#[test]
+fn trailing_literal_with_dollar_anchor() {
+    // Trailing '$' should be stripped, then "haiku" extracted.
+    assert_eq!(extract_trailing_literal_byte("(?i)haiku$"), Some(b'h'));
+    assert_eq!(extract_trailing_literal_byte("(?i)haiku$$"), Some(b'h'));
+}
+
+#[test]
+fn trailing_literal_only_dollars() {
+    // Pattern is just "$" — after stripping, end == 0 → None.
+    assert_eq!(extract_trailing_literal_byte("$"), None);
+    assert_eq!(extract_trailing_literal_byte("$$"), None);
+}
+
+#[test]
+fn trailing_literal_non_alpha_last_char() {
+    // Last char before anchor is not alphabetic → None.
+    assert_eq!(extract_trailing_literal_byte("foo.*[0-9]"), None);
+    assert_eq!(extract_trailing_literal_byte("abc123"), None);
+}
+
+#[test]
+fn trailing_literal_too_short() {
+    // Alphabetic run < 3 chars → None.
+    assert_eq!(extract_trailing_literal_byte(".*ab"), None);
+    assert_eq!(extract_trailing_literal_byte("x"), None);
+    assert_eq!(extract_trailing_literal_byte("xy"), None);
+}
+
+#[test]
+fn trailing_literal_exactly_three() {
+    // Exactly 3 alpha chars at end → extracted.
+    assert_eq!(extract_trailing_literal_byte(".*abc"), Some(b'a'));
+}
+
+#[test]
+fn trailing_literal_alternation_bails() {
+    // Pipe means alternation → None.
+    assert_eq!(extract_trailing_literal_byte("haiku|sonnet"), None);
+}
+
+#[test]
+fn trailing_literal_uppercase_lowered() {
+    // Uppercase should be lowered.
+    assert_eq!(extract_trailing_literal_byte(".*HAIKU"), Some(b'h'));
+}
+
+#[test]
+fn trailing_literal_empty_pattern() {
+    assert_eq!(extract_trailing_literal_byte(""), None);
+}
+
+#[test]
+fn trailing_literal_alpha_run_with_digit_boundary() {
+    // "foo123bar" — last alpha run is "bar" (3 chars), first byte = b'b'.
+    assert_eq!(extract_trailing_literal_byte("foo123bar"), Some(b'b'));
+    // "foo1ab" — last alpha run is "ab" (2 chars) → None.
+    assert_eq!(extract_trailing_literal_byte("foo1ab"), None);
+}

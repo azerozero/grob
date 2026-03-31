@@ -289,3 +289,131 @@ proptest! {
             "Clean text should be zero-copy, got Owned");
     }
 }
+
+// ---------- DlpBlockError Display ----------
+
+#[test]
+fn display_injection_blocked_single() {
+    let err = DlpBlockError::InjectionBlocked(vec![
+        prompt_injection::InjectionDetection {
+            pattern_name: "rule1".into(),
+            matched_text: "ignore previous".into(),
+            start: 0,
+            end: 15,
+        },
+    ]);
+    let msg = err.to_string();
+    assert!(msg.starts_with("Prompt injection detected: "));
+    assert!(msg.contains("ignore previous"));
+    // Single item means no comma separator.
+    assert!(!msg.contains(", "));
+}
+
+#[test]
+fn display_injection_blocked_multiple() {
+    let err = DlpBlockError::InjectionBlocked(vec![
+        prompt_injection::InjectionDetection {
+            pattern_name: "rule1".into(),
+            matched_text: "first".into(),
+            start: 0,
+            end: 5,
+        },
+        prompt_injection::InjectionDetection {
+            pattern_name: "rule2".into(),
+            matched_text: "second".into(),
+            start: 10,
+            end: 16,
+        },
+    ]);
+    let msg = err.to_string();
+    assert!(msg.starts_with("Prompt injection detected: "));
+    // Comma separator must appear between items.
+    assert!(msg.contains(", "));
+    assert!(msg.contains("first"));
+    assert!(msg.contains("second"));
+}
+
+#[test]
+fn display_url_exfil_blocked_single() {
+    let err = DlpBlockError::UrlExfilBlocked(vec![
+        url_exfil::UrlExfilDetection {
+            url: "https://evil.com/leak".into(),
+            reason: "suspicious_domain".into(),
+            start: 0,
+            end: 20,
+        },
+    ]);
+    let msg = err.to_string();
+    assert!(msg.starts_with("URL exfiltration detected: "));
+    assert!(msg.contains("evil.com"));
+    assert!(!msg.contains(", "));
+}
+
+#[test]
+fn display_url_exfil_blocked_multiple() {
+    let err = DlpBlockError::UrlExfilBlocked(vec![
+        url_exfil::UrlExfilDetection {
+            url: "https://evil.com/a".into(),
+            reason: "r1".into(),
+            start: 0,
+            end: 10,
+        },
+        url_exfil::UrlExfilDetection {
+            url: "https://evil.com/b".into(),
+            reason: "r2".into(),
+            start: 20,
+            end: 30,
+        },
+    ]);
+    let msg = err.to_string();
+    assert!(msg.starts_with("URL exfiltration detected: "));
+    assert!(msg.contains(", "));
+}
+
+// ---------- DlpEngine::from_config secret_count ----------
+
+#[test]
+fn from_config_counts_secrets_and_custom_prefixes() {
+    let config = DlpConfig {
+        enabled: true,
+        scan_input: true,
+        scan_output: true,
+        rules_file: String::new(),
+        no_builtins: true,
+        secrets: vec![
+            SecretRule {
+                name: "tok1".into(),
+                prefix: "tok1_".into(),
+                pattern: "tok1_[a-z]+".into(),
+                action: SecretAction::Canary,
+            },
+            SecretRule {
+                name: "tok2".into(),
+                prefix: "tok2_".into(),
+                pattern: "tok2_[a-z]+".into(),
+                action: SecretAction::Canary,
+            },
+        ],
+        custom_prefixes: vec![CustomPrefixRule {
+            name: "xpfx".into(),
+            prefix: "xpfx_".into(),
+            length: 20,
+            action: SecretAction::Canary,
+        }],
+        names: vec![],
+        entropy: EntropyConfig::default(),
+        pii: Default::default(),
+        enable_sessions: false,
+        url_exfil: Default::default(),
+        prompt_injection: Default::default(),
+        signed_config: Default::default(),
+        key_rotation_hours: 24,
+        names_mode: NamesMode::Manual,
+        auto_detect_cache_limit: 64,
+    };
+    let engine = DlpEngine::from_config(config).unwrap();
+    // 2 secrets + 1 custom prefix = 3 patterns loaded in scanner.
+    // Verify by scanning a string matching the custom prefix.
+    let result = engine.sanitize_text("here is xpfx_abcdef and tok1_hello");
+    assert!(matches!(result, Cow::Owned(_)), "Should have redacted something");
+}
