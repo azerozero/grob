@@ -6,7 +6,7 @@ use std::path::PathBuf;
 // so fields can use plain types instead of atomics.
 
 // Re-export SpendData and current_month from the shared models module.
-pub use crate::models::spend_data::{current_month, SpendData};
+pub(crate) use crate::models::spend_data::{current_month, SpendData};
 
 /// Budget limit parameters for warning checks.
 pub struct BudgetLimits {
@@ -154,8 +154,9 @@ impl SpendTracker {
         self.data.by_model.get(model).copied().unwrap_or(0.0)
     }
 
-    /// Load spend for a specific tenant
-    pub fn tenant_spend(&self, tenant: &str) -> SpendData {
+    /// Load spend for a specific tenant.
+    #[allow(dead_code)]
+    pub(crate) fn tenant_spend(&self, tenant: &str) -> SpendData {
         if let Some(ref store) = self.store {
             store.load_spend(Some(tenant))
         } else {
@@ -345,7 +346,7 @@ impl crate::traits::SpendTracking for SpendTracker {
 }
 
 /// Load spend data from the default path (for CLI commands, no tracker needed)
-pub fn load_spend_data() -> SpendData {
+pub(crate) fn load_spend_data() -> SpendData {
     let path = SpendTracker::default_path();
     if path.exists() {
         match std::fs::read_to_string(&path) {

@@ -138,7 +138,7 @@ impl GrobStore {
     }
 
     /// Load spend data (from in-memory cache for global, from db for tenants).
-    pub fn load_spend(&self, tenant: Option<&str>) -> SpendData {
+    pub(crate) fn load_spend(&self, tenant: Option<&str>) -> SpendData {
         if tenant.is_none() {
             return self
                 .spend_cache
@@ -150,7 +150,13 @@ impl GrobStore {
     }
 
     /// Record spend for a request. Uses in-memory cache + batched writes.
-    pub fn record_spend(&self, tenant: Option<&str>, amount: f64, provider: &str, model: &str) {
+    pub(crate) fn record_spend(
+        &self,
+        tenant: Option<&str>,
+        amount: f64,
+        provider: &str,
+        model: &str,
+    ) {
         // Update in-memory cache (always for global)
         if tenant.is_none() {
             let mut cache = self.spend_cache.lock().unwrap_or_else(|e| e.into_inner());
@@ -190,7 +196,7 @@ impl GrobStore {
     }
 
     /// Force write spend data to disk.
-    pub fn flush_spend(&self) {
+    pub(crate) fn flush_spend(&self) {
         self.flush_spend_for(None);
     }
 
