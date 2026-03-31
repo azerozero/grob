@@ -1,24 +1,27 @@
 name: Release-plz
 
+permissions:
+  contents: write
+  pull-requests: write
+
 on:
   push:
     branches:
       - develop
+      - main
     paths:
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
-  release-plz:
-    name: Release
+  # On develop push: create/update the release PR targeting main
+  release-pr:
+    name: Create Release PR
+    if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     concurrency:
-      group: release-plz-${{ github.ref }}
+      group: release-plz-pr
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v6
@@ -29,5 +32,29 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: release-plz/action@v0.5
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+  # On main push (PR merged): create git tag
+  release-tag:
+    name: Tag Release
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-plz-tag
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: release-plz/action@v0.5
+        with:
+          command: release
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
