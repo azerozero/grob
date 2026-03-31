@@ -77,10 +77,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      rust: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.rust }}
-      e2e: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.e2e }}
-      ci: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.ci }}
-      docs: ${{ github.event_name == 'workflow_dispatch' && 'true' || steps.filter.outputs.docs }}
+      rust: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'true' || steps.filter.outputs.rust }}
+      e2e: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'true' || steps.filter.outputs.e2e }}
+      ci: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'true' || steps.filter.outputs.ci }}
+      docs: ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'true' || steps.filter.outputs.docs }}
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -668,12 +668,12 @@ jobs:
           compression-level: 9
 
   # =========================================================================
-  # Stage 5: Update Homebrew tap (develop push + tag push only)
+  # Stage 5: Update Homebrew tap (tag push only — needs release assets)
   # =========================================================================
   homebrew:
     name: Update Homebrew tap
-    if: github.event_name == 'push'
-    needs: [version, container]
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, release]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -687,11 +687,9 @@ jobs:
           VERSION="v${{ needs.version.outputs.version }}"
           V="${VERSION#v}"
 
-          # Download and hash all 4 tarballs from the build artifacts via GHCR
-          # On tag push the release job will have run; on develop push we pull
-          # from the uploaded artifacts directly. Since artifacts are not publicly
-          # URL-addressable we download the release assets (tag push) or skip
-          # homebrew on develop (no release assets yet).
+          # Download and hash all 4 tarballs from the GitHub Release.
+          # This job runs only on tag pushes and depends on the release job,
+          # so assets are guaranteed to exist at this point.
           for TARGET in aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-musl x86_64-unknown-linux-musl; do
             URL="https://github.com/azerozero/grob/releases/download/${VERSION}/grob-${VERSION}-${TARGET}.tar.gz"
             SHA=$(curl -sSL "$URL" | sha256sum | cut -d' ' -f1)
