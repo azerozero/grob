@@ -50,6 +50,24 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/storage/` | Unified redb storage backend (GrobStore) |
 | `src/preset/` | Preset management system |
 
+## Local Setup
+
+After cloning, install the pre-commit hooks managed by [prek](https://github.com/j178/prek):
+
+```bash
+prek install
+```
+
+This activates `cargo fmt`, `clippy`, and `gitleaks` on every commit, and heavier checks (tests, semver-checks, audit) on push. Configuration lives in `prek.toml`.
+
+If `prek` is not installed:
+
+```bash
+brew install j178/tap/prek   # macOS / Linuxbrew
+# or: cargo install prek
+# or: curl -fsSL https://prek.sh | sh
+```
+
 ## Git Flow & CI/CD
 
 ### Branching Model
