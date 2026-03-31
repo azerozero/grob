@@ -17,7 +17,7 @@
 
 **Grob** is a high-performance LLM routing proxy that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, and fits in a 6 MB container with zero dependencies.
 
-> **~100 µs pure overhead** with full DLP + routing + caching + rate limiting — [50x faster than LiteLLM, every feature measured individually](docs/reference/benchmarks.md).
+> **~100 us pure overhead** with full DLP + routing + caching + rate limiting -- [50x faster than LiteLLM, every feature measured individually](docs/reference/benchmarks.md).
 
 ```mermaid
 flowchart LR
@@ -37,12 +37,12 @@ flowchart LR
 
 | Problem | How Grob solves it |
 |---------|-------------------|
-| API keys and secrets leak to LLM providers in prompts | **DLP engine** scans every request — redacts, blocks, or warns before the data leaves |
-| Provider goes down during a coding session | **Multi-provider failover** with circuit breakers and exponential backoff. Zero client changes. |
-| No visibility into what your AI tools send | **`grob watch`** — live TUI showing every request, response, DLP action, and fallback in real time |
+| API keys and secrets leak to LLM providers in prompts | **DLP engine** scans every request -- redacts, blocks, or warns before the data leaves |
+| Provider goes down during a coding session | **Multi-provider failover** with circuit breakers and exponential backoff. Zero client changes |
+| No visibility into what your AI tools send | **`grob watch`** -- live TUI showing every request, response, DLP action, and fallback in real time |
 | Bill shock from runaway LLM usage | **Spend tracking** with per-tenant budgets, monthly caps, and alerts at 80% |
-| AI agent executes destructive tool calls without review | **HIT Gateway** — intercepts every `tool_use` block, enforces per-policy approval rules (auto-approve / require human / deny), supports multisig and quorum |
-| Deploying in air-gapped / sovereign environments | **Single binary, 6 MB, zero dependencies** — no Python, no PostgreSQL, no Redis |
+| AI agent executes destructive tool calls without review | **HIT Gateway** -- intercepts every `tool_use` block, enforces per-policy approval rules (auto-approve / require human / deny), supports multisig and quorum |
+| Deploying in air-gapped / sovereign environments | **Single binary, 6 MB, zero dependencies** -- no Python, no PostgreSQL, no Redis |
 
 ## 30-second quickstart
 
@@ -53,7 +53,7 @@ brew install azerozero/tap/grob
 
 **Without Homebrew** (Linux / CI):
 ```bash
-curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
+curl -fsSL https://grob.sh | sh
 ```
 
 Then:
@@ -64,7 +64,7 @@ grob exec -- claude
 
 That's it. Grob auto-starts, routes traffic, and stops when your tool exits.
 
-## DLP — secrets never reach the provider
+## DLP -- secrets never reach the provider
 
 Every request and response passes through the DLP engine before leaving your machine:
 
@@ -79,7 +79,7 @@ url_exfil = "block"      # Data exfiltration URLs → stripped
 canary = true            # Inject canary tokens to detect leaks
 ```
 
-No other LLM proxy does this. LiteLLM, Bifrost, Portkey, Kong — none have inline DLP on the hot path.
+No other LLM proxy does this. LiteLLM, Bifrost, Portkey, Kong -- none have inline DLP on the hot path.
 
 ## Live traffic inspector
 
@@ -191,11 +191,11 @@ grob preset apply gdpr        # EU-only routing + DLP
 
 ## Also included
 
-- **Signed audit log** — ECDSA-P256 / Ed25519 / HMAC-SHA256, hash-chained, Merkle tree batch signing
-- **Response caching** — Dedup temperature=0 requests (saves tokens and money)
-- **Native TLS + ACME** — Built-in HTTPS with Let's Encrypt auto-certificates
-- **Three API endpoints** — `/v1/messages` (Anthropic), `/v1/chat/completions` (OpenAI), `/v1/responses` (Codex CLI)
-- **Prometheus + OpenTelemetry** — `/metrics` endpoint, OTLP distributed tracing
+- **Signed audit log** -- ECDSA-P256 / Ed25519 / HMAC-SHA256, hash-chained, Merkle tree batch signing
+- **Response caching** -- Dedup temperature=0 requests (saves tokens and money)
+- **Native TLS + ACME** -- Built-in HTTPS with Let's Encrypt auto-certificates
+- **Three API endpoints** -- `/v1/messages` (Anthropic), `/v1/chat/completions` (OpenAI), `/v1/responses` (Codex CLI)
+- **Prometheus + OpenTelemetry** -- `/metrics` endpoint, OTLP distributed tracing
 
 See the [full feature matrix](docs/reference/features.md) for rate limiting, JWT/OAuth, log export, zero-downtime upgrades, record & replay, and more.
 
@@ -259,6 +259,58 @@ docker run -e ANTHROPIC_API_KEY=sk-... ghcr.io/azerozero/grob:latest
 
 6 MB image, `FROM scratch`, TLS bundled via rustls. No OS layer needed.
 
+## Project structure
+
+```
+src/
+├── server/              Axum HTTP server and dispatch pipeline
+│   ├── dispatch/        Core dispatch: DLP, cache, route, provider loop
+│   ├── openai_compat/   OpenAI /v1/chat/completions translation
+│   ├── responses_compat/  OpenAI Responses API translation
+│   └── fan_out.rs       Parallel multi-provider dispatch
+├── providers/           Provider implementations and registry
+├── router/              Regex-based request routing engine
+├── cli/                 Config structs and CLI argument parsing
+├── commands/            CLI command implementations
+├── auth/                OAuth client, token store, JWT validation
+├── features/
+│   ├── dlp/             Secret scanning, PII, canary tokens
+│   ├── policies/        HIT Gateway, per-action authorization
+│   ├── token_pricing/   Pricing, spend tracking, budgets
+│   ├── mcp/             MCP tool matrix, JSON-RPC server
+│   ├── tap/             Webhook event emission
+│   └── harness/         Record & replay sandwich testing
+├── security/            Circuit breakers, rate limiting, audit log
+└── storage/             Unified redb storage backend
+```
+
+## Development
+
+### Prerequisites
+
+- Rust stable (edition 2021)
+- For TUI features: a terminal with 256-color support
+
+### Build and run
+
+```bash
+cargo build
+cargo run -- start
+```
+
+### Tests
+
+```bash
+cargo test
+```
+
+### Benchmarks
+
+```bash
+cargo bench --bench routing
+cargo bench --bench hotpath
+```
+
 ## Documentation
 
 | Doc | Description |
@@ -281,6 +333,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR gu
 
 ## License
 
-[AGPL-3.0](LICENSE) — Commercial licensing available. See [LICENSING.md](LICENSING.md).
+[AGPL-3.0](LICENSE) -- Commercial licensing available. See [LICENSING.md](LICENSING.md).
 
 Built in Rust. Copyright (c) 2025-2026 [A00 SASU](https://github.com/azerozero).
