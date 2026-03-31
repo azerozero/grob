@@ -294,14 +294,12 @@ proptest! {
 
 #[test]
 fn display_injection_blocked_single() {
-    let err = DlpBlockError::InjectionBlocked(vec![
-        prompt_injection::InjectionDetection {
-            pattern_name: "rule1".into(),
-            matched_text: "ignore previous".into(),
-            start: 0,
-            end: 15,
-        },
-    ]);
+    let err = DlpBlockError::InjectionBlocked(vec![prompt_injection::InjectionDetection {
+        pattern_name: "rule1".into(),
+        matched_text: "ignore previous".into(),
+        start: 0,
+        end: 15,
+    }]);
     let msg = err.to_string();
     assert!(msg.starts_with("Prompt injection detected: "));
     assert!(msg.contains("ignore previous"));
@@ -335,14 +333,12 @@ fn display_injection_blocked_multiple() {
 
 #[test]
 fn display_url_exfil_blocked_single() {
-    let err = DlpBlockError::UrlExfilBlocked(vec![
-        url_exfil::UrlExfilDetection {
-            url: "https://evil.com/leak".into(),
-            reason: "suspicious_domain".into(),
-            start: 0,
-            end: 20,
-        },
-    ]);
+    let err = DlpBlockError::UrlExfilBlocked(vec![url_exfil::UrlExfilDetection {
+        url: "https://evil.com/leak".into(),
+        reason: "suspicious_domain".into(),
+        start: 0,
+        end: 20,
+    }]);
     let msg = err.to_string();
     assert!(msg.starts_with("URL exfiltration detected: "));
     assert!(msg.contains("evil.com"));
@@ -415,5 +411,8 @@ fn from_config_counts_secrets_and_custom_prefixes() {
     // 2 secrets + 1 custom prefix = 3 patterns loaded in scanner.
     // Verify by scanning a string matching the custom prefix.
     let result = engine.sanitize_text("here is xpfx_abcdef and tok1_hello");
-    assert!(matches!(result, Cow::Owned(_)), "Should have redacted something");
+    assert!(
+        matches!(result, Cow::Owned(_)),
+        "Should have redacted something"
+    );
 }
