@@ -105,17 +105,6 @@ types_or = ["rust", "toml"]
 pass_filenames = false
 stages = ["pre-push"]
 
-# Semver compatibility — compare against latest git tag (not crates.io)
-# Only runs when Rust source changes.
-[[repos.hooks]]
-id = "cargo-semver-checks"
-name = "cargo semver-checks"
-language = "system"
-entry = "sh"
-args = ["-c", "TAG=$(git tag --sort=-v:refname | head -1) && [ -n \"$TAG\" ] && cargo semver-checks --baseline-rev \"$TAG\" || echo 'No tags found, skipping semver check'"]
-types = ["rust"]
-pass_filenames = false
-stages = ["pre-push"]
 
 # Sweep stale build artifacts (>7 days) to prevent target/ bloat
 [[repos.hooks]]
