@@ -111,7 +111,7 @@ cargo bench --bench hotpath
 - Presets live in `presets/*.toml` (shipped with the binary) and user presets in `~/.grob/presets/`.
 - Feature flags are all on by default. To build without DLP: `cargo build --no-default-features --features oauth,tap,compliance,mcp`.
 - Anthropic beta features (`anthropic-beta` header) include prompt-caching-scope, interleaved-thinking, fine-grained-tool-streaming, and oauth. Client-provided beta features are merged with server defaults (no duplicates).
-- Routing priority (highest to lowest): WebSearch > Background > Subagent > PromptRules > Think > Default. Auto-map runs first as a name transformation but does not change route type.
+- Routing priority (highest to lowest): WebSearch > Background > AutoMap (name transform) > SubagentTag (model override, returns Default) > PromptRules > Think > Default.
 - `grob exec -- <cmd>` is the recommended way to use Grob. It auto-starts, sets env vars, runs your tool, and auto-stops.
 - `grob preset apply <name> --reload` applies a preset and hot-reloads the running server in one step.
 - Budget exceeded returns HTTP 402, not 429. Rate limit exceeded returns 429.

@@ -50,7 +50,7 @@
 ## Router::route(request)
 
 **Module:** `src/router/mod.rs`
-**Intention:** Classify an incoming request into a route type and resolve the target model name by evaluating rules in strict priority order: WebSearch > Background > AutoMap > Subagent > PromptRules > Think > Default.
+**Intention:** Classify an incoming request into a route type and resolve the target model name by evaluating rules in strict priority order: WebSearch > Background > AutoMap > SubagentTag > PromptRules > Think > Default. Note: SubagentTag extracts a model from `<GROB-SUBAGENT-MODEL>` system prompt tags but returns `RouteType::Default` (no dedicated variant).
 
 **Invariants:**
 - INV-1 (Priority order): A higher-priority rule always wins. If a request matches both WebSearch and Think, WebSearch is returned.

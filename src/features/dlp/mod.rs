@@ -321,14 +321,18 @@ impl DlpEngine {
     }
 
     /// Sanitize an outgoing request with block support.
-    /// Returns `Err(DlpBlockError)` if prompt injection is detected with `action: block`.
+    ///
+    /// Returns `Err(DlpBlockError)` if prompt injection or URL exfiltration
+    /// is detected with `action: block`. The request must NOT proceed to
+    /// any provider when this returns an error.
     pub fn sanitize_request_checked(
         &self,
         request: &mut CanonicalRequest,
     ) -> Result<(), DlpBlockError> {
+        let all_text = Self::extract_request_text(request);
+
         // Stage 0: Prompt injection detection (before name anonymization)
         if let Some(ref detector) = self.injection_detector {
-            let all_text = Self::extract_request_text(request);
             for text in &all_text {
                 match detector.scan(text) {
                     prompt_injection::InjectionResult::Blocked(dets) => {
@@ -336,6 +340,15 @@ impl DlpEngine {
                     }
                     prompt_injection::InjectionResult::Logged
                     | prompt_injection::InjectionResult::Clean => {}
+                }
+            }
+        }
+
+        // Stage 0.5: URL exfiltration detection on inbound requests
+        if let Some(ref exfil) = self.url_exfil_scanner {
+            for text in &all_text {
+                if let Some(dets) = exfil.is_blocked(text) {
+                    return Err(DlpBlockError::UrlExfilBlocked(dets));
                 }
             }
         }
