@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0](https://github.com/azerozero/grob/compare/v0.33.0...v0.34.0) - 2026-03-31
+
+### Fixed
+
+- *(ci)* remove audit-wire path dep (breaks CI), fix shellcheck SC2086
+- *(ci+dlp+docs)* actionlint args, URL exfil request blocking, doc sync
+
+### Other
+
+- *(ci)* decouple test jobs from slow quality checks
+- *(server)* extract god functions, fix CI duplication, add spend tracking
+
 ## [0.33.0](https://github.com/azerozero/grob/compare/v0.32.0...v0.33.0) - 2026-03-30
 
 ### Fixed
