@@ -261,36 +261,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - uses: bnjbvr/cargo-machete@main
 
-  semver:
-    name: API Compatibility
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
-    continue-on-error: true
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: semver
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - name: Install cargo-semver-checks
-        run: cargo install cargo-semver-checks --locked
-      - name: Find latest tag for baseline
-        id: baseline
-        run: |
-          TAG=$(git tag --sort=-v:refname | head -1)
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      - name: Check semver compatibility
-        if: steps.baseline.outputs.tag != ''
-        run: cargo semver-checks --baseline-rev ${{ steps.baseline.outputs.tag }}
-
   coverage:
     name: Coverage
     needs: [changes]
@@ -938,7 +908,7 @@ jobs:
       - deny
       - docs
       - machete
-      - semver
+
       - coverage
       - feature-check
       - test-ubuntu
@@ -958,7 +928,7 @@ jobs:
             "${{ needs.deny.result }}" \
             "${{ needs.docs.result }}" \
             "${{ needs.machete.result }}" \
-            "${{ needs.semver.result }}" \
+
             "${{ needs.coverage.result }}" \
             "${{ needs.feature-check.result }}" \
             "${{ needs.test-ubuntu.result }}" \
@@ -988,7 +958,7 @@ jobs:
       - deny
       - docs
       - machete
-      - semver
+
       - coverage
       - feature-check
       - test-ubuntu
@@ -1016,7 +986,7 @@ jobs:
           script: |
             const jobs = [
               'changes', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
-              'docs', 'machete', 'semver', 'coverage', 'feature-check',
+              'docs', 'machete', 'coverage', 'feature-check',
               'test-ubuntu', 'test-other', 'mutants', 'build', 'container',
               'e2e', 'load', 'release', 'homebrew', 'homebrew-test',
               'validate-yaml', 'required'

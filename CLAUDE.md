@@ -58,7 +58,7 @@ After cloning, install the pre-commit hooks managed by [prek](https://github.com
 prek install
 ```
 
-This activates `cargo fmt`, `clippy`, and `gitleaks` on every commit, and heavier checks (tests, semver-checks, audit) on push. Configuration lives in `prek.toml`.
+This activates `cargo fmt`, `clippy`, and `gitleaks` on every commit, and heavier checks (tests, audit) on push. Configuration lives in `prek.toml`.
 
 If `prek` is not installed:
 
@@ -77,7 +77,7 @@ feature/* ──► develop ──► (release-plz PR) ──► main ──► 
 ```
 
 1. **Feature branches**: Create from `develop`, name `feature/<topic>` or `fix/<topic>`. PR targets `develop`.
-2. **`develop`**: Integration branch. Every push triggers the full CI pipeline (lint, test, semver-checks, mutation testing).
+2. **`develop`**: Integration branch. Every push triggers the full CI pipeline (lint, test, mutation testing).
 3. **Release**: When CI passes on `develop`, release-plz automatically opens a PR to `main` (version bump, changelog, git tag).
 4. **`main`**: Production branch. Only receives merges from release-plz PRs. Tag push (`v*`) triggers cross-builds, container image, and Homebrew formula update.
 
@@ -85,7 +85,7 @@ feature/* ──► develop ──► (release-plz PR) ──► main ──► 
 
 | Stage | Trigger | Jobs |
 |-------|---------|------|
-| Quality gates | push to `develop` / PR | fmt, clippy, doc, shellcheck, actionlint, semver-checks |
+| Quality gates | push to `develop` / PR | fmt, clippy, doc, shellcheck, actionlint |
 | Tests | push to `develop` / PR | unit tests (Ubuntu + macOS + Windows), integration tests |
 | Mutation testing | push to `develop` only | cargo-mutants on critical paths (router, DLP) |
 | Cross-build | push to `develop` + tag push | Multi-target binaries (Linux amd64/arm64/musl, macOS, Windows) |
