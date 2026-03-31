@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 /// Persistent spend data (serialized to JSON).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SpendData {
     /// Current month (e.g., "2026-02").
     pub month: String,
