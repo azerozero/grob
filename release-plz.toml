@@ -9,6 +9,8 @@ git_release_enable = false
 git_tag_name = "v{{ version }}"
 git_tag_enable = true
 changelog_update = true
+# Binary-only project — no public library API to check
+semver_check = false
 pr_labels = ["release"]
 # Only bump on commits that change Rust source (not e2e/ci/docs infra).
 # release-plz regex has no lookahead, so we allowlist src-related scopes.
