@@ -569,7 +569,10 @@ fn test_prompt_rule_strip_match_in_multi_turn() {
 #[test]
 fn trailing_literal_basic_extraction() {
     // "haiku" is ≥ 3 alpha chars at end → first byte lowered = b'h'
-    assert_eq!(extract_trailing_literal_byte("(?i)claude.*haiku"), Some(b'h'));
+    assert_eq!(
+        extract_trailing_literal_byte("(?i)claude.*haiku"),
+        Some(b'h')
+    );
 }
 
 #[test]
