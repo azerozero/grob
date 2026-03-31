@@ -50,6 +50,35 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/storage/` | Unified redb storage backend (GrobStore) |
 | `src/preset/` | Preset management system |
 
+## Git Flow & CI/CD
+
+### Branching Model
+
+```
+feature/* ──► develop ──► (release-plz PR) ──► main ──► tag v*
+```
+
+1. **Feature branches**: Create from `develop`, name `feature/<topic>` or `fix/<topic>`. PR targets `develop`.
+2. **`develop`**: Integration branch. Every push triggers the full CI pipeline (lint, test, semver-checks, mutation testing).
+3. **Release**: When CI passes on `develop`, release-plz automatically opens a PR to `main` (version bump, changelog, git tag).
+4. **`main`**: Production branch. Only receives merges from release-plz PRs. Tag push (`v*`) triggers cross-builds, container image, and Homebrew formula update.
+
+### CI Pipeline Stages (`.github/workflows/ci.yml`)
+
+| Stage | Trigger | Jobs |
+|-------|---------|------|
+| Quality gates | push to `develop` / PR | fmt, clippy, doc, shellcheck, actionlint, semver-checks |
+| Tests | push to `develop` / PR | unit tests (Ubuntu + macOS + Windows), integration tests |
+| Mutation testing | push to `develop` only | cargo-mutants on critical paths (router, DLP) |
+| Cross-build | push to `develop` + tag push | Multi-target binaries (Linux amd64/arm64/musl, macOS, Windows) |
+| Release | tag `v*` push | GitHub Release, container image, Homebrew formula |
+
+### Release Flow (`.github/workflows/release-plz.yml`)
+
+- Triggered by push to `develop` (only `src/**`, `Cargo.toml`, `Cargo.lock`).
+- release-plz creates a PR to `main` with version bump + changelog + git tag.
+- Merging the PR pushes the tag, which triggers the full release pipeline.
+
 ## Documentation Standards
 
 ### Doc Comment Conventions (RFC 505 + RFC 1574 + Microsoft M-DOC)
