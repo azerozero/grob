@@ -937,7 +937,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: rhysd/actionlint@v1.7.11
         with:
-          flags: -color
+          args: -color
 
   # =========================================================================
   # Stage 9.2: Required — merge queue gate (aggregates all required checks)

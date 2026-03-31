@@ -8,7 +8,7 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 
 - **Binary only** — grob is distributed as a standalone binary, NOT as a crate on crates.io.
 - **crates.io/crates/grob is a different project** (Coding-Badly/grob, "Growable buffer for Windows API"). Do not confuse or reference it.
-- Container image: `ghcr.io/azerozero/grob:<version>` (scratch, ~17MB)
+- Container image: `ghcr.io/azerozero/grob:<version>` (scratch, ~6MB)
 - Releases: GitHub Releases via release-plz (auto-bumps version on develop push)
 - Install: `brew install azerozero/tap/grob` or `curl -fsSL https://grob.sh | sh`
 

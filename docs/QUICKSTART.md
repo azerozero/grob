@@ -5,9 +5,9 @@ Get up and running in 30 seconds.
 ## 1. Install
 
 ```bash
-cargo install grob
-# or with binstall:
-cargo binstall grob
+brew install azerozero/tap/grob
+# or without Homebrew:
+curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
 ```
 
 ## 2. Apply a preset
