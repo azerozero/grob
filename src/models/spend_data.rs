@@ -5,8 +5,7 @@ use std::collections::HashMap;
 
 /// Persistent spend data (serialized to JSON).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct SpendData {
+pub(crate) struct SpendData {
     /// Current month (e.g., "2026-02").
     pub month: String,
     /// Total spend in USD.
@@ -33,6 +32,6 @@ impl Default for SpendData {
 }
 
 /// Returns the current year-month as a "YYYY-MM" string.
-pub fn current_month() -> String {
+pub(crate) fn current_month() -> String {
     chrono::Local::now().format("%Y-%m").to_string()
 }
