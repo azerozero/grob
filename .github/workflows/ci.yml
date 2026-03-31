@@ -371,14 +371,7 @@ jobs:
       - changes
       - fmt
       - clippy
-      - audit
-      - gitleaks
       - deny
-      - docs
-      - machete
-      - semver
-      - coverage
-      - feature-check
     if: |
       always() &&
       (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') &&
@@ -428,14 +421,7 @@ jobs:
       - changes
       - fmt
       - clippy
-      - audit
-      - gitleaks
       - deny
-      - docs
-      - machete
-      - semver
-      - coverage
-      - feature-check
     if: |
       always() &&
       (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') &&
