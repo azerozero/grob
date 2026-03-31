@@ -40,7 +40,8 @@ pub(crate) use helpers::{
 #[cfg(feature = "mcp")]
 pub(crate) use init::init_mcp;
 pub(crate) use init::{
-    init_auth, init_core_services, init_dlp, init_observability, init_security, maybe_preset_sync,
+    emit_tee_attestation, init_auth, init_core_services, init_dlp, init_observability,
+    init_provider_scorer, init_security, maybe_preset_sync, spawn_background_tasks,
 };
 pub(crate) use middleware::{
     apply_transparency_headers, auth_middleware, extract_api_credential, extract_client_ip,
@@ -54,7 +55,6 @@ use crate::features::dlp::session::DlpSessionManager;
 use crate::features::token_pricing::SharedPricingTable;
 use crate::providers::ProviderRegistry;
 use crate::router::Router;
-use crate::security::provider_scorer::ProviderScorer;
 use crate::security::{AuditLog, RateLimiter};
 use crate::traits;
 use axum::{
@@ -63,7 +63,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::limit::RequestBodyLimitLayer;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
@@ -144,7 +144,7 @@ pub struct SecurityState {
     /// Webhook tap sender for event emission.
     pub tap_sender: Option<Arc<crate::features::tap::TapSender>>,
     /// Adaptive provider scorer for latency-aware routing.
-    pub provider_scorer: Option<Arc<ProviderScorer>>,
+    pub provider_scorer: Option<Arc<crate::security::provider_scorer::ProviderScorer>>,
     /// MCP tool matrix and JSON-RPC server state.
     #[cfg(feature = "mcp")]
     pub mcp: Option<Arc<crate::features::mcp::McpState>>,
@@ -243,57 +243,9 @@ pub async fn start_server(
 
     let (rate_limiter, circuit_breakers, audit_log, response_cache) = init_security(&config)?;
 
-    // Emit TEE attestation report into the audit log (if both are available).
-    if let (Some(ref report), Some(ref audit)) = (&tee_status.attestation_report, &audit_log) {
-        use crate::security::audit_log::{AuditEntry, AuditEvent, Classification};
-        let entry = AuditEntry {
-            timestamp: chrono::Utc::now(),
-            event_id: uuid::Uuid::new_v4().to_string(),
-            tenant_id: "system".to_string(),
-            user_id: None,
-            action: AuditEvent::TeeAttestation,
-            classification: Classification::C1,
-            backend_routed: tee_status.platform.clone(),
-            request_hash: Some(report.clone()),
-            dlp_rules_triggered: vec![],
-            ip_source: "localhost".to_string(),
-            duration_ms: 0,
-            previous_hash: String::new(),
-            signature: vec![],
-            signature_algorithm: String::new(),
-            model_name: None,
-            input_tokens: None,
-            output_tokens: None,
-            risk_level: None,
-            batch_id: None,
-            batch_index: None,
-            merkle_root: None,
-            merkle_proof: None,
-        };
-        if let Err(e) = audit.write(entry) {
-            warn!("⚠️  Failed to write TEE attestation to audit log: {e}");
-        } else {
-            info!("📜 TEE attestation written to audit log");
-        }
-    }
+    emit_tee_attestation(&tee_status, &audit_log);
 
-    let provider_scorer = if config.security.adaptive_scoring {
-        let scorer_config = crate::security::provider_scorer::ScorerConfig {
-            latency_alpha: config.security.scoring_latency_alpha,
-            window_size: config.security.scoring_window_size,
-            decay_rate: config.security.scoring_decay_rate,
-        };
-        let scorer = Arc::new(ProviderScorer::new(scorer_config, circuit_breakers.clone()));
-        info!(
-            "📊 Adaptive provider scoring enabled (window={}, alpha={}, decay={})",
-            config.security.scoring_window_size,
-            config.security.scoring_latency_alpha,
-            config.security.scoring_decay_rate
-        );
-        Some(scorer)
-    } else {
-        None
-    };
+    let provider_scorer = init_provider_scorer(&config, &circuit_breakers);
 
     // Coerce concrete types to trait objects for testability
     let tracer: Arc<dyn traits::Tracer> = message_tracer;
@@ -338,68 +290,12 @@ pub async fn start_server(
     });
 
     maybe_preset_sync(&config).await;
-
-    // Webhook relay: listens for HitApprovalRequest events with auth_method="webhook" and
-    // POSTs a notification to the configured webhook_url. The external system is expected to
-    // call POST /api/hit/approve to resolve the approval.
-    // NOTE: requires both `policies` (HIT logic) and `watch` (event bus subscribe()).
-    #[cfg(all(feature = "policies", feature = "watch"))]
-    {
-        let mut relay_rx = state.event_bus.subscribe();
-        tokio::spawn(async move {
-            use crate::features::watch::events::WatchEvent;
-            let client = reqwest::Client::new();
-            loop {
-                match relay_rx.recv().await {
-                    Ok(WatchEvent::HitApprovalRequest {
-                        auth_method,
-                        webhook_url: Some(url),
-                        request_id,
-                        tool_name,
-                        tool_input_preview,
-                        ..
-                    }) if auth_method == "webhook" => {
-                        let payload = serde_json::json!({
-                            "request_id": request_id,
-                            "tool_name": tool_name,
-                            "tool_input_preview": tool_input_preview,
-                            "callback": "POST /api/hit/approve",
-                        });
-                        if let Err(e) = client.post(&url).json(&payload).send().await {
-                            tracing::warn!(
-                                url = %url,
-                                error = %e,
-                                "HIT webhook relay: failed to notify webhook"
-                            );
-                        }
-                    }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    _ => {}
-                }
-            }
-        });
-    }
+    spawn_background_tasks(&state);
 
     let app = build_app_router(&config, state.clone());
-    let oauth_state = state.clone();
-    let drain_state = state.clone();
-
-    // Validate all model mappings in background (non-blocking).
-    // Warns about dead fallback models without delaying startup.
-    {
-        let validation_state = state.clone();
-        tokio::spawn(async move {
-            let inner = validation_state.snapshot();
-            info!("Validating model mappings...");
-            let results =
-                crate::preset::validate_config(&inner.config, &inner.provider_registry).await;
-            crate::preset::log_validation_results(&results);
-        });
-    }
-
-    lifecycle::spawn_oauth_callback(oauth_state);
+    lifecycle::spawn_oauth_callback(state.clone());
     lifecycle::bind_and_serve(&config, app, shutdown_signal).await?;
-    lifecycle::drain_in_flight(&drain_state).await;
+    lifecycle::drain_in_flight(&state).await;
     crate::otel::shutdown_otel();
 
     Ok(())

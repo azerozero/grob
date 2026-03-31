@@ -140,7 +140,7 @@ mod tests {
 
         // Write legacy spend.json
         let spend = SpendData {
-            month: crate::features::token_pricing::spend::current_month(),
+            month: crate::models::spend_data::current_month(),
             total: 42.50,
             by_provider: {
                 let mut m = HashMap::new();
@@ -152,6 +152,7 @@ mod tests {
                 m.insert("claude-sonnet".to_string(), 42.50);
                 m
             },
+            by_provider_count: HashMap::new(),
         };
         std::fs::write(
             grob_dir.join("spend.json"),

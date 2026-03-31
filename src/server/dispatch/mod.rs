@@ -200,8 +200,13 @@ pub(crate) async fn dispatch(
     // ── Step 1.6: Pledge tool filtering ──
     if ctx.inner.config.pledge.enabled {
         let filter = crate::features::pledge::PledgeFilter::new(&ctx.inner.config.pledge);
-        // TODO: Extract source/token from DispatchContext once auth metadata lands.
-        filter.apply(request, None, None);
+        let token = ctx
+            .headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "))
+            .or_else(|| ctx.headers.get("x-api-key").and_then(|v| v.to_str().ok()));
+        filter.apply(request, ctx.tenant_id.as_deref(), token);
     }
 
     // ── Step 2: Cache key ──

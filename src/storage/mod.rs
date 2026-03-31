@@ -161,6 +161,10 @@ impl GrobStore {
             cache.total += amount;
             *cache.by_provider.entry(provider.to_string()).or_default() += amount;
             *cache.by_model.entry(model.to_string()).or_default() += amount;
+            *cache
+                .by_provider_count
+                .entry(provider.to_string())
+                .or_default() += 1;
         }
 
         // Batch writes: persist every 10 calls
@@ -175,6 +179,10 @@ impl GrobStore {
             data.total += amount;
             *data.by_provider.entry(provider.to_string()).or_default() += amount;
             *data.by_model.entry(model.to_string()).or_default() += amount;
+            *data
+                .by_provider_count
+                .entry(provider.to_string())
+                .or_default() += 1;
             if let Err(e) = self.write_spend_data(Some(t), &data) {
                 tracing::warn!("Failed to persist tenant spend data for {}: {}", t, e);
             }

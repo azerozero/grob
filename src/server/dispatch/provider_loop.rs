@@ -144,69 +144,38 @@ pub(super) async fn dispatch_provider_loop(
         match result {
             Ok(dispatch_result) => return Ok(dispatch_result),
             Err(ProviderLoopAction::RateLimited) => {
-                // Try key pool rotation before falling through to next provider.
-                if provider.rotate_key_pool() {
-                    info!(
-                        "Provider {} rate-limited (stream), rotated to next pooled key — retrying",
-                        mapping.provider
-                    );
-                    // Re-prepare and retry with the same provider + new key.
-                    let (retry_request, _) =
-                        prepare_provider_request(ctx, request, mapping, &decision.route_type);
-                    let retry_result = if ctx.is_streaming {
-                        dispatch_streaming(ctx, retry_request, provider.as_ref(), mapping).await
-                    } else {
-                        dispatch_non_streaming(
-                            ctx,
-                            retry_request,
-                            provider.as_ref(),
-                            &ProviderAttempt {
-                                mapping,
-                                decision,
-                                cache_key,
-                                original_model: &original_model,
-                                is_subscription,
-                            },
-                        )
-                        .await
-                    };
-                    match retry_result {
-                        Ok(dispatch_result) => return Ok(dispatch_result),
-                        Err(_) => {
-                            // Fall through to next provider mapping.
-                        }
-                    }
+                if let Some(ok) = try_rotate_and_retry(
+                    ctx,
+                    request,
+                    provider.as_ref(),
+                    &ProviderAttempt {
+                        mapping,
+                        decision,
+                        cache_key,
+                        original_model: &original_model,
+                        is_subscription,
+                    },
+                )
+                .await
+                {
+                    return Ok(ok);
                 }
-                // Emit Fallback event for `grob watch`.
-                if let Some(next) = effective_mappings.get(idx + 1) {
-                    ctx.state.event_bus.emit(
-                        crate::features::watch::events::WatchEvent::Fallback {
-                            request_id: ctx.req_id.to_string(),
-                            from_provider: mapping.provider.clone(),
-                            to_provider: next.provider.clone(),
-                            reason: "rate limited".to_string(),
-                            timestamp: chrono::Utc::now(),
-                        },
-                    );
-                }
+                emit_fallback(
+                    ctx,
+                    mapping,
+                    effective_mappings.get(idx + 1),
+                    "rate limited",
+                );
                 tokio::task::yield_now().await;
                 continue;
             }
             Err(ProviderLoopAction::Continue) => {
-                // Emit Fallback event for `grob watch`.
-                if let Some(next) = effective_mappings.get(idx + 1) {
-                    ctx.state.event_bus.emit(
-                        crate::features::watch::events::WatchEvent::Fallback {
-                            request_id: ctx.req_id.to_string(),
-                            from_provider: mapping.provider.clone(),
-                            to_provider: next.provider.clone(),
-                            reason: "provider error".to_string(),
-                            timestamp: chrono::Utc::now(),
-                        },
-                    );
-                }
-                // NOTE: Yield between provider attempts so other tasks (health checks,
-                // metrics scrapes) are not starved during long fallback chains.
+                emit_fallback(
+                    ctx,
+                    mapping,
+                    effective_mappings.get(idx + 1),
+                    "provider error",
+                );
                 tokio::task::yield_now().await;
                 continue;
             }
@@ -298,6 +267,53 @@ fn prepare_provider_request(
     }
 
     (provider_request, original_model)
+}
+
+/// Attempts key pool rotation and retry on rate limit.
+///
+/// Returns `Some(result)` if the retry succeeded, `None` if rotation was
+/// unavailable or the retry also failed.
+async fn try_rotate_and_retry(
+    ctx: &DispatchContext<'_>,
+    request: &mut crate::models::CanonicalRequest,
+    provider: &dyn crate::providers::LlmProvider,
+    attempt: &ProviderAttempt<'_>,
+) -> Option<DispatchResult> {
+    if !provider.rotate_key_pool() {
+        return None;
+    }
+    info!(
+        "Provider {} rate-limited, rotated to next pooled key — retrying",
+        attempt.mapping.provider
+    );
+    let (retry_request, _) =
+        prepare_provider_request(ctx, request, attempt.mapping, &attempt.decision.route_type);
+    let retry_result = if ctx.is_streaming {
+        dispatch_streaming(ctx, retry_request, provider, attempt.mapping).await
+    } else {
+        dispatch_non_streaming(ctx, retry_request, provider, attempt).await
+    };
+    retry_result.ok()
+}
+
+/// Emits a fallback event for `grob watch`.
+fn emit_fallback(
+    ctx: &DispatchContext<'_>,
+    from: &crate::cli::ModelMapping,
+    next: Option<&crate::cli::ModelMapping>,
+    reason: &str,
+) {
+    if let Some(next) = next {
+        ctx.state
+            .event_bus
+            .emit(crate::features::watch::events::WatchEvent::Fallback {
+                request_id: ctx.req_id.to_string(),
+                from_provider: from.provider.clone(),
+                to_provider: next.provider.clone(),
+                reason: reason.to_string(),
+                timestamp: chrono::Utc::now(),
+            });
+    }
 }
 
 /// Backward-compat fallback: try direct model->provider lookup from the registry.

@@ -106,8 +106,8 @@ pub trait SpendTracking: Send {
     /// Persists the current spend data.
     fn save(&self);
 
-    /// Returns per-provider spend breakdown for the current period.
-    fn provider_breakdown(&self) -> Vec<(String, f64)> {
+    /// Returns per-provider spend breakdown (name, spend_usd, request_count).
+    fn provider_breakdown(&self) -> Vec<(String, f64, u64)> {
         Vec::new()
     }
 
@@ -241,7 +241,7 @@ pub mod mocks {
         fn total(&self) -> f64 {
             0.0
         }
-        fn provider_breakdown(&self) -> Vec<(String, f64)> {
+        fn provider_breakdown(&self) -> Vec<(String, f64, u64)> {
             vec![]
         }
         fn save(&self) {}

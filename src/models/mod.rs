@@ -2,6 +2,8 @@
 
 /// Provider-specific request extensions for lossless roundtrips.
 pub mod extensions;
+/// Spend tracking data types shared between storage and pricing.
+pub mod spend_data;
 
 use extensions::RequestExtensions;
 use serde::{Deserialize, Serialize};

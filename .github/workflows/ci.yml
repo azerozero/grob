@@ -126,32 +126,6 @@ jobs:
           echo "Cargo.toml version: ${V}"
 
   # =========================================================================
-  # Stage 0.5: Smoke — fast feedback < 2 min (no dependencies)
-  # =========================================================================
-  smoke:
-    name: Smoke (fast feedback)
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: smoke
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - uses: taiki-e/install-action@nextest
-      - run: cargo nextest run --profile ci --partition count:1/4
-
-  # =========================================================================
   # Stage 1: Parallel lint / check gate
   # =========================================================================
   fmt:
@@ -483,11 +457,10 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: Run tests
         run: |
+          WIN_FEATURES="--no-default-features --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs"
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cargo nextest run --profile ci --no-default-features --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs
-            # Doc-tests skipped on Windows: ring (transitive dep via reqwest→rustls)
-            # fails to link in doc-test mode with --no-default-features. Doc-tests
-            # are already validated on Ubuntu (default features) and macOS.
+            cargo nextest run --profile ci $WIN_FEATURES
+            cargo test --doc $WIN_FEATURES
           else
             cargo nextest run --profile ci
             cargo test --doc
@@ -974,7 +947,6 @@ jobs:
     if: always()
     needs:
       - changes
-      - smoke
       - fmt
       - clippy
       - audit
@@ -995,7 +967,6 @@ jobs:
         run: |
           # Fail if any required job failed (skipped is OK for pruned paths).
           results=( \
-            "${{ needs.smoke.result }}" \
             "${{ needs.fmt.result }}" \
             "${{ needs.clippy.result }}" \
             "${{ needs.audit.result }}" \
@@ -1026,7 +997,6 @@ jobs:
     if: always()
     needs:
       - changes
-      - smoke
       - fmt
       - clippy
       - audit
@@ -1061,7 +1031,7 @@ jobs:
         with:
           script: |
             const jobs = [
-              'changes', 'smoke', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
+              'changes', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
               'docs', 'machete', 'semver', 'coverage', 'feature-check',
               'test-ubuntu', 'test-other', 'mutants', 'build', 'container',
               'e2e', 'load', 'release', 'homebrew', 'homebrew-test',

@@ -99,6 +99,9 @@ moka = { version = "0.12", features = ["future", "sync"] }
 # JWT Auth
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
 
+# Shared audit wire format, Merkle tree, crypto traits
+audit-wire = { path = "../shared/audit-wire", features = ["signing", "encryption", "tee"] }
+
 # Security (HDS/PCI/SecNumCloud compliance)
 p256 = { version = "0.13", features = ["ecdsa"] }   # ECDSA P-256 for audit signing
 ecdsa = "0.16"                                       # ECDSA traits
@@ -203,7 +206,8 @@ test-util = []
 # rustls/rustls-pemfile: behind optional "tls" feature flag
 # insta: snapshot testing — used incrementally as tests are converted
 # tracing-test: used via #[traced_test] attribute on individual tests
-ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "rustls-acme", "insta", "tracing-test", "socket2", "tikv-jemallocator", "nix", "jsonrpsee"]
+# audit-wire: shared crate wired as dependency, migration in progress
+ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "rustls-acme", "insta", "tracing-test", "socket2", "tikv-jemallocator", "nix", "jsonrpsee", "audit-wire"]
 
 [profile.release]
 opt-level = 3

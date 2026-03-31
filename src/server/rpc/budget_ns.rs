@@ -41,10 +41,10 @@ pub async fn breakdown(
 
     Ok(data
         .into_iter()
-        .map(|(provider, spent_usd)| SpendBreakdown {
+        .map(|(provider, spent_usd, request_count)| SpendBreakdown {
             provider,
             spent_usd,
-            request_count: 0, // TODO: add request count tracking in Phase 2
+            request_count,
         })
         .collect())
 }

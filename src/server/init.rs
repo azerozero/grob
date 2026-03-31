@@ -352,6 +352,122 @@ pub(crate) fn init_mcp(
     Some(state)
 }
 
+/// Initializes the adaptive provider scorer if enabled.
+pub(crate) fn init_provider_scorer(
+    config: &AppConfig,
+    circuit_breakers: &Option<Arc<CircuitBreakerRegistry>>,
+) -> Option<Arc<crate::security::provider_scorer::ProviderScorer>> {
+    if !config.security.adaptive_scoring {
+        return None;
+    }
+    let scorer_config = crate::security::provider_scorer::ScorerConfig {
+        latency_alpha: config.security.scoring_latency_alpha,
+        window_size: config.security.scoring_window_size,
+        decay_rate: config.security.scoring_decay_rate,
+    };
+    let scorer = Arc::new(crate::security::provider_scorer::ProviderScorer::new(
+        scorer_config,
+        circuit_breakers.clone(),
+    ));
+    info!(
+        "📊 Adaptive provider scoring enabled (window={}, alpha={}, decay={})",
+        config.security.scoring_window_size,
+        config.security.scoring_latency_alpha,
+        config.security.scoring_decay_rate
+    );
+    Some(scorer)
+}
+
+/// Emits the TEE attestation report into the audit log if both are available.
+pub(crate) fn emit_tee_attestation(
+    tee_status: &crate::security::tee::TeeStatus,
+    audit_log: &Option<Arc<AuditLog>>,
+) {
+    let (Some(ref report), Some(ref audit)) = (&tee_status.attestation_report, audit_log) else {
+        return;
+    };
+    use crate::security::audit_log::{AuditEntry, AuditEvent, Classification};
+    let entry = AuditEntry {
+        timestamp: chrono::Utc::now(),
+        event_id: uuid::Uuid::new_v4().to_string(),
+        tenant_id: "system".to_string(),
+        user_id: None,
+        action: AuditEvent::TeeAttestation,
+        classification: Classification::C1,
+        backend_routed: tee_status.platform.clone(),
+        request_hash: Some(report.clone()),
+        dlp_rules_triggered: vec![],
+        ip_source: "localhost".to_string(),
+        duration_ms: 0,
+        previous_hash: String::new(),
+        signature: vec![],
+        signature_algorithm: String::new(),
+        model_name: None,
+        input_tokens: None,
+        output_tokens: None,
+        risk_level: None,
+        batch_id: None,
+        batch_index: None,
+        merkle_root: None,
+        merkle_proof: None,
+    };
+    if let Err(e) = audit.write(entry) {
+        warn!("⚠️  Failed to write TEE attestation to audit log: {e}");
+    } else {
+        info!("📜 TEE attestation written to audit log");
+    }
+}
+
+/// Spawns background tasks: webhook relay and model mapping validation.
+pub(crate) fn spawn_background_tasks(state: &Arc<super::AppState>) {
+    // Webhook relay: HitApprovalRequest events with auth_method="webhook"
+    #[cfg(all(feature = "policies", feature = "watch"))]
+    {
+        let mut relay_rx = state.event_bus.subscribe();
+        tokio::spawn(async move {
+            use crate::features::watch::events::WatchEvent;
+            let client = reqwest::Client::new();
+            loop {
+                match relay_rx.recv().await {
+                    Ok(WatchEvent::HitApprovalRequest {
+                        auth_method,
+                        webhook_url: Some(url),
+                        request_id,
+                        tool_name,
+                        tool_input_preview,
+                        ..
+                    }) if auth_method == "webhook" => {
+                        let payload = serde_json::json!({
+                            "request_id": request_id,
+                            "tool_name": tool_name,
+                            "tool_input_preview": tool_input_preview,
+                            "callback": "POST /api/hit/approve",
+                        });
+                        if let Err(e) = client.post(&url).json(&payload).send().await {
+                            tracing::warn!(
+                                url = %url,
+                                error = %e,
+                                "HIT webhook relay: failed to notify webhook"
+                            );
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    _ => {}
+                }
+            }
+        });
+    }
+
+    // Validate model mappings in background (non-blocking).
+    let validation_state = state.clone();
+    tokio::spawn(async move {
+        let inner = validation_state.snapshot();
+        info!("Validating model mappings...");
+        let results = crate::preset::validate_config(&inner.config, &inner.provider_registry).await;
+        crate::preset::log_validation_results(&results);
+    });
+}
+
 /// Performs initial preset sync and spawns background sync if configured.
 pub(crate) async fn maybe_preset_sync(config: &AppConfig) {
     if !config.presets.auto_sync {

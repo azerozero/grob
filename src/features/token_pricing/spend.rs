@@ -1,11 +1,12 @@
 //! Persistent monthly spend tracking
 //! Stores spend data in ~/.grob/spend.json, auto-resets on new month
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::path::PathBuf;
 // Note: SpendTracker is always accessed through `Mutex<SpendTracker>` in AppState,
 // so fields can use plain types instead of atomics.
+
+// Re-export SpendData and current_month from the shared models module.
+pub use crate::models::spend_data::{current_month, SpendData};
 
 /// Budget limit parameters for warning checks.
 pub struct BudgetLimits {
@@ -33,30 +34,6 @@ impl std::fmt::Display for BudgetError {
 }
 
 impl std::error::Error for BudgetError {}
-
-/// Persistent spend data (serialized to JSON)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpendData {
-    /// Current month (e.g., "2026-02")
-    pub month: String,
-    /// Total spend in USD
-    pub total: f64,
-    /// Spend by provider name
-    pub by_provider: HashMap<String, f64>,
-    /// Spend by model name
-    pub by_model: HashMap<String, f64>,
-}
-
-impl Default for SpendData {
-    fn default() -> Self {
-        Self {
-            month: current_month(),
-            total: 0.0,
-            by_provider: HashMap::new(),
-            by_model: HashMap::new(),
-        }
-    }
-}
 
 /// Spend tracker with periodic persistence.
 /// Thin wrapper around `GrobStore` for backward compatibility.
@@ -140,6 +117,11 @@ impl SpendTracker {
                 .entry(provider.to_string())
                 .or_default() += cost;
             *self.data.by_model.entry(model.to_string()).or_default() += cost;
+            *self
+                .data
+                .by_provider_count
+                .entry(provider.to_string())
+                .or_default() += 1;
 
             self.request_count += 1;
             if self.request_count.is_multiple_of(10) {
@@ -342,11 +324,14 @@ impl crate::traits::SpendTracking for SpendTracker {
         self.total()
     }
 
-    fn provider_breakdown(&self) -> Vec<(String, f64)> {
+    fn provider_breakdown(&self) -> Vec<(String, f64, u64)> {
         self.data
             .by_provider
             .iter()
-            .map(|(k, v)| (k.clone(), *v))
+            .map(|(k, v)| {
+                let count = self.data.by_provider_count.get(k).copied().unwrap_or(0);
+                (k.clone(), *v, count)
+            })
             .collect()
     }
 
@@ -380,11 +365,6 @@ pub fn load_spend_data() -> SpendData {
     } else {
         SpendData::default()
     }
-}
-
-/// Returns the current year-month as a "YYYY-MM" string.
-pub fn current_month() -> String {
-    chrono::Local::now().format("%Y-%m").to_string()
 }
 
 #[cfg(test)]
