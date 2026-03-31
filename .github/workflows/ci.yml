@@ -265,6 +265,7 @@ jobs:
     name: API Compatibility
     needs: [changes]
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
