@@ -50,6 +50,19 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 - **Default host is IPv6**: `::1` (not `127.0.0.1`). Container mode uses `0.0.0.0`.
 - **Per-project config overlay**: `.grob.toml` in project root merges with global config (router, budget, preset overrides).
 
+## Git Flow
+
+```
+feature/* or fix/* ──► PR ──► develop ──► (release-plz PR) ──► main ──► tag v*
+```
+
+- **Never commit or push directly to `main`**. Only release-plz merges into `main`.
+- **Never create a PR with `develop` as the head targeting `main`**. This risks `develop` being deleted by GitHub's auto-delete-head-branch. Only release-plz creates PRs to `main` via temporary `release-plz-*` branches.
+- **Both `main` and `develop` are protected** (GitHub rulesets: no deletion, no force push).
+- **Always work on a feature branch** from `develop`: `feature/<topic>` or `fix/<topic>`.
+- **Conventional commits**: `feat:`, `fix:`, `refactor:`, `perf:` trigger version bumps via release-plz. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes.
+- **Pre-commit hooks** via [prek](https://github.com/j178/prek): run `prek install` after cloning. Hooks run `cargo fmt`, `clippy`, `gitleaks` on commit and tests, audit, deny on push.
+
 ## Commands
 
 ```bash
