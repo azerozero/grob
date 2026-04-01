@@ -18,13 +18,18 @@ pub enum CredentialStatus {
     Ready,
     /// OAuth token is missing for this provider.
     MissingOAuth {
+        /// Human-readable provider name from config.
         provider_name: String,
+        /// Token store key (e.g. "anthropic-max", "openai-codex").
         oauth_provider_id: String,
+        /// OAuth type string for [`OAuthConfig`] lookup.
         oauth_type: String,
     },
     /// API key environment variable is not set.
     MissingApiKey {
+        /// Human-readable provider name from config.
         provider_name: String,
+        /// Environment variable name that should hold the key.
         env_var: String,
     },
 }
