@@ -86,6 +86,26 @@ pub async fn cmd_start(
     }
     instance::cleanup_legacy_pid();
 
+    // Pre-flight credential check (interactive, only when TTY is available).
+    if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        if let Ok(store) =
+            crate::storage::GrobStore::open(&crate::storage::GrobStore::default_path())
+        {
+            let store = std::sync::Arc::new(store);
+            if let Ok(token_store) = crate::auth::TokenStore::with_store(store) {
+                let statuses =
+                    crate::auth::auto_flow::detect_credentials(&config.providers, &token_store);
+                let has_missing = statuses
+                    .iter()
+                    .any(|s| !matches!(s, crate::auth::auto_flow::CredentialStatus::Ready));
+                if has_missing {
+                    let _ =
+                        crate::auth::auto_flow::run_interactive_flow(statuses, &token_store).await;
+                }
+            }
+        }
+    }
+
     start_foreground(config, config_source).await?;
     Ok(())
 }

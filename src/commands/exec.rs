@@ -16,6 +16,27 @@ pub async fn cmd_exec(
     let already_running = instance::is_instance_running(&config.server.host, effective_port).await;
 
     if !already_running {
+        // Pre-flight credential check before spawning background service.
+        if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            if let Ok(store) =
+                crate::storage::GrobStore::open(&crate::storage::GrobStore::default_path())
+            {
+                let store = std::sync::Arc::new(store);
+                if let Ok(token_store) = crate::auth::TokenStore::with_store(store) {
+                    let statuses =
+                        crate::auth::auto_flow::detect_credentials(&config.providers, &token_store);
+                    let has_missing = statuses
+                        .iter()
+                        .any(|s| !matches!(s, crate::auth::auto_flow::CredentialStatus::Ready));
+                    if has_missing {
+                        let _ =
+                            crate::auth::auto_flow::run_interactive_flow(statuses, &token_store)
+                                .await;
+                    }
+                }
+            }
+        }
+
         eprintln!("Starting Grob on port {}...", effective_port);
         spawn_background_service(Some(effective_port), cli_config)?;
 
