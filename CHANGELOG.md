@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.1](https://github.com/azerozero/grob/compare/v0.35.0...v0.35.1) - 2026-04-01
+
+### Added
+
+- *(auth)* auto-detect and setup missing credentials on start
+
+### Fixed
+
+- *(ci)* split release-plz into release-pr and release-tag jobs
+
+### Other
+
+- *(claude,agents)* document git flow rules and branch protection
+- *(auth)* add doc comments to CredentialStatus fields
+- disable semver_check in release-plz (binary, not a crate)
+
 ## [0.34.0](https://github.com/azerozero/grob/compare/v0.33.0...v0.34.0) - 2026-03-31
 
 ### Fixed
