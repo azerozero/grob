@@ -259,7 +259,7 @@ jobs:
         with:
           shared-key: machete
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - uses: bnjbvr/cargo-machete@main
+      - uses: bnjbvr/cargo-machete@v0.9.1 # pinned — update manually
 
   coverage:
     name: Coverage

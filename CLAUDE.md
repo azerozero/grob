@@ -49,6 +49,10 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/traits.rs` | Core trait contracts (7+ traits for dispatch pipeline) |
 | `src/storage/` | Unified redb storage backend (GrobStore) |
 | `src/preset/` | Preset management system |
+| `src/auth/auto_flow.rs` | Automatic credential setup at startup |
+| `src/features/tool_layer/` | Tool-calling abstraction layer |
+| `src/features/pledge/` | Pledge-based capability restrictions |
+| `src/server/watch_sse.rs` | Live traffic inspector SSE backend |
 
 ## Local Setup
 
@@ -93,7 +97,7 @@ feature/* ──► develop ──► (release-plz PR) ──► main ──► 
 
 | Stage | Trigger | Jobs |
 |-------|---------|------|
-| Quality gates | push to `develop` / PR | fmt, clippy, doc, shellcheck, actionlint |
+| Quality gates | push to `develop` / PR | fmt, clippy, doc, actionlint |
 | Tests | push to `develop` / PR | unit tests (Ubuntu + macOS + Windows), integration tests |
 | Mutation testing | push to `develop` only | cargo-mutants on critical paths (router, DLP) |
 | Cross-build | push to `develop` + tag push | Multi-target binaries (Linux amd64/arm64/musl, macOS, Windows) |
