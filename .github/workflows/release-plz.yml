@@ -8,17 +8,23 @@ on:
   push:
     branches:
       - develop
-      - main
     paths:
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
+  # Trigger when a release-plz PR is merged into main.
+  # PAT pushes don't trigger `push` events, so we use pull_request instead.
+  pull_request:
+    types: [closed]
+    branches:
+      - main
 
 jobs:
-  # On develop push: create/update the release PR targeting main
+  # On develop push: create/update the release PR targeting main,
+  # then tag any unreleased versions.
   release-pr:
     name: Create Release PR
-    if: github.ref == 'refs/heads/develop'
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     concurrency:
       group: release-plz-pr
@@ -37,10 +43,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
-  # On main push (PR merged): create git tag
+  # On release PR merged into main: create git tag.
   release-tag:
     name: Tag Release
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.merged == true
+      && contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest
     concurrency:
       group: release-plz-tag
@@ -49,6 +58,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: main
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - uses: dtolnay/rust-toolchain@stable
