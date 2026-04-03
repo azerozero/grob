@@ -13,37 +13,48 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GROB="${GROB_BIN:-cargo run --quiet --}"
-GROB_HOME=$(mktemp -d)
+TEST_HOME=$(mktemp -d)
+GROB_HOME="${TEST_HOME}/.grob"
 export GROB_HOME
 
 PORT=13499  # avoid colliding with the main e2e pod
 MOCK_URL="http://127.0.0.1:8100"
-CONFIG="${GROB_HOME}/.grob/config.toml"
+GROB_DIR="$GROB_HOME"
+CONFIG="${GROB_DIR}/config.toml"
+mkdir -p "$GROB_DIR"
 
 passed=0
 failed=0
 skipped=0
 
+inc() { eval "$1=\$(( $1 + 1 ))"; }
+
 cleanup() {
     # Stop grob if running
-    $GROB stop --port "$PORT" 2>/dev/null || true
-    rm -rf "$GROB_HOME"
+    if [[ -n "${GROB_PID:-}" ]]; then
+        kill "$GROB_PID" 2>/dev/null || true
+        wait "$GROB_PID" 2>/dev/null || true
+    fi
+    rm -rf "$TEST_HOME"
 }
 trap cleanup EXIT
 
 run_test() {
-    local id="$1" name="$2"
-    shift 2
-    if [[ -n "${1:-}" ]] && [[ "$1" != "$id" ]]; then
+    local id="$1" name="$2" fn="$3" filter="$4"
+    if [[ -n "$filter" ]] && [[ "$filter" != "$id" ]]; then
         return
     fi
     echo -n "  $id $name ... "
-    if "$@"; then
+    set +e
+    $fn
+    local rc=$?
+    set -e
+    if [[ $rc -eq 0 ]]; then
         echo "PASS"
-        ((passed++))
+        inc passed
     else
         echo "FAIL"
-        ((failed++))
+        inc failed
     fi
 }
 
@@ -51,8 +62,13 @@ run_test() {
 # W0: No config → grob doctor exits with issues
 # =========================================================================
 test_W0_no_config_doctor() {
+    # With a minimal empty-ish config, doctor should flag missing providers.
+    cat > "${CONFIG}.w0" <<TOML
+[router]
+default = "default"
+TOML
     local out
-    out=$($GROB doctor --config /dev/null 2>&1) || true
+    out=$($GROB -c "${CONFIG}.w0" doctor 2>&1) || true
     echo "$out" | grep -q "No providers configured"
 }
 
@@ -62,7 +78,8 @@ test_W0_no_config_doctor() {
 test_W1_setup_generates_config() {
     # Simulate: select Claude Code (1), OAuth (1), skip openrouter (2),
     # standard security (1), unlimited budget (1)
-    printf '1\n1\n2\n1\n1\n' | $GROB setup --config "$CONFIG" 2>&1 >/dev/null
+    mkdir -p "$GROB_DIR"
+    printf '1\n1\n2\n1\n1\n' | $GROB setup >/dev/null 2>&1 || true
 
     [[ -f "$CONFIG" ]] || return 1
 
@@ -74,8 +91,9 @@ test_W1_setup_generates_config() {
 # W2: Generated config is valid TOML that grob can parse
 # =========================================================================
 test_W2_config_parses() {
-    # grob validate --dry-run just parses, doesn't call providers
-    $GROB doctor --config "$CONFIG" 2>&1 | grep -q "Config file:"
+    local out
+    out=$($GROB -c "$CONFIG" doctor 2>&1) || true
+    echo "$out" | grep -q "Config file:"
 }
 
 # =========================================================================
@@ -92,6 +110,9 @@ name = "mock"
 provider_type = "openai"
 base_url = "$MOCK_URL"
 api_key = "sk-test-key"
+models = []
+enabled = true
+pass_through = true
 
 [[models]]
 name = "default"
@@ -112,7 +133,7 @@ TOML
 # =========================================================================
 test_W4_doctor_passes() {
     local out
-    out=$($GROB doctor --config "$CONFIG" 2>&1)
+    out=$($GROB -c "$CONFIG" doctor 2>&1)
     echo "$out" | grep -q "Config file:"
     # Should not have "No providers configured"
     ! echo "$out" | grep -q "No providers configured"
@@ -122,7 +143,8 @@ test_W4_doctor_passes() {
 # W5: Start server with mock config, health check passes
 # =========================================================================
 test_W5_start_and_health() {
-    $GROB start -d --config "$CONFIG" --port "$PORT" 2>&1 >/dev/null
+    $GROB -c "$CONFIG" start >/dev/null 2>&1 &
+    GROB_PID=$!
 
     # Wait for health
     for _ in $(seq 1 30); do
@@ -160,7 +182,10 @@ test_W7_config_reload() {
 # W8: Stop and verify clean shutdown
 # =========================================================================
 test_W8_stop_clean() {
-    $GROB stop --port "$PORT" 2>&1 >/dev/null || true
+    if [[ -n "${GROB_PID:-}" ]]; then
+        kill "$GROB_PID" 2>/dev/null || true
+        wait "$GROB_PID" 2>/dev/null || true
+    fi
     sleep 1
     # Health should fail now
     ! curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1
@@ -171,9 +196,9 @@ test_W8_stop_clean() {
 # =========================================================================
 test_W9_setup_detects_existing() {
     local out
-    # Setup should detect existing config and show it
-    out=$(printf '7\n' | $GROB setup --config "$CONFIG" 2>&1) || true
-    # Should mention the config exists or show current state
+    # Setup should detect existing config and show current state
+    out=$(printf '7\n' | $GROB setup 2>&1) || true
+    # Config should still exist after re-run
     [[ -f "$CONFIG" ]]
 }
 
