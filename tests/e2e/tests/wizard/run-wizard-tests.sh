@@ -108,7 +108,7 @@ host = "127.0.0.1"
 [[providers]]
 name = "mock"
 provider_type = "openai"
-base_url = "$MOCK_URL"
+base_url = "$MOCK_URL/v1"
 api_key = "sk-test-key"
 models = []
 enabled = true
