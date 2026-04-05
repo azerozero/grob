@@ -472,6 +472,35 @@ pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Previews a preset merge without writing to disk.
+///
+/// Returns the merged TOML as a string for display.
+pub fn preview_preset(name: &str, config_path: &Path) -> Result<String> {
+    let preset_content_str = preset_content(name)?;
+    let preset: toml::Value = toml::from_str(&preset_content_str)
+        .with_context(|| format!("Failed to parse preset '{}'", name))?;
+
+    let existing_content = if config_path.exists() {
+        std::fs::read_to_string(config_path)
+            .with_context(|| format!("Failed to read config: {}", config_path.display()))?
+    } else {
+        String::new()
+    };
+
+    let mut config: toml::Value = if existing_content.is_empty() {
+        toml::Value::Table(toml::map::Map::new())
+    } else {
+        toml::from_str(&existing_content)
+            .with_context(|| format!("Failed to parse config: {}", config_path.display()))?
+    };
+
+    if let (Some(config_table), Some(preset_table)) = (config.as_table_mut(), preset.as_table()) {
+        merge_preset_into_config(config_table, preset_table);
+    }
+
+    toml::to_string_pretty(&config).context("Failed to serialize preview")
+}
+
 /// Merges only compliance sections from a preset without replacing router/providers/models.
 ///
 /// Overlays `[security]`, `[compliance]`, `[dlp]` from the named preset onto the

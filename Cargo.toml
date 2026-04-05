@@ -156,6 +156,16 @@ tracing-test = "0.2"       # Capture tracing logs in tests
 proptest = "1"
 rcgen = "0.13"             # Self-signed certs for TLS benchmarks
 
+# Cucumber BDD (E2E)
+cucumber = "0.21"
+reqwest = { version = "0.12", features = ["json"] }
+
+[[test]]
+name = "cucumber"
+path = "tests/cucumber/main.rs"
+harness = false
+test = false  # Only run via: cargo test --test cucumber
+
 [[bench]]
 name = "routing"
 harness = false
