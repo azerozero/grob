@@ -110,6 +110,12 @@ pub(crate) async fn update_config_json(
     let mut config: toml::Value = toml::from_str(&config_str)
         .map_err(|e| AppError::ParseError(format!("Failed to parse config: {}", e)))?;
 
+    // Create backup before modifying config
+    let backup_path = config_path.with_extension("toml.backup");
+    tokio::fs::copy(config_path, &backup_path)
+        .await
+        .map_err(|e| AppError::ParseError(format!("Failed to create backup: {}", e)))?;
+
     // Update providers section
     if let Some(providers) = new_config.get("providers") {
         // Convert from serde_json::Value to toml::Value

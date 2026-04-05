@@ -46,7 +46,11 @@ async fn main() -> anyhow::Result<()> {
 
     // First-run setup wizard: trigger on `grob setup` or when config doesn't exist
     // for start/exec commands (interactive TTY only).
-    let needs_wizard = matches!(command, Commands::Setup)
+    let (wizard_yes, wizard_dry_run) = match &command {
+        Commands::Setup { yes, dry_run } => (*yes, *dry_run),
+        _ => (false, false),
+    };
+    let needs_wizard = matches!(command, Commands::Setup { .. })
         || (matches!(command, Commands::Start { .. } | Commands::Exec { .. })
             && matches!(&config_source, cli::ConfigSource::File(p) if cli::AppConfig::needs_first_run(p))
             && std::io::stdin().is_terminal());
@@ -57,7 +61,11 @@ async fn main() -> anyhow::Result<()> {
             cli::ConfigSource::Url(_) => cli::AppConfig::default_path()
                 .unwrap_or_else(|_| PathBuf::from("config/default.toml")),
         };
-        let completed = commands::setup::run_setup_wizard(&config_path)?;
+        let flags = commands::setup::SetupFlags {
+            yes: wizard_yes,
+            dry_run: wizard_dry_run,
+        };
+        let completed = commands::setup::run_setup_wizard(&config_path, &flags)?;
         if !completed {
             return Ok(());
         }
@@ -150,8 +158,13 @@ async fn main() -> anyhow::Result<()> {
             PresetAction::List => commands::preset::cmd_preset_list(&config).await,
             PresetAction::Info { name } => commands::preset::cmd_preset_info(&name),
             PresetAction::Install { source } => commands::preset::cmd_preset_install(&source).await,
-            PresetAction::Apply { name, reload } => {
-                commands::preset::cmd_preset_apply(&name, &config_source, &config, reload).await?;
+            PresetAction::Apply {
+                name,
+                reload,
+                dry_run,
+            } => {
+                commands::preset::cmd_preset_apply(&name, &config_source, &config, reload, dry_run)
+                    .await?;
             }
             PresetAction::Export { name, env } => {
                 commands::preset::cmd_preset_export(&name, &config_source, env.as_deref())?;
@@ -177,7 +190,7 @@ async fn main() -> anyhow::Result<()> {
         Commands::ConfigDiff { target } => {
             commands::config_diff::cmd_config_diff(&config, &config_source, target)?;
         }
-        Commands::Setup => {
+        Commands::Setup { .. } => {
             // Already handled above; if we reach here, wizard already ran.
         }
         Commands::Key { action } => match action {
@@ -221,7 +234,12 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?
         }
-        Commands::Doctor => commands::doctor::cmd_doctor(&config, &config_source).await,
+        Commands::Doctor => {
+            let exit_code = commands::doctor::cmd_doctor(&config, &config_source).await;
+            if exit_code > 0 {
+                std::process::exit(exit_code as i32);
+            }
+        }
         #[cfg(feature = "watch")]
         Commands::Watch => {
             let base_url = cli::format_base_url(&config.server.host, config.server.port.value());

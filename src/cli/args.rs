@@ -122,7 +122,14 @@ pub enum Commands {
         target: Option<String>,
     },
     /// Interactive setup wizard (auto-triggered on first run)
-    Setup,
+    Setup {
+        /// Accept all defaults without prompting
+        #[arg(long)]
+        yes: bool,
+        /// Preview changes without writing to disk
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Live traffic inspector — watch requests, DLP actions, and fallbacks in real time
     #[cfg(feature = "watch")]
     Watch,
@@ -269,6 +276,9 @@ pub enum PresetAction {
         /// Hot-reload the running server after applying
         #[arg(short, long)]
         reload: bool,
+        /// Preview changes without writing to disk
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Export current config as a reusable preset
     Export {

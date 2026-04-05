@@ -315,27 +315,15 @@ fn setup_api_key_interactive(
         return Ok(false);
     }
 
-    // Store the key in ~/.grob/config.toml by updating the provider's api_key
-    // field from "$ENV_VAR" to the actual value.
-    let grob_dir = crate::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?
-        .join(".grob");
-    let config_path = grob_dir.join("config.toml");
-    if config_path.exists() {
-        let content = std::fs::read_to_string(&config_path)?;
-        // Replace the env var reference with the actual key.
-        let replaced = content.replace(&format!("\"${}\"", env_var), &format!("\"{}\"", key));
-        if replaced != content {
-            std::fs::write(&config_path, &replaced)?;
-            eprintln!("    ✅ API key saved to config.toml");
-            eprintln!();
-            return Ok(true);
-        }
-    }
-
-    // Fallback: tell the user to set the env var.
-    eprintln!("    Set the env var and restart:");
-    eprintln!("    export {}={}", env_var, key);
+    // Keep the $ENV_VAR reference in config.toml — never store raw keys on disk.
+    // Instead, instruct the user to export the key in their shell profile.
+    eprintln!(
+        "    ✅ Key accepted (stored as ${} reference in config)",
+        env_var
+    );
+    eprintln!();
+    eprintln!("    Add to your shell profile:");
+    eprintln!("      export {}={}", env_var, key);
     eprintln!();
     Ok(true)
 }

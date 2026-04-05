@@ -43,6 +43,7 @@ pub async fn cmd_preset_apply(
     config_source: &cli::ConfigSource,
     config: &cli::AppConfig,
     reload: bool,
+    dry_run: bool,
 ) -> anyhow::Result<()> {
     let file_path = match config_source {
         cli::ConfigSource::File(p) => p.clone(),
@@ -52,6 +53,20 @@ pub async fn cmd_preset_apply(
             return Ok(());
         }
     };
+
+    if dry_run {
+        println!("🔧 Dry run: previewing preset '{}'...", name);
+        match preset::preview_preset(name, &file_path) {
+            Ok(preview) => {
+                println!("{}", preview);
+                println!();
+                println!("Dry run — no changes written.");
+            }
+            Err(e) => eprintln!("❌ Failed to preview preset: {}", e),
+        }
+        return Ok(());
+    }
+
     println!("🔧 Applying preset '{}'...", name);
     match preset::apply_preset(name, &file_path) {
         Ok(_) => {
