@@ -166,5 +166,4 @@ See `docs/reference/` for the full config field reference.
 
 ## See also
 
-- [ADR-0007 — Federated multi-enterprise HIT authorization](../decisions/0007-hit-federated-multisig.md) — architecture decision for multisig and cross-enterprise approval chains
-- [ADR-0006 — Policy engine, encrypted audit, HIT Gateway](../decisions/0006-policy-engine-encrypted-audit-hit-gateway.md) — < 10 µs per-request overhead rationale and HIT design decisions
+- [ADR-0006 — Policy engine, encrypted audit, HIT Gateway](../decisions/0006-policy-engine-encrypted-audit-hit-gateway.md) — per-request overhead rationale and HIT design decisions
