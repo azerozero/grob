@@ -111,7 +111,9 @@ enum Compliance {
 
 /// Flags from CLI arguments.
 pub struct SetupFlags {
+    /// Accepts all defaults without interactive prompts.
     pub yes: bool,
+    /// Previews changes without writing to disk.
     pub dry_run: bool,
 }
 
