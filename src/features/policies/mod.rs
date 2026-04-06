@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod context;
+pub mod decision_token;
 pub mod hit;
 pub mod hit_auth;
 #[cfg(feature = "policies")]
