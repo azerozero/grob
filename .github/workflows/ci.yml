@@ -425,14 +425,27 @@ jobs:
 
   # =========================================================================
   # Stage 2.5: Mutation testing (develop push only, informational)
+  #   Sharded: 1 file per job for ~4x speedup (was ~45min sequential).
   # =========================================================================
   mutants:
-    name: Mutation Testing
+    name: Mutation Testing (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.ref == 'refs/heads/develop'
     needs: [test-ubuntu, test-other]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            file: src/router/mod.rs
+          - shard: 2
+            file: src/features/dlp/mod.rs
+          - shard: 3
+            file: src/features/dlp/pii.rs
+          - shard: 4
+            file: src/features/dlp/dfa.rs
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -441,23 +454,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: mutants
+          shared-key: mutants-${{ matrix.shard }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - name: Install cargo-mutants
         run: cargo install cargo-mutants --locked
-      - name: Run mutation testing on critical paths
+      - name: Run mutation testing on ${{ matrix.file }}
         run: |
           cargo mutants --package grob --timeout 120 -j 2 \
-            --file src/router/mod.rs \
-            --file src/features/dlp/mod.rs \
-            --file src/features/dlp/pii.rs \
-            --file src/features/dlp/dfa.rs \
+            --file ${{ matrix.file }} \
             -- --lib
       - name: Upload mutation testing results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: mutants-results-${{ github.sha }}
+          name: mutants-results-shard-${{ matrix.shard }}-${{ github.sha }}
           path: mutants.out/
           if-no-files-found: ignore
 
