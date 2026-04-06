@@ -20,6 +20,13 @@ async fn volume_mountpoint() -> String {
 }
 
 /// Reads audit JSONL directly from the volume mountpoint on the host.
+///
+/// Public alias for use from other step modules.
+pub async fn load_audit_pub(world: &mut E2eWorld) {
+    load_audit(world).await;
+}
+
+/// Reads audit JSONL directly from the volume mountpoint on the host.
 async fn load_audit(world: &mut E2eWorld) {
     let mountpoint = volume_mountpoint().await;
     let path = format!("{mountpoint}/current.jsonl");

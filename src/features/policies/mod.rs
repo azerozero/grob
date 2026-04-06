@@ -2,7 +2,7 @@
 //!
 //! Evaluates [`RequestContext`] against glob-based [`MatchRules`] to produce
 //! a [`ResolvedPolicy`] with overrides for DLP, rate limiting, routing, budget,
-//! log export, and HIT authorization.
+//! log export, HIT authorization, and decision token routing.
 
 pub mod config;
 pub mod context;
