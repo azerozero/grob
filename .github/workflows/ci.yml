@@ -434,7 +434,7 @@ jobs:
     if: github.ref == 'refs/heads/develop'
     needs: [test-ubuntu, test-other]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     continue-on-error: true
     strategy:
       fail-fast: false
