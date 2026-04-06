@@ -738,3 +738,31 @@ fn trailing_literal_digit_then_three_alpha() {
     // Digit breaks, only 2 alpha → None.
     assert_eq!(extract_trailing_literal_byte("9ab"), None);
 }
+
+#[test]
+fn trailing_literal_triple_dollar() {
+    // Kills: `end -= 1` → no-op (infinite loop / timeout) in dollar-stripping loop.
+    // All three dollars stripped → end == 0 → None.
+    assert_eq!(extract_trailing_literal_byte("$$$"), None);
+}
+
+#[test]
+fn trailing_literal_pure_alpha_pattern() {
+    // Kills: `i > 0` → `false` in backward walk (walk would not execute at all).
+    // Entire pattern is alpha → i walks to 0, run = full length.
+    assert_eq!(extract_trailing_literal_byte("hello"), Some(b'h'));
+    assert_eq!(extract_trailing_literal_byte("abc"), Some(b'a'));
+    // Only 2 alpha chars (full pattern) → None.
+    assert_eq!(extract_trailing_literal_byte("ab"), None);
+}
+
+#[test]
+fn trailing_literal_single_char() {
+    // Kills: `end == 0` → off-by-one mutations after dollar strip.
+    // Single alpha char → run is 1 < 3 → None.
+    assert_eq!(extract_trailing_literal_byte("x"), None);
+    // Single non-alpha → None (early return on non-alpha check).
+    assert_eq!(extract_trailing_literal_byte("9"), None);
+    // Single dollar → end == 0 → None.
+    assert_eq!(extract_trailing_literal_byte("$"), None);
+}
