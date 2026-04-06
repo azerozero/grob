@@ -53,8 +53,7 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
+permissions: read-all
 
 env:
   CARGO_INCREMENTAL: 0
