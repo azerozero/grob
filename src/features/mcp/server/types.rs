@@ -193,6 +193,76 @@ impl std::fmt::Display for CalibrateParams {
     }
 }
 
+/// Configurable sections exposed by the `grob_configure` self-tuning tool.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigSection {
+    /// Request routing rules and model assignments.
+    Router,
+    /// Monthly spend budget and warning thresholds.
+    Budget,
+    /// DLP pipeline settings (read-only severity/action fields).
+    Dlp,
+    /// LLM response cache settings.
+    Cache,
+}
+
+impl std::fmt::Display for ConfigSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigSection::Router => f.write_str("router"),
+            ConfigSection::Budget => f.write_str("budget"),
+            ConfigSection::Dlp => f.write_str("dlp"),
+            ConfigSection::Cache => f.write_str("cache"),
+        }
+    }
+}
+
+/// Actions supported by the `grob_configure` self-tuning tool.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum ConfigureAction {
+    /// Reads the current value of a config section (safe subset only).
+    Read {
+        /// Config section to read.
+        section: ConfigSection,
+    },
+    /// Updates a single key within a config section.
+    Update {
+        /// Config section containing the key.
+        section: ConfigSection,
+        /// Dot-separated key path within the section (e.g. `"default"`, `"monthly_limit_usd"`).
+        key: String,
+        /// New value to set.
+        value: serde_json::Value,
+    },
+}
+
+impl std::fmt::Display for ConfigureAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigureAction::Read { section } => write!(f, "read {section}"),
+            ConfigureAction::Update { section, key, .. } => {
+                write!(f, "update {section}.{key}")
+            }
+        }
+    }
+}
+
+/// Parameters for `grob_configure`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConfigureParams {
+    /// The action to perform (read or update).
+    #[serde(flatten)]
+    pub action: ConfigureAction,
+}
+
+impl std::fmt::Display for ConfigureParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "configure {}", self.action)
+    }
+}
+
 /// MCP `tools/list` response entry.
 #[derive(Debug, Clone, Serialize)]
 pub struct McpToolInfo {
