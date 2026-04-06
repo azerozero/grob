@@ -634,3 +634,135 @@ fn trailing_literal_alpha_run_with_digit_boundary() {
     // "foo1ab" — last alpha run is "ab" (2 chars) → None.
     assert_eq!(extract_trailing_literal_byte("foo1ab"), None);
 }
+
+// --- Mutant-killing tests for extract_trailing_literal_byte ---
+// Targets: >= 3 boundary, to_ascii_lowercase, alternation, escape sequences.
+
+#[test]
+fn trailing_literal_boundary_two_vs_three() {
+    // Exactly 2 alpha chars → None (boundary: < 3).
+    assert_eq!(extract_trailing_literal_byte(".*ab"), None);
+    // Exactly 3 alpha chars → Some (boundary: >= 3).
+    assert_eq!(extract_trailing_literal_byte(".*abc"), Some(b'a'));
+    // Exactly 4 alpha chars → Some (first byte of run).
+    assert_eq!(extract_trailing_literal_byte(".*abcd"), Some(b'a'));
+}
+
+#[test]
+fn trailing_literal_lowercase_identity() {
+    // Already lowercase — result must equal the byte itself.
+    assert_eq!(extract_trailing_literal_byte(".*hello"), Some(b'h'));
+    // Mixed case — result is always lowercased first byte of the run.
+    assert_eq!(extract_trailing_literal_byte(".*Hello"), Some(b'h'));
+    assert_eq!(extract_trailing_literal_byte(".*HELLO"), Some(b'h'));
+    // Verify the returned byte is specifically lowercase, not the original.
+    let result = extract_trailing_literal_byte(".*ZZZ");
+    assert_eq!(result, Some(b'z'));
+    assert_ne!(result, Some(b'Z'));
+}
+
+#[test]
+fn trailing_literal_first_byte_of_run_not_last() {
+    // Must return first byte of the alphabetic run, not the last.
+    assert_eq!(extract_trailing_literal_byte(".*xyz"), Some(b'x'));
+    assert_ne!(extract_trailing_literal_byte(".*xyz"), Some(b'z'));
+}
+
+#[test]
+fn trailing_literal_quantifiers_before_alpha() {
+    // Quantifier before the alpha run does not affect extraction.
+    assert_eq!(extract_trailing_literal_byte(".*foo+bar"), Some(b'b'));
+    assert_eq!(extract_trailing_literal_byte(".*foo?baz"), Some(b'b'));
+    assert_eq!(extract_trailing_literal_byte(".*foo*qux"), Some(b'q'));
+}
+
+#[test]
+fn trailing_literal_trailing_quantifier() {
+    // Quantifier as last character → not alphabetic → None.
+    assert_eq!(extract_trailing_literal_byte(".*abc+"), None);
+    assert_eq!(extract_trailing_literal_byte(".*abc*"), None);
+    assert_eq!(extract_trailing_literal_byte(".*abc?"), None);
+}
+
+#[test]
+fn trailing_literal_dollar_after_short_alpha() {
+    // "ab$" → strip $, alpha run is "ab" (2) → None.
+    assert_eq!(extract_trailing_literal_byte("ab$"), None);
+    // "abc$" → strip $, alpha run is "abc" (3) → Some(b'a').
+    assert_eq!(extract_trailing_literal_byte("abc$"), Some(b'a'));
+}
+
+#[test]
+fn trailing_literal_pipe_anywhere() {
+    // Pipe at start, middle, end — all bail.
+    assert_eq!(extract_trailing_literal_byte("|abc"), None);
+    assert_eq!(extract_trailing_literal_byte("abc|def"), None);
+    assert_eq!(extract_trailing_literal_byte("abc|"), None);
+}
+
+#[test]
+fn trailing_literal_backslash_escape() {
+    // 'd' after backslash is still an ASCII alpha byte — the function does not
+    // parse regex escapes, it only looks at raw bytes.
+    assert_eq!(extract_trailing_literal_byte(".*abc\\d"), None);
+    // "\\wabc" → backslash (0x5C) breaks alpha run, "wabc" is 4 alpha → Some(b'w').
+    assert_eq!(extract_trailing_literal_byte(".*\\wabc"), Some(b'w'));
+}
+
+#[test]
+fn trailing_literal_unicode_non_ascii() {
+    // "café" ends with UTF-8 bytes for 'é' (0xC3 0xA9) which are not ASCII alpha,
+    // but the byte before them is 'f' — so the function sees the raw bytes.
+    // Actually "café" = [99, 97, 102, 195, 169] — last non-alpha, alpha run before
+    // is "caf" wait no — let's just verify actual behavior.
+    // "über" = [195, 188, 98, 101, 114] — "ber" is 3 alpha → Some(b'b').
+    assert_eq!(extract_trailing_literal_byte(".*über"), Some(b'b'));
+    // Pure non-ASCII at end → None.
+    assert_eq!(extract_trailing_literal_byte(".*ÉÉÉ"), None);
+}
+
+#[test]
+fn trailing_literal_long_alpha_run() {
+    // Long run → returns first byte.
+    assert_eq!(
+        extract_trailing_literal_byte(".*abcdefghijklmnop"),
+        Some(b'a')
+    );
+}
+
+#[test]
+fn trailing_literal_digit_then_three_alpha() {
+    // Digit breaks the run, then 3 alpha → extracted.
+    assert_eq!(extract_trailing_literal_byte("9abc"), Some(b'a'));
+    assert_eq!(extract_trailing_literal_byte("99abc"), Some(b'a'));
+    // Digit breaks, only 2 alpha → None.
+    assert_eq!(extract_trailing_literal_byte("9ab"), None);
+}
+
+#[test]
+fn trailing_literal_triple_dollar() {
+    // Kills: `end -= 1` → no-op (infinite loop / timeout) in dollar-stripping loop.
+    // All three dollars stripped → end == 0 → None.
+    assert_eq!(extract_trailing_literal_byte("$$$"), None);
+}
+
+#[test]
+fn trailing_literal_pure_alpha_pattern() {
+    // Kills: `i > 0` → `false` in backward walk (walk would not execute at all).
+    // Entire pattern is alpha → i walks to 0, run = full length.
+    assert_eq!(extract_trailing_literal_byte("hello"), Some(b'h'));
+    assert_eq!(extract_trailing_literal_byte("abc"), Some(b'a'));
+    // Only 2 alpha chars (full pattern) → None.
+    assert_eq!(extract_trailing_literal_byte("ab"), None);
+}
+
+#[test]
+fn trailing_literal_single_char() {
+    // Kills: `end == 0` → off-by-one mutations after dollar strip.
+    // Single alpha char → run is 1 < 3 → None.
+    assert_eq!(extract_trailing_literal_byte("x"), None);
+    // Single non-alpha → None (early return on non-alpha check).
+    assert_eq!(extract_trailing_literal_byte("9"), None);
+    // Single dollar → end == 0 → None.
+    assert_eq!(extract_trailing_literal_byte("$"), None);
+}
