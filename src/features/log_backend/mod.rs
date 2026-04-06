@@ -15,8 +15,11 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Plane {
+    /// Infrastructure and OS-level logs (journald, auditd).
     Machine,
+    /// Application-level logs (container stdout/stderr).
     App,
+    /// Compliance and security audit logs (grob ECDSA-P256 signed).
     Audit,
 }
 
@@ -171,16 +174,22 @@ pub enum SignatureStatus {
 /// Errors from log backend operations.
 #[derive(Debug, thiserror::Error)]
 pub enum LogBackendError {
+    /// Indicates the role lacks permission to query the requested backend.
     #[error("backend not allowed for role: {0}")]
     BackendDenied(String),
+    /// Indicates the role lacks permission to access the requested plane.
     #[error("plane not allowed for role: {0}")]
     PlaneDenied(String),
+    /// Indicates the role lacks permission for the requested action.
     #[error("action not allowed: {0}")]
     ActionDenied(String),
+    /// Indicates N-of-N signature verification or hash-chain failure.
     #[error("integrity violation: {0}")]
     IntegrityViolation(String),
+    /// Indicates the backend is unreachable or degraded.
     #[error("backend unavailable: {0}")]
     Unavailable(String),
+    /// Indicates a transport or deserialization error during query.
     #[error("query error: {0}")]
     QueryError(String),
 }
