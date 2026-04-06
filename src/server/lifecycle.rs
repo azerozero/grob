@@ -1,4 +1,8 @@
 //! Server lifecycle: bind, serve, drain, and OAuth callback spawning.
+//!
+//! TLS uses axum-server with rustls. The `rustls-pemfile` transitive dep
+//! is tracked under RUSTSEC-2025-0134 until axum-server migrates to
+//! `rustls-pki-types`.
 
 use super::{oauth_handlers, AppState};
 use crate::cli::AppConfig;
