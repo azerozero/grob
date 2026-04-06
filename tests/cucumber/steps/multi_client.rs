@@ -1,4 +1,4 @@
-use cucumber::{then, when};
+use cucumber::{given, then, when};
 use std::collections::HashMap;
 
 use crate::world::E2eWorld;
@@ -276,5 +276,98 @@ async fn failover_or_502(world: &mut E2eWorld, client: String) {
     assert!(
         status == 502 || status == 200,
         "client {client}: expected 502 or 200 (fallback), got {status}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// T5 — HIT Gateway multi-client
+// ---------------------------------------------------------------------------
+
+/// Per-client HIT configuration for T5 scenarios.
+#[derive(Debug, Default, Clone)]
+pub struct HitClientConfig {
+    /// Auto-approve threshold (tool scores below this are auto-approved).
+    pub auto_below: u32,
+    /// XFA score (high XFA can relax the threshold).
+    pub xfa_score: Option<u32>,
+    /// Deny all tools.
+    pub deny_all: bool,
+    /// Last HIT decision for this client.
+    pub last_decision: Option<String>,
+}
+
+/// Resolves the HIT decision for a client given their config and tool score.
+fn resolve_hit_decision(cfg: &HitClientConfig, tool_score: u32) -> String {
+    if cfg.deny_all {
+        return "deny".to_string();
+    }
+
+    // XFA relaxation: if XFA score >= 90, effectively double the auto_below threshold.
+    let effective_threshold = if cfg.xfa_score.map_or(false, |xfa| xfa >= 90) {
+        cfg.auto_below * 2
+    } else {
+        cfg.auto_below
+    };
+
+    if tool_score < effective_threshold {
+        "auto-approve".to_string()
+    } else {
+        "pending".to_string()
+    }
+}
+
+#[given(regex = r"^client ([A-C]) has HIT auto_below threshold (\d+)$")]
+async fn client_hit_threshold(world: &mut E2eWorld, client: String, threshold: u32) {
+    let cfg = world
+        .hit_configs
+        .entry(client)
+        .or_insert_with(HitClientConfig::default);
+    cfg.auto_below = threshold;
+}
+
+#[given(regex = r"client ([A-C]) has HIT auto_below threshold (\d+) and XFA score (\d+)")]
+async fn client_hit_threshold_xfa(world: &mut E2eWorld, client: String, threshold: u32, xfa: u32) {
+    let cfg = world
+        .hit_configs
+        .entry(client)
+        .or_insert_with(HitClientConfig::default);
+    cfg.auto_below = threshold;
+    cfg.xfa_score = Some(xfa);
+}
+
+#[given(regex = r"client ([A-C]) has HIT policy deny all tools")]
+async fn client_hit_deny_all(world: &mut E2eWorld, client: String) {
+    let cfg = world
+        .hit_configs
+        .entry(client)
+        .or_insert_with(HitClientConfig::default);
+    cfg.deny_all = true;
+}
+
+#[when(regex = r"client ([A-C]) triggers a tool call scoring (\d+)")]
+async fn client_tool_call(world: &mut E2eWorld, client: String, score: u32) {
+    let cfg = world.hit_configs.get(&client).cloned().unwrap_or_default();
+
+    let decision = resolve_hit_decision(&cfg, score);
+    let hit_cfg = world
+        .hit_configs
+        .entry(client)
+        .or_insert_with(HitClientConfig::default);
+    hit_cfg.last_decision = Some(decision);
+}
+
+#[then(regex = r#"client ([A-C]) tool call decision is "(.+)""#)]
+async fn client_hit_decision(world: &mut E2eWorld, client: String, expected: String) {
+    let cfg = world
+        .hit_configs
+        .get(&client)
+        .unwrap_or_else(|| panic!("no HIT config for client {client}"));
+    let actual = cfg
+        .last_decision
+        .as_deref()
+        .unwrap_or_else(|| panic!("no HIT decision recorded for client {client}"));
+    assert_eq!(
+        actual, expected,
+        "client {client}: expected HIT decision '{expected}', got '{actual}'"
     );
 }

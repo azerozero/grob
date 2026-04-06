@@ -53,6 +53,8 @@ pub struct E2eWorld {
     pub clients: HashMap<String, ClientSnapshot>,
     /// SSN value injected in DLP scenarios for later assertion.
     pub injected_ssn: String,
+    /// Per-client HIT configurations for T5 scenarios (keyed by "A", "B", "C").
+    pub hit_configs: HashMap<String, crate::steps::multi_client::HitClientConfig>,
 }
 
 impl E2eWorld {

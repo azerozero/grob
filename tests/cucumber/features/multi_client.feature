@@ -48,3 +48,35 @@ Feature: Multi-client isolation and enforcement
     Given toxiproxy disables proxy "anthropic-mock"
     When client C sends a request on project "analytics"
     Then client C receives 200
+
+  # T5 — HIT Gateway multi-client
+  Scenario: Low threshold client requires human approval
+    Given client A has HIT auto_below threshold 30
+    When client A triggers a tool call scoring 40
+    Then client A tool call decision is "pending"
+
+  Scenario: High threshold client with XFA auto-approves
+    Given client B has HIT auto_below threshold 60 and XFA score 90
+    When client B triggers a tool call scoring 40
+    Then client B tool call decision is "auto-approve"
+
+  Scenario: Deny-all client blocks all tool calls
+    Given client C has HIT policy deny all tools
+    When client C triggers a tool call scoring 40
+    Then client C tool call decision is "deny"
+
+  # T5 — HIT Gateway multi-client
+  Scenario: Low threshold client requires human approval
+    Given client A has HIT auto_below threshold 30
+    When client A triggers a tool call scoring 40
+    Then client A tool call decision is "pending"
+
+  Scenario: High threshold client with XFA auto-approves
+    Given client B has HIT auto_below threshold 60 and XFA score 90
+    When client B triggers a tool call scoring 40
+    Then client B tool call decision is "auto-approve"
+
+  Scenario: Deny-all client blocks all tool calls
+    Given client C has HIT policy deny all tools
+    When client C triggers a tool call scoring 40
+    Then client C tool call decision is "deny"
