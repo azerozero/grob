@@ -54,10 +54,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
-  checks: write
-  packages: write
-  id-token: write
+  contents: read
 
 env:
   CARGO_INCREMENTAL: 0
@@ -174,6 +171,8 @@ jobs:
 
   audit:
     name: Security Audit
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -187,6 +186,8 @@ jobs:
 
   gitleaks:
     name: Gitleaks
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -198,7 +199,7 @@ jobs:
           fetch-depth: 0
       - name: Install gitleaks
         run: |
-          VERSION=$(curl -sSf https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r .tag_name | sed 's/^v//')
+          VERSION=8.24.3  # pinned — update manually
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
             | sudo tar xz -C /usr/local/bin gitleaks
       - name: Run gitleaks
@@ -206,6 +207,8 @@ jobs:
 
   deny:
     name: Cargo Deny
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -457,7 +460,7 @@ jobs:
           shared-key: mutants-${{ matrix.shard }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - name: Install cargo-mutants
-        run: cargo install cargo-mutants --locked
+        run: cargo install cargo-mutants@24.11.2 --locked  # pinned — update manually
       - name: Run mutation testing on ${{ matrix.file }}
         run: |
           cargo mutants --package grob --timeout 120 -j 2 \
@@ -514,7 +517,8 @@ jobs:
       - name: Install cross
         if: matrix.use-cross
         run: |
-          curl -fsSL https://github.com/cross-rs/cross/releases/latest/download/cross-x86_64-unknown-linux-musl.tar.gz \
+          VERSION=0.2.5  # pinned — update manually
+          curl -fsSL "https://github.com/cross-rs/cross/releases/download/v${VERSION}/cross-x86_64-unknown-linux-musl.tar.gz" \
             | tar xz -C /usr/local/bin
           cross --version
 
@@ -555,6 +559,10 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # cosign keyless signing
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -813,6 +821,8 @@ jobs:
     needs: [version, build, container, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write  # create GitHub Release
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -959,6 +969,8 @@ jobs:
   summary:
     name: Pipeline Summary
     if: always()
+    permissions:
+      checks: write  # job summary
     needs:
       - changes
       - fmt
