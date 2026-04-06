@@ -47,3 +47,31 @@ Feature: Sokolsky log backend integration
     Given logs with the same trace across multiple backends
     When an admin queries with aggregation
     Then the response contains entries from all backends sorted by timestamp
+
+  # T-SOK-5 — Multi-backend aggregation with deduplication
+  Scenario: Aggregated query merges and deduplicates entries
+    Given 2 backends with overlapping entries
+    When an admin queries with aggregation
+    Then entries are merged and sorted by timestamp
+    And no duplicate entry IDs exist in the response
+
+  # T-SOK-6 — Backend graceful degradation
+  Scenario: Unavailable backend does not block aggregated query
+    Given victorialogs is up and journald is down
+    When an admin queries with aggregation
+    Then entries from victorialogs are returned
+    And a warning is logged for the journald backend
+
+  # T-SOK-7 — Audit-of-audit
+  Scenario: Auditor access generates audit-of-audit entry
+    Given an auditor with audit_of_audit enabled
+    When the auditor queries the machine plane
+    Then an audit-of-audit entry is generated
+    And the audit entry contains accessor and query details
+
+  # T-SOK-8 — DLP field redaction cross-plan
+  Scenario: DLP redacts PII even for full-access roles
+    Given an admin with full field access
+    And the DLP engine is active with PII patterns
+    When the admin queries entries containing PII
+    Then PII fields are redacted by the DLP engine

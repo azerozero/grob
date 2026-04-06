@@ -306,6 +306,47 @@ pub fn check_access(
     Ok(())
 }
 
+/// DLP configuration for cross-plan PII redaction.
+///
+/// When active, applies additional redaction patterns on top of role-based
+/// field filtering. This ensures PII is redacted even for full-access roles.
+#[derive(Debug, Clone, Default)]
+pub struct DlpConfig {
+    /// Whether the DLP engine is active.
+    pub active: bool,
+    /// Glob patterns for fields to redact (e.g. "user_*", "*_pii").
+    pub pii_patterns: Vec<String>,
+}
+
+/// Applies DLP redaction to a log entry.
+///
+/// Redacts fields matching PII patterns regardless of role permissions.
+/// Only applies when `dlp.active` is true and the role has not been
+/// granted `dlp_bypass`.
+pub fn apply_dlp(entry: &mut LogEntry, dlp: &DlpConfig, role: &LogRole) {
+    if !dlp.active || role.dlp_bypass {
+        return;
+    }
+    for pattern in &dlp.pii_patterns {
+        redact_matching_fields(&mut entry.fields, pattern);
+    }
+}
+
+/// Record of an audit-of-audit event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditOfAuditEntry {
+    /// Identity of the accessor.
+    pub accessor: String,
+    /// Role name.
+    pub role: String,
+    /// Plane queried.
+    pub plane: Option<Plane>,
+    /// Backend queried.
+    pub backend: Option<String>,
+    /// Number of results returned.
+    pub results_count: usize,
+}
+
 /// Queries logs with role-based access control and field filtering.
 ///
 /// # Errors
@@ -315,6 +356,23 @@ pub async fn query_with_role(
     backends: &[&dyn LogBackend],
     role: &LogRole,
     query: &LogQuery,
+) -> Result<Vec<LogEntry>, LogBackendError> {
+    query_with_role_dlp(backends, role, query, &DlpConfig::default()).await
+}
+
+/// Queries logs with role-based access control, field filtering, and DLP.
+///
+/// Returns the log entries along with an optional audit-of-audit record
+/// when the role has `audit_of_audit` enabled.
+///
+/// # Errors
+///
+/// Returns access denied errors or backend query errors.
+pub async fn query_with_role_dlp(
+    backends: &[&dyn LogBackend],
+    role: &LogRole,
+    query: &LogQuery,
+    dlp: &DlpConfig,
 ) -> Result<Vec<LogEntry>, LogBackendError> {
     // Check plane access.
     check_access(role, query.plane.as_ref(), query.backend.as_deref())?;
@@ -337,6 +395,8 @@ pub async fn query_with_role(
         }
         // Sort by timestamp.
         results.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        // Deduplicate by entry ID (keeps first occurrence).
+        deduplicate_entries(&mut results);
     } else {
         // Query specific backend or first available.
         let target_name = query.backend.as_deref();
@@ -373,7 +433,36 @@ pub async fn query_with_role(
         filter_fields(entry, role);
     }
 
+    // Apply DLP redaction (cross-plan, even for full-access roles).
+    for entry in &mut results {
+        apply_dlp(entry, dlp, role);
+    }
+
     Ok(results)
+}
+
+/// Generates an audit-of-audit record for the given query.
+pub fn generate_audit_of_audit(
+    role: &LogRole,
+    query: &LogQuery,
+    results_count: usize,
+) -> Option<AuditOfAuditEntry> {
+    if !role.audit_of_audit {
+        return None;
+    }
+    Some(AuditOfAuditEntry {
+        accessor: role.name.clone(),
+        role: role.name.clone(),
+        plane: query.plane,
+        backend: query.backend.clone(),
+        results_count,
+    })
+}
+
+/// Removes duplicate entries by ID, keeping the first occurrence.
+fn deduplicate_entries(entries: &mut Vec<LogEntry>) {
+    let mut seen = std::collections::HashSet::new();
+    entries.retain(|e| seen.insert(e.id.clone()));
 }
 
 #[cfg(test)]
@@ -635,5 +724,264 @@ mod tests {
     fn glob_exact_match() {
         assert!(field_glob_match("ciphertext", "ciphertext"));
         assert!(!field_glob_match("ciphertext", "plaintext"));
+    }
+
+    // ── T-SOK-5: Multi-backend aggregation with deduplication ──
+
+    #[test]
+    fn deduplicate_entries_removes_dupes_keeps_order() {
+        let mut entries = vec![
+            LogEntry {
+                id: "a".into(),
+                timestamp: "2026-04-06T10:00:00Z".into(),
+                plane: Plane::App,
+                backend: "victorialogs".into(),
+                source: "node-1".into(),
+                fields: HashMap::new(),
+                signature_status: SignatureStatus::Unverified,
+            },
+            LogEntry {
+                id: "b".into(),
+                timestamp: "2026-04-06T10:01:00Z".into(),
+                plane: Plane::App,
+                backend: "journald".into(),
+                source: "node-1".into(),
+                fields: HashMap::new(),
+                signature_status: SignatureStatus::Unverified,
+            },
+            LogEntry {
+                id: "a".into(),
+                timestamp: "2026-04-06T10:00:00Z".into(),
+                plane: Plane::App,
+                backend: "journald".into(),
+                source: "node-1".into(),
+                fields: HashMap::new(),
+                signature_status: SignatureStatus::Unverified,
+            },
+        ];
+        deduplicate_entries(&mut entries);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].id, "a");
+        assert_eq!(entries[1].id, "b");
+    }
+
+    #[tokio::test]
+    async fn aggregated_query_deduplicates_across_backends() {
+        use crate::features::log_backend::sokolsky::MockLogBackend;
+
+        let shared_entry = LogEntry {
+            id: "shared-1".into(),
+            timestamp: "2026-04-06T10:00:00Z".into(),
+            plane: Plane::App,
+            backend: "victorialogs".into(),
+            source: "node-1".into(),
+            fields: HashMap::from([("message".into(), serde_json::json!("hello"))]),
+            signature_status: SignatureStatus::Unverified,
+        };
+        let mut shared_entry_jd = shared_entry.clone();
+        shared_entry_jd.backend = "journald".into();
+
+        let unique_vl = LogEntry {
+            id: "vl-only".into(),
+            timestamp: "2026-04-06T10:01:00Z".into(),
+            plane: Plane::App,
+            backend: "victorialogs".into(),
+            source: "node-1".into(),
+            fields: HashMap::from([("message".into(), serde_json::json!("world"))]),
+            signature_status: SignatureStatus::Unverified,
+        };
+
+        let vl = MockLogBackend::new("victorialogs", vec![shared_entry, unique_vl]);
+        let jd = MockLogBackend::new("journald", vec![shared_entry_jd]);
+        let backends: Vec<&dyn LogBackend> = vec![&vl, &jd];
+
+        let role = admin_role();
+        let query = LogQuery {
+            plane: Some(Plane::App),
+            aggregate: true,
+            ..Default::default()
+        };
+
+        let results = query_with_role(&backends, &role, &query).await.unwrap();
+        assert_eq!(results.len(), 2);
+        // No duplicate IDs.
+        let ids: Vec<&str> = results.iter().map(|e| e.id.as_str()).collect();
+        assert!(ids.contains(&"shared-1"));
+        assert!(ids.contains(&"vl-only"));
+    }
+
+    // ── T-SOK-6: Backend graceful degradation ──
+
+    #[tokio::test]
+    async fn degraded_backend_does_not_block_aggregate() {
+        use crate::features::log_backend::sokolsky::MockLogBackend;
+
+        let entry = LogEntry {
+            id: "1".into(),
+            timestamp: "2026-04-06T10:00:00Z".into(),
+            plane: Plane::App,
+            backend: "victorialogs".into(),
+            source: "node-1".into(),
+            fields: HashMap::from([("message".into(), serde_json::json!("ok"))]),
+            signature_status: SignatureStatus::Unverified,
+        };
+        let vl = MockLogBackend::new("victorialogs", vec![entry]);
+        let jd = MockLogBackend::unavailable("journald");
+        let backends: Vec<&dyn LogBackend> = vec![&vl, &jd];
+
+        let role = LogRole {
+            name: "admin".into(),
+            backends: vec!["victorialogs".into(), "journald".into()],
+            planes: vec![Plane::Machine, Plane::App, Plane::Audit],
+            fields_visible: FieldSpec::All("*".into()),
+            fields_redacted: vec![],
+            actions: vec!["read".into()],
+            tenant_filter: None,
+            dlp_bypass: false,
+            audit_of_audit: false,
+        };
+
+        let query = LogQuery {
+            plane: Some(Plane::App),
+            aggregate: true,
+            ..Default::default()
+        };
+
+        let results = query_with_role(&backends, &role, &query).await.unwrap();
+        // VictoriaLogs entries returned despite journald being down.
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].backend, "victorialogs");
+    }
+
+    // ── T-SOK-7: Audit-of-audit ──
+
+    #[test]
+    fn auditor_generates_audit_of_audit_entry() {
+        let role = auditor_role();
+        let query = LogQuery {
+            plane: Some(Plane::Machine),
+            ..Default::default()
+        };
+        let audit = generate_audit_of_audit(&role, &query, 42);
+        assert!(audit.is_some());
+        let audit = audit.unwrap();
+        assert_eq!(audit.accessor, "auditor");
+        assert_eq!(audit.role, "auditor");
+        assert_eq!(audit.plane, Some(Plane::Machine));
+        assert_eq!(audit.results_count, 42);
+    }
+
+    #[test]
+    fn non_auditor_does_not_generate_audit_of_audit() {
+        let role = admin_role();
+        let query = LogQuery {
+            plane: Some(Plane::Machine),
+            ..Default::default()
+        };
+        assert!(generate_audit_of_audit(&role, &query, 10).is_none());
+    }
+
+    // ── T-SOK-8: DLP field redaction cross-plan ──
+
+    #[test]
+    fn dlp_redacts_pii_even_for_admin() {
+        let role = admin_role();
+        let dlp = DlpConfig {
+            active: true,
+            pii_patterns: vec!["user_*".into(), "ip_*".into(), "ciphertext".into()],
+        };
+        let mut entry = LogEntry {
+            id: "1".into(),
+            timestamp: "2026-04-06T10:00:00Z".into(),
+            plane: Plane::App,
+            backend: "victorialogs".into(),
+            source: "node-1".into(),
+            fields: HashMap::from([
+                ("user_email".into(), serde_json::json!("john@acme.com")),
+                ("ip_address".into(), serde_json::json!("192.168.1.1")),
+                ("ciphertext".into(), serde_json::json!("secret")),
+                ("trace_id".into(), serde_json::json!("abc123")),
+                ("message".into(), serde_json::json!("hello")),
+            ]),
+            signature_status: SignatureStatus::Unverified,
+        };
+
+        // Role filter passes everything (admin has full access).
+        filter_fields(&mut entry, &role);
+        assert_eq!(entry.fields.len(), 5);
+
+        // DLP redacts PII fields on top of role filtering.
+        apply_dlp(&mut entry, &dlp, &role);
+        assert_eq!(entry.fields["user_email"], serde_json::json!("[REDACTED]"));
+        assert_eq!(entry.fields["ip_address"], serde_json::json!("[REDACTED]"));
+        assert_eq!(entry.fields["ciphertext"], serde_json::json!("[REDACTED]"));
+        // Non-PII fields untouched.
+        assert_eq!(entry.fields["trace_id"], serde_json::json!("abc123"));
+        assert_eq!(entry.fields["message"], serde_json::json!("hello"));
+    }
+
+    #[test]
+    fn dlp_inactive_does_not_redact() {
+        let role = admin_role();
+        let dlp = DlpConfig {
+            active: false,
+            pii_patterns: vec!["user_*".into()],
+        };
+        let mut entry = LogEntry {
+            id: "1".into(),
+            timestamp: "2026-04-06T10:00:00Z".into(),
+            plane: Plane::App,
+            backend: "victorialogs".into(),
+            source: "node-1".into(),
+            fields: HashMap::from([("user_email".into(), serde_json::json!("john@acme.com"))]),
+            signature_status: SignatureStatus::Unverified,
+        };
+
+        apply_dlp(&mut entry, &dlp, &role);
+        assert_eq!(
+            entry.fields["user_email"],
+            serde_json::json!("john@acme.com")
+        );
+    }
+
+    #[tokio::test]
+    async fn dlp_applied_in_query_with_role_dlp() {
+        use crate::features::log_backend::sokolsky::MockLogBackend;
+
+        let entry = LogEntry {
+            id: "1".into(),
+            timestamp: "2026-04-06T10:00:00Z".into(),
+            plane: Plane::App,
+            backend: "victorialogs".into(),
+            source: "node-1".into(),
+            fields: HashMap::from([
+                ("user_email".into(), serde_json::json!("jane@acme.com")),
+                ("trace_id".into(), serde_json::json!("xyz789")),
+            ]),
+            signature_status: SignatureStatus::Unverified,
+        };
+        let vl = MockLogBackend::new("victorialogs", vec![entry]);
+        let backends: Vec<&dyn LogBackend> = vec![&vl];
+
+        let role = admin_role();
+        let dlp = DlpConfig {
+            active: true,
+            pii_patterns: vec!["user_*".into()],
+        };
+        let query = LogQuery {
+            plane: Some(Plane::App),
+            backend: Some("victorialogs".into()),
+            ..Default::default()
+        };
+
+        let results = query_with_role_dlp(&backends, &role, &query, &dlp)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].fields["user_email"],
+            serde_json::json!("[REDACTED]")
+        );
+        assert_eq!(results[0].fields["trace_id"], serde_json::json!("xyz789"));
     }
 }
