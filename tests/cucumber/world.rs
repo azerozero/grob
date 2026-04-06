@@ -1,6 +1,19 @@
 use cucumber::World;
 use std::collections::HashMap;
 
+/// Per-client response snapshot for multi-client scenarios.
+#[derive(Debug, Default, Clone)]
+pub struct ClientSnapshot {
+    /// Last HTTP status received by this client.
+    pub last_status: u16,
+    /// Last HTTP response body.
+    pub last_body: String,
+    /// Last HTTP response headers.
+    pub last_headers: HashMap<String, String>,
+    /// Count of successful (200) responses.
+    pub ok_count: u32,
+}
+
 /// Shared state across all steps in a scenario.
 #[derive(Debug, Default, World)]
 pub struct E2eWorld {
@@ -36,6 +49,10 @@ pub struct E2eWorld {
     pub wizard_home: String,
     /// Config content snapshot for before/after comparison.
     pub wizard_config_snapshot: String,
+    /// Per-client snapshots for multi-client scenarios (keyed by "A", "B", "C").
+    pub clients: HashMap<String, ClientSnapshot>,
+    /// SSN value injected in DLP scenarios for later assertion.
+    pub injected_ssn: String,
 }
 
 impl E2eWorld {
