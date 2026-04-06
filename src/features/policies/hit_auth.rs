@@ -115,12 +115,19 @@ impl HitAuthorization {
     }
 
     /// Computes the SHA-256 hash of this entry (for chain integrity).
+    ///
+    /// NOTE: auth_method and signer were added to the hash input in v0.x.
+    /// This is a breaking change: hashes computed before this change will
+    /// not match hashes computed after it. Existing chains must be
+    /// re-hashed or treated as legacy.
     fn compute_hash(&self) -> String {
         let mut hasher = Sha256::new();
         hasher.update(self.request_id.as_bytes());
         hasher.update(self.tool_name.as_bytes());
         hasher.update(self.tool_input_hash.as_bytes());
         hasher.update(self.decision.to_string().as_bytes());
+        hasher.update(self.auth_method.to_string().as_bytes());
+        hasher.update(self.signer.as_bytes());
         hasher.update(self.timestamp.as_bytes());
         if let Some(ref prev) = self.previous_hash {
             hasher.update(prev.as_bytes());
@@ -206,6 +213,48 @@ mod tests {
 
         auth.decision = AuthDecision::Deny;
         assert!(!auth.verify());
+    }
+
+    #[test]
+    fn test_hash_includes_auth_method_and_signer() {
+        let auth_prompt = HitAuthorization::new(HitAuthParams {
+            request_id: "req-1".into(),
+            tool_name: "Bash".into(),
+            tool_input: "echo hello".into(),
+            decision: AuthDecision::Approve,
+            auth_method: AuthMethod::Prompt,
+            signer: "alice".into(),
+            previous_hash: None,
+        });
+
+        let auth_yubikey = HitAuthorization::new(HitAuthParams {
+            request_id: "req-1".into(),
+            tool_name: "Bash".into(),
+            tool_input: "echo hello".into(),
+            decision: AuthDecision::Approve,
+            auth_method: AuthMethod::Yubikey,
+            signer: "alice".into(),
+            previous_hash: None,
+        });
+
+        let auth_bob = HitAuthorization::new(HitAuthParams {
+            request_id: "req-1".into(),
+            tool_name: "Bash".into(),
+            tool_input: "echo hello".into(),
+            decision: AuthDecision::Approve,
+            auth_method: AuthMethod::Prompt,
+            signer: "bob".into(),
+            previous_hash: None,
+        });
+
+        // Changing auth_method must produce a different hash.
+        assert_ne!(auth_prompt.hash, auth_yubikey.hash);
+        // Changing signer must produce a different hash.
+        assert_ne!(auth_prompt.hash, auth_bob.hash);
+        // All must still verify.
+        assert!(auth_prompt.verify());
+        assert!(auth_yubikey.verify());
+        assert!(auth_bob.verify());
     }
 
     #[test]

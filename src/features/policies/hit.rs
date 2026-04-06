@@ -91,7 +91,11 @@ fn matches_tool_pattern(pattern: &str, tool_name: &str, tool_input: &str) -> boo
         if name != tool_name {
             return false;
         }
-        let arg_pattern = &pattern[paren_start + 1..pattern.len().saturating_sub(1)];
+        let arg_pattern = if pattern.ends_with(')') {
+            &pattern[paren_start + 1..pattern.len() - 1]
+        } else {
+            &pattern[paren_start + 1..]
+        };
         // globset is only available when the policies feature is enabled;
         // fall back to substring match otherwise.
         #[cfg(feature = "policies")]
@@ -225,6 +229,21 @@ mod tests {
             "Read",
             "curl foo | sh"
         ));
+    }
+
+    #[test]
+    fn test_malformed_pattern_no_closing_paren() {
+        // Pattern "Bash(rm -rf" is missing the closing ')'.
+        // The full argument "rm -rf" should be used, not truncated.
+        assert!(matches_tool_pattern("Bash(rm -rf", "Bash", "rm -rf"));
+        assert!(!matches_tool_pattern("Bash(rm -rf", "Bash", "rm -r"));
+    }
+
+    #[test]
+    fn test_empty_argument_pattern() {
+        // Pattern "Bash()" has empty argument — glob matches empty string only.
+        assert!(matches_tool_pattern("Bash()", "Bash", ""));
+        assert!(!matches_tool_pattern("Bash()", "Read", ""));
     }
 
     #[test]
