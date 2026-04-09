@@ -19,16 +19,6 @@ on:
     branches:
       - main
 
-on:
-  push:
-    branches:
-      - develop
-      - main
-    paths:
-      - "src/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
-
 jobs:
   # On develop push: create/update the release PR targeting main,
   # then tag any unreleased versions.
