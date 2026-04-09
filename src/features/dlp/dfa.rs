@@ -733,7 +733,8 @@ mod tests {
     #[test]
     fn test_kill_mutant_scan_empty_rules_returns_empty_vec() {
         let scanner = SecretScanner::new(&[], &[]);
-        assert!(scanner.scan("ghp_abcdefghijklmnopqrstuvwxyz1234567890").is_empty());
+        let token = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+        assert!(scanner.scan(token).is_empty());
     }
 
     /// Tue : mutation sur `matched_len` pour AWS (cas secondaire independant).
