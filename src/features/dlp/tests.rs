@@ -542,8 +542,8 @@ fn test_kill_mutant_610_scan_end_of_stream_secret_branch() {
         ..Default::default()
     };
     let engine_empty = DlpEngine::from_config(empty_secrets).unwrap();
-    let report = engine_empty
-        .scan_end_of_stream_reported("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
+    let report =
+        engine_empty.scan_end_of_stream_reported("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
     assert_eq!(report.secrets, 0);
     assert!(
         !report.secret_scan_attempted,
@@ -564,8 +564,8 @@ fn test_kill_mutant_610_scan_end_of_stream_secret_branch() {
     // Cas 3 : engine AVEC secrets ET texte piege → branche entree ET detection.
     // Tue `delete !` : avec `self.scanner.is_empty() && ...` le scanner
     // non-vide donne false et on ne rentre plus dans la branche.
-    let dirty_report = engine_full
-        .scan_end_of_stream_reported("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
+    let dirty_report =
+        engine_full.scan_end_of_stream_reported("ghp_abcdefghijklmnopqrstuvwxyz1234567890");
     assert_eq!(
         dirty_report.secrets, 1,
         "secret present → 1 detection (tue `delete !`)"

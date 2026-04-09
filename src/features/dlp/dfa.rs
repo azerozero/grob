@@ -577,7 +577,11 @@ mod tests {
         // Les patterns sont "ghp_[A-Za-z0-9]{36}" (19 chars) et "AKIA[0-9A-Z]{16}" (16 chars).
         // Max attendu = 19, tres > 1.
         let max = scanner.max_pattern_str_len();
-        assert!(max >= 16, "max_pattern_str_len doit refleter la longueur reelle, got {}", max);
+        assert!(
+            max >= 16,
+            "max_pattern_str_len doit refleter la longueur reelle, got {}",
+            max
+        );
         assert_ne!(max, 1, "stub `-> 1` tue");
 
         // Scanner vide → 0 (pas 1).
