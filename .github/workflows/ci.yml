@@ -440,14 +440,23 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - shard: 1
+          - shard: "1"
             file: src/router/mod.rs
-          - shard: 2
+            mutants_shard: ""
+          - shard: "2"
             file: src/features/dlp/mod.rs
-          - shard: 3
+            mutants_shard: ""
+          # pii.rs depasse le budget 60min sur un seul job — split natif
+          # cargo-mutants `--shard K/N` sans toucher au code prod.
+          - shard: "3a"
             file: src/features/dlp/pii.rs
-          - shard: 4
+            mutants_shard: "0/2"
+          - shard: "3b"
+            file: src/features/dlp/pii.rs
+            mutants_shard: "1/2"
+          - shard: "4"
             file: src/features/dlp/dfa.rs
+            mutants_shard: ""
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -462,7 +471,12 @@ jobs:
         run: cargo install cargo-mutants@24.11.2 --locked  # pinned — update manually
       - name: Run mutation testing on ${{ matrix.file }}
         run: |
+          SHARD_ARG=""
+          if [ -n "${{ matrix.mutants_shard }}" ]; then
+            SHARD_ARG="--shard ${{ matrix.mutants_shard }}"
+          fi
           cargo mutants --package grob --timeout 120 -j 2 \
+            $SHARD_ARG \
             --file ${{ matrix.file }} \
             -- --lib
       - name: Upload mutation testing results
