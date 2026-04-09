@@ -13,21 +13,25 @@ use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 use grob::cli;
-use grob::cli::args::{Cli, Commands, KeyAction, PresetAction};
+use grob::cli::args::{detect_bare_trailing_cmd, Cli, Commands, KeyAction, PresetAction};
 use grob::commands;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // W-4 : intercept `grob -- <cmd>` before clap parses it, so the user
+    // gets an actionable hint instead of a generic `unexpected argument`.
+    let raw_args: Vec<String> = std::env::args().collect();
+    if let Some(suggestion) = detect_bare_trailing_cmd(&raw_args) {
+        eprintln!("error: `grob -- <cmd>` is not a valid shortcut.");
+        eprintln!();
+        eprintln!("  did you mean: {suggestion} ?");
+        std::process::exit(2);
+    }
+
     let cli_args = Cli::parse();
 
     let command = if let Some(cmd) = cli_args.command {
         cmd
-    } else if !cli_args.trailing_cmd.is_empty() {
-        Commands::Exec {
-            port: None,
-            no_stop: false,
-            cmd: cli_args.trailing_cmd,
-        }
     } else {
         use clap::CommandFactory;
         Cli::command().print_help()?;
