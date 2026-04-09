@@ -998,7 +998,9 @@ jobs:
       - feature-check
       - test-ubuntu
       - test-other
-      - mutants
+      # mutants retire du needs (T-CI-0d): le job a deja continue-on-error: true,
+      # le garder ici ne faisait que propager ses cancellations dans le statut
+      # global de la pipeline sans ajouter de signal utile.
       - build
       - container
       - e2e
@@ -1022,7 +1024,7 @@ jobs:
             const jobs = [
               'changes', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
               'docs', 'machete', 'coverage', 'feature-check',
-              'test-ubuntu', 'test-other', 'mutants', 'build', 'container',
+              'test-ubuntu', 'test-other', 'build', 'container',
               'e2e', 'load', 'release', 'homebrew', 'homebrew-test',
               'validate-yaml', 'required'
             ];
