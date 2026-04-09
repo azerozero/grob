@@ -471,12 +471,12 @@ jobs:
         run: cargo install cargo-mutants@24.11.2 --locked  # pinned — update manually
       - name: Run mutation testing on ${{ matrix.file }}
         run: |
-          SHARD_ARG=""
+          SHARD_ARGS=()
           if [ -n "${{ matrix.mutants_shard }}" ]; then
-            SHARD_ARG="--shard ${{ matrix.mutants_shard }}"
+            SHARD_ARGS+=(--shard "${{ matrix.mutants_shard }}")
           fi
           cargo mutants --package grob --timeout 120 -j 2 \
-            $SHARD_ARG \
+            "${SHARD_ARGS[@]}" \
             --file ${{ matrix.file }} \
             -- --lib
       - name: Upload mutation testing results
