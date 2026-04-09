@@ -49,6 +49,10 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/traits.rs` | Core trait contracts (7+ traits for dispatch pipeline) |
 | `src/storage/` | Unified redb storage backend (GrobStore) |
 | `src/preset/` | Preset management system |
+| `src/auth/auto_flow.rs` | Automatic credential setup at startup |
+| `src/features/tool_layer/` | Tool-calling abstraction layer |
+| `src/features/pledge/` | Pledge-based capability restrictions |
+| `src/server/watch_sse.rs` | Live traffic inspector SSE backend |
 
 ## Local Setup
 
@@ -81,11 +85,19 @@ feature/* ──► develop ──► (release-plz PR) ──► main ──► 
 3. **Release**: When CI passes on `develop`, release-plz automatically opens a PR to `main` (version bump, changelog, git tag).
 4. **`main`**: Production branch. Only receives merges from release-plz PRs. Tag push (`v*`) triggers cross-builds, container image, and Homebrew formula update.
 
+### Critical Rules
+
+- **Never commit or push directly to `main`**. All changes go through `develop` or feature branches.
+- **Never create a PR with `develop` as the head branch targeting `main`**. Only release-plz creates PRs to `main` (via temporary `release-plz-*` branches). Creating a manual PR from `develop` to `main` risks `develop` being deleted by GitHub's auto-delete-head-branch setting.
+- **Both `main` and `develop` are protected** by GitHub rulesets (no deletion, no force push).
+- **Conventional commits required**: `feat:`, `fix:`, `refactor:`, `perf:` with scopes trigger release-plz version bumps. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes.
+- **release-plz `release_commits` filter**: only `feat|fix|refactor|perf` with allowed scopes (`auth`, `cache`, `server`, `dispatch`, `providers`, `router`, `dlp`, `security`, `storage`, `preset`, `cli`, `commands`, `compat`) or no scope trigger a version bump.
+
 ### CI Pipeline Stages (`.github/workflows/ci.yml`)
 
 | Stage | Trigger | Jobs |
 |-------|---------|------|
-| Quality gates | push to `develop` / PR | fmt, clippy, doc, shellcheck, actionlint |
+| Quality gates | push to `develop` / PR | fmt, clippy, doc, actionlint |
 | Tests | push to `develop` / PR | unit tests (Ubuntu + macOS + Windows), integration tests |
 | Mutation testing | push to `develop` only | cargo-mutants on critical paths (router, DLP) |
 | Cross-build | push to `develop` + tag push | Multi-target binaries (Linux amd64/arm64/musl, macOS, Windows) |

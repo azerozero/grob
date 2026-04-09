@@ -1,6 +1,6 @@
 [package]
 name = "grob"
-version = "0.35.0"
+version = "0.35.1"
 edition = "2021"
 license = "AGPL-3.0-only"
 description = "High-performance LLM routing proxy — routes to Anthropic, OpenAI, Gemini, DeepSeek, Ollama & more with streaming, tool calling, and multi-provider fallback"
@@ -155,6 +155,16 @@ tracing-test = "0.2"       # Capture tracing logs in tests
 # Property Testing
 proptest = "1"
 rcgen = "0.13"             # Self-signed certs for TLS benchmarks
+
+# Cucumber BDD (E2E)
+cucumber = "0.21"
+reqwest = { version = "0.12", features = ["json"] }
+
+[[test]]
+name = "cucumber"
+path = "tests/cucumber/main.rs"
+harness = false
+test = false  # Only run via: cargo test --test cucumber
 
 [[bench]]
 name = "routing"

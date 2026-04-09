@@ -1,5 +1,7 @@
 //! Authentication: JWT validation, OAuth flows, and token storage.
 
+/// Automatic credential setup at startup.
+pub mod auto_flow;
 /// JWT validation and claims extraction.
 pub mod jwt;
 /// OAuth PKCE flows for Anthropic, OpenAI, and Gemini.

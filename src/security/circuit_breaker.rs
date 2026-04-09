@@ -88,6 +88,7 @@ impl CircuitBreaker {
                 // Check if timeout elapsed
                 if self.last_state_change.elapsed() >= self.config.timeout {
                     self.transition_to(CircuitState::HalfOpen);
+                    self.half_open_calls += 1;
                     true
                 } else {
                     false
@@ -191,7 +192,8 @@ impl CircuitBreakerRegistry {
         Self::with_config(CircuitBreakerConfig::default())
     }
 
-    fn with_config(config: CircuitBreakerConfig) -> Self {
+    /// Creates a registry with a custom circuit breaker configuration.
+    pub fn with_config(config: CircuitBreakerConfig) -> Self {
         Self {
             breakers: Arc::new(RwLock::new(HashMap::new())),
             default_config: config,
@@ -358,5 +360,31 @@ mod tests {
 
         // Other providers not affected
         assert!(registry.can_execute("provider2").await);
+    }
+
+    #[tokio::test]
+    async fn half_open_allows_exactly_max_calls() {
+        let config = CircuitBreakerConfig {
+            failure_threshold: 1,
+            success_threshold: 1,
+            timeout: Duration::from_millis(10),
+            half_open_max_calls: 2,
+        };
+        let registry = CircuitBreakerRegistry::with_config(config);
+
+        // Trip to Open.
+        registry.record_failure("p").await;
+        assert!(!registry.can_execute("p").await);
+
+        // Wait for timeout → first can_execute transitions to HalfOpen.
+        sleep(Duration::from_millis(20)).await;
+
+        // Should allow exactly 2 calls (half_open_max_calls), not 3.
+        assert!(registry.can_execute("p").await, "call 1 should pass");
+        assert!(registry.can_execute("p").await, "call 2 should pass");
+        assert!(
+            !registry.can_execute("p").await,
+            "call 3 should be rejected"
+        );
     }
 }

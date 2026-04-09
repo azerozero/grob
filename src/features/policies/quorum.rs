@@ -106,7 +106,9 @@ pub fn tally_votes(config: &QuorumConfig, votes: &[VoterDecision]) -> QuorumResu
         QuorumStrategy::Unanimous => {
             if denials > 0 {
                 QuorumResult::Deny
-            } else if approvals == votes.len() && (approvals + denials) >= config.min_voters {
+            // NOTE: denials == 0 here (early return above), so approvals == votes.len()
+            // already implies all voters approved. Only min_voters check remains.
+            } else if approvals == votes.len() && approvals >= config.min_voters {
                 QuorumResult::Approve
             } else {
                 match config.on_failure {

@@ -53,11 +53,7 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-  checks: write
-  packages: write
-  id-token: write
+permissions: read-all
 
 env:
   CARGO_INCREMENTAL: 0
@@ -174,6 +170,8 @@ jobs:
 
   audit:
     name: Security Audit
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -187,6 +185,8 @@ jobs:
 
   gitleaks:
     name: Gitleaks
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -198,7 +198,7 @@ jobs:
           fetch-depth: 0
       - name: Install gitleaks
         run: |
-          VERSION=$(curl -sSf https://api.github.com/repos/gitleaks/gitleaks/releases/latest | jq -r .tag_name | sed 's/^v//')
+          VERSION=8.24.3  # pinned — update manually
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
             | sudo tar xz -C /usr/local/bin gitleaks
       - name: Run gitleaks
@@ -206,6 +206,8 @@ jobs:
 
   deny:
     name: Cargo Deny
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -259,7 +261,7 @@ jobs:
         with:
           shared-key: machete
           save-if: ${{ github.ref == 'refs/heads/develop' }}
-      - uses: bnjbvr/cargo-machete@main
+      - uses: bnjbvr/cargo-machete@v0.9.1 # pinned — update manually
 
   coverage:
     name: Coverage
@@ -425,14 +427,36 @@ jobs:
 
   # =========================================================================
   # Stage 2.5: Mutation testing (develop push only, informational)
+  #   Sharded: 1 file per job for ~4x speedup (was ~45min sequential).
   # =========================================================================
   mutants:
-    name: Mutation Testing
+    name: Mutation Testing (shard ${{ matrix.shard }}/${{ strategy.job-total }})
     if: github.ref == 'refs/heads/develop'
     needs: [test-ubuntu, test-other]
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: "1"
+            file: src/router/mod.rs
+            mutants_shard: ""
+          - shard: "2"
+            file: src/features/dlp/mod.rs
+            mutants_shard: ""
+          # pii.rs depasse le budget 60min sur un seul job — split natif
+          # cargo-mutants `--shard K/N` sans toucher au code prod.
+          - shard: "3a"
+            file: src/features/dlp/pii.rs
+            mutants_shard: "0/2"
+          - shard: "3b"
+            file: src/features/dlp/pii.rs
+            mutants_shard: "1/2"
+          - shard: "4"
+            file: src/features/dlp/dfa.rs
+            mutants_shard: ""
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -441,23 +465,25 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: mutants
+          shared-key: mutants-${{ matrix.shard }}
           save-if: ${{ github.ref == 'refs/heads/develop' }}
       - name: Install cargo-mutants
-        run: cargo install cargo-mutants --locked
-      - name: Run mutation testing on critical paths
+        run: cargo install cargo-mutants@24.11.2 --locked  # pinned — update manually
+      - name: Run mutation testing on ${{ matrix.file }}
         run: |
+          SHARD_ARGS=()
+          if [ -n "${{ matrix.mutants_shard }}" ]; then
+            SHARD_ARGS+=(--shard "${{ matrix.mutants_shard }}")
+          fi
           cargo mutants --package grob --timeout 120 -j 2 \
-            --file src/router/mod.rs \
-            --file src/features/dlp/mod.rs \
-            --file src/features/dlp/pii.rs \
-            --file src/features/dlp/dfa.rs \
+            "${SHARD_ARGS[@]}" \
+            --file ${{ matrix.file }} \
             -- --lib
       - name: Upload mutation testing results
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: mutants-results-${{ github.sha }}
+          name: mutants-results-shard-${{ matrix.shard }}-${{ github.sha }}
           path: mutants.out/
           if-no-files-found: ignore
 
@@ -504,7 +530,8 @@ jobs:
       - name: Install cross
         if: matrix.use-cross
         run: |
-          curl -fsSL https://github.com/cross-rs/cross/releases/latest/download/cross-x86_64-unknown-linux-musl.tar.gz \
+          VERSION=0.2.5  # pinned — update manually
+          curl -fsSL "https://github.com/cross-rs/cross/releases/download/v${VERSION}/cross-x86_64-unknown-linux-musl.tar.gz" \
             | tar xz -C /usr/local/bin
           cross --version
 
@@ -545,6 +572,10 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write  # cosign keyless signing
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -803,6 +834,8 @@ jobs:
     needs: [version, build, container, e2e]
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write  # create GitHub Release
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -949,6 +982,8 @@ jobs:
   summary:
     name: Pipeline Summary
     if: always()
+    permissions:
+      checks: write  # job summary
     needs:
       - changes
       - fmt
@@ -963,7 +998,9 @@ jobs:
       - feature-check
       - test-ubuntu
       - test-other
-      - mutants
+      # mutants retire du needs (T-CI-0d): le job a deja continue-on-error: true,
+      # le garder ici ne faisait que propager ses cancellations dans le statut
+      # global de la pipeline sans ajouter de signal utile.
       - build
       - container
       - e2e
@@ -987,7 +1024,7 @@ jobs:
             const jobs = [
               'changes', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
               'docs', 'machete', 'coverage', 'feature-check',
-              'test-ubuntu', 'test-other', 'mutants', 'build', 'container',
+              'test-ubuntu', 'test-other', 'build', 'container',
               'e2e', 'load', 'release', 'homebrew', 'homebrew-test',
               'validate-yaml', 'required'
             ];

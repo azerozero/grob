@@ -30,7 +30,8 @@ Value: JSON-serialized `SpendData`:
   "month": "2026-03",
   "total": 42.50,
   "by_provider": { "anthropic": 30.00, "openai": 12.50 },
-  "by_model": { "claude-sonnet": 30.00, "gpt-4o": 12.50 }
+  "by_model": { "claude-sonnet": 30.00, "gpt-4o": 12.50 },
+  "by_provider_count": { "anthropic": 15, "openai": 8 }
 }
 ```
 

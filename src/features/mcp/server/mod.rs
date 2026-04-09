@@ -28,6 +28,7 @@ pub async fn handle_mcp_rpc(
         "tool_matrix/bench" => methods::handle_bench(mcp, req.params, req.id.clone()).await,
         "tool_matrix/calibrate" => methods::handle_calibrate(mcp, req.params, req.id.clone()).await,
         "tool_matrix/report" => methods::handle_report(mcp, req.id.clone()).await,
+        "grob_configure" => methods::handle_configure(&state, req.params, req.id.clone()).await,
         "tools/list" => methods::handle_tools_list(mcp, req.id.clone()).await,
         _ => Err(JsonRpcError::method_not_found(req.id.clone(), &req.method)),
     };

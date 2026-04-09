@@ -10,7 +10,7 @@ Grob currently applies DLP rules, rate limits, routing, and budgets through sepa
 
 ## Decision Drivers
 
-- Multi-tenant deployments need different security postures per establishment (hospital A vs hospital B)
+- Multi-tenant deployments need different security postures per tenant
 - Compliance auditors must access only their scope (PCI auditor sees PCI sessions, not all traffic)
 - Full request/response content must be exportable for audit without exposing it to unauthorized parties
 - Grob already implements 70% of a HIT Gateway (audit chain, rate limiting, credential isolation, JWT auth)
@@ -24,7 +24,7 @@ Grob currently applies DLP rules, rate limits, routing, and budgets through sepa
 
 ## Decision Outcome
 
-Chosen option: "Option B — Unified policy engine with age encryption and native HIT Gateway", because it eliminates config duplication, reuses existing grob infrastructure, and positions grob as the reference HIT implementation.
+Chosen option: "Option B — Unified policy engine with age encryption and native HIT Gateway", because it eliminates config duplication and reuses existing grob infrastructure.
 
 ## Design
 

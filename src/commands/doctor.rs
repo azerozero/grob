@@ -2,12 +2,15 @@ use super::common::is_grob_healthy;
 use crate::{cli, storage};
 
 /// Runs diagnostic checks on config, providers, storage, and service health.
-pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSource) {
+///
+/// Returns an exit code: 0 = all OK, 1 = warnings, 2 = errors.
+pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSource) -> u8 {
     println!("🩺 Grob Doctor — Diagnostic Checks");
     println!("   Version: {}", env!("CARGO_PKG_VERSION"));
     println!();
 
-    let mut issues = 0u32;
+    let mut warnings = 0u32;
+    let mut errors = 0u32;
 
     // 1. Config file
     match config_source {
@@ -16,7 +19,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
                 println!("  ✅ Config file: {}", p.display());
             } else {
                 println!("  ❌ Config file not found: {}", p.display());
-                issues += 1;
+                errors += 1;
             }
         }
         cli::ConfigSource::Url(u) => {
@@ -40,10 +43,10 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         .count();
     if total == 0 {
         println!("  ❌ No providers configured");
-        issues += 1;
+        errors += 1;
     } else if with_keys < total {
         println!("  ⚠️  Providers: {}/{} have credentials", with_keys, total);
-        issues += 1;
+        warnings += 1;
     } else {
         println!(
             "  ✅ Providers: {}/{} configured with credentials",
@@ -55,7 +58,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
     let model_count = config.models.len();
     if model_count == 0 {
         println!("  ❌ No models configured");
-        issues += 1;
+        errors += 1;
     } else {
         println!("  ✅ Models: {} configured", model_count);
     }
@@ -78,7 +81,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
                     "  ❌ Port {}: in use by another process",
                     config.server.port
                 );
-                issues += 1;
+                errors += 1;
             }
         }
     }
@@ -105,7 +108,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         Ok(_) => println!("  ✅ Storage (redb): accessible"),
         Err(e) => {
             println!("  ❌ Storage (redb): {}", e);
-            issues += 1;
+            errors += 1;
         }
     }
 
@@ -127,7 +130,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         println!("  ✅ Environment variables: all set");
     } else {
         println!("  ❌ Missing env vars: {}", missing_env.join(", "));
-        issues += 1;
+        errors += 1;
     }
 
     // 11. Podman
@@ -145,9 +148,14 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
     }
 
     println!();
-    if issues == 0 {
-        println!("  🎉 All checks passed!");
+    if errors > 0 {
+        println!("  ⚠️  {} error(s), {} warning(s)", errors, warnings);
+        2
+    } else if warnings > 0 {
+        println!("  ⚠️  {} warning(s)", warnings);
+        1
     } else {
-        println!("  ⚠️  {} issue(s) found", issues);
+        println!("  🎉 All checks passed!");
+        0
     }
 }
