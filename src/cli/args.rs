@@ -21,35 +21,36 @@ pub struct Cli {
 /// Known top-level subcommands, used by [`detect_bare_trailing_cmd`] to tell a
 /// legitimate `grob exec -- <cmd>` apart from a misuse like `grob -- claude`.
 ///
-/// Kept in sync manually with [`Commands`]. Any new subcommand added to the
-/// enum should be appended here so the `grob -- <cmd>` guard keeps working.
+/// Kept alphabetical for easy audit vs [`Commands`]. Any new subcommand added
+/// to the enum should be inserted in order so the `grob -- <cmd>` guard keeps
+/// working.
 const KNOWN_SUBCOMMANDS: &[&str] = &[
-    "start",
-    "stop",
-    "restart",
-    "status",
-    "spend",
-    "model",
-    "validate",
-    "preset",
-    "run",
-    "exec",
-    "launch", // alias of exec
-    "completions",
-    "setup-completions",
-    "env",
-    "connect",
-    "init",
-    "config-diff",
-    "setup",
-    "watch",
-    "key",
-    "rollback",
     "bench",
+    "completions",
+    "config-diff",
+    "connect",
     "doctor",
-    "upgrade",
+    "env",
+    "exec",
     "harness",
     "help",
+    "init",
+    "key",
+    "launch", // alias of exec
+    "model",
+    "preset",
+    "restart",
+    "rollback",
+    "run",
+    "setup",
+    "setup-completions",
+    "spend",
+    "start",
+    "status",
+    "stop",
+    "upgrade",
+    "validate",
+    "watch",
 ];
 
 /// Detects the `grob -- <cmd>` misuse and returns the suggested replacement.
