@@ -94,10 +94,28 @@ struct Choices {
     preset: String,
     preset_desc: String,
     auth: Vec<AuthOverride>,
-    fallback: bool,
+    fallback: FallbackChoice,
     fallback_key: Option<String>,
     compliance: Compliance,
     budget: Option<i64>,
+}
+
+/// Fallback provider chosen in the wizard.
+///
+/// Always prompted (even when a preset ships a fallback) so the user can
+/// explicitly opt out and avoid the phantom `$OPENROUTER_API_KEY not set`
+/// warning at startup. See `src/commands/setup.rs::screen_fallback`.
+#[derive(Clone)]
+enum FallbackChoice {
+    /// No fallback provider. Any preset-shipped fallback provider and
+    /// related model mappings are stripped from the written config.
+    None,
+    /// OpenRouter (the common default, reads `$OPENROUTER_API_KEY`).
+    OpenRouter,
+    /// Gemini OAuth/API key as fallback.
+    Gemini,
+    /// Keep whatever fallback the preset defines (expert mode).
+    KeepPreset,
 }
 
 #[derive(Clone, Copy)]
@@ -283,15 +301,23 @@ fn screen_auth(providers: &[String]) -> Vec<AuthOverride> {
     out
 }
 
-fn screen_fallback() -> (bool, Option<String>) {
+fn screen_fallback(preset_has_fallback: bool) -> (FallbackChoice, Option<String>) {
     println!();
-    println!("  Add a fallback provider?");
-    println!("    [1] OpenRouter (recommended — 100+ models)");
-    println!("    [2] No fallback");
-    if prompt_choice(2) != 1 {
-        return (false, None);
+    println!("  Fallback provider?");
+    println!("    [1] Aucun (no fallback)");
+    println!("    [2] OpenRouter (recommended — 100+ models)");
+    println!("    [3] Gemini ($GEMINI_API_KEY)");
+    if preset_has_fallback {
+        println!("    [4] Custom (keep the fallback shipped by the preset)");
+    } else {
+        println!("    [4] Custom (keep what the preset defines, if anything)");
     }
-    (true, prompt_key("OPENROUTER_API_KEY"))
+    match prompt_choice(4) {
+        1 => (FallbackChoice::None, None),
+        2 => (FallbackChoice::OpenRouter, prompt_key("OPENROUTER_API_KEY")),
+        3 => (FallbackChoice::Gemini, prompt_key("GEMINI_API_KEY")),
+        _ => (FallbackChoice::KeepPreset, None),
+    }
 }
 
 fn screen_compliance(tools: &[&ToolInfo]) -> Compliance {
@@ -397,8 +423,19 @@ fn display_recap(c: &Choices, path: &Path, dry_run: bool, auto_confirm: bool) ->
             println!("      {:<14} ${}", a.provider, a.env_var);
         }
     }
-    if c.fallback {
-        println!("      {:<14} $OPENROUTER_API_KEY (fallback)", "openrouter");
+    match c.fallback {
+        FallbackChoice::None => {
+            println!("      (no fallback provider)");
+        }
+        FallbackChoice::OpenRouter => {
+            println!("      {:<14} $OPENROUTER_API_KEY (fallback)", "openrouter");
+        }
+        FallbackChoice::Gemini => {
+            println!("      {:<14} $GEMINI_API_KEY (fallback)", "gemini");
+        }
+        FallbackChoice::KeepPreset => {
+            println!("      (fallback: keep preset default)");
+        }
     }
 
     let label = match c.compliance {
@@ -433,11 +470,16 @@ fn display_recap(c: &Choices, path: &Path, dry_run: bool, auto_confirm: bool) ->
 }
 
 fn print_exports(c: &Choices) {
+    let fallback_env = match c.fallback {
+        FallbackChoice::OpenRouter => Some("OPENROUTER_API_KEY"),
+        FallbackChoice::Gemini => Some("GEMINI_API_KEY"),
+        FallbackChoice::None | FallbackChoice::KeepPreset => None,
+    };
     let keys: Vec<(&str, &str)> = c
         .auth
         .iter()
         .filter_map(|a| a.entered_key.as_deref().map(|k| (a.env_var.as_str(), k)))
-        .chain(c.fallback_key.as_deref().map(|k| ("OPENROUTER_API_KEY", k)))
+        .chain(fallback_env.zip(c.fallback_key.as_deref()))
         .collect();
     if keys.is_empty() {
         return;
@@ -450,6 +492,36 @@ fn print_exports(c: &Choices) {
 }
 
 // ── Atomic write ──
+
+/// Removes fallback providers (by name) from a loaded preset config and
+/// drops any `[[models.mappings]]` that still reference them.
+///
+/// Invoked when the user picks `FallbackChoice::None` so the written config
+/// does not carry a dead `$OPENROUTER_API_KEY` reference that would warn at
+/// startup. Kept as a free function for direct snapshot testing.
+pub(crate) fn strip_fallback(config: &mut toml::Value, names_to_strip: &[&str]) {
+    if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
+        providers.retain(|p| {
+            let keep = p
+                .get("name")
+                .and_then(|n| n.as_str())
+                .is_none_or(|n| !names_to_strip.contains(&n));
+            keep
+        });
+    }
+    if let Some(models) = config.get_mut("models").and_then(|m| m.as_array_mut()) {
+        for model in models.iter_mut() {
+            let Some(mappings) = model.get_mut("mappings").and_then(|m| m.as_array_mut()) else {
+                continue;
+            };
+            mappings.retain(|m| {
+                m.get("provider")
+                    .and_then(|p| p.as_str())
+                    .is_none_or(|p| !names_to_strip.contains(&p))
+            });
+        }
+    }
+}
 
 fn patch(config: &mut toml::Value, section: &str, fields: &[(&str, toml::Value)]) {
     let table = config
@@ -511,17 +583,41 @@ fn write_config(choices: &Choices, path: &Path) -> Result<()> {
     }
 
     // Fallback
-    if choices.fallback {
-        if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
-            providers.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some("openrouter"));
-            let mut t = toml::map::Map::new();
-            t.insert("name".into(), "openrouter".into());
-            t.insert("provider_type".into(), "openrouter".into());
-            t.insert("pass_through".into(), toml::Value::Boolean(true));
-            t.insert("enabled".into(), toml::Value::Boolean(true));
-            t.insert("models".into(), toml::Value::Array(vec![]));
-            t.insert("api_key".into(), "$OPENROUTER_API_KEY".into());
-            providers.push(toml::Value::Table(t));
+    match choices.fallback {
+        FallbackChoice::None => {
+            // Strip any fallback provider shipped by the preset plus the model
+            // mapping references that point to it — otherwise the config
+            // resolver warns at startup on `$OPENROUTER_API_KEY not set` even
+            // though the user explicitly said "no fallback".
+            strip_fallback(&mut config, &["openrouter", "gemini"]);
+        }
+        FallbackChoice::OpenRouter => {
+            if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
+                providers.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some("openrouter"));
+                let mut t = toml::map::Map::new();
+                t.insert("name".into(), "openrouter".into());
+                t.insert("provider_type".into(), "openrouter".into());
+                t.insert("pass_through".into(), toml::Value::Boolean(true));
+                t.insert("enabled".into(), toml::Value::Boolean(true));
+                t.insert("models".into(), toml::Value::Array(vec![]));
+                t.insert("api_key".into(), "$OPENROUTER_API_KEY".into());
+                providers.push(toml::Value::Table(t));
+            }
+        }
+        FallbackChoice::Gemini => {
+            if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
+                providers.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some("gemini"));
+                let mut t = toml::map::Map::new();
+                t.insert("name".into(), "gemini".into());
+                t.insert("provider_type".into(), "gemini".into());
+                t.insert("enabled".into(), toml::Value::Boolean(true));
+                t.insert("models".into(), toml::Value::Array(vec![]));
+                t.insert("api_key".into(), "$GEMINI_API_KEY".into());
+                providers.push(toml::Value::Table(t));
+            }
+        }
+        FallbackChoice::KeepPreset => {
+            // Leave the preset as-is.
         }
     }
 
@@ -637,7 +733,10 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
                 entered_key: None,
                 env_var: "ANTHROPIC_API_KEY".into(),
             }],
-            fallback: false,
+            // `--yes` stays conservative : no fallback provider, so we never
+            // emit a phantom "$OPENROUTER_API_KEY not set" warning on a cold
+            // install without a subscription.
+            fallback: FallbackChoice::None,
             fallback_key: None,
             compliance: Compliance::Standard,
             budget: None,
@@ -666,13 +765,12 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
     // Screen 2: Auth
     let auth = screen_auth(&providers);
 
-    // Screen 3: Fallback (only if few providers and no openrouter)
-    let primary = providers.iter().filter(|p| *p != "openrouter").count();
-    let (fallback, fallback_key) = if primary <= 1 && !providers.iter().any(|p| p == "openrouter") {
-        screen_fallback()
-    } else {
-        (false, None)
-    };
+    // Screen 3: Fallback — always prompted (opt-in). If the preset ships a
+    // fallback (openrouter / gemini) and the user says "Aucun", we strip the
+    // fallback provider from the written config so no phantom warning fires
+    // at startup.
+    let preset_has_fallback = providers.iter().any(|p| p == "openrouter" || p == "gemini");
+    let (fallback, fallback_key) = screen_fallback(preset_has_fallback);
 
     // Screen 4: Compliance
     let tool_refs: Vec<&ToolInfo> = tools.iter().filter_map(|&i| TOOLS.get(i)).collect();
@@ -805,4 +903,104 @@ fn print_usage(choices: &Choices) {
     }
     println!();
     println!("  Not proxyable (hardcoded endpoints): GitHub Copilot, Gemini CLI");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// W-2 : quand l'utilisateur choisit `Aucun` dans le nouveau screen
+    /// fallback, `strip_fallback` retire le provider openrouter du preset
+    /// charge ET les `[[models.mappings]]` qui le referencent. Sans ce
+    /// nettoyage, un warning fantome `$OPENROUTER_API_KEY not set` tombe au
+    /// prochain demarrage meme si l'utilisateur a dit non au fallback.
+    #[test]
+    fn test_w2_strip_fallback_removes_openrouter_and_mappings() {
+        let preset = crate::preset::preset_content("perf").expect("perf preset loads");
+        let mut config: toml::Value = toml::from_str(&preset).expect("perf preset parses");
+
+        // Sanity avant strip : openrouter doit bien etre present.
+        let providers_before = config
+            .get("providers")
+            .and_then(|p| p.as_array())
+            .unwrap()
+            .len();
+        assert!(
+            providers_before >= 2,
+            "perf preset should ship openrouter alongside anthropic"
+        );
+
+        strip_fallback(&mut config, &["openrouter", "gemini"]);
+
+        // Apres strip : plus d'openrouter nulle part.
+        let providers = config
+            .get("providers")
+            .and_then(|p| p.as_array())
+            .expect("providers still an array");
+        for p in providers {
+            let name = p.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            assert_ne!(name, "openrouter", "openrouter provider must be removed");
+            assert_ne!(name, "gemini", "gemini provider must be removed");
+        }
+
+        // Plus aucune mapping ne reference openrouter.
+        let models = config
+            .get("models")
+            .and_then(|m| m.as_array())
+            .expect("models still an array");
+        for m in models {
+            if let Some(mappings) = m.get("mappings").and_then(|x| x.as_array()) {
+                for mp in mappings {
+                    let prov = mp.get("provider").and_then(|p| p.as_str()).unwrap_or("");
+                    assert_ne!(
+                        prov,
+                        "openrouter",
+                        "openrouter mapping must be stripped from model {:?}",
+                        m.get("name")
+                    );
+                    assert_ne!(prov, "gemini", "gemini mapping must be stripped");
+                }
+            }
+        }
+
+        // Snapshot du resultat serialise pour capter toute regression.
+        let rendered = toml::to_string_pretty(&config).expect("serialize back");
+        insta::assert_snapshot!("w2_perf_preset_without_fallback", rendered);
+    }
+
+    /// W-2 : strip sur un config qui n'a pas de provider a retirer = no-op.
+    #[test]
+    fn test_w2_strip_fallback_noop_when_absent() {
+        let mut config: toml::Value = toml::from_str(
+            r#"
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+enabled = true
+
+[[models]]
+name = "default"
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+"#,
+        )
+        .unwrap();
+
+        strip_fallback(&mut config, &["openrouter", "gemini"]);
+
+        let providers_after = config.get("providers").and_then(|p| p.as_array()).unwrap();
+        assert_eq!(providers_after.len(), 1);
+        let mappings_after = config
+            .get("models")
+            .and_then(|m| m.as_array())
+            .unwrap()
+            .iter()
+            .filter_map(|m| m.get("mappings").and_then(|x| x.as_array()))
+            .next()
+            .unwrap();
+        assert_eq!(mappings_after.len(), 1);
+    }
 }
