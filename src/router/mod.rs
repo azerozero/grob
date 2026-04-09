@@ -94,23 +94,28 @@ fn extract_trailing_literal_byte(pattern: &str) -> Option<u8> {
     }
 
     let bytes = pattern.as_bytes();
-    // Skip trailing '$' anchor(s).
-    let mut end = bytes.len();
-    while end > 0 && bytes[end - 1] == b'$' {
-        end -= 1;
-    }
+    // Saute les ancres '$' de fin via `rposition` plutot qu'un decrement
+    // d'index mutable : cargo-mutants transforme `end -= 1` en `end /= 1`,
+    // ce qui cree une boucle infinie non tuable par test (timeout systematique).
+    // L'expression iterateur n'expose aucun decrement mutable a muter.
+    let end = bytes
+        .iter()
+        .rposition(|&b| b != b'$')
+        .map_or(0, |p| p + 1);
     if end == 0 {
         return None;
     }
-    // Character before any trailing anchor must be alphabetic (no quantifier).
+    // Le caractere avant toute ancre doit etre alphabetique (pas de quantificateur).
     if !bytes[end - 1].is_ascii_alphabetic() {
         return None;
     }
-    // Walk backwards through the alphabetic run.
-    let mut i = end;
-    while i > 0 && bytes[i - 1].is_ascii_alphabetic() {
-        i -= 1;
-    }
+    // Remonte la sequence alphabetique finale, encore via `rposition` pour
+    // eviter tout decrement mutable susceptible de devenir une boucle infinie
+    // sous mutation cargo-mutants.
+    let i = bytes[..end]
+        .iter()
+        .rposition(|b| !b.is_ascii_alphabetic())
+        .map_or(0, |p| p + 1);
     if end - i >= 3 {
         Some(bytes[i].to_ascii_lowercase())
     } else {
