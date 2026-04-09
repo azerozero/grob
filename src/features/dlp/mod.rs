@@ -145,6 +145,29 @@ impl std::fmt::Display for DlpBlockError {
     }
 }
 
+/// Rapport d'un scan de fin de stream (SSE).
+///
+/// Compte les detections cross-chunk par categorie ET observe l'entree
+/// dans chaque branche conditionnelle. Les flags `*_scan_attempted` rendent
+/// les conditions `&& / !` observables depuis les tests, pour tuer les
+/// mutations cargo-mutants qui sinon resteraient MISSED (mutants equivalents
+/// a l'oeil nu mais distinguables par la branche d'entree).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EosScanReport {
+    /// Indique si la branche de scan des secrets a ete evaluee (pre-filter passe).
+    pub secret_scan_attempted: bool,
+    /// Nombre de secrets cross-chunk detectes par le DFA scanner.
+    pub secrets: usize,
+    /// Indique si la branche de scan des pseudonymes a ete evaluee.
+    pub name_scan_attempted: bool,
+    /// Nombre de pseudonymes non deanonymises en cross-chunk.
+    pub pseudonyms: usize,
+    /// Indique si la branche de scan URL exfil a ete evaluee (scanner + URL).
+    pub url_scan_attempted: bool,
+    /// Nombre d'URLs exfiltrantes detectees en cross-chunk.
+    pub url_exfils: usize,
+}
+
 /// Central DLP engine combining all detection and replacement components.
 pub struct DlpEngine {
     /// Resolved DLP configuration used to build all sub-scanners.
@@ -168,6 +191,17 @@ pub struct DlpEngine {
 }
 
 impl DlpEngine {
+    /// Returns the total number of secret-detection rules declared in a config.
+    ///
+    /// Sums `config.secrets` (explicit rules) and `config.custom_prefixes`
+    /// (user custom-prefix rules). Exposed as a helper so unit tests can
+    /// observe the arithmetic directly — otherwise the addition lives only
+    /// inside a `tracing::info!` / `metrics::gauge!` call and mutation tests
+    /// cannot kill mutants on the `+` operator.
+    pub fn count_secret_rules(config: &DlpConfig) -> usize {
+        config.secrets.len() + config.custom_prefixes.len()
+    }
+
     /// Build a DLP engine from config. Returns None if DLP is disabled.
     pub fn from_config(mut config: DlpConfig) -> Option<Arc<Self>> {
         if !config.enabled {
@@ -226,7 +260,7 @@ impl DlpEngine {
             None
         };
 
-        let secret_count = config.secrets.len() + config.custom_prefixes.len();
+        let secret_count = Self::count_secret_rules(&config);
         let name_count = config.names.len();
         let pii_active = pii_scanner.is_some();
         tracing::info!(
@@ -606,8 +640,20 @@ impl DlpEngine {
     /// End-of-stream scan: detect cross-chunk secrets and pseudonyms that
     /// were split across SSE deltas. Can't unsend bytes, but emits alerts + metrics.
     pub fn scan_end_of_stream(&self, full_text: &str) {
+        let _ = self.scan_end_of_stream_reported(full_text);
+    }
+
+    /// End-of-stream scan qui retourne un rapport structure.
+    ///
+    /// Variante testable de [`scan_end_of_stream`] : renvoie un
+    /// [`EosScanReport`] avec le nombre de findings detectes par categorie,
+    /// pour que les tests unitaires puissent observer les branches `&&`/`!`
+    /// sans avoir a capturer les metriques globales.
+    pub fn scan_end_of_stream_reported(&self, full_text: &str) -> EosScanReport {
+        let mut report = EosScanReport::default();
         // DFA scan for cross-chunk secrets
         if !self.scanner.is_empty() && self.scanner.might_contain_secret(full_text) {
+            report.secret_scan_attempted = true;
             if let Some((_, events)) = self.scanner.redact(full_text, &self.canary_gen) {
                 for event in &events {
                     tracing::warn!(
@@ -619,26 +665,32 @@ impl DlpEngine {
                         "rule" => event.rule_name.clone()
                     )
                     .increment(1);
+                    report.secrets += 1;
                 }
             }
         }
         // Name check: pseudonyms that weren't deanonymized per-delta (cross-chunk)
         if !self.anonymizer.is_empty() && self.anonymizer.deanonymize_if_match(full_text).is_some()
         {
+            report.name_scan_attempted = true;
             tracing::warn!("DLP cross-chunk pseudonym detected in final buffer");
             metrics::counter!("grob_dlp_cross_chunk_total", "rule" => "pseudonym").increment(1);
+            report.pseudonyms += 1;
         }
         // URL exfil cross-chunk scan
         if let Some(ref exfil) = self.url_exfil_scanner {
             if exfil.might_contain_url(full_text) {
+                report.url_scan_attempted = true;
                 let result = exfil.scan(full_text);
                 if !matches!(result, url_exfil::UrlExfilResult::Clean) {
                     tracing::warn!("DLP cross-chunk URL exfiltration detected in final buffer");
                     metrics::counter!("grob_dlp_cross_chunk_total", "rule" => "url_exfil")
                         .increment(1);
+                    report.url_exfils += 1;
                 }
             }
         }
+        report
     }
 
     /// Run async SPRT entropy scan on completed response text.
