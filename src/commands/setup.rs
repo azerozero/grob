@@ -778,7 +778,7 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
         write_config(&choices, config_path)?;
         println!();
         println!("  Config written to {}", config_path.display());
-        chain_auto_flow(config_path).await;
+        chain_auto_flow(config_path, flags).await;
         print_status(config_path);
         return Ok(true);
     }
@@ -833,7 +833,7 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
     println!();
     println!("  Config written to {}", config_path.display());
     print_exports(&choices);
-    chain_auto_flow(config_path).await;
+    chain_auto_flow(config_path, flags).await;
     print_status(config_path);
     print_usage(&choices);
 
@@ -845,10 +845,11 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
 /// Invoked from `run_setup_wizard` right after `write_config`. Reads the freshly
 /// written config, detects missing credentials (OAuth tokens or API keys), and
 /// runs the interactive setup from [`crate::auth::auto_flow`] so the user lands
-/// ready-to-run without a second manual step. Silent no-op when stdin is not a
-/// TTY (non-interactive installs, CI, tests) or when no provider needs setup.
-async fn chain_auto_flow(config_path: &Path) {
-    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+/// ready-to-run without a second manual step. Silent no-op when `flags.yes` is
+/// set (user explicitly skipped prompts), when stdin is not a TTY
+/// (non-interactive installs, CI, tests), or when no provider needs setup.
+async fn chain_auto_flow(config_path: &Path, flags: &SetupFlags) {
+    if flags.yes || !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         return;
     }
     let Ok(config) = crate::cli::AppConfig::from_file(config_path) else {
