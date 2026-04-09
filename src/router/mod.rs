@@ -98,10 +98,7 @@ fn extract_trailing_literal_byte(pattern: &str) -> Option<u8> {
     // d'index mutable : cargo-mutants transforme `end -= 1` en `end /= 1`,
     // ce qui cree une boucle infinie non tuable par test (timeout systematique).
     // L'expression iterateur n'expose aucun decrement mutable a muter.
-    let end = bytes
-        .iter()
-        .rposition(|&b| b != b'$')
-        .map_or(0, |p| p + 1);
+    let end = bytes.iter().rposition(|&b| b != b'$').map_or(0, |p| p + 1);
     if end == 0 {
         return None;
     }
