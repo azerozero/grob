@@ -97,7 +97,18 @@ struct Choices {
     fallback: FallbackChoice,
     fallback_key: Option<String>,
     compliance: Compliance,
-    budget: Option<i64>,
+    budget: Option<BudgetChoice>,
+}
+
+/// Monthly budget cap chosen by the user.
+///
+/// `currency` is cosmetic only : the config schema stores the numeric value
+/// in `[budget] monthly_limit_usd` regardless of the currency label. Grob
+/// does no forex conversion.
+#[derive(Clone)]
+struct BudgetChoice {
+    amount: i64,
+    currency: &'static str,
 }
 
 /// Fallback provider chosen in the wizard.
@@ -354,23 +365,39 @@ fn screen_compliance(tools: &[&ToolInfo]) -> Compliance {
     }
 }
 
-fn screen_budget() -> Option<i64> {
+fn screen_budget() -> Option<BudgetChoice> {
     println!();
     println!("  Monthly budget cap:");
-    println!("    [1] Unlimited");
-    println!("    [2] $50/month");
-    println!("    [3] $200/month");
-    println!("    [4] Custom amount");
+    println!("    [1] Illimite");
+    println!("    [2] Saisir un montant");
 
-    match prompt_choice(4) {
-        2 => Some(50),
-        3 => Some(200),
-        4 => {
-            print!("    Amount in USD: ");
+    match prompt_choice(2) {
+        2 => {
+            print!("    Montant: ");
             io::stdout().flush().ok();
-            read_line().parse().ok()
+            let amount = read_line().parse::<i64>().ok()?;
+            print!("    Devise [USD]: ");
+            io::stdout().flush().ok();
+            let currency_input = read_line();
+            let currency = parse_currency(&currency_input);
+            Some(BudgetChoice { amount, currency })
         }
         _ => None,
+    }
+}
+
+/// Parses a free-form currency input, defaulting to USD when empty or invalid.
+///
+/// Accepted values : `USD`, `EUR`, `GBP` (case-insensitive). The config schema
+/// only stores amounts in USD, so non-USD values are still displayed in the
+/// recap for transparency but the persisted value goes into
+/// `[budget] monthly_limit_usd` unchanged.
+fn parse_currency(input: &str) -> &'static str {
+    match input.trim().to_ascii_uppercase().as_str() {
+        "" | "USD" => "USD",
+        "EUR" => "EUR",
+        "GBP" => "GBP",
+        _ => "USD",
     }
 }
 
@@ -447,8 +474,11 @@ fn display_recap(c: &Choices, path: &Path, dry_run: bool, auto_confirm: bool) ->
     };
     println!("    Compliance:  {}", label);
 
-    match c.budget {
-        Some(usd) => println!("    Budget:      ${}/month (warn at 80%)", usd),
+    match &c.budget {
+        Some(b) => println!(
+            "    Budget:      {} {}/month (warn at 80%)",
+            b.amount, b.currency
+        ),
         None => println!("    Budget:      unlimited"),
     }
 
@@ -655,12 +685,12 @@ fn write_config(choices: &Choices, path: &Path) -> Result<()> {
     }
 
     // Budget
-    if let Some(usd) = choices.budget {
+    if let Some(ref b) = choices.budget {
         patch(
             &mut config,
             "budget",
             &[
-                ("monthly_limit_usd", usd.into()),
+                ("monthly_limit_usd", b.amount.into()),
                 ("warn_at_percent", 80.into()),
             ],
         );
@@ -966,6 +996,52 @@ mod tests {
         // Snapshot du resultat serialise pour capter toute regression.
         let rendered = toml::to_string_pretty(&config).expect("serialize back");
         insta::assert_snapshot!("w2_perf_preset_without_fallback", rendered);
+    }
+
+    /// W-3 : `parse_currency` reconnait USD/EUR/GBP, ignore la casse, et
+    /// tombe sur USD quand l'entree est vide ou inconnue. Ce helper est le
+    /// seul morceau pur du nouveau screen_budget libre, donc c'est le bon
+    /// endroit pour le verrouiller.
+    #[test]
+    fn test_w3_parse_currency_defaults_and_variants() {
+        assert_eq!(parse_currency(""), "USD");
+        assert_eq!(parse_currency("usd"), "USD");
+        assert_eq!(parse_currency("USD"), "USD");
+        assert_eq!(parse_currency("  eur "), "EUR");
+        assert_eq!(parse_currency("GBP"), "GBP");
+        assert_eq!(parse_currency("bitcoin"), "USD");
+    }
+
+    /// W-3 : le patch TOML applique par `write_config` pour un budget custom
+    /// s'ecrit sous `[budget] monthly_limit_usd` + `warn_at_percent = 80`.
+    /// Verrouille le schema pour que le MCP server (qui lit cette cle) ne
+    /// casse pas sur un futur refactor.
+    #[test]
+    fn test_w3_budget_patch_writes_monthly_limit_usd() {
+        let mut config: toml::Value = toml::from_str("").unwrap();
+        let budget = BudgetChoice {
+            amount: 123,
+            currency: "EUR",
+        };
+        patch(
+            &mut config,
+            "budget",
+            &[
+                ("monthly_limit_usd", budget.amount.into()),
+                ("warn_at_percent", 80.into()),
+            ],
+        );
+        let section = config.get("budget").and_then(|v| v.as_table()).unwrap();
+        assert_eq!(
+            section
+                .get("monthly_limit_usd")
+                .and_then(|v| v.as_integer()),
+            Some(123)
+        );
+        assert_eq!(
+            section.get("warn_at_percent").and_then(|v| v.as_integer()),
+            Some(80)
+        );
     }
 
     /// W-2 : strip sur un config qui n'a pas de provider a retirer = no-op.
