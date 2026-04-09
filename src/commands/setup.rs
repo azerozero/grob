@@ -601,7 +601,11 @@ fn providers_from_preset(name: &str) -> Vec<String> {
 /// Runs the interactive setup wizard.
 ///
 /// Returns `true` if config was written, `false` if cancelled or dry-run.
-pub fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<bool> {
+///
+/// # Errors
+///
+/// Returns an error if config writing fails or the backup copy fails.
+pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<bool> {
     println!();
 
     // Detect existing config
@@ -645,6 +649,7 @@ pub fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<bool> 
         write_config(&choices, config_path)?;
         println!();
         println!("  Config written to {}", config_path.display());
+        chain_auto_flow(config_path).await;
         print_status(config_path);
         return Ok(true);
     }
@@ -700,10 +705,43 @@ pub fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<bool> 
     println!();
     println!("  Config written to {}", config_path.display());
     print_exports(&choices);
+    chain_auto_flow(config_path).await;
     print_status(config_path);
     print_usage(&choices);
 
     Ok(true)
+}
+
+/// Chains the auto-flow credential setup after the wizard writes the config.
+///
+/// Invoked from `run_setup_wizard` right after `write_config`. Reads the freshly
+/// written config, detects missing credentials (OAuth tokens or API keys), and
+/// runs the interactive setup from [`crate::auth::auto_flow`] so the user lands
+/// ready-to-run without a second manual step. Silent no-op when stdin is not a
+/// TTY (non-interactive installs, CI, tests) or when no provider needs setup.
+async fn chain_auto_flow(config_path: &Path) {
+    if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        return;
+    }
+    let Ok(config) = crate::cli::AppConfig::from_file(config_path) else {
+        return;
+    };
+    let Ok(store) = crate::storage::GrobStore::open(&crate::storage::GrobStore::default_path())
+    else {
+        return;
+    };
+    let store = std::sync::Arc::new(store);
+    let Ok(token_store) = crate::auth::TokenStore::with_store(store) else {
+        return;
+    };
+    let statuses = crate::auth::auto_flow::detect_credentials(&config.providers, &token_store);
+    let has_missing = statuses
+        .iter()
+        .any(|s| !matches!(s, crate::auth::auto_flow::CredentialStatus::Ready));
+    if !has_missing {
+        return;
+    }
+    let _ = crate::auth::auto_flow::run_interactive_flow(statuses, &token_store).await;
 }
 
 fn print_status(config_path: &Path) {

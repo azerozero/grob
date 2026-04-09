@@ -65,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
             yes: wizard_yes,
             dry_run: wizard_dry_run,
         };
-        let completed = commands::setup::run_setup_wizard(&config_path, &flags)?;
+        let completed = commands::setup::run_setup_wizard(&config_path, &flags).await?;
         if !completed {
             return Ok(());
         }
