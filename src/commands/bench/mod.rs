@@ -41,6 +41,28 @@ pub use payloads::{parse_payload_flag, PayloadSize};
 const WARMUP_REQUESTS: usize = 50;
 const CONCURRENT_DURATION_SECS: u64 = 5;
 
+// ── Shared context ──────────────────────────────────────────────────────
+
+/// Groups the shared state threaded through every benchmark function.
+struct BenchContext {
+    backend_url: String,
+    routing_patterns: Arc<Vec<regex::Regex>>,
+    auth_token: Option<String>,
+    auth_key_hash: Option<String>,
+    requests: usize,
+    effective_concurrency: usize,
+    format: String,
+}
+
+impl BenchContext {
+    /// Whether the benchmark runs in concurrent (throughput) mode.
+    fn is_concurrent(&self) -> bool {
+        self.effective_concurrency > 1
+    }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+
 /// Builds an HTTP client matching grob's real provider client optimizations.
 fn build_bench_client() -> reqwest::Client {
     reqwest::Client::builder()
@@ -50,6 +72,22 @@ fn build_bench_client() -> reqwest::Client {
         .http2_adaptive_window(true)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+/// Polls a proxy health endpoint until it responds (max 500 ms).
+async fn wait_for_proxy_ready(proxy_url: &str) {
+    let client = reqwest::Client::new();
+    for _ in 0..50 {
+        if client
+            .get(format!("{proxy_url}/health"))
+            .send()
+            .await
+            .is_ok()
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 // ── Entry point ─────────────────────────────────────────────────────────
@@ -166,19 +204,19 @@ pub async fn cmd_bench(
         .await?;
     anyhow::ensure!(probe_resp.status() == 200, "Mock backend returned non-200");
 
+    let ctx = BenchContext {
+        backend_url: backend_url.clone(),
+        routing_patterns,
+        auth_token,
+        auth_key_hash,
+        requests,
+        effective_concurrency,
+        format: format.to_string(),
+    };
+
     // ── Escalation mode ─────────────────────────────────────────────────
     if escalate {
-        return run_escalation(
-            &backend_url,
-            &routing_patterns,
-            &dlp_patterns,
-            &auth_token,
-            &auth_key_hash,
-            requests,
-            concurrency,
-            format,
-        )
-        .await;
+        return run_escalation(&ctx).await;
     }
 
     let scenarios = build_scenarios(with_auth);
@@ -228,40 +266,18 @@ pub async fn cmd_bench(
                     enable_auth: scenario.enable_auth,
                     enable_rate_limit: scenario.enable_rate_limit,
                     enable_cache: scenario.enable_cache,
-                    auth_key_hash: auth_key_hash.clone(),
-                    routing_patterns: routing_patterns.clone(),
+                    auth_key_hash: ctx.auth_key_hash.clone(),
+                    routing_patterns: ctx.routing_patterns.clone(),
                     dlp_patterns: effective_dlp_patterns,
                     #[cfg(feature = "policies")]
                     policy_matcher,
                 };
                 let (proxy_url, _proxy_handle) = start_proxy(state).await;
-
-                // Wait for proxy to be ready.
-                let client = reqwest::Client::new();
-                for _ in 0..50 {
-                    if client
-                        .get(format!("{proxy_url}/health"))
-                        .send()
-                        .await
-                        .is_ok()
-                    {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
+                wait_for_proxy_ready(&proxy_url).await;
                 proxy_url
             };
 
-            let (s, rps) = measure(
-                &target_url,
-                &body,
-                &auth_token,
-                scenario.enable_auth,
-                is_concurrent,
-                effective_concurrency,
-                requests,
-            )
-            .await?;
+            let (s, rps) = measure(&ctx, &target_url, &body, scenario.enable_auth).await?;
 
             if is_direct {
                 baseline_p50.insert(psize.label(), s.p50);
@@ -366,14 +382,16 @@ pub async fn cmd_bench(
 ///
 /// Returns `(stats, Option<rps>)`.
 async fn measure(
+    ctx: &BenchContext,
     target_url: &str,
     body: &serde_json::Value,
-    auth_token: &Option<String>,
     enable_auth: bool,
-    is_concurrent: bool,
-    effective_concurrency: usize,
-    requests: usize,
 ) -> Result<(stats::Stats, Option<f64>)> {
+    let auth_token = &ctx.auth_token;
+    let is_concurrent = ctx.is_concurrent();
+    let effective_concurrency = ctx.effective_concurrency;
+    let requests = ctx.requests;
+
     if is_concurrent {
         let warmup_client = reqwest::Client::builder()
             .pool_max_idle_per_host(10)
@@ -441,41 +459,21 @@ async fn measure(
 // ── Escalation mode ─────────────────────────────────────────────────────
 
 /// Runs the escalation staircase benchmark.
-#[allow(clippy::too_many_arguments)]
-async fn run_escalation(
-    backend_url: &str,
-    routing_patterns: &Arc<Vec<regex::Regex>>,
-    _all_dlp_patterns: &Arc<Vec<regex::Regex>>,
-    auth_token: &Option<String>,
-    auth_key_hash: &Option<String>,
-    requests: usize,
-    concurrency: usize,
-    format: &str,
-) -> Result<()> {
-    let cpu_count = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(1);
-    let effective_concurrency = if concurrency == 0 {
-        cpu_count
-    } else {
-        concurrency
-    };
-    let is_concurrent = effective_concurrency > 1;
-
+async fn run_escalation(ctx: &BenchContext) -> Result<()> {
     // Escalation always uses medium payload (realistic Claude Code traffic).
     let psize = PayloadSize::Medium;
     let steps = build_escalation_steps();
 
-    if format != "json" {
+    if ctx.format != "json" {
         println!();
         println!("  Feature Escalation ({})", psize.label());
-        if is_concurrent {
+        if ctx.is_concurrent() {
             println!(
                 "  Mode: concurrent (c={}), {} sec/step",
-                effective_concurrency, CONCURRENT_DURATION_SECS
+                ctx.effective_concurrency, CONCURRENT_DURATION_SECS
             );
         } else {
-            println!("  Requests: {} per step", requests);
+            println!("  Requests: {} per step", ctx.requests);
         }
         println!();
     }
@@ -493,54 +491,32 @@ async fn run_escalation(
         };
 
         let target_url = if is_direct {
-            backend_url.to_string()
+            ctx.backend_url.clone()
         } else {
             let dlp_pats = match step.dlp_pattern_set {
                 Some(set) => compile_dlp_patterns(set),
                 None => Arc::new(Vec::new()),
             };
             let state = ProxyState {
-                backend_url: backend_url.to_string(),
+                backend_url: ctx.backend_url.clone(),
                 client: build_bench_client(),
                 enable_routing: step.enable_routing,
                 enable_dlp: step.enable_dlp,
                 enable_auth: step.enable_auth,
                 enable_rate_limit: step.enable_rate_limit,
                 enable_cache: step.enable_cache,
-                auth_key_hash: auth_key_hash.clone(),
-                routing_patterns: routing_patterns.clone(),
+                auth_key_hash: ctx.auth_key_hash.clone(),
+                routing_patterns: ctx.routing_patterns.clone(),
                 dlp_patterns: dlp_pats,
                 #[cfg(feature = "policies")]
                 policy_matcher: None,
             };
             let (proxy_url, _handle) = start_proxy(state).await;
-
-            // Wait for proxy readiness.
-            let client = reqwest::Client::new();
-            for _ in 0..50 {
-                if client
-                    .get(format!("{proxy_url}/health"))
-                    .send()
-                    .await
-                    .is_ok()
-                {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
+            wait_for_proxy_ready(&proxy_url).await;
             proxy_url
         };
 
-        let (s, rps) = measure(
-            &target_url,
-            &body,
-            auth_token,
-            step.enable_auth,
-            is_concurrent,
-            effective_concurrency,
-            requests,
-        )
-        .await?;
+        let (s, rps) = measure(ctx, &target_url, &body, step.enable_auth).await?;
 
         if is_direct {
             baseline_p50 = Some(s.p50);
@@ -567,45 +543,24 @@ async fn run_escalation(
     {
         let all_dlp = compile_dlp_patterns(DlpPatternSet::Full);
         let state = ProxyState {
-            backend_url: backend_url.to_string(),
+            backend_url: ctx.backend_url.clone(),
             client: build_bench_client(),
             enable_routing: true,
             enable_dlp: true,
-            enable_auth: auth_token.is_some(),
+            enable_auth: ctx.auth_token.is_some(),
             enable_rate_limit: true,
             enable_cache: true,
-            auth_key_hash: auth_key_hash.clone(),
-            routing_patterns: routing_patterns.clone(),
+            auth_key_hash: ctx.auth_key_hash.clone(),
+            routing_patterns: ctx.routing_patterns.clone(),
             dlp_patterns: all_dlp,
             #[cfg(feature = "policies")]
             policy_matcher: None,
         };
         let (proxy_url, _handle) = start_proxy(state).await;
-
-        let client = reqwest::Client::new();
-        for _ in 0..50 {
-            if client
-                .get(format!("{proxy_url}/health"))
-                .send()
-                .await
-                .is_ok()
-            {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        wait_for_proxy_ready(&proxy_url).await;
 
         let body = secrets_request_body(psize);
-        let (s, rps) = measure(
-            &proxy_url,
-            &body,
-            auth_token,
-            auth_token.is_some(),
-            is_concurrent,
-            effective_concurrency,
-            requests,
-        )
-        .await?;
+        let (s, rps) = measure(ctx, &proxy_url, &body, ctx.auth_token.is_some()).await?;
 
         let overhead = baseline_p50.map(|b| s.p50.saturating_sub(b));
 
@@ -618,7 +573,7 @@ async fn run_escalation(
     }
 
     // ── Render output ────────────────────────────────────────────────
-    if format == "json" {
+    if ctx.format == "json" {
         let json_rows: Vec<ScenarioResult> = rows
             .iter()
             .map(|r| ScenarioResult {
@@ -640,8 +595,8 @@ async fn run_escalation(
                     .unwrap_or(1),
                 grob_version: env!("CARGO_PKG_VERSION").to_string(),
             },
-            requests_per_scenario: requests,
-            concurrency: effective_concurrency,
+            requests_per_scenario: ctx.requests,
+            concurrency: ctx.effective_concurrency,
             payload_sizes: vec![psize.label().to_string()],
             scenarios: json_rows,
             verdict: "escalation".to_string(),
