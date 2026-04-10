@@ -52,7 +52,22 @@ pub struct PiiScanner {
 }
 
 impl PiiScanner {
-    /// Build a PII scanner from config. Returns `None` if all detectors are disabled.
+    /// Builds a PII scanner from config. Returns `None` if all detectors are disabled.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::dlp::config::PiiConfig;
+    /// use grob::features::dlp::pii::PiiScanner;
+    ///
+    /// // Default config enables credit_cards + IBAN
+    /// let config = PiiConfig::default();
+    /// assert!(PiiScanner::from_config(&config).is_some());
+    ///
+    /// // Everything disabled => None
+    /// let off = PiiConfig { credit_cards: false, iban: false, bic: false, ..Default::default() };
+    /// assert!(PiiScanner::from_config(&off).is_none());
+    /// ```
     pub fn from_config(config: &PiiConfig) -> Option<Self> {
         let any_enabled = config.credit_cards || config.iban || config.bic;
         if !any_enabled {
@@ -81,8 +96,23 @@ impl PiiScanner {
         })
     }
 
-    /// Fast pre-filter: check if text could plausibly contain PII.
-    /// Returns false if there aren't enough consecutive digits or uppercase letters.
+    /// Fast pre-filter: returns false when no PII is plausible.
+    ///
+    /// Rejects text lacking enough consecutive digits or uppercase letters
+    /// to form a credit card, IBAN, or BIC.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::dlp::config::PiiConfig;
+    /// use grob::features::dlp::pii::PiiScanner;
+    ///
+    /// let scanner = PiiScanner::from_config(&PiiConfig::default()).unwrap();
+    /// // Digit run >= 8 → might contain a card number
+    /// assert!(scanner.might_contain_pii("card 4111111111111111 here"));
+    /// // Pure prose → rejected
+    /// assert!(!scanner.might_contain_pii("hello world, no numbers"));
+    /// ```
     #[inline]
     pub fn might_contain_pii(&self, text: &str) -> bool {
         let bytes = text.as_bytes();
@@ -204,9 +234,22 @@ impl PiiScanner {
     }
 }
 
-/// Luhn algorithm: validates credit card numbers.
-/// Sum of alternating doubled digits mod 10 == 0.
-fn luhn_check(digits: &str) -> bool {
+/// Validates a credit card number using the Luhn algorithm.
+///
+/// Expects a digit-only string (no spaces or dashes). Returns true
+/// when the sum of alternating doubled digits mod 10 equals 0.
+///
+/// # Examples
+///
+/// ```
+/// use grob::features::dlp::pii::luhn_check;
+///
+/// // Valid Visa test number
+/// assert!(luhn_check("4111111111111111"));
+/// // Invalid (last digit changed)
+/// assert!(!luhn_check("4111111111111112"));
+/// ```
+pub fn luhn_check(digits: &str) -> bool {
     let mut sum: u32 = 0;
     let mut double = false;
 
@@ -227,10 +270,25 @@ fn luhn_check(digits: &str) -> bool {
     sum.is_multiple_of(10)
 }
 
-/// IBAN mod97 validation (ISO 7064).
-/// Rearranges country+check to end, converts letters to digits, checks mod 97 == 1.
-/// Uses chunked arithmetic to avoid u64 overflow.
-fn iban_mod97_check(iban: &str) -> bool {
+/// Validates an IBAN using ISO 7064 mod-97 arithmetic.
+///
+/// Rearranges country+check to end, converts letters to digits, then
+/// verifies the remainder equals 1. Returns false for strings shorter
+/// than 15 characters or containing non-alphanumeric characters.
+///
+/// # Examples
+///
+/// ```
+/// use grob::features::dlp::pii::iban_mod97_check;
+///
+/// // Valid French IBAN
+/// assert!(iban_mod97_check("FR7630006000011234567890189"));
+/// // Invalid (modified check digits)
+/// assert!(!iban_mod97_check("FR0030006000011234567890189"));
+/// // Too short
+/// assert!(!iban_mod97_check("FR76300060"));
+/// ```
+pub fn iban_mod97_check(iban: &str) -> bool {
     if iban.len() < 15 {
         return false;
     }
@@ -255,10 +313,26 @@ fn iban_mod97_check(iban: &str) -> bool {
     remainder == 1
 }
 
-/// BIC/SWIFT format validation.
-/// Format: 4 letters (bank) + 2 letters (ISO 3166 country) + 2 alphanum (location)
-/// + optional 3 alphanum (branch).
-fn bic_format_check(bic: &str) -> bool {
+/// Validates a BIC/SWIFT code format.
+///
+/// Checks 4-letter bank code, 2-letter ISO 3166 country code, 2-character
+/// alphanumeric location, and optional 3-character branch code.
+///
+/// # Examples
+///
+/// ```
+/// use grob::features::dlp::pii::bic_format_check;
+///
+/// // Valid 8-char BIC (BNP Paribas, France)
+/// assert!(bic_format_check("BNPAFRPP"));
+/// // Valid 11-char BIC with branch
+/// assert!(bic_format_check("BNPAFRPP123"));
+/// // Invalid: wrong length
+/// assert!(!bic_format_check("BNPA"));
+/// // Invalid: lowercase
+/// assert!(!bic_format_check("bnpafrpp"));
+/// ```
+pub fn bic_format_check(bic: &str) -> bool {
     let len = bic.len();
     if len != 8 && len != 11 {
         return false;

@@ -198,6 +198,16 @@ impl DlpEngine {
     /// observe the arithmetic directly — otherwise the addition lives only
     /// inside a `tracing::info!` / `metrics::gauge!` call and mutation tests
     /// cannot kill mutants on the `+` operator.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::dlp::config::DlpConfig;
+    /// use grob::features::dlp::DlpEngine;
+    ///
+    /// let config = DlpConfig::default();
+    /// assert_eq!(DlpEngine::count_secret_rules(&config), 0);
+    /// ```
     pub fn count_secret_rules(config: &DlpConfig) -> usize {
         config.secrets.len() + config.custom_prefixes.len()
     }
