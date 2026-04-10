@@ -4,6 +4,8 @@
 pub(crate) mod audit;
 mod budget;
 mod config_api;
+/// Centralized deny-list for configuration updates.
+pub(crate) mod config_guard;
 /// Core dispatch pipeline: DLP, cache, route, provider loop.
 pub(crate) mod dispatch;
 mod endpoints;
