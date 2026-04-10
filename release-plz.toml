@@ -16,7 +16,7 @@ pr_labels = ["release"]
 # release-plz regex has no lookahead, so we allowlist src-related scopes.
 # Unscoped feat/fix also match (e.g., "feat: new feature").
 # Convention: use chore(e2e), chore(ci), chore(docs) for infra changes.
-release_commits = "^(feat|fix|refactor|perf)(\\((auth|cache|server|dispatch|providers|router|dlp|security|storage|preset|cli|commands|compat)\\))?:"
+release_commits = "^(feat|fix|refactor|perf)(\\((auth|cache|server|dispatch|providers|router|dlp|security|storage|preset|cli|commands|compat|setup|mcp|policies|features|tap|harness|pledge|tool_layer|watch)\\))?:"
 
 [[package]]
 name = "grob"
