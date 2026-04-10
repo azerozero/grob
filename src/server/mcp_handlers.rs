@@ -80,34 +80,7 @@ fn to_json_value(result: Result<JsonRpcResponse, JsonRpcError>) -> serde_json::V
 
 // ── grob_configure self-tuning ──────────────────────────────────────────────
 
-/// Keys that agents are never allowed to modify via `grob_configure`.
-///
-/// Covers credentials, security core switches, and audit — any field whose
-/// modification could weaken the security posture or expose secrets.
-const DENIED_KEYS: &[(&str, &str)] = &[
-    ("router", "api_key"),
-    ("budget", "api_key"),
-    ("cache", "api_key"),
-];
-
-/// Validates that a key update is not on the deny-list.
-fn is_key_denied(section: &ConfigSection, key: &str) -> bool {
-    let section_str = match section {
-        ConfigSection::Router => "router",
-        ConfigSection::Budget => "budget",
-        ConfigSection::Dlp => "dlp",
-        ConfigSection::Cache => "cache",
-    };
-
-    // DLP section is fully read-only (security cannot be weakened via self-tuning)
-    if section_str == "dlp" {
-        return true;
-    }
-
-    DENIED_KEYS
-        .iter()
-        .any(|(s, k)| *s == section_str && *k == key)
-}
+use super::config_guard::is_key_denied;
 
 /// Returns a safe JSON view of the requested config section (no secrets).
 fn read_config_section(

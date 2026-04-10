@@ -7,8 +7,9 @@ use axum::{
     Json,
 };
 use std::sync::Arc;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
+use super::config_guard::is_section_or_key_denied;
 use super::{AppError, AppState, ReloadableState};
 
 /// Redact an API key for safe display (show first 4 + last 4 chars)
@@ -91,6 +92,32 @@ pub(crate) async fn update_config_json(
 ) -> Result<Json<serde_json::Value>, AppError> {
     // Remove null values (TOML doesn't support null)
     remove_null_values(&mut new_config);
+
+    // Reject writes to denied sections or keys before touching disk.
+    if let Some(obj) = new_config.as_object() {
+        for (section, value) in obj {
+            // Whole-section deny check (providers, dlp).
+            if is_section_or_key_denied(section, "") {
+                warn!(section = %section, "config API: denied write to protected section");
+                return Err(AppError::ParseError(format!(
+                    "denied: section '{}' cannot be modified via the config API",
+                    section
+                )));
+            }
+            // Per-key deny check within allowed sections.
+            if let Some(inner) = value.as_object() {
+                for key in inner.keys() {
+                    if is_section_or_key_denied(section, key) {
+                        warn!(section = %section, key = %key, "config API: denied write to protected key");
+                        return Err(AppError::ParseError(format!(
+                            "denied: {}.{} cannot be modified via the config API",
+                            section, key
+                        )));
+                    }
+                }
+            }
+        }
+    }
 
     // Write back to config file (only works with local file configs)
     let config_path = match &state.config_source {
