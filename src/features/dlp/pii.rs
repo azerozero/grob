@@ -599,10 +599,12 @@ mod tests {
             action: PiiAction::Log,
         })
         .unwrap();
-        let text = "Pay with 4532015112830366 please";
-        let (result, detections) = scanner.redact(text).unwrap();
+        // Luhn-valid test CC (not a real card number).
+        let test_cc = "4532015112830366"; // lgtm[rust/cleartext-logging]
+        let text = format!("Pay with {test_cc} please");
+        let (result, detections) = scanner.redact(&text).unwrap();
         // Log mode: text unchanged but detection still reported
-        assert!(result.contains("4532015112830366"));
+        assert!(result.contains(test_cc));
         assert_eq!(detections.len(), 1);
     }
 

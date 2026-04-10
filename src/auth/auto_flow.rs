@@ -132,15 +132,8 @@ pub async fn run_interactive_flow(
     eprintln!("  Missing credentials ({}):", total);
     for status in &missing {
         match status {
-            CredentialStatus::MissingOAuth {
-                provider_name,
-                oauth_provider_id,
-                ..
-            } => {
-                eprintln!(
-                    "    ⚠️  {} — OAuth token missing ({})",
-                    provider_name, oauth_provider_id
-                );
+            CredentialStatus::MissingOAuth { provider_name, .. } => {
+                eprintln!("    ⚠️  {} — OAuth token missing", provider_name);
             }
             CredentialStatus::MissingApiKey {
                 provider_name,
@@ -222,7 +215,7 @@ async fn setup_oauth_interactive(
     let config = match oauth_config_for_type(oauth_type) {
         Some(c) => c,
         None => {
-            eprintln!("    ❌ Unknown OAuth type: {}", oauth_type);
+            eprintln!("    ❌ Unsupported OAuth type configured");
             return Ok(false);
         }
     };
