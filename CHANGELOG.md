@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0](https://github.com/azerozero/grob/compare/v0.35.0...v0.36.0) - 2026-04-10
+
+### Added
+
+- *(cli)* affiche un hint pour grob -- claude sans exec
+- *(setup)* permet de saisir un budget cap libre
+- *(setup)* rend le fallback provider opt-in
+- *(setup)* chaine l'OAuth auto_flow dans le wizard
+- *(policies)* add decision token type for transparent agent routing
+- *(auth)* auto-detect and setup missing credentials on start
+
+### Fixed
+
+- *(security)* corrige 5 alertes CodeQL/Semgrep cleartext logging
+- *(setup)* respecte flags.yes dans chain_auto_flow
+- *(ci)* sync-main ouvre une PR au lieu de pusher directement sur main ([#105](https://github.com/azerozero/grob/pull/105))
+- *(ci)* shellcheck SC2086 array idiom pour SHARD_ARG
+- *(ci)* ajoute un workflow shim pour debloquer les PR docs-only
+- *(ci)* retire mutants du needs[] du summary required (continue-on-error deja actif)
+- *(ci)* split shard 3 de mutation testing sur dlp/pii.rs en deux jobs paralleles
+- *(ci)* raise mutation testing job timeout to 60 minutes
+- *(security)* ignore RUSTSEC-2025-0134, document TLS dep status
+- *(security)* ignore RUSTSEC-2025-0134 in cargo audit config
+- *(ci)* use read-all global permissions baseline
+- *(security)* close 3 policy engine drifts
+- *(setup,cli,security)* overhaul wizard flow and fix audit issues
+- *(test)* fix wizard W6 proxy test — use /v1 base_url for vidaimock
+- *(test)* make wizard E2E tests pass locally
+- *(security,docs,ci)* address 5 quick wins from issue #82
+- *(ci)* trigger release-tag on PR merge instead of push
+- *(ci)* split release-plz into release-pr and release-tag jobs
+- *(ci)* remove cargo-semver-checks (binary, not a crate)
+- *(semver)* make SpendData pub(crate) instead of non_exhaustive
+- *(ci)* fix release flow — homebrew after release, tag push runs all jobs
+- *(ci)* make semver-checks non-blocking (continue-on-error)
+- *(ci)* add #[non_exhaustive] to SpendData to fix semver-checks
+- *(ci)* remove audit-wire path dep (breaks CI), fix shellcheck SC2086
+- *(ci+dlp+docs)* actionlint args, URL exfil request blocking, doc sync
+
+### Other
+
+- bump version to 0.36.0 ([#114](https://github.com/azerozero/grob/pull/114))
+- corrige 12 incoherences doc-code identifiees par cli-audit-sync
+- *(dlp)* ajoute 30+ tests pour tuer les mutants survivants de pii.rs
+- *(cli)* reordonne KNOWN_SUBCOMMANDS alphabetiquement
+- *(dlp)* extract token literal to kill chain_width violation
+- *(dlp)* cargo fmt sur tests et dfa
+- *(dlp)* ajoute 25+ tests pour tuer les mutants survivants de mod.rs et dfa.rs
+- *(router)* add 3 targeted tests to kill extract_trailing_literal_byte mutants
+- *(router)* add 12 mutant-killer tests for extract_trailing_literal_byte
+- *(ci)* harden pipeline — pin tool versions, scope permissions, prune jobs
+- *(policies)* mention decision token routing in module doc
+- *(e2e)* add T5 HIT Gateway multi-client scenarios
+- *(e2e)* add multi-client isolation harness T1-T4
+- *(docs)* remove competitive intel from public docs
+- *(e2e)* add wizard lifecycle tests and ADR-0008
+- release v0.35.1 ([#83](https://github.com/azerozero/grob/pull/83))
+- *(claude,agents)* document git flow rules and branch protection
+- *(auth)* add doc comments to CredentialStatus fields
+- disable semver_check in release-plz (binary, not a crate)
+- bump version to 0.35.0
+- *(claude)* add prek local setup instructions
+- *(tests)* apply cargo fmt formatting
+- *(readme)* add project structure, update install URL, normalize dashes
+- *(claude)* add git flow and CI/CD documentation
+- *(router,dlp)* add tests to kill surviving mutants
+- add musl cross-build config, remove leftover kraft.yaml
+- release v0.34.0 ([#79](https://github.com/azerozero/grob/pull/79))
+- *(ci)* decouple test jobs from slow quality checks
+
 ## [0.35.1](https://github.com/azerozero/grob/compare/v0.35.0...v0.35.1) - 2026-04-01
 
 ### Added
