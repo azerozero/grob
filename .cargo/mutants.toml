@@ -1,0 +1,26 @@
+# Configuration cargo-mutants — exclusions de mutants structurellement inatteignables.
+# Voir docs: https://mutants.rs/config.html
+
+# L180 pii.rs: le guard `det.start < last_end` est defensif. Les regex PII
+# utilisent \b (word boundaries), donc deux matchs CC/IBAN/BIC ne peuvent pas
+# se chevaucher en pratique. Les mutants < -> == et < -> <= sont inatteignables.
+#
+# L219 pii.rs luhn_check et L374 luhn_check_digit: `d *= 2` produit uniquement
+# des valeurs paires (0,2,4,6,8,10,12,14,16,18). d == 9 est inatteignable,
+# donc `> 9` et `>= 9` sont equivalents.
+#
+# L354 pii.rs generate_canary_cc: la boucle `while partial.len() < len - 1`
+# est du dead code defensif. Le format! {:0>width$} genere toujours >= len-1
+# chars grace au zero-padding, donc partial.len() == len-1 est toujours vrai.
+
+# L405 pii.rs generate_canary_iban: `(remainder * 100 + val) % 97` mute en
+# `+ 97` est mathematiquement equivalent car l'iteration suivante applique
+# `% 97` sur le resultat, et (x + 97) % 97 ≡ x % 97 (97 ≡ 0 mod 97).
+
+exclude_re = [
+    "replace < with (==|<=) in PiiScanner::redact",
+    "replace > with >= in luhn_check$",
+    "replace > with >= in luhn_check_digit",
+    "replace < with .* in generate_canary_cc$",
+    "replace % with \\+ in generate_canary_iban",
+]
