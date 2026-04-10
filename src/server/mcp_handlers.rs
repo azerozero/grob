@@ -1,0 +1,569 @@
+//! MCP JSON-RPC Axum handlers and self-tuning configuration logic.
+//!
+//! Moved here from `features/mcp/server/` to break the features -> server
+//! dependency cycle. The pure MCP business logic (query, bench, calibrate,
+//! report, tools/list) stays in `features::mcp::server::methods`.
+
+use super::AppState;
+use crate::features::mcp::server::methods;
+use crate::features::mcp::server::types::{
+    JsonRpcError, JsonRpcRequest, JsonRpcResponse, RPC_INTERNAL_ERROR,
+};
+use axum::{extract::State, response::IntoResponse, Json};
+use std::sync::Arc;
+
+use crate::features::mcp::server::types::{ConfigSection, ConfigureAction, ConfigureParams};
+
+// ── Axum HTTP handlers ──────────────────────────────────────────────────────
+
+/// Handles `POST /mcp` — dispatches on JSON-RPC `method` field.
+pub async fn handle_mcp_rpc(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<JsonRpcRequest>,
+) -> impl IntoResponse {
+    let mcp = match state.security.mcp.as_ref() {
+        Some(m) => m,
+        None => {
+            return Json(to_json_value(Err(JsonRpcError::internal(
+                req.id,
+                "MCP not initialized",
+            ))));
+        }
+    };
+
+    let result = match req.method.as_str() {
+        "tool_matrix/query" => methods::handle_query(mcp, req.params, req.id.clone()).await,
+        "tool_matrix/bench" => methods::handle_bench(mcp, req.params, req.id.clone()).await,
+        "tool_matrix/calibrate" => methods::handle_calibrate(mcp, req.params, req.id.clone()).await,
+        "tool_matrix/report" => methods::handle_report(mcp, req.id.clone()).await,
+        "grob_configure" => handle_configure(&state, req.params, req.id.clone()).await,
+        "tools/list" => methods::handle_tools_list(mcp, req.id.clone()).await,
+        _ => Err(JsonRpcError::method_not_found(req.id.clone(), &req.method)),
+    };
+
+    Json(to_json_value(result))
+}
+
+/// Handles `GET /api/tool-matrix` — REST endpoint for the full matrix report.
+pub async fn handle_matrix_report(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.security.mcp.as_ref() {
+        Some(mcp) => {
+            let report = methods::build_matrix_report(mcp).await;
+            Json(report)
+        }
+        None => Json(serde_json::json!({
+            "error": "MCP not enabled",
+            "tool_count": 0,
+            "tools": [],
+        })),
+    }
+}
+
+/// Serializes a JSON-RPC result to a [`serde_json::Value`].
+///
+/// Both `JsonRpcResponse` and `JsonRpcError` are simple structs with only
+/// string/numeric fields, so serialization cannot realistically fail. The
+/// fallback exists purely to satisfy the type system without `unwrap()`.
+fn to_json_value(result: Result<JsonRpcResponse, JsonRpcError>) -> serde_json::Value {
+    let fallback = |e: serde_json::Error| {
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "error": {"code": RPC_INTERNAL_ERROR, "message": e.to_string()},
+            "id": null
+        })
+    };
+    match result {
+        Ok(resp) => serde_json::to_value(resp).unwrap_or_else(fallback),
+        Err(err) => serde_json::to_value(err).unwrap_or_else(fallback),
+    }
+}
+
+// ── grob_configure self-tuning ──────────────────────────────────────────────
+
+/// Keys that agents are never allowed to modify via `grob_configure`.
+///
+/// Covers credentials, security core switches, and audit — any field whose
+/// modification could weaken the security posture or expose secrets.
+const DENIED_KEYS: &[(&str, &str)] = &[
+    ("router", "api_key"),
+    ("budget", "api_key"),
+    ("cache", "api_key"),
+];
+
+/// Validates that a key update is not on the deny-list.
+fn is_key_denied(section: &ConfigSection, key: &str) -> bool {
+    let section_str = match section {
+        ConfigSection::Router => "router",
+        ConfigSection::Budget => "budget",
+        ConfigSection::Dlp => "dlp",
+        ConfigSection::Cache => "cache",
+    };
+
+    // DLP section is fully read-only (security cannot be weakened via self-tuning)
+    if section_str == "dlp" {
+        return true;
+    }
+
+    DENIED_KEYS
+        .iter()
+        .any(|(s, k)| *s == section_str && *k == key)
+}
+
+/// Returns a safe JSON view of the requested config section (no secrets).
+fn read_config_section(
+    config: &crate::cli::AppConfig,
+    section: &ConfigSection,
+) -> serde_json::Value {
+    match section {
+        ConfigSection::Router => serde_json::json!({
+            "default": config.router.default,
+            "background": config.router.background,
+            "think": config.router.think,
+            "websearch": config.router.websearch,
+            "auto_map_regex": config.router.auto_map_regex,
+            "background_regex": config.router.background_regex,
+            "prompt_rules": config.router.prompt_rules,
+            "gdpr": config.router.gdpr,
+            "region": config.router.region,
+        }),
+        ConfigSection::Budget => serde_json::json!({
+            "monthly_limit_usd": config.budget.monthly_limit_usd,
+            "warn_at_percent": config.budget.warn_at_percent,
+        }),
+        ConfigSection::Dlp => serde_json::json!({
+            "enabled": config.dlp.enabled,
+            "scan_input": config.dlp.scan_input,
+            "scan_output": config.dlp.scan_output,
+            "entropy_enabled": config.dlp.entropy.enabled,
+            "entropy_action": format!("{:?}", config.dlp.entropy.action),
+            "pii_credit_cards": config.dlp.pii.credit_cards,
+            "pii_iban": config.dlp.pii.iban,
+            "pii_action": format!("{:?}", config.dlp.pii.action),
+            "url_exfil_enabled": config.dlp.url_exfil.enabled,
+            "prompt_injection_enabled": config.dlp.prompt_injection.enabled,
+        }),
+        ConfigSection::Cache => serde_json::json!({
+            "enabled": config.cache.enabled,
+            "max_capacity": config.cache.max_capacity,
+            "ttl_secs": config.cache.ttl_secs,
+            "max_entry_bytes": config.cache.max_entry_bytes,
+        }),
+    }
+}
+
+/// Applies an update to a config section, returning the modified config.
+///
+/// The caller is responsible for triggering the hot-reload after a successful update.
+fn apply_config_update(
+    config: &mut crate::cli::AppConfig,
+    section: &ConfigSection,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), String> {
+    match section {
+        ConfigSection::Router => match key {
+            "default" => {
+                config.router.default = value
+                    .as_str()
+                    .ok_or("expected string for router.default")?
+                    .to_string();
+            }
+            "background" => {
+                config.router.background = value.as_str().map(String::from);
+            }
+            "think" => {
+                config.router.think = value.as_str().map(String::from);
+            }
+            "websearch" => {
+                config.router.websearch = value.as_str().map(String::from);
+            }
+            "auto_map_regex" => {
+                config.router.auto_map_regex = value.as_str().map(String::from);
+            }
+            "background_regex" => {
+                config.router.background_regex = value.as_str().map(String::from);
+            }
+            "gdpr" => {
+                config.router.gdpr = value.as_bool().ok_or("expected bool for router.gdpr")?;
+            }
+            "region" => {
+                config.router.region = value.as_str().map(String::from);
+            }
+            _ => return Err(format!("unknown router key: {key}")),
+        },
+        ConfigSection::Budget => match key {
+            "monthly_limit_usd" => {
+                let v = value
+                    .as_f64()
+                    .ok_or("expected number for budget.monthly_limit_usd")?;
+                config.budget.monthly_limit_usd =
+                    crate::cli::BudgetUsd::new(v).map_err(|e| format!("invalid budget: {e}"))?;
+            }
+            "warn_at_percent" => {
+                let v = value
+                    .as_u64()
+                    .ok_or("expected integer for budget.warn_at_percent")?;
+                if v > 100 {
+                    return Err("warn_at_percent must be 0-100".to_string());
+                }
+                config.budget.warn_at_percent = v as u32;
+            }
+            _ => return Err(format!("unknown budget key: {key}")),
+        },
+        ConfigSection::Dlp => {
+            return Err("DLP section is read-only via self-tuning".to_string());
+        }
+        ConfigSection::Cache => match key {
+            "enabled" => {
+                config.cache.enabled = value.as_bool().ok_or("expected bool for cache.enabled")?;
+            }
+            "max_capacity" => {
+                config.cache.max_capacity = value
+                    .as_u64()
+                    .ok_or("expected integer for cache.max_capacity")?;
+            }
+            "ttl_secs" => {
+                config.cache.ttl_secs = value
+                    .as_u64()
+                    .ok_or("expected integer for cache.ttl_secs")?;
+            }
+            "max_entry_bytes" => {
+                let v = value
+                    .as_u64()
+                    .ok_or("expected integer for cache.max_entry_bytes")?;
+                config.cache.max_entry_bytes = v as usize;
+            }
+            _ => return Err(format!("unknown cache key: {key}")),
+        },
+    }
+    Ok(())
+}
+
+/// Handles `grob_configure` — self-tuning configuration tool for MCP agents.
+///
+/// Agents can read safe config subsets and update whitelisted parameters.
+/// Credential, security, and bind-address modifications are always rejected.
+pub async fn handle_configure(
+    state: &Arc<AppState>,
+    params: serde_json::Value,
+    id: serde_json::Value,
+) -> Result<JsonRpcResponse, JsonRpcError> {
+    let p: ConfigureParams = serde_json::from_value(params)
+        .map_err(|e| JsonRpcError::invalid_params(id.clone(), &e.to_string()))?;
+
+    match p.action {
+        ConfigureAction::Read { ref section } => {
+            let snapshot = state.snapshot();
+            let data = read_config_section(&snapshot.config, section);
+
+            tracing::info!(section = %section, "MCP: grob_configure read");
+
+            Ok(JsonRpcResponse::ok(
+                id,
+                serde_json::json!({
+                    "action": "read",
+                    "section": section.to_string(),
+                    "config": data,
+                }),
+            ))
+        }
+        ConfigureAction::Update {
+            ref section,
+            ref key,
+            ref value,
+        } => {
+            if is_key_denied(section, key) {
+                tracing::warn!(
+                    section = %section,
+                    key = %key,
+                    "MCP: grob_configure denied update (security policy)"
+                );
+                return Err(JsonRpcError::invalid_params(
+                    id,
+                    &format!(
+                        "denied: {}.{} cannot be modified via self-tuning",
+                        section, key
+                    ),
+                ));
+            }
+
+            // Clone the current config, apply the change, then atomically swap
+            let mut new_config = {
+                let snapshot = state.snapshot();
+                snapshot.config.clone()
+            };
+
+            apply_config_update(&mut new_config, section, key, value)
+                .map_err(|e| JsonRpcError::invalid_params(id.clone(), &e))?;
+
+            // Rebuild reloadable state (same mechanism as /api/config/reload)
+            let new_router = crate::router::Router::new(new_config.clone());
+            let new_registry = crate::providers::ProviderRegistry::from_configs_with_models(
+                &new_config.providers,
+                Some(state.token_store.clone()),
+                &new_config.models,
+                &new_config.server.timeouts,
+            )
+            .map_err(|e| {
+                JsonRpcError::internal(
+                    id.clone(),
+                    &format!("failed to rebuild provider registry: {e}"),
+                )
+            })?;
+
+            let new_inner = Arc::new(super::ReloadableState::new(
+                new_config,
+                new_router,
+                Arc::new(new_registry),
+            ));
+
+            // Atomic swap
+            *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner;
+
+            tracing::info!(
+                section = %section,
+                key = %key,
+                "MCP: grob_configure applied update + hot-reload"
+            );
+
+            Ok(JsonRpcResponse::ok(
+                id,
+                serde_json::json!({
+                    "action": "update",
+                    "section": section.to_string(),
+                    "key": key,
+                    "status": "applied",
+                }),
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_app_config() -> crate::cli::AppConfig {
+        let toml_str = r#"
+            [router]
+            default = "claude-sonnet"
+            think = "claude-opus"
+            background = "claude-haiku"
+            websearch = "claude-sonnet"
+        "#;
+        toml::from_str(toml_str).unwrap()
+    }
+
+    #[test]
+    fn test_configure_read_router() {
+        let config = test_app_config();
+        let result = read_config_section(&config, &ConfigSection::Router);
+        assert_eq!(result["default"], "claude-sonnet");
+        assert_eq!(result["think"], "claude-opus");
+        assert_eq!(result["background"], "claude-haiku");
+    }
+
+    #[test]
+    fn test_configure_read_budget() {
+        let config = test_app_config();
+        let result = read_config_section(&config, &ConfigSection::Budget);
+        assert_eq!(result["monthly_limit_usd"].as_f64().unwrap(), 0.0);
+        assert!(result.get("warn_at_percent").is_some());
+    }
+
+    #[test]
+    fn test_configure_read_dlp() {
+        let config = test_app_config();
+        let result = read_config_section(&config, &ConfigSection::Dlp);
+        assert_eq!(result["enabled"], serde_json::json!(false));
+        assert!(result.get("scan_input").is_some());
+    }
+
+    #[test]
+    fn test_configure_read_cache() {
+        let config = test_app_config();
+        let result = read_config_section(&config, &ConfigSection::Cache);
+        assert_eq!(result["enabled"], false);
+        assert_eq!(result["ttl_secs"], 3600);
+    }
+
+    #[test]
+    fn test_configure_update_routing_default() {
+        let mut config = test_app_config();
+        apply_config_update(
+            &mut config,
+            &ConfigSection::Router,
+            "default",
+            &serde_json::json!("gpt-4o"),
+        )
+        .unwrap();
+        assert_eq!(config.router.default, "gpt-4o");
+    }
+
+    #[test]
+    fn test_configure_update_routing_think() {
+        let mut config = test_app_config();
+        apply_config_update(
+            &mut config,
+            &ConfigSection::Router,
+            "think",
+            &serde_json::json!("o1-pro"),
+        )
+        .unwrap();
+        assert_eq!(config.router.think.as_deref(), Some("o1-pro"));
+    }
+
+    #[test]
+    fn test_configure_update_budget_limit() {
+        let mut config = test_app_config();
+        apply_config_update(
+            &mut config,
+            &ConfigSection::Budget,
+            "monthly_limit_usd",
+            &serde_json::json!(50.0),
+        )
+        .unwrap();
+        assert_eq!(f64::from(config.budget.monthly_limit_usd), 50.0);
+    }
+
+    #[test]
+    fn test_configure_update_cache_enabled() {
+        let mut config = test_app_config();
+        apply_config_update(
+            &mut config,
+            &ConfigSection::Cache,
+            "enabled",
+            &serde_json::json!(true),
+        )
+        .unwrap();
+        assert!(config.cache.enabled);
+    }
+
+    #[test]
+    fn test_configure_update_cache_ttl() {
+        let mut config = test_app_config();
+        apply_config_update(
+            &mut config,
+            &ConfigSection::Cache,
+            "ttl_secs",
+            &serde_json::json!(7200),
+        )
+        .unwrap();
+        assert_eq!(config.cache.ttl_secs, 7200);
+    }
+
+    #[test]
+    fn test_configure_reject_dlp_update() {
+        assert!(is_key_denied(&ConfigSection::Dlp, "enabled"));
+        assert!(is_key_denied(&ConfigSection::Dlp, "scan_input"));
+        assert!(is_key_denied(&ConfigSection::Dlp, "anything"));
+    }
+
+    #[test]
+    fn test_configure_reject_credentials() {
+        assert!(is_key_denied(&ConfigSection::Router, "api_key"));
+        assert!(is_key_denied(&ConfigSection::Budget, "api_key"));
+    }
+
+    #[test]
+    fn test_configure_reject_security_core() {
+        assert!(is_key_denied(&ConfigSection::Dlp, "enabled"));
+        assert!(is_key_denied(&ConfigSection::Dlp, "scan_input"));
+        assert!(is_key_denied(&ConfigSection::Dlp, "scan_output"));
+        assert!(is_key_denied(&ConfigSection::Dlp, "no_builtins"));
+    }
+
+    #[test]
+    fn test_configure_allow_safe_keys() {
+        assert!(!is_key_denied(&ConfigSection::Router, "default"));
+        assert!(!is_key_denied(&ConfigSection::Router, "think"));
+        assert!(!is_key_denied(&ConfigSection::Budget, "monthly_limit_usd"));
+        assert!(!is_key_denied(&ConfigSection::Cache, "enabled"));
+        assert!(!is_key_denied(&ConfigSection::Cache, "ttl_secs"));
+    }
+
+    #[test]
+    fn test_configure_update_unknown_key_rejected() {
+        let mut config = test_app_config();
+        let result = apply_config_update(
+            &mut config,
+            &ConfigSection::Router,
+            "nonexistent_key",
+            &serde_json::json!("value"),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown router key"));
+    }
+
+    #[test]
+    fn test_configure_update_wrong_type_rejected() {
+        let mut config = test_app_config();
+        let result = apply_config_update(
+            &mut config,
+            &ConfigSection::Router,
+            "default",
+            &serde_json::json!(42),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_configure_update_negative_budget_rejected() {
+        let mut config = test_app_config();
+        let result = apply_config_update(
+            &mut config,
+            &ConfigSection::Budget,
+            "monthly_limit_usd",
+            &serde_json::json!(-10.0),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_configure_update_warn_percent_over_100_rejected() {
+        let mut config = test_app_config();
+        let result = apply_config_update(
+            &mut config,
+            &ConfigSection::Budget,
+            "warn_at_percent",
+            &serde_json::json!(150),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_configure_params_deserialize_read() {
+        let json = serde_json::json!({
+            "action": "read",
+            "section": "router"
+        });
+        let p: ConfigureParams = serde_json::from_value(json).unwrap();
+        match p.action {
+            ConfigureAction::Read { section } => assert_eq!(section, ConfigSection::Router),
+            _ => panic!("expected Read action"),
+        }
+    }
+
+    #[test]
+    fn test_configure_params_deserialize_update() {
+        let json = serde_json::json!({
+            "action": "update",
+            "section": "cache",
+            "key": "ttl_secs",
+            "value": 7200
+        });
+        let p: ConfigureParams = serde_json::from_value(json).unwrap();
+        match p.action {
+            ConfigureAction::Update {
+                section,
+                key,
+                value,
+            } => {
+                assert_eq!(section, ConfigSection::Cache);
+                assert_eq!(key, "ttl_secs");
+                assert_eq!(value, 7200);
+            }
+            _ => panic!("expected Update action"),
+        }
+    }
+}

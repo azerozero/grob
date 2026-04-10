@@ -34,7 +34,7 @@ impl AppConfig {
             if !provider.is_enabled() {
                 continue;
             }
-            use crate::providers::AuthType;
+            use super::AuthType;
             match provider.auth_type {
                 AuthType::ApiKey => {
                     let key_missing = provider.api_key.is_none();
