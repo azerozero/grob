@@ -1,11 +1,15 @@
-//! Centralized deny-list for configuration updates.
+//! Centralized guard for configuration updates.
 //!
-//! Both the MCP self-tuning path (`grob_configure`) and the web config API
-//! (`/api/config`) share this guard to prevent credential leaks and security
-//! weakening through config writes.
+//! Provides a deny-list to prevent credential leaks and security weakening,
+//! and a unified persist-and-reload pipeline shared by the web config API
+//! (`/api/config`) and the MCP self-tuning path (`grob_configure`).
 
 #[cfg(feature = "mcp")]
 use crate::features::mcp::server::types::ConfigSection;
+
+use std::path::Path;
+use std::sync::Arc;
+use tracing::info;
 
 /// Top-level TOML sections that are never writable via any config API.
 const DENIED_SECTIONS: &[&str] = &["providers", "dlp"];
@@ -46,6 +50,82 @@ pub fn is_key_denied(section: &ConfigSection, key: &str) -> bool {
         ConfigSection::Cache => "cache",
     };
     is_section_or_key_denied(section_str, key)
+}
+
+/// Backs up the config file, writes new content, and triggers a hot-reload.
+///
+/// Both the web config API and MCP self-tuning path delegate here so that
+/// backup, serialisation, and reload behaviour are identical regardless of
+/// the mutation surface.
+///
+/// # Errors
+///
+/// Returns an error when the config source is a remote URL (read-only), the
+/// backup copy fails, serialisation fails, disk write fails, or the
+/// hot-reload (re-parse + provider rebuild) fails.
+pub async fn persist_and_reload(
+    state: &Arc<super::AppState>,
+    config: &crate::cli::AppConfig,
+) -> Result<(), super::AppError> {
+    let config_path = match &state.config_source {
+        crate::cli::ConfigSource::File(p) => p,
+        crate::cli::ConfigSource::Url(_) => {
+            return Err(super::AppError::ParseError(
+                "Cannot save config: loaded from remote URL (read-only)".to_string(),
+            ));
+        }
+    };
+
+    // 1. Backup
+    let backup_path = config_path.with_extension("toml.backup");
+    tokio::fs::copy(config_path, &backup_path)
+        .await
+        .map_err(|e| super::AppError::ParseError(format!("Failed to create backup: {e}")))?;
+
+    // 2. Serialise and write
+    let toml_str = toml::to_string_pretty(config)
+        .map_err(|e| super::AppError::ParseError(format!("Failed to serialize config: {e}")))?;
+
+    tokio::fs::write(config_path, toml_str)
+        .await
+        .map_err(|e| super::AppError::ParseError(format!("Failed to write config: {e}")))?;
+
+    // 3. Hot-reload: rebuild router + provider registry from the new config
+    reload_state(state, config.clone(), config_path)?;
+
+    Ok(())
+}
+
+/// Rebuilds [`ReloadableState`] from a validated config and atomically swaps it.
+fn reload_state(
+    state: &Arc<super::AppState>,
+    config: crate::cli::AppConfig,
+    _config_path: &Path,
+) -> Result<(), super::AppError> {
+    let new_router = crate::router::Router::new(config.clone());
+
+    let new_registry = crate::providers::ProviderRegistry::from_configs_with_models(
+        &config.providers,
+        Some(state.token_store.clone()),
+        &config.models,
+        &config.server.timeouts,
+    )
+    .map_err(|e| {
+        super::AppError::ProviderError(format!("Failed to rebuild provider registry: {e}"))
+    })?;
+
+    let new_inner = Arc::new(super::ReloadableState::new(
+        config,
+        new_router,
+        Arc::new(new_registry),
+    ));
+
+    // Atomic swap
+    *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner;
+
+    info!("Configuration persisted and hot-reloaded");
+
+    Ok(())
 }
 
 #[cfg(test)]

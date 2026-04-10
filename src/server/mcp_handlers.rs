@@ -212,42 +212,7 @@ fn apply_config_update(
     Ok(())
 }
 
-/// Persists the updated configuration to disk (best-effort).
-///
-/// Mirrors the write-back logic from the web API (`config_api::update_config_json`):
-/// reads the current file, creates a `.toml.backup`, serialises the new config, and
-/// overwrites. Failures are logged but never bubble up -- the in-memory hot-reload
-/// has already been validated and that is the primary contract.
-async fn persist_config_to_disk(state: &Arc<AppState>, config: &crate::cli::AppConfig) {
-    let config_path = match &state.config_source {
-        crate::cli::ConfigSource::File(p) => p.clone(),
-        crate::cli::ConfigSource::Url(_) => {
-            tracing::debug!("MCP: config loaded from URL, skipping disk persistence");
-            return;
-        }
-    };
-
-    // Create a backup of the current file before overwriting.
-    let backup_path = config_path.with_extension("toml.backup");
-    if let Err(e) = tokio::fs::copy(&config_path, &backup_path).await {
-        tracing::warn!("MCP: failed to create config backup: {e}");
-    }
-
-    let toml_str = match toml::to_string_pretty(config) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("MCP: failed to serialise config to TOML: {e}");
-            return;
-        }
-    };
-
-    if let Err(e) = tokio::fs::write(&config_path, toml_str).await {
-        tracing::warn!(
-            "MCP: failed to persist config to {}: {e}",
-            config_path.display()
-        );
-    }
-}
+// Disk persistence and hot-reload are handled by `config_guard::persist_and_reload`.
 
 /// Handles `grob_configure` — self-tuning configuration tool for MCP agents.
 ///
@@ -297,7 +262,7 @@ pub async fn handle_configure(
                 ));
             }
 
-            // Clone the current config, apply the change, then atomically swap
+            // Clone the current config, apply the change, then persist + reload.
             let mut new_config = {
                 let snapshot = state.snapshot();
                 snapshot.config.clone()
@@ -306,33 +271,10 @@ pub async fn handle_configure(
             apply_config_update(&mut new_config, section, key, value)
                 .map_err(|e| JsonRpcError::invalid_params(id.clone(), &e))?;
 
-            // Rebuild reloadable state (same mechanism as /api/config/reload)
-            let new_router = crate::router::Router::new(new_config.clone());
-            let new_registry = crate::providers::ProviderRegistry::from_configs_with_models(
-                &new_config.providers,
-                Some(state.token_store.clone()),
-                &new_config.models,
-                &new_config.server.timeouts,
-            )
-            .map_err(|e| {
-                JsonRpcError::internal(
-                    id.clone(),
-                    &format!("failed to rebuild provider registry: {e}"),
-                )
-            })?;
-
-            // Persist updated config to disk so changes survive restarts.
-            // Must happen before `new_config` is moved into `ReloadableState`.
-            persist_config_to_disk(state, &new_config).await;
-
-            let new_inner = Arc::new(super::ReloadableState::new(
-                new_config,
-                new_router,
-                Arc::new(new_registry),
-            ));
-
-            // Atomic swap
-            *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner;
+            // Backup, write, and hot-reload via the shared pipeline.
+            super::config_guard::persist_and_reload(state, &new_config)
+                .await
+                .map_err(|e| JsonRpcError::internal(id.clone(), &e.to_string()))?;
 
             tracing::info!(
                 section = %section,
