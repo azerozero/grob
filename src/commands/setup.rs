@@ -445,7 +445,7 @@ fn display_recap(c: &Choices, path: &Path, dry_run: bool, auto_confirm: bool) ->
     println!("    Providers:");
     for a in &c.auth {
         if a.use_oauth {
-            println!("      {:<14} OAuth ({})", a.provider, a.oauth_id);
+            println!("      {:<14} OAuth (configured)", a.provider);
         } else {
             println!("      {:<14} ${}", a.provider, a.env_var);
         }
