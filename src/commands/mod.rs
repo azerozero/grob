@@ -14,6 +14,8 @@ pub mod config_promote;
 pub mod config_rollback;
 /// Establishes a live connection to a running grob instance.
 pub mod connect;
+/// Best-effort API key validation via lightweight provider calls.
+pub mod credential_check;
 /// Diagnoses configuration, connectivity, and provider health.
 pub mod doctor;
 /// Displays resolved environment variables and config paths.
