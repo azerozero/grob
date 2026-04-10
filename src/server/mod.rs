@@ -15,6 +15,9 @@ mod handlers;
 pub(crate) mod helpers;
 mod init;
 mod lifecycle;
+/// MCP JSON-RPC handlers (Axum glue + self-tuning configuration).
+#[cfg(feature = "mcp")]
+pub(crate) mod mcp_handlers;
 mod middleware;
 mod oauth_handlers;
 /// OpenAI `/v1/chat/completions` compatibility translation layer.
@@ -361,11 +364,8 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
     // MCP routes (conditionally compiled and enabled)
     #[cfg(feature = "mcp")]
     let app = if state.security.mcp.is_some() {
-        app.route("/mcp", post(crate::features::mcp::server::handle_mcp_rpc))
-            .route(
-                "/api/tool-matrix",
-                get(crate::features::mcp::server::handle_matrix_report),
-            )
+        app.route("/mcp", post(mcp_handlers::handle_mcp_rpc))
+            .route("/api/tool-matrix", get(mcp_handlers::handle_matrix_report))
     } else {
         app
     };

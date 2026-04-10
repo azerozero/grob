@@ -1,5 +1,6 @@
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use super::{BodySizeLimit, BudgetUsd, Port};
 
@@ -701,4 +702,104 @@ pub struct HarnessConfig {
     /// Path to replay from. Mutually exclusive with `record_path`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replay_path: Option<std::path::PathBuf>,
+}
+
+// ── Provider configuration ──────────────────────────────────────────────────
+//
+// Moved here from providers/mod.rs to break the cli <-> providers dependency
+// cycle. These are TOML-deserialized config types that naturally belong alongside
+// the other config structs. providers/mod.rs re-exports them for backward
+// compatibility.
+
+/// Authentication type for providers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+#[derive(Default)]
+pub enum AuthType {
+    /// API key authentication.
+    #[default]
+    ApiKey,
+    /// OAuth 2.0 authentication.
+    OAuth,
+}
+
+/// Provider configuration from TOML.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    /// Unique provider name used in routing and logging.
+    pub name: String,
+    /// Provider backend type (e.g., `"anthropic"`, `"openai"`, `"gemini"`).
+    pub provider_type: String,
+
+    /// Authentication type (default: api_key).
+    #[serde(default)]
+    pub auth_type: AuthType,
+
+    /// API key (required for auth_type = "apikey").
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::auth::token_store::serialize_secret_opt",
+        deserialize_with = "crate::auth::token_store::deserialize_secret_opt"
+    )]
+    pub api_key: Option<SecretString>,
+
+    /// OAuth provider ID (required for auth_type = "oauth").
+    /// References a token stored in TokenStore.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_provider: Option<String>,
+
+    /// Google Cloud Project ID (for Vertex AI provider).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+
+    /// Location/Region (for Vertex AI provider).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+
+    /// Custom base URL override for the provider API endpoint.
+    pub base_url: Option<String>,
+
+    /// Custom HTTP headers (e.g., {"X-Novita-Source": "grob"}).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub headers: Option<HashMap<String, String>>,
+
+    /// List of model identifiers this provider supports.
+    pub models: Vec<String>,
+    /// Whether this provider is enabled; defaults to `true` when absent.
+    pub enabled: Option<bool>,
+
+    /// Per-provider monthly budget in USD (optional, overrides global).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_usd: Option<BudgetUsd>,
+
+    /// Provider region for GDPR filtering (e.g., "eu", "us", "global").
+    /// None defaults to "global" (no restriction).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+
+    /// Accepts any model name not explicitly configured in `[[models]]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_through: Option<bool>,
+
+    /// Path to PEM client certificate for mTLS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_cert: Option<String>,
+    /// Path to PEM client private key for mTLS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_key: Option<String>,
+    /// Path to custom CA certificate for verifying the upstream server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_ca: Option<String>,
+
+    /// Multi-account key pool for chaining API keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<PoolConfig>,
+}
+
+impl ProviderConfig {
+    /// Returns `true` if the provider is enabled (defaults to `true`).
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
 }

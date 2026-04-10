@@ -84,6 +84,8 @@ pub mod otel;
 pub mod pid;
 /// Preset management: builtin/installed presets and apply/export.
 pub mod preset;
+/// Static model pricing lookup (leaf module, no cross-module dependencies).
+pub mod pricing;
 /// LLM provider implementations and registry.
 pub mod providers;
 /// Request routing engine with regex-based rules.
