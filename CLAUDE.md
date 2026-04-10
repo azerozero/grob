@@ -77,21 +77,22 @@ brew install j178/tap/prek   # macOS / Linuxbrew
 ### Branching Model
 
 ```
-feature/* ──► develop ──► (release-plz PR) ──► main ──► tag v*
+feature/* ──► develop ──► tag v* ──► release
+                              └──► sync-main PR ──► main
 ```
 
 1. **Feature branches**: Create from `develop`, name `feature/<topic>` or `fix/<topic>`. PR targets `develop`.
-2. **`develop`**: Integration branch. Every push triggers the full CI pipeline (lint, test, mutation testing).
-3. **Release**: When CI passes on `develop`, release-plz automatically opens a PR to `main` (version bump, changelog, git tag).
-4. **`main`**: Production branch. Only receives merges from release-plz PRs. Tag push (`v*`) triggers cross-builds, container image, and Homebrew formula update.
+2. **`develop`**: Integration branch. Every push triggers the full CI pipeline (lint, test, mutation testing). release-plz watches `develop` and creates a tag `v*` directly from it when releasable commits land.
+3. **Release**: The tag push triggers the release pipeline (cross-builds, container image, Homebrew formula update).
+4. **`main`**: Stable branch. After a tag is created, `sync-main.yml` automatically opens a PR from `develop` to `main` to keep it in sync. `main` receives the merge **after** the tag, not before.
 
 ### Critical Rules
 
 - **Never commit or push directly to `main`**. All changes go through `develop` or feature branches.
-- **Never create a PR with `develop` as the head branch targeting `main`**. Only release-plz creates PRs to `main` (via temporary `release-plz-*` branches). Creating a manual PR from `develop` to `main` risks `develop` being deleted by GitHub's auto-delete-head-branch setting.
+- **Never create a PR with `develop` as the head branch targeting `main`**. Only `sync-main.yml` creates PRs to `main` (via short-lived `sync-main-v*` branches). Creating a manual PR from `develop` to `main` risks `develop` being deleted by GitHub's auto-delete-head-branch setting.
 - **Both `main` and `develop` are protected** by GitHub rulesets (no deletion, no force push).
 - **Conventional commits required**: `feat:`, `fix:`, `refactor:`, `perf:` with scopes trigger release-plz version bumps. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes.
-- **release-plz `release_commits` filter**: only `feat|fix|refactor|perf` with allowed scopes (`auth`, `cache`, `server`, `dispatch`, `providers`, `router`, `dlp`, `security`, `storage`, `preset`, `cli`, `commands`, `compat`) or no scope trigger a version bump.
+- **release-plz `release_commits` filter**: only `feat|fix|refactor|perf` commits (any scope or no scope) trigger a version bump. The prefix is the gate, not the scope.
 
 ### CI Pipeline Stages (`.github/workflows/ci.yml`)
 
@@ -103,11 +104,12 @@ feature/* ──► develop ──► (release-plz PR) ──► main ──► 
 | Cross-build | push to `develop` + tag push | Multi-target binaries (Linux amd64/arm64/musl, macOS, Windows) |
 | Release | tag `v*` push | GitHub Release, container image, Homebrew formula |
 
-### Release Flow (`.github/workflows/release-plz.yml`)
+### Release Flow (`.github/workflows/release-plz.yml` + `sync-main.yml`)
 
 - Triggered by push to `develop` (only `src/**`, `Cargo.toml`, `Cargo.lock`).
-- release-plz creates a PR to `main` with version bump + changelog + git tag.
-- Merging the PR pushes the tag, which triggers the full release pipeline.
+- release-plz bumps the version, updates `CHANGELOG.md`, and creates a `v*` tag directly on `develop`.
+- The tag push triggers the full release pipeline (cross-builds, container image, Homebrew).
+- `sync-main.yml` reacts to the tag push and opens a PR from `develop` to `main` (via a `sync-main-v*` branch) to keep `main` in sync. This PR is auto-merged when CI passes.
 
 ## Documentation Standards
 
