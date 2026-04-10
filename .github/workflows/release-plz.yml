@@ -12,16 +12,18 @@ on:
       - "src/**"
       - "Cargo.toml"
       - "Cargo.lock"
-  # Trigger when a release-plz PR is merged into main.
-  # PAT pushes don't trigger `push` events, so we use pull_request instead.
+  # Trigger when a release-plz PR (label: release) is merged.
+  # release-plz creates PRs targeting develop (the working branch),
+  # so we must listen on develop, not just main.
   pull_request:
     types: [closed]
     branches:
+      - develop
       - main
 
 jobs:
-  # On develop push: create/update the release PR targeting main,
-  # then tag any unreleased versions.
+  # On develop push: create/update the release PR targeting develop,
+  # with version bump + changelog.
   release-pr:
     name: Create Release PR
     if: github.event_name == 'push'
@@ -43,7 +45,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
-  # On release PR merged into main: create git tag.
+  # On release PR merged into develop (or main): create git tag.
+  # The tag push then triggers sync-main.yml which promotes develop → main via PR.
   release-tag:
     name: Tag Release
     if: >-
@@ -58,7 +61,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          ref: main
+          ref: develop
           token: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
       - uses: dtolnay/rust-toolchain@stable

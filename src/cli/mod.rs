@@ -12,10 +12,11 @@ pub use crate::features::tool_layer::config::ToolLayerConfig;
 #[cfg(feature = "harness")]
 pub use config::HarnessConfig;
 pub use config::{
-    AcmeConfig, BudgetConfig, CacheConfig, ComplianceConfig, EnforcementMode, FanOutConfig,
-    FanOutMode, FipsConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig, PoolConfig,
-    PoolStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule, RouterConfig,
-    SecurityConfig, ServerConfig, TeeConfig, TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
+    AcmeConfig, AuthType, BudgetConfig, CacheConfig, ComplianceConfig, EnforcementMode,
+    FanOutConfig, FanOutMode, FipsConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig,
+    PoolConfig, PoolStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,
+    ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TimeoutConfig,
+    TlsConfig, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
@@ -25,7 +26,6 @@ use crate::features::dlp::config::DlpConfig;
 use crate::features::mcp::config::McpConfig;
 use crate::features::pledge::config::PledgeConfig;
 use crate::features::tap::TapConfig;
-use crate::providers::ProviderConfig;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};

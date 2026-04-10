@@ -63,11 +63,6 @@ impl McpState {
         self.scorer.read().await
     }
 
-    /// Returns a write-locked reference to the scorer.
-    pub async fn write_scorer(&self) -> tokio::sync::RwLockWriteGuard<'_, ToolScorer> {
-        self.scorer.write().await
-    }
-
     /// Returns a handle to the runtime scores for the bench engine.
     pub(crate) fn matrix_handle(&self) -> matrix::RuntimeScores {
         self.matrix.scores_handle()
