@@ -188,7 +188,7 @@ fn prompt_multi(max: usize) -> Vec<usize> {
     }
 }
 
-fn prompt_key(env_var: &str) -> Option<String> {
+fn prompt_key_for_provider(env_var: &str, provider_name: Option<&str>) -> Option<String> {
     if std::env::var(env_var).is_ok() {
         println!("    ${} already set in environment", env_var);
         return None;
@@ -198,11 +198,35 @@ fn prompt_key(env_var: &str) -> Option<String> {
     let key = read_line();
     if key.is_empty() {
         println!("    Skipped");
-        None
-    } else {
-        println!("    Accepted (stored as ${} reference)", env_var);
-        Some(key)
+        return None;
     }
+
+    // Best-effort validation when the provider is known.
+    if let Some(name) = provider_name {
+        let rt = tokio::runtime::Handle::try_current();
+        let valid = match rt {
+            Ok(handle) => tokio::task::block_in_place(|| {
+                handle.block_on(super::credential_check::validate_api_key(name, &key))
+            }),
+            Err(_) => {
+                // No runtime available — skip validation.
+                true
+            }
+        };
+        if !valid {
+            println!(
+                "    Warning: token may be invalid ({} returned auth error). Continue anyway? [y/N]",
+                name
+            );
+            if !confirm("    > ") {
+                println!("    Key rejected by user");
+                return None;
+            }
+        }
+    }
+
+    println!("    Accepted (stored as ${} reference)", env_var);
+    Some(key)
 }
 
 fn confirm(prompt: &str) -> bool {
@@ -282,7 +306,7 @@ fn screen_auth(providers: &[String]) -> Vec<AuthOverride> {
                 });
                 println!("    OAuth — will prompt on first `grob start`");
             } else {
-                let key = prompt_key(env_var);
+                let key = prompt_key_for_provider(env_var, Some(name));
                 out.push(AuthOverride {
                     provider: name.clone(),
                     use_oauth: false,
@@ -295,7 +319,7 @@ fn screen_auth(providers: &[String]) -> Vec<AuthOverride> {
             println!("    [1] Enter API key now");
             println!("    [2] I'll set ${} later", env_var);
             if prompt_choice(2) == 1 {
-                let key = prompt_key(env_var);
+                let key = prompt_key_for_provider(env_var, Some(name));
                 out.push(AuthOverride {
                     provider: name.clone(),
                     use_oauth: false,
@@ -325,8 +349,14 @@ fn screen_fallback(preset_has_fallback: bool) -> (FallbackChoice, Option<String>
     }
     match prompt_choice(4) {
         1 => (FallbackChoice::None, None),
-        2 => (FallbackChoice::OpenRouter, prompt_key("OPENROUTER_API_KEY")),
-        3 => (FallbackChoice::Gemini, prompt_key("GEMINI_API_KEY")),
+        2 => (
+            FallbackChoice::OpenRouter,
+            prompt_key_for_provider("OPENROUTER_API_KEY", Some("openrouter")),
+        ),
+        3 => (
+            FallbackChoice::Gemini,
+            prompt_key_for_provider("GEMINI_API_KEY", Some("gemini")),
+        ),
         _ => (FallbackChoice::KeepPreset, None),
     }
 }

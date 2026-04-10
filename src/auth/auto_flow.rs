@@ -172,7 +172,7 @@ pub async fn run_interactive_flow(
                 provider_name,
                 env_var,
             } => {
-                if setup_api_key_interactive(&provider_name, &env_var, &stdin)? {
+                if setup_api_key_interactive(&provider_name, &env_var, &stdin).await? {
                     configured += 1;
                 }
             }
@@ -275,7 +275,7 @@ async fn setup_oauth_interactive(
 }
 
 /// Interactive API key setup: prompt for key or skip.
-fn setup_api_key_interactive(
+async fn setup_api_key_interactive(
     provider_name: &str,
     env_var: &str,
     stdin: &io::Stdin,
@@ -306,6 +306,23 @@ fn setup_api_key_interactive(
     if key.is_empty() {
         eprintln!("    ❌ No key entered, skipping");
         return Ok(false);
+    }
+
+    // Best-effort validation before accepting.
+    let valid = crate::commands::credential_check::validate_api_key(provider_name, key).await;
+    if !valid {
+        eprintln!(
+            "    ⚠️  Token may be invalid ({} returned auth error). Continue anyway? [y/N]",
+            provider_name
+        );
+        eprint!("    > ");
+        io::stderr().flush()?;
+        let mut answer = String::new();
+        stdin.lock().read_line(&mut answer)?;
+        if !answer.trim().eq_ignore_ascii_case("y") && !answer.trim().eq_ignore_ascii_case("yes") {
+            eprintln!("    Key rejected by user");
+            return Ok(false);
+        }
     }
 
     // Keep the $ENV_VAR reference in config.toml — never store raw keys on disk.
