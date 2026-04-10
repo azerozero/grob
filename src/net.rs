@@ -9,7 +9,12 @@
 
 use anyhow::{Context, Result};
 
-/// Create a tokio TcpListener, with SO_REUSEPORT when available.
+/// Creates a tokio TcpListener, with SO_REUSEPORT when available.
+///
+/// # Errors
+///
+/// Returns an error if the address cannot be parsed or the socket
+/// cannot be bound.
 pub async fn bind_reuseport(addr: &str) -> Result<tokio::net::TcpListener> {
     #[cfg(feature = "socket-opts")]
     {
@@ -27,8 +32,14 @@ pub async fn bind_reuseport(addr: &str) -> Result<tokio::net::TcpListener> {
     }
 }
 
-/// Create a std::net::TcpListener, with SO_REUSEPORT when available.
-/// Suitable for passing to axum_server::from_tcp_rustls().
+/// Creates a std::net::TcpListener, with SO_REUSEPORT when available.
+///
+/// Suitable for passing to `axum_server::from_tcp_rustls()`.
+///
+/// # Errors
+///
+/// Returns an error if the address is invalid, socket creation fails,
+/// socket options cannot be set, or binding fails.
 #[cfg(feature = "socket-opts")]
 pub fn bind_reuseport_std(addr: &str) -> Result<std::net::TcpListener> {
     use socket2::{Domain, Protocol, Socket, Type};
@@ -73,6 +84,10 @@ pub fn bind_reuseport_std(addr: &str) -> Result<std::net::TcpListener> {
 }
 
 /// Fallback: plain std TcpListener without socket options.
+///
+/// # Errors
+///
+/// Returns an error if the address cannot be bound.
 #[cfg(not(feature = "socket-opts"))]
 pub fn bind_reuseport_std(addr: &str) -> Result<std::net::TcpListener> {
     use std::net::TcpListener;

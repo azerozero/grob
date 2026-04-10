@@ -34,7 +34,12 @@ struct InjectionOverrides {
     custom_patterns: Vec<String>,
 }
 
-/// Load a public key from a PEM file or raw SEC1 bytes.
+/// Loads a P-256 public key from a PEM file or raw SEC1 bytes.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read, the PEM base64 is
+/// invalid, or the key material is not a valid P-256 public key.
 pub fn load_public_key(path: &str) -> Result<VerifyingKey> {
     let data =
         std::fs::read(path).with_context(|| format!("Failed to read public key: {}", path))?;

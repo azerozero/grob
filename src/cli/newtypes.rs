@@ -10,6 +10,10 @@ pub struct BudgetUsd(f64);
 
 impl BudgetUsd {
     /// Creates a new `BudgetUsd`, returning an error if negative.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `String` if `value` is negative.
     pub fn new(value: f64) -> Result<Self, String> {
         if value < 0.0 {
             Err(format!("budget_usd must be non-negative, got {}", value))
@@ -47,6 +51,10 @@ pub struct Port(u16);
 
 impl Port {
     /// Creates a new `Port`, returning an error if 0.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `String` if `value` is zero.
     pub fn new(value: u16) -> Result<Self, String> {
         if value == 0 {
             Err("port must be non-zero".to_string())
@@ -120,6 +128,10 @@ pub struct BodySizeLimit(usize);
 
 impl BodySizeLimit {
     /// Creates a new `BodySizeLimit`, returning an error if 0.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `String` if `value` is zero.
     pub fn new(value: usize) -> Result<Self, String> {
         if value == 0 {
             Err("max_body_size must be non-zero".to_string())

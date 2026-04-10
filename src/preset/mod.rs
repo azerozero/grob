@@ -37,7 +37,12 @@ pub struct PresetInfo {
     pub is_builtin: bool,
 }
 
-/// Get the presets directory: ~/.grob/presets/
+/// Returns the presets directory path (`~/.grob/presets/`).
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined or
+/// the presets directory cannot be created.
 pub fn preset_dir() -> Result<PathBuf> {
     let dir = crate::grob_home()
         .context("Failed to get home directory (set GROB_HOME)")?
@@ -47,7 +52,11 @@ pub fn preset_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// List all available presets (builtins + installed)
+/// Lists all available presets (builtins + installed).
+///
+/// # Errors
+///
+/// Returns an error if the presets directory cannot be read.
 pub fn list_presets() -> Result<Vec<PresetInfo>> {
     let mut presets = vec![
         PresetInfo {
@@ -122,7 +131,12 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
     Ok(presets)
 }
 
-/// Get preset content by name (builtin or installed file)
+/// Gets preset content by name (builtin or installed file).
+///
+/// # Errors
+///
+/// Returns an error if the preset name is not recognized as a
+/// builtin and no installed file exists for it.
 pub fn preset_content(name: &str) -> Result<String> {
     // Check builtins first
     match name {
@@ -214,7 +228,12 @@ fn print_requirements_section(env_vars: &[String], needs_oauth: bool, needs_olla
     }
 }
 
-/// Print detailed info about a preset (providers, models, env vars, routing).
+/// Prints detailed info about a preset (providers, models, env vars, routing).
+///
+/// # Errors
+///
+/// Returns an error if the preset cannot be loaded or its TOML
+/// content cannot be parsed.
 pub fn print_preset_info(name: &str) -> Result<()> {
     let content = preset_content(name)?;
     let preset: toml::Value =
@@ -366,8 +385,16 @@ fn ensure_server_defaults(config_table: &mut toml::map::Map<String, toml::Value>
     }
 }
 
-/// Apply a preset to the config file.
-/// Keeps `[server]` and `[presets]` sections, replaces `[router]` + `[[providers]]` + `[[models]]`.
+/// Applies a preset to the config file.
+///
+/// Keeps `[server]` and `[presets]` sections, replaces `[router]` +
+/// `[[providers]]` + `[[models]]`.
+///
+/// # Errors
+///
+/// Returns an error if the preset cannot be loaded, the existing
+/// config cannot be read/parsed, or the merged config cannot be
+/// written.
 pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
     let preset_content = preset_content(name)?;
 
@@ -475,6 +502,11 @@ pub fn apply_preset(name: &str, config_path: &Path) -> Result<()> {
 /// Previews a preset merge without writing to disk.
 ///
 /// Returns the merged TOML as a string for display.
+///
+/// # Errors
+///
+/// Returns an error if the preset or existing config cannot be
+/// loaded or parsed.
 pub fn preview_preset(name: &str, config_path: &Path) -> Result<String> {
     let preset_content_str = preset_content(name)?;
     let preset: toml::Value = toml::from_str(&preset_content_str)
@@ -506,6 +538,11 @@ pub fn preview_preset(name: &str, config_path: &Path) -> Result<String> {
 /// Overlays `[security]`, `[compliance]`, `[dlp]` from the named preset onto the
 /// existing config. Router flags `gdpr` and `region` are merged without
 /// replacing model assignments.
+///
+/// # Errors
+///
+/// Returns an error if the preset or config file cannot be read,
+/// parsed, or the merged result cannot be written.
 pub fn overlay_compliance(name: &str, config_path: &Path) -> Result<()> {
     let content = preset_content(name)?;
     let preset: toml::Value = toml::from_str(&content)
@@ -548,6 +585,11 @@ pub fn overlay_compliance(name: &str, config_path: &Path) -> Result<()> {
 }
 
 /// Exports current config as a preset (strips `[server]`, replaces API keys with env vars).
+///
+/// # Errors
+///
+/// Returns an error if the config file cannot be read/parsed or the
+/// preset file cannot be written.
 pub fn export_preset(name: &str, config_path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config: {}", config_path.display()))?;

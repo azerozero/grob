@@ -29,10 +29,16 @@ async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String> {
         .with_context(|| format!("Failed to read response from {}", url))
 }
 
-/// Sync presets from any URL source.
-/// - URL ending in `.toml` (not `index.toml`) → download single preset file
-/// - URL ending in `/` or `index.toml` → download index, then fetch each listed file
-/// - URL ending in `.git` or `git@` prefix → fallback to git clone (requires git)
+/// Syncs presets from any URL source.
+///
+/// - URL ending in `.toml` (not `index.toml`): downloads a single preset file
+/// - URL ending in `/` or `index.toml`: downloads index, then fetches each listed file
+/// - URL ending in `.git` or `git@` prefix: fallback to git clone (requires git)
+///
+/// # Errors
+///
+/// Returns an error if the source is unreachable, downloaded files
+/// are not valid TOML, or local writes fail.
 pub async fn sync_presets(source: &str) -> Result<()> {
     if source.ends_with(".git") || source.starts_with("git@") || source.starts_with("git://") {
         // Git fallback (requires git installed)
@@ -105,7 +111,12 @@ async fn sync_from_url(url: &str) -> Result<()> {
     Ok(())
 }
 
-/// Install presets from a source (HTTP URL or local file/directory)
+/// Installs presets from a source (HTTP URL or local file/directory).
+///
+/// # Errors
+///
+/// Returns an error if the source is not found, the download fails,
+/// or local file copies fail.
 pub async fn install_from_source(source: &str) -> Result<()> {
     if source.starts_with("http://") || source.starts_with("https://") {
         sync_presets(source).await
@@ -224,8 +235,14 @@ fn clone_repo(url: &str, dest: &Path) -> Result<()> {
 // Background sync
 // ---------------------------------------------------------------------------
 
-/// Parse a human-readable interval string to seconds.
-/// Supports: "30m", "6h", "1d", "12h", etc.
+/// Parses a human-readable interval string to seconds.
+///
+/// Supports: `"30m"`, `"6h"`, `"1d"`, `"12h"`, etc.
+///
+/// # Errors
+///
+/// Returns an error if the input is empty, the numeric part cannot
+/// be parsed, or the unit suffix is not one of `s`/`m`/`h`/`d`.
 pub fn parse_interval(input: &str) -> Result<u64> {
     let trimmed = input.trim();
     if trimmed.is_empty() {

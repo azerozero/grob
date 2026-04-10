@@ -31,6 +31,11 @@ pub struct EcdsaP256Signer {
 
 impl EcdsaP256Signer {
     /// Loads a key from `path` or generates a new one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key file cannot be read, contains
+    /// invalid P-256 key material, or a new key cannot be written.
     pub fn load_or_generate(path: Option<&Path>) -> Result<Self> {
         let signing_key = if let Some(p) = path {
             if p.exists() {
@@ -87,6 +92,11 @@ pub struct Ed25519Signer {
 
 impl Ed25519Signer {
     /// Loads a key from `path` or generates a new one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key file cannot be read, is not exactly
+    /// 32 bytes, or a new key cannot be written.
     pub fn load_or_generate(path: Option<&Path>) -> Result<Self> {
         let signing_key = if let Some(p) = path {
             if p.exists() {
@@ -151,6 +161,11 @@ pub struct HmacSha256Signer {
 
 impl HmacSha256Signer {
     /// Loads a key from `path` or generates a new one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key file cannot be read, is not exactly
+    /// 32 bytes, or a new key cannot be written.
     pub fn load_or_generate(path: &Path) -> Result<Self> {
         let key = if path.exists() {
             let mut bytes = std::fs::read(path).context("Failed to read HMAC key")?;

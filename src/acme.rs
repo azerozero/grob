@@ -7,8 +7,14 @@ use crate::cli::AcmeConfig;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-/// Resolve the certificate cache directory.
+/// Resolves the certificate cache directory.
+///
 /// Defaults to `~/.grob/certs/` if not specified.
+///
+/// # Errors
+///
+/// Returns an error if the home directory cannot be determined or
+/// the cache directory cannot be created.
 pub fn resolve_cache_dir(config: &AcmeConfig) -> Result<PathBuf> {
     let dir = if config.cache_dir.is_empty() {
         crate::grob_home()
@@ -26,10 +32,15 @@ pub fn resolve_cache_dir(config: &AcmeConfig) -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// Build the rustls-acme AcmeConfig and return an AxumAcceptor.
+/// Builds the rustls-acme AcmeConfig and returns an AxumAcceptor.
 ///
 /// Returns an `axum_server::accept::Accept`-compatible acceptor.
 /// Spawns the ACME event loop in the background for certificate renewals.
+///
+/// # Errors
+///
+/// Returns an error if the certificate cache directory cannot be
+/// resolved or created.
 #[cfg(feature = "acme")]
 pub fn build_acme_acceptor(config: &AcmeConfig) -> Result<rustls_acme::axum::AxumAcceptor> {
     use futures::StreamExt;

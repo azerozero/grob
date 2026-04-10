@@ -79,6 +79,11 @@ pub fn resolve_caller(
 }
 
 /// Verifies that the caller has at least the required role.
+///
+/// # Errors
+///
+/// Returns an `ErrorObjectOwned` with code `ERR_FORBIDDEN` if the
+/// caller's role is lower than `required`.
 pub fn require_role(caller: &CallerIdentity, required: Role) -> Result<(), ErrorObjectOwned> {
     if caller.role.has_at_least(required) {
         Ok(())
