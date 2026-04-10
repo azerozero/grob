@@ -25,7 +25,18 @@ pub struct ModelPricing {
 }
 
 impl ModelPricing {
-    /// Calculate cost for a given number of tokens
+    /// Calculates cost for a given number of tokens.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::token_pricing::KNOWN_PRICING;
+    ///
+    /// let sonnet = KNOWN_PRICING.iter().find(|p| p.model == "claude-sonnet-4-6").unwrap();
+    /// let cost = sonnet.calculate(1_000, 500);
+    /// // 1000 * 3.0 / 1M + 500 * 15.0 / 1M = 0.0105
+    /// assert!((cost - 0.0105).abs() < 1e-6);
+    /// ```
     pub fn calculate(&self, input_tokens: u32, output_tokens: u32) -> f64 {
         (input_tokens as f64 * self.input_per_million
             + output_tokens as f64 * self.output_per_million)
@@ -171,7 +182,18 @@ pub struct PricingTable {
 }
 
 impl PricingTable {
-    /// Create from hardcoded fallbacks only
+    /// Creates from hardcoded fallbacks only.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::token_pricing::PricingTable;
+    ///
+    /// let table = PricingTable::from_known();
+    /// let (inp, out) = table.get("claude-opus-4-6").unwrap();
+    /// assert_eq!(inp, 15.0);
+    /// assert_eq!(out, 75.0);
+    /// ```
     pub fn from_known() -> Self {
         let mut prices = HashMap::new();
         for p in KNOWN_PRICING {
@@ -261,7 +283,21 @@ impl PricingTable {
         Ok(prices)
     }
 
-    /// Get price per million tokens for a model (case-insensitive, fuzzy match)
+    /// Gets price per million tokens for a model (case-insensitive, fuzzy match).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::token_pricing::PricingTable;
+    ///
+    /// let table = PricingTable::from_known();
+    /// // Exact match
+    /// assert!(table.get("gpt-4o").is_some());
+    /// // Fuzzy match: model ID containing a known key
+    /// assert!(table.get("anthropic/claude-sonnet-4-6:beta").is_some());
+    /// // Unknown model
+    /// assert!(table.get("unknown-xyz").is_none());
+    /// ```
     pub fn get(&self, model: &str) -> Option<(f64, f64)> {
         // Try exact (case-sensitive) first - zero allocation
         if let Some(prices) = self.prices.get(model) {
@@ -317,7 +353,21 @@ static PRICING_MAP: std::sync::LazyLock<
     std::collections::HashMap<&'static str, &'static ModelPricing>,
 > = std::sync::LazyLock::new(|| KNOWN_PRICING.iter().map(|p| (p.model, p)).collect());
 
-/// Get pricing for a model from the static fallback table (case-insensitive)
+/// Gets pricing for a model from the static fallback table (case-insensitive).
+///
+/// # Examples
+///
+/// ```
+/// use grob::features::token_pricing::pricing;
+///
+/// let p = pricing("claude-sonnet-4-6").unwrap();
+/// assert_eq!(p.input_per_million, 3.0);
+/// assert_eq!(p.output_per_million, 15.0);
+///
+/// // Case-insensitive substring matching
+/// assert!(pricing("deepseek-chat").is_some());
+/// assert!(pricing("no-such-model").is_none());
+/// ```
 pub fn pricing(model: &str) -> Option<&'static ModelPricing> {
     // Try exact match first (O(1), no allocation)
     PRICING_MAP.get(model).copied().or_else(|| {
