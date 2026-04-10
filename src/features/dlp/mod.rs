@@ -627,7 +627,12 @@ impl DlpEngine {
         (result, reports)
     }
 
-    /// Check response text for URL exfiltration block. Returns error if blocked.
+    /// Checks response text for URL exfiltration attempts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DlpBlockError::UrlExfilBlocked`] if the text contains
+    /// a URL matching the exfiltration pattern.
     pub fn check_response_url_exfil(&self, text: &str) -> Result<(), DlpBlockError> {
         if let Some(ref exfil) = self.url_exfil_scanner {
             if let Some(dets) = exfil.is_blocked(text) {

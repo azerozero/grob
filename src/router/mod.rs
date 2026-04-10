@@ -202,7 +202,7 @@ impl Router {
         }
     }
 
-    /// Route an incoming request to the appropriate model
+    /// Routes an incoming request to the appropriate model.
     ///
     /// Priority order (highest to lowest):
     /// 1. WebSearch - tool-based detection (web_search tool present)
@@ -211,6 +211,10 @@ impl Router {
     /// 4. Prompt Rules - regex pattern matching on user prompt (after background for cost savings)
     /// 5. Think - Plan Mode / reasoning enabled
     /// 6. Default - auto-mapped or original model name
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a configured prompt-rule regex fails to compile.
     pub fn route(&self, request: &mut CanonicalRequest) -> Result<RouteDecision> {
         // 1. WebSearch (HIGHEST PRIORITY - tool-based detection, no model name needed)
         if let Some(ref websearch_model) = self.config.router.websearch {

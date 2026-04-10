@@ -6,6 +6,11 @@ use std::io::Write;
 ///
 /// Loads the preset, fetches the remote config for diffing, optionally
 /// prompts for confirmation, then uploads and triggers a reload.
+///
+/// # Errors
+///
+/// Returns an error if the preset cannot be loaded, the remote
+/// instance is unreachable, or the config push/reload fails.
 pub async fn cmd_config_push(name: &str, target_url: &str, skip_confirm: bool) -> Result<()> {
     let preset_toml = preset::preset_content(name)
         .with_context(|| format!("Failed to load preset '{}'", name))?;
@@ -123,6 +128,11 @@ pub async fn cmd_config_push(name: &str, target_url: &str, skip_confirm: bool) -
 ///
 /// Fetches the remote `/api/config` JSON, strips the `server` section
 /// (host/port are not portable), and saves as a TOML preset file.
+///
+/// # Errors
+///
+/// Returns an error if the remote instance is unreachable, the
+/// response cannot be parsed, or the preset file cannot be written.
 pub async fn cmd_config_pull(from_url: &str, save_name: &str) -> Result<()> {
     let client = reqwest::Client::new();
     let timeout = std::time::Duration::from_secs(10);

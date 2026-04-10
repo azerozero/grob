@@ -102,7 +102,12 @@ pub struct TokenStore {
 }
 
 impl TokenStore {
-    /// Create a new token store backed by GrobStore.
+    /// Creates a new token store backed by [`GrobStore`](crate::storage::GrobStore).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if loading existing tokens from the
+    /// database fails.
     pub fn with_store(store: std::sync::Arc<crate::storage::GrobStore>) -> Result<Self> {
         let tokens = store.all_oauth_tokens();
         Ok(Self {
@@ -122,7 +127,12 @@ impl TokenStore {
         }
     }
 
-    /// Create a new token store (legacy JSON mode).
+    /// Creates a new token store (legacy JSON mode).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the token file exists but cannot be read
+    /// or parsed as JSON.
     pub fn new(file_path: PathBuf) -> Result<Self> {
         let tokens = if file_path.exists() {
             let content = fs::read_to_string(&file_path).context("Failed to read token file")?;
@@ -138,7 +148,12 @@ impl TokenStore {
         })
     }
 
-    /// Get default token store path
+    /// Gets the default token store path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the home directory cannot be determined
+    /// or the config directory cannot be created.
     pub fn default_path() -> Result<PathBuf> {
         let home = crate::home_dir().context("Failed to get home directory (set GROB_HOME)")?;
         let config_dir = home.join(".grob");
@@ -146,13 +161,23 @@ impl TokenStore {
         Ok(config_dir.join("oauth_tokens.json"))
     }
 
-    /// Create a token store at the default location (legacy mode).
+    /// Creates a token store at the default location (legacy mode).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the default path cannot be resolved or
+    /// the token file cannot be read.
     pub fn at_default_path() -> Result<Self> {
         let path = Self::default_path()?;
         Self::new(path)
     }
 
-    /// Save token for a provider
+    /// Saves a token for a provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database write or legacy JSON
+    /// persistence fails.
     pub fn save(&self, token: OAuthToken) -> Result<()> {
         let provider_id = token.provider_id.clone();
 
@@ -178,7 +203,12 @@ impl TokenStore {
         tokens.get(provider_id).cloned()
     }
 
-    /// Remove token for a provider
+    /// Removes a token for a provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database deletion or legacy JSON
+    /// persistence fails.
     pub fn remove(&self, provider_id: &str) -> Result<()> {
         if let Some(ref store) = self.store {
             store.delete_oauth_token(provider_id)?;

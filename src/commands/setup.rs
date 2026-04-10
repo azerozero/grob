@@ -730,7 +730,7 @@ fn providers_from_preset(name: &str) -> Vec<String> {
 ///
 /// # Errors
 ///
-/// Returns an error if config writing fails or the backup copy fails.
+/// Returns an error if config writing, backup, or credential setup fails.
 pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<bool> {
     println!();
 

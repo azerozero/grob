@@ -111,8 +111,12 @@ impl AppConfig {
         !path.exists()
     }
 
-    /// Get default config file path
-    /// Returns ~/.grob/config.toml (cross-platform)
+    /// Returns the default config file path (`~/.grob/config.toml`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the home directory cannot be determined
+    /// or the config directory cannot be created.
     pub fn default_path() -> Result<PathBuf> {
         let config_dir =
             crate::grob_home().context("Failed to get home directory (set GROB_HOME)")?;
@@ -125,7 +129,12 @@ impl AppConfig {
         Ok(config_dir.join("config.toml"))
     }
 
-    /// Load configuration from a TOML file
+    /// Loads configuration from a TOML file.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, the TOML content
+    /// is malformed, or config validation fails.
     pub fn from_file(path: &Path) -> Result<Self> {
         // Check if file exists, if not create a default one
         if !path.exists() {
@@ -138,7 +147,12 @@ impl AppConfig {
         Self::from_content(&content, &format!("{}", path.display()))
     }
 
-    /// Load configuration from a ConfigSource (file path or URL)
+    /// Loads configuration from a [`ConfigSource`] (file path or URL).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file/URL cannot be read, the HTTP
+    /// request fails, or the TOML content is invalid.
     pub async fn from_source(source: &ConfigSource) -> Result<Self> {
         match source {
             ConfigSource::File(path) => Self::from_file(path),
@@ -156,7 +170,12 @@ impl AppConfig {
         }
     }
 
-    /// Parse configuration from TOML content string
+    /// Parses configuration from a TOML content string.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the TOML cannot be deserialized, environment
+    /// variable resolution fails, or config validation fails.
     pub fn from_content(content: &str, source_label: &str) -> Result<Self> {
         let mut config: AppConfig = toml::from_str(content)
             .with_context(|| format!("Failed to parse config from {}", source_label))?;

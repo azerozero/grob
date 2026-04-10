@@ -300,7 +300,12 @@ impl ProviderRegistry {
         self.providers.get(name).cloned()
     }
 
-    /// Get a provider for a specific model
+    /// Gets a provider for a specific model.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProviderError::ModelNotSupported`] if no registered
+    /// provider handles the given model name.
     pub fn provider_for_model(&self, model: &str) -> Result<Arc<dyn LlmProvider>, ProviderError> {
         // First, check if we have a direct model → provider mapping
         if let Some(provider_name) = self.model_to_provider.get(model) {

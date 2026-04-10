@@ -80,6 +80,11 @@ impl Drop for SealedKey {
 ///
 /// Returns the [`TeeStatus`] and, if attestation succeeded, populates
 /// the `attestation_report` field.
+///
+/// # Errors
+///
+/// Returns an error in `Enforce` mode when no TEE is detected on
+/// the host.
 pub fn enforce_tee(mode: EnforcementMode, config: &crate::cli::TeeConfig) -> Result<TeeStatus> {
     if mode == EnforcementMode::Off {
         return Ok(TeeStatus {
@@ -249,6 +254,12 @@ mod platform {
 
     // ── Attestation ─────────────────────────────────────────────────────────
 
+    /// Requests an attestation report from the TEE backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the TEE guest device cannot be opened
+    /// or the ioctl call fails.
     pub fn get_attestation_report(backend: TeeBackend, user_data: &[u8]) -> Result<Vec<u8>> {
         match backend {
             TeeBackend::AmdSevSnp => get_snp_attestation_report(user_data),
@@ -329,6 +340,12 @@ mod platform {
 
     // ── Key derivation ──────────────────────────────────────────────────────
 
+    /// Derives a sealed key from the TEE hardware.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the TEE guest device cannot be opened
+    /// or the key derivation ioctl call fails.
     pub fn derive_sealed_key(backend: TeeBackend, label: &str) -> Result<SealedKey> {
         match backend {
             TeeBackend::AmdSevSnp => derive_snp_key(label),
@@ -442,10 +459,20 @@ mod platform {
         None
     }
 
+    /// Requests an attestation report (unsupported on this platform).
+    ///
+    /// # Errors
+    ///
+    /// Always returns an error on non-Linux platforms.
     pub fn get_attestation_report(_backend: TeeBackend, _user_data: &[u8]) -> Result<Vec<u8>> {
         anyhow::bail!("TEE attestation not available on this platform")
     }
 
+    /// Derives a sealed key (unsupported on this platform).
+    ///
+    /// # Errors
+    ///
+    /// Always returns an error on non-Linux platforms.
     pub fn derive_sealed_key(_backend: TeeBackend, _label: &str) -> Result<SealedKey> {
         anyhow::bail!("TEE key derivation not available on this platform")
     }
@@ -475,6 +502,10 @@ pub fn get_attestation_report(backend: TeeBackend, user_data: &[u8]) -> Result<V
 
 /// Generates an attestation report and returns a hex-encoded string
 /// suitable for embedding in audit logs.
+///
+/// # Errors
+///
+/// Returns an error if the underlying attestation report request fails.
 pub fn attestation_for_audit(backend: TeeBackend, user_data: &[u8]) -> Result<String> {
     let report = get_attestation_report(backend, user_data)?;
     Ok(hex::encode(&report))

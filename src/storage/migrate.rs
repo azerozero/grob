@@ -6,9 +6,15 @@ const SPEND_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("spend");
 const OAUTH_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("oauth_tokens");
 const META_TABLE: TableDefinition<&str, &str> = TableDefinition::new("meta");
 
-/// Migrate legacy JSON files (spend.json, oauth_tokens.json) into redb.
-/// Only runs once — sets `migrated_from_json = "true"` in META_TABLE.
+/// Migrates legacy JSON files (spend.json, oauth_tokens.json) into redb.
+///
+/// Only runs once -- sets `migrated_from_json = "true"` in META_TABLE.
 /// Does NOT delete the original JSON files (natural backup).
+///
+/// # Errors
+///
+/// Returns an error if the database transaction fails or JSON data
+/// cannot be serialized into the redb tables.
 pub fn migrate_from_json(db: &Database, db_path: &Path) -> Result<()> {
     // Check if already migrated
     {

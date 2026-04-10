@@ -266,6 +266,12 @@ pub struct AuditLog {
 
 impl AuditLog {
     /// Creates a new audit log with the configured signing backend.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the log directory cannot be created, the
+    /// signing key cannot be loaded or generated, or the existing log
+    /// file cannot be read for chain continuity.
     pub fn new(config: AuditConfig) -> Result<Self> {
         std::fs::create_dir_all(&config.log_dir)
             .with_context(|| format!("Failed to create audit directory: {:?}", config.log_dir))?;
@@ -383,6 +389,11 @@ impl AuditLog {
     /// In per-entry mode (batch_size=1), signs and appends immediately.
     /// In batch mode, buffers the entry and flushes when the batch is
     /// full or the flush interval has elapsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the entry cannot be serialized or written
+    /// to the log file.
     pub fn write(&self, mut entry: AuditEntry) -> Result<()> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
 
@@ -413,6 +424,11 @@ impl AuditLog {
     }
 
     /// Flushes any pending batch entries. Safe to call even if buffer is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if buffered entries cannot be written to the
+    /// log file.
     pub fn flush(&self) -> Result<()> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if !state.batch_buffer.is_empty() {

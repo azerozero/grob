@@ -221,7 +221,11 @@ impl OAuthClient {
         }
     }
 
-    /// Generate authorization URL with PKCE
+    /// Generates the authorization URL with PKCE challenge.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configured `auth_url` is not a valid URL.
     pub fn authorization_url(&self) -> Result<AuthorizationUrl> {
         let pkce = PKCEVerifier::generate();
 
@@ -371,7 +375,13 @@ impl OAuthClient {
         }
     }
 
-    /// Refresh an access token
+    /// Refreshes an access token using the stored refresh token.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if no token exists for `provider_id`, the HTTP
+    /// request to the token endpoint fails, or the provider rejects
+    /// the refresh request.
     pub async fn refresh_token(&self, provider_id: &str) -> Result<OAuthToken> {
         let existing_token = self
             .token_store
@@ -475,8 +485,15 @@ impl OAuthClient {
             .context("OAuth token request failed")
     }
 
-    /// Load Code Assist for Gemini and get project ID
-    /// This must be called after OAuth exchange for Gemini providers
+    /// Loads Code Assist for Gemini and returns the project ID.
+    ///
+    /// Must be called after OAuth exchange for Gemini providers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the `loadCodeAssist` API call fails,
+    /// the provider returns a non-success HTTP status, or the response
+    /// does not contain a `cloudaicompanionProject` field.
     pub async fn load_code_assist(&self, access_token: &str) -> Result<String> {
         #[derive(Serialize)]
         struct LoadCodeAssistRequest {

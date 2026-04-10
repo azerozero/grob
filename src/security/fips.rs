@@ -102,6 +102,11 @@ fn audit_algorithms() -> Vec<String> {
 // ── Startup enforcement ─────────────────────────────────────────────────────
 
 /// Runs the FIPS startup check according to the configured enforcement mode.
+///
+/// # Errors
+///
+/// Returns an error in `Enforce` mode when FIPS is not detected on
+/// the host.
 pub fn enforce_fips(mode: EnforcementMode) -> Result<FipsStatus> {
     if mode == EnforcementMode::Off {
         return Ok(FipsStatus {

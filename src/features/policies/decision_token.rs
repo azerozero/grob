@@ -166,6 +166,11 @@ impl DecisionToken {
     }
 
     /// Verifies token integrity (hash matches computed value).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecisionTokenError::IntegrityFailure`] if the stored
+    /// hash does not match the recomputed hash.
     pub fn verify_integrity(&self) -> Result<(), DecisionTokenError> {
         if self.hash != self.compute_hash() {
             return Err(DecisionTokenError::IntegrityFailure);
@@ -174,6 +179,11 @@ impl DecisionToken {
     }
 
     /// Resolves the backend target from this token's mode.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecisionTokenError::IntegrityFailure`] if integrity
+    /// verification fails before resolving the backend.
     pub fn resolve_backend(&self) -> Result<BackendTarget, DecisionTokenError> {
         self.verify_integrity()?;
         Ok(match self.claims.mode {

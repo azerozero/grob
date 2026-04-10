@@ -411,7 +411,12 @@ struct RulesFile {
 }
 
 impl DlpConfig {
-    /// Load and merge rules from an external file, if `rules_file` is set.
+    /// Loads and merges rules from an external file, if `rules_file` is set.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the rules file cannot be read or parsed
+    /// as TOML.
     pub fn load_external_rules(&mut self) -> Result<()> {
         if self.rules_file.is_empty() {
             return Ok(());
