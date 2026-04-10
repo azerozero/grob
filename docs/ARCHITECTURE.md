@@ -25,13 +25,13 @@ flowchart TB
     end
 
     subgraph router["Router"]
-        r0["0. Auto-map regex — transform model name"]
         r1["1. WebSearch — web_search tool detected"]
         r2["2. Background — model matches background_regex"]
-        r3["3. Subagent — GROB-SUBAGENT-MODEL tag"]
-        r4["4. Prompt rules — regex on user message"]
-        r5["5. Think — thinking/reasoning enabled"]
-        r6["6. Default model — fallback"]
+        r3["3. Auto-map regex — transform model name"]
+        r4["4. Subagent — GROB-SUBAGENT-MODEL tag"]
+        r5["5. Prompt rules — regex on user message"]
+        r6["6. Think — thinking/reasoning enabled"]
+        r7["7. Default model — fallback"]
         rd["RouteDecision { model, route_type }"]
     end
 
