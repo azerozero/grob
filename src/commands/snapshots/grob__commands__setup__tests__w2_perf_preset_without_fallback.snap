@@ -1,0 +1,57 @@
+---
+source: src/commands/setup.rs
+assertion_line: 973
+expression: rendered
+---
+[[models]]
+name = "claude-opus-thinking"
+
+[[models.mappings]]
+actual_model = "claude-opus-4-6"
+priority = 1
+provider = "anthropic"
+
+[[models.mappings]]
+actual_model = "claude-sonnet-4-6"
+priority = 2
+provider = "anthropic"
+
+[[models]]
+name = "default"
+
+[[models.mappings]]
+actual_model = "claude-sonnet-4-6"
+priority = 1
+provider = "anthropic"
+
+[[models]]
+name = "background"
+
+[[models.mappings]]
+actual_model = "claude-sonnet-4-6"
+priority = 1
+provider = "anthropic"
+
+[[models]]
+name = "websearch"
+
+[[models.mappings]]
+actual_model = "claude-sonnet-4-6"
+priority = 1
+provider = "anthropic"
+
+[[providers]]
+auth_type = "oauth"
+enabled = true
+models = []
+name = "anthropic"
+oauth_provider = "anthropic-max"
+provider_type = "anthropic"
+
+[router]
+auto_map_regex = "^claude-"
+background = "background"
+background_regex = "(?i)claude.*haiku"
+default = "default"
+think = "claude-opus-thinking"
+websearch = "websearch"

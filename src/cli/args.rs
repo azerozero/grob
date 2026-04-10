@@ -8,7 +8,7 @@ use clap_complete::Shell;
 #[command(before_help = concat!("Grob v", env!("CARGO_PKG_VERSION")))]
 #[command(about = "High-performance LLM routing proxy\n\nQuick start:\n  grob exec -- claude     Launch Claude Code through Grob\n  grob exec -- aider      Launch Aider through Grob\n  grob start -d           Start Grob in background\n  grob status             Show service status and models", long_about = None)]
 pub struct Cli {
-    /// Subcommand to execute (defaults to `exec` with trailing args)
+    /// Subcommand to execute
     #[command(subcommand)]
     pub command: Option<Commands>,
 
@@ -16,10 +16,95 @@ pub struct Cli {
     /// Also settable via GROB_CONFIG env var
     #[arg(short, long, env = "GROB_CONFIG")]
     pub config: Option<String>,
+}
 
-    /// Shorthand: `grob -- <cmd>` is equivalent to `grob exec -- <cmd>`.
-    #[arg(last = true)]
-    pub trailing_cmd: Vec<String>,
+/// Known top-level subcommands, used by [`detect_bare_trailing_cmd`] to tell a
+/// legitimate `grob exec -- <cmd>` apart from a misuse like `grob -- claude`.
+///
+/// Kept alphabetical for easy audit vs [`Commands`]. Any new subcommand added
+/// to the enum should be inserted in order so the `grob -- <cmd>` guard keeps
+/// working.
+const KNOWN_SUBCOMMANDS: &[&str] = &[
+    "bench",
+    "completions",
+    "config-diff",
+    "connect",
+    "doctor",
+    "env",
+    "exec",
+    "harness",
+    "help",
+    "init",
+    "key",
+    "launch", // alias of exec
+    "model",
+    "preset",
+    "restart",
+    "rollback",
+    "run",
+    "setup",
+    "setup-completions",
+    "spend",
+    "start",
+    "status",
+    "stop",
+    "upgrade",
+    "validate",
+    "watch",
+];
+
+/// Detects the `grob -- <cmd>` misuse and returns the suggested replacement.
+///
+/// Returns `Some("grob exec -- <cmd>")` when the argv looks like a bare
+/// `--` escape hatch without a subcommand (`grob -- claude --print hi`),
+/// so `main.rs` can print a hint and exit non-zero instead of letting
+/// clap emit a generic `unexpected argument` error.
+///
+/// # Examples
+///
+/// ```
+/// use grob::cli::args::detect_bare_trailing_cmd;
+///
+/// let bare = vec!["grob".into(), "--".into(), "claude".into()];
+/// assert_eq!(
+///     detect_bare_trailing_cmd(&bare).as_deref(),
+///     Some("grob exec -- claude"),
+/// );
+///
+/// let ok = vec!["grob".into(), "exec".into(), "--".into(), "claude".into()];
+/// assert!(detect_bare_trailing_cmd(&ok).is_none());
+/// ```
+#[must_use]
+pub fn detect_bare_trailing_cmd(args: &[String]) -> Option<String> {
+    let mut iter = args.iter().enumerate().skip(1);
+    while let Some((idx, arg)) = iter.next() {
+        if arg == "--" {
+            // Bare `--` found with no subcommand before it.
+            let trailing: Vec<&str> = args[idx + 1..].iter().map(String::as_str).collect();
+            if trailing.is_empty() {
+                return None;
+            }
+            return Some(format!("grob exec -- {}", trailing.join(" ")));
+        }
+        // Skip global flags (and their values) that can legitimately
+        // appear before the subcommand.
+        if arg == "-c" || arg == "--config" {
+            iter.next(); // consume the value
+            continue;
+        }
+        if arg.starts_with('-') {
+            // Any other flag : skip it, do not treat it as a subcommand.
+            continue;
+        }
+        if KNOWN_SUBCOMMANDS.contains(&arg.as_str()) {
+            // A real subcommand came first : hand off to clap.
+            return None;
+        }
+        // Unknown positional argument : clap will reject it with its
+        // own error, no need to short-circuit.
+        return None;
+    }
+    None
 }
 
 /// Available CLI subcommands for managing the Grob service.
@@ -310,4 +395,83 @@ pub enum PresetAction {
         #[arg(long)]
         save: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detect_bare_trailing_cmd;
+
+    fn args(raw: &[&str]) -> Vec<String> {
+        raw.iter().map(|s| (*s).to_string()).collect()
+    }
+
+    /// W-4 : `grob -- claude` → hint `grob exec -- claude`.
+    #[test]
+    fn test_w4_detect_bare_trailing_simple() {
+        insta::assert_snapshot!(
+            detect_bare_trailing_cmd(&args(&["grob", "--", "claude"]))
+                .expect("bare `--` should be detected"),
+            @"grob exec -- claude"
+        );
+    }
+
+    /// W-4 : le hint propage les arguments du binaire cible.
+    #[test]
+    fn test_w4_detect_bare_trailing_with_args() {
+        insta::assert_snapshot!(
+            detect_bare_trailing_cmd(&args(&[
+                "grob", "--", "claude", "--print", "hello world",
+            ]))
+            .expect("bare `--` should be detected"),
+            @"grob exec -- claude --print hello world"
+        );
+    }
+
+    /// W-4 : `grob -c cfg.toml -- claude` -> flag global ignore, hint quand meme.
+    #[test]
+    fn test_w4_detect_bare_trailing_after_config_flag() {
+        assert_eq!(
+            detect_bare_trailing_cmd(&args(&["grob", "-c", "/tmp/cfg.toml", "--", "claude",])),
+            Some("grob exec -- claude".to_string())
+        );
+    }
+
+    /// W-4 : forme correcte `grob exec -- claude` = aucun hint.
+    #[test]
+    fn test_w4_detect_bare_trailing_ignores_exec() {
+        assert_eq!(
+            detect_bare_trailing_cmd(&args(&["grob", "exec", "--", "claude"])),
+            None
+        );
+    }
+
+    /// W-4 : alias `launch` = aucun hint (exec alias).
+    #[test]
+    fn test_w4_detect_bare_trailing_ignores_launch_alias() {
+        assert_eq!(
+            detect_bare_trailing_cmd(&args(&["grob", "launch", "--", "aider"])),
+            None
+        );
+    }
+
+    /// W-4 : aucun `--` = aucun hint.
+    #[test]
+    fn test_w4_detect_bare_trailing_no_dashdash() {
+        assert_eq!(detect_bare_trailing_cmd(&args(&["grob", "status"])), None);
+    }
+
+    /// W-4 : `grob --` sans rien apres = aucun hint (rien a executer).
+    #[test]
+    fn test_w4_detect_bare_trailing_empty_tail() {
+        assert_eq!(detect_bare_trailing_cmd(&args(&["grob", "--"])), None);
+    }
+
+    /// W-4 : positional inconnu avant `--` = on laisse clap gerer l'erreur.
+    #[test]
+    fn test_w4_detect_bare_trailing_unknown_positional() {
+        assert_eq!(
+            detect_bare_trailing_cmd(&args(&["grob", "foobar", "--", "claude"])),
+            None
+        );
+    }
 }

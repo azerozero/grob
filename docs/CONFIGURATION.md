@@ -211,7 +211,7 @@ max_body_size = 10485760        # Max request body in bytes (default: 10MB)
 security_headers = true         # Apply OWASP security headers (default: true)
 circuit_breaker = true          # Enable circuit breaker per provider (default: true)
 audit_dir = ""                  # Audit log directory, empty = disabled (default: "")
-audit_signing_algorithm = ""    # "ecdsa-p256" (default) or "hmac-sha256"
+audit_signing_algorithm = ""    # "ecdsa-p256" (default), "hmac-sha256", or "ed25519"
 audit_hmac_key_path = ""        # Path to HMAC key file (for hmac-sha256; default: <audit_dir>/audit_hmac.key)
 
 # Adaptive provider scoring (opt-in)

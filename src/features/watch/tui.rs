@@ -131,6 +131,11 @@ impl App {
 }
 
 /// Runs the TUI, connecting to the given grob SSE endpoint.
+///
+/// # Errors
+///
+/// Returns an error if the terminal cannot be initialized, the SSE
+/// connection fails, or the remote returns a non-success status.
 pub async fn run(base_url: &str) -> Result<()> {
     let events_url = format!("{}/api/events", base_url);
 

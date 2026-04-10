@@ -25,6 +25,11 @@ impl StorageCipher {
     /// Loads or generates the encryption key and returns a cipher instance.
     ///
     /// Key file path defaults to `<db_dir>/encryption.key` (sibling of `grob.db`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the key file cannot be read, has an
+    /// incorrect size, or the key directory is not writable.
     pub fn load_or_generate(db_path: &Path) -> Result<Self> {
         let key_path = Self::key_path(db_path);
         let mut key_bytes = if key_path.exists() {
@@ -51,6 +56,10 @@ impl StorageCipher {
     }
 
     /// Encrypts plaintext bytes. Returns `nonce || ciphertext` (12 + N bytes).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the AES-256-GCM encryption operation fails.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
         use aes_gcm::aead::rand_core::RngCore;
         let mut nonce_bytes = [0u8; NONCE_LEN];
@@ -69,6 +78,11 @@ impl StorageCipher {
     }
 
     /// Decrypts data produced by [`encrypt`]. Expects `nonce || ciphertext`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the data is shorter than the nonce length
+    /// or AES-256-GCM decryption fails (wrong key or corrupted data).
     pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
         if data.len() < NONCE_LEN {
             anyhow::bail!(

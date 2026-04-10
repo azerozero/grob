@@ -227,6 +227,11 @@ impl GrobStore {
     }
 
     /// Saves an OAuth token to the database (encrypted with AES-256-GCM).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization, encryption, or the database
+    /// write transaction fails.
     pub fn save_oauth_token(&self, token: &OAuthToken) -> Result<()> {
         let plaintext = serde_json::to_vec(token)?;
         let encrypted = self.cipher.encrypt(&plaintext)?;
@@ -248,7 +253,11 @@ impl GrobStore {
         serde_json::from_slice(&decrypted).ok()
     }
 
-    /// Delete an OAuth token by provider ID.
+    /// Deletes an OAuth token by provider ID.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database write transaction fails.
     pub fn delete_oauth_token(&self, provider_id: &str) -> Result<()> {
         let write_txn = self.db.begin_write()?;
         {
@@ -312,6 +321,11 @@ impl GrobStore {
     ///
     /// The record is keyed by its SHA-256 hash for O(1) authentication lookups.
     /// A secondary index keyed by `id:` + UUID enables list and revoke by id.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serialization, encryption, or the database
+    /// write transaction fails.
     pub fn store_virtual_key(&self, record: &VirtualKeyRecord) -> Result<()> {
         let plaintext = serde_json::to_vec(record)?;
         let encrypted = self.cipher.encrypt(&plaintext)?;
@@ -366,6 +380,11 @@ impl GrobStore {
     }
 
     /// Revokes a virtual key by UUID (sets `revoked = true`).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database transaction, deserialization,
+    /// or re-encryption of the updated record fails.
     pub fn revoke_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
         let id_key = format!("id:{id}");
         let read_txn = self.db.begin_read()?;
@@ -385,6 +404,10 @@ impl GrobStore {
     }
 
     /// Deletes a virtual key by UUID (removes both hash and id entries).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the database read or write transaction fails.
     pub fn delete_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
         let id_key = format!("id:{id}");
         let read_txn = self.db.begin_read()?;

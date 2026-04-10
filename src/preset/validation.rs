@@ -49,7 +49,12 @@ impl ModelValidation {
     }
 }
 
-/// Build a provider registry from config (for CLI validation path).
+/// Builds a provider registry from config (for CLI validation path).
+///
+/// # Errors
+///
+/// Returns an error if the token store cannot be initialized or the
+/// provider registry cannot be built from the config.
 pub fn build_registry(config: &AppConfig) -> Result<(Arc<ProviderRegistry>, TokenStore)> {
     let token_store = TokenStore::at_default_path()
         .map_err(|e| anyhow::anyhow!("Failed to init token store: {}", e))?;

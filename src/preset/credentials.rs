@@ -27,7 +27,11 @@ pub struct CredentialStatus {
     pub detail: String,
 }
 
-/// Check credentials for all providers in the config and return status.
+/// Checks credentials for all providers in the config.
+///
+/// # Errors
+///
+/// Returns an error if the config file cannot be read or parsed.
 pub fn check_credentials(config_path: &Path) -> Result<Vec<CredentialStatus>> {
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("Failed to read config: {}", config_path.display()))?;
@@ -199,9 +203,15 @@ fn load_oauth_provider_list() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Interactive credential setup wizard.
-/// For each provider missing credentials, prompts the user to enter an API key
-/// or skip. Writes entered keys directly into the config file.
+/// Runs the interactive credential setup wizard.
+///
+/// For each provider missing credentials, prompts the user to enter
+/// an API key or skip. Writes entered keys directly into the config file.
+///
+/// # Errors
+///
+/// Returns an error if the config file cannot be read, parsed, or
+/// written after credential updates.
 pub fn setup_credentials_interactive(config_path: &Path) -> Result<()> {
     setup_credentials_interactive_filtered(config_path, None)
 }

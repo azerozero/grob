@@ -64,6 +64,11 @@ fn convert_tools(tools: &[serde_json::Value]) -> Vec<Tool> {
 }
 
 /// Transforms a [`ResponsesRequest`] into a [`CanonicalRequest`].
+///
+/// # Errors
+///
+/// Returns a `String` description if the input items contain
+/// an unrecognised variant that cannot be mapped to the canonical format.
 pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<CanonicalRequest, String> {
     let mut messages: Vec<Message> = Vec::new();
     let mut system_prompt: Option<SystemPrompt> = None;

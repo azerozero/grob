@@ -4,7 +4,13 @@ use std::collections::HashSet;
 use super::{AppConfig, ModelStrategy};
 
 impl AppConfig {
-    /// Validate configuration for common errors
+    /// Validates configuration for common errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if model mappings reference unknown providers,
+    /// enabled providers lack required auth credentials, or configured
+    /// regex patterns fail to compile.
     pub fn validate(&self) -> Result<()> {
         let provider_names: HashSet<&str> =
             self.providers.iter().map(|p| p.name.as_str()).collect();

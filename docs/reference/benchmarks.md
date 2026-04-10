@@ -2,7 +2,7 @@
 
 > **90 µs overhead** with routing + auth + rate limiting + cache + DLP on 4 vCPU ARM — 40x faster than LiteLLM, with more features than Bifrost.
 
-Grob v0.30.0 — 2026-03-27 — `grob bench --concurrent` (c=vCPU, 5 sec/scenario, mock TCP backend on localhost).
+Grob v0.35.1 — 2026-04-09 — `grob bench --concurrency` (c=vCPU, 5 sec/scenario, mock TCP backend on localhost).
 
 > v0.26.0 added the HIT policy engine (SSE stream interception + approval channel). For requests without tool_use blocks the overhead is unchanged. For tool_use blocks requiring human approval, stream latency includes the approval wait time (not a grob bottleneck).
 >
@@ -19,7 +19,7 @@ Grob v0.30.0 — 2026-03-27 — `grob bench --concurrent` (c=vCPU, 5 sec/scenari
 
 All within the ADR-0006 target of < 10 µs for 20 rules.
 
-**Combined proxy+policy overhead** (routing + DLP + policy matcher, from `grob bench --concurrent`):
+**Combined proxy+policy overhead** (routing + DLP + policy matcher, from `grob bench --concurrency`):
 
 | Scenario | P50 overhead | Notes |
 |----------|-------------:|-------|

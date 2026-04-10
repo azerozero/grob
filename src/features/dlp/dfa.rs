@@ -601,7 +601,7 @@ mod tests {
     fn test_kill_mutant_196_scan_matched_len_subtraction() {
         let scanner = SecretScanner::new(&test_rules(), &[]);
         // Token complet au milieu du texte pour que start() > 0.
-        let token = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";
+        let token = format!("ghp_{}", "abcdefghijklmnopqrstuvwxyz1234567890");
         assert_eq!(token.len(), 40);
         let text = format!("prefix {} suffix", token);
         let matches = scanner.scan(&text);
@@ -733,8 +733,8 @@ mod tests {
     #[test]
     fn test_kill_mutant_scan_empty_rules_returns_empty_vec() {
         let scanner = SecretScanner::new(&[], &[]);
-        let token = "ghp_abcdefghijklmnopqrstuvwxyz1234567890";
-        assert!(scanner.scan(token).is_empty());
+        let token = format!("ghp_{}", "abcdefghijklmnopqrstuvwxyz1234567890");
+        assert!(scanner.scan(&token).is_empty());
     }
 
     /// Tue : mutation sur `matched_len` pour AWS (cas secondaire independant).

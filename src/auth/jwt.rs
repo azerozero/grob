@@ -65,7 +65,12 @@ pub struct JwtValidator {
 }
 
 impl JwtValidator {
-    /// Create a JwtValidator from config.
+    /// Creates a [`JwtValidator`] from config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HMAC secret or JWKS URL in `config`
+    /// cannot be parsed into valid decoding keys.
     pub fn from_config(config: &JwtConfig) -> Result<Self> {
         let hmac_key = if !config.hmac_secret.is_empty() {
             Some(DecodingKey::from_secret(config.hmac_secret.as_bytes()))
@@ -110,10 +115,16 @@ impl JwtValidator {
         })
     }
 
-    /// Validate a JWT token string and extract claims.
+    /// Validates a JWT token string and extracts claims.
     ///
     /// Uses an in-memory cache keyed by SHA-256(token) to avoid repeated
     /// cryptographic signature verification (5 min TTL).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AuthError::InvalidToken`] if the signature is invalid
+    /// or no configured key (HMAC / JWKS RSA / JWKS EC) can verify it.
+    /// Returns [`AuthError`] variants for expired or malformed tokens.
     pub fn validate(&self, token: &str) -> Result<GrobClaims, AuthError> {
         use sha2::{Digest, Sha256};
 
@@ -186,7 +197,12 @@ impl JwtValidator {
         !ec.is_empty()
     }
 
-    /// Refresh JWKS keys from the configured URL.
+    /// Refreshes JWKS keys from the configured URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the HTTP request to the JWKS URL fails
+    /// or the response cannot be parsed as a JSON Web Key Set.
     pub async fn refresh_jwks(&self) -> Result<()> {
         let url = match &self.jwks_url {
             Some(url) => url.clone(),
