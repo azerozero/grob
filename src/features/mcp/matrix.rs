@@ -316,11 +316,6 @@ impl ToolMatrix {
         self.runtime_scores.insert(tool, provider, score).await;
     }
 
-    /// Returns a snapshot of all runtime scores as (tool, provider, score) triples.
-    pub async fn all_runtime_scores(&self) -> Vec<(String, String, ToolScore)> {
-        self.runtime_scores.snapshot().await
-    }
-
     /// Returns a cloned handle to the runtime scores.
     ///
     /// Used internally by the bench engine to update scores directly.

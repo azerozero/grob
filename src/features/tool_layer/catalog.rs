@@ -42,11 +42,6 @@ pub fn lookup(name: &str) -> Option<&'static CatalogEntry> {
     CATALOG.get(name)
 }
 
-/// Returns all canonical tool names in the catalog.
-pub fn all_names() -> impl Iterator<Item = &'static str> {
-    CATALOG.keys().map(String::as_str)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
