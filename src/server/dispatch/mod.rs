@@ -298,68 +298,74 @@ fn scan_dlp_input(
         return Ok(());
     }
 
-    if let Err(block_err) = dlp_engine.sanitize_request_checked(request) {
-        // Emit DLP block event for `grob watch`.
-        let (block_rule_type, block_detail) = match &block_err {
-            crate::features::dlp::DlpBlockError::InjectionBlocked(dets) => {
-                ("injection", format!("{} injection(s) detected", dets.len()))
-            }
-            crate::features::dlp::DlpBlockError::UrlExfilBlocked(dets) => (
-                "url_exfil",
-                format!("{} exfiltration URL(s) detected", dets.len()),
-            ),
-        };
-        ctx.state.event_bus.emit(WatchEvent::DlpAction {
-            request_id: ctx.req_id.to_string(),
-            direction: DlpDirection::Request,
-            action: "block".into(),
-            rule_type: block_rule_type.into(),
-            detail: block_detail,
-            timestamp: chrono::Utc::now(),
-        });
-
-        let had_injection = matches!(
-            &block_err,
-            crate::features::dlp::DlpBlockError::InjectionBlocked(_)
-        );
-        let risk = crate::security::risk::assess_risk(&crate::security::risk::SecurityOutcome {
-            dlp_rules_triggered: 1,
-            was_blocked: true,
-            had_injection,
-            had_pii: false,
-        });
-
-        let compliance = &ctx.inner.config.compliance;
-        if compliance.enabled && compliance.risk_classification {
-            let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
-                &compliance.escalation_threshold,
-            );
-            crate::security::risk::maybe_escalate(&crate::security::risk::EscalationEvent {
-                risk,
-                threshold,
-                webhook_url: &compliance.escalation_webhook,
-                event_id: ctx.req_id,
-                tenant_id: ctx.tenant_id.as_deref().unwrap_or("anon"),
-                model: &ctx.model,
-            });
+    match dlp_engine.sanitize_request_checked(request) {
+        Ok(reports) => {
+            ctx.emit_dlp_events(&reports, DlpDirection::Request);
+            Ok(())
         }
+        Err(block_err) => {
+            // Emit DLP block event for `grob watch`.
+            let (block_rule_type, block_detail) = match &block_err {
+                crate::features::dlp::DlpBlockError::InjectionBlocked(dets) => {
+                    ("injection", format!("{} injection(s) detected", dets.len()))
+                }
+                crate::features::dlp::DlpBlockError::UrlExfilBlocked(dets) => (
+                    "url_exfil",
+                    format!("{} exfiltration URL(s) detected", dets.len()),
+                ),
+            };
+            ctx.state.event_bus.emit(WatchEvent::DlpAction {
+                request_id: ctx.req_id.to_string(),
+                direction: DlpDirection::Request,
+                action: "block".into(),
+                rule_type: block_rule_type.into(),
+                detail: block_detail,
+                timestamp: chrono::Utc::now(),
+            });
 
-        ctx.log_audit_if_enabled(AuditEntry {
-            action: crate::security::audit_log::AuditEvent::DlpBlock,
-            backend: "BLOCKED",
-            dlp_rules: vec![block_err.to_string()],
-            duration_ms: ctx.start_time.elapsed().as_millis() as u64,
-            model_name: Some(&ctx.model),
-            token_counts: None,
-            risk_level: Some(risk),
-            dlp_blocked: true,
-            dlp_had_injection: had_injection,
-            dlp_had_pii: false,
-            dlp_had_redact_or_warn: false,
-        });
-        return Err(AppError::DlpBlocked(format!("{}", block_err)));
+            let had_injection = matches!(
+                &block_err,
+                crate::features::dlp::DlpBlockError::InjectionBlocked(_)
+            );
+            let risk =
+                crate::security::risk::assess_risk(&crate::security::risk::SecurityOutcome {
+                    dlp_rules_triggered: 1,
+                    was_blocked: true,
+                    had_injection,
+                    had_pii: false,
+                });
+
+            let compliance = &ctx.inner.config.compliance;
+            if compliance.enabled && compliance.risk_classification {
+                let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
+                    &compliance.escalation_threshold,
+                );
+                crate::security::risk::maybe_escalate(&crate::security::risk::EscalationEvent {
+                    risk,
+                    threshold,
+                    webhook_url: &compliance.escalation_webhook,
+                    event_id: ctx.req_id,
+                    tenant_id: ctx.tenant_id.as_deref().unwrap_or("anon"),
+                    model: &ctx.model,
+                });
+            }
+
+            ctx.log_audit_if_enabled(AuditEntry {
+                action: crate::security::audit_log::AuditEvent::DlpBlock,
+                backend: "BLOCKED",
+                dlp_rules: vec![block_err.to_string()],
+                duration_ms: ctx.start_time.elapsed().as_millis() as u64,
+                model_name: Some(&ctx.model),
+                token_counts: None,
+                risk_level: Some(risk),
+                dlp_blocked: true,
+                dlp_had_injection: had_injection,
+                dlp_had_pii: false,
+                dlp_had_redact_or_warn: false,
+            });
+            Err(AppError::DlpBlocked(format!("{}", block_err)))
+        }
     }
-    Ok(())
 }
 
 /// Handle fan-out strategy (dispatch to multiple providers in parallel).
