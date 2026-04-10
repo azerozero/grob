@@ -610,6 +610,7 @@ fn write_config(choices: &Choices, path: &Path) -> Result<()> {
                 t.remove("oauth_provider");
             }
         }
+        println!();
     }
 
     // Fallback
