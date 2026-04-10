@@ -71,12 +71,29 @@ Every request and response passes through the DLP engine before leaving your mac
 ```toml
 [dlp]
 enabled = true
-secrets = "redact"       # API keys, tokens, credentials → [REDACTED]
-pii = "warn"             # Emails, phone numbers → logged
-names = "pseudonymize"   # Real names → consistent pseudonyms
-injection = "block"      # Prompt injection attempts → 400
-url_exfil = "block"      # Data exfiltration URLs → stripped
-canary = true            # Inject canary tokens to detect leaks
+
+[[dlp.secrets]]
+name = "custom_token"
+prefix = "tok_"
+pattern = "tok_[A-Za-z0-9]{40}"
+action = "redact"            # API keys, tokens, credentials → [REDACTED]
+
+[dlp.pii]
+credit_cards = true
+iban = true
+action = "redact"            # Emails, phone numbers → redacted
+
+[[dlp.names]]
+term = "Acme Corp"
+action = "pseudonym"         # Real names → consistent pseudonyms
+
+[dlp.prompt_injection]
+enabled = true
+action = "block"             # Prompt injection attempts → 400
+
+[dlp.url_exfil]
+enabled = true
+action = "block"             # Data exfiltration URLs → stripped
 ```
 
 No other LLM proxy does this. LiteLLM, Bifrost, Portkey, Kong -- none have inline DLP on the hot path.
@@ -267,6 +284,8 @@ src/
 │   ├── dispatch/        Core dispatch: DLP, cache, route, provider loop
 │   ├── openai_compat/   OpenAI /v1/chat/completions translation
 │   ├── responses_compat/  OpenAI Responses API translation
+│   ├── rpc/             JSON-RPC endpoint
+│   ├── watch_sse.rs     Live traffic inspector SSE backend
 │   └── fan_out.rs       Parallel multi-provider dispatch
 ├── providers/           Provider implementations and registry
 ├── router/              Regex-based request routing engine
@@ -279,9 +298,12 @@ src/
 │   ├── token_pricing/   Pricing, spend tracking, budgets
 │   ├── mcp/             MCP tool matrix, JSON-RPC server
 │   ├── tap/             Webhook event emission
-│   └── harness/         Record & replay sandwich testing
+│   ├── harness/         Record & replay sandwich testing
+│   ├── tool_layer/      Tool-calling abstraction layer
+│   └── pledge/          Pledge-based capability restrictions
 ├── security/            Circuit breakers, rate limiting, audit log
-└── storage/             Unified redb storage backend
+├── storage/             Unified redb storage backend
+└── preset/              Preset management system
 ```
 
 ## Development

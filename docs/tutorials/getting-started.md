@@ -15,13 +15,13 @@ Choose one of three methods:
 **Option A: Install script (recommended)**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
+curl -fsSL https://grob.sh | sh
 ```
 
-**Option B: cargo-binstall (pre-built binary)**
+**Option B: Homebrew (macOS / Linux)**
 
 ```bash
-cargo binstall grob
+brew install azerozero/tap/grob
 ```
 
 **Option C: Build from source**

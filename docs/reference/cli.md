@@ -270,7 +270,7 @@ Pull config from a remote grob instance and save it as a local preset. Fetches t
 grob preset pull --from https://grob-prod.example.com --save prod-snapshot
 ```
 
-### `grob watch` (requires `--features watch`)
+### `grob watch`
 
 Live traffic inspector TUI. Connects to the running server's SSE endpoint (`/api/events`) and displays a ratatui dashboard with provider health, live request stream, and DLP alerts.
 

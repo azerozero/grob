@@ -46,9 +46,20 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Topic | Document |
 |-------|----------|
 | All config options | [Configuration Reference](CONFIGURATION.md) |
-| DLP engine | [DLP Reference](reference/dlp.md) |
-| OWASP LLM Top 10 | [OWASP Coverage](reference/owasp-llm-top10.md) |
 | CLI commands | [CLI Reference](reference/cli.md) |
+| DLP engine | [DLP Reference](reference/dlp.md) |
+| Routing engine | [Routing Reference](reference/routing.md) |
+| Authentication | [Authentication Reference](reference/authentication.md) |
+| Caching | [Caching Reference](reference/caching.md) |
+| Fan-out racing | [Fan-out Reference](reference/fan-out.md) |
+| Security middleware | [Security Reference](reference/security.md) |
+| Storage backend | [Storage Reference](reference/storage.md) |
+| Observability | [Observability Reference](reference/observability.md) |
+| Operations | [Operations Reference](reference/operations.md) |
+| Setup wizard | [Setup Wizard Reference](reference/setup-wizard.md) |
+| Feature matrix | [Feature Matrix](reference/features.md) |
+| Benchmarks | [Benchmarks](reference/benchmarks.md) |
+| OWASP LLM Top 10 | [OWASP Coverage](reference/owasp-llm-top10.md) |
 | Provider internals | [Provider Reference](reference/providers.md) |
 | API compatibility | [API Compatibility Reference](reference/api-compatibility.md) |
 | API endpoints | [OpenAPI Spec](openapi.yaml) |
@@ -62,11 +73,23 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 |-------|----------|
 | Architecture | [Architecture Overview](ARCHITECTURE.md) |
 | Security model | [Security Model](explanation/security.md) |
+| Policy engine | [Policy Engine](explanation/policies.md) |
 | Design philosophy | [Design Principles](design-principles.md) |
 | Gemini specifics | [Gemini Integration](gemini-integration.md) |
-| Architecture decisions | [ADRs](decisions/) |
 | Design doc template | [Design Doc Template](design/000-template.md) |
+
+### Architecture decisions (ADRs)
+
+| ADR | Title |
+|-----|-------|
+| [0001](decisions/0001-static-config-no-hot-reload.md) | Static config, no hot reload |
+| [0002](decisions/0002-custom-oauth-no-crate.md) | Custom OAuth, no crate |
+| [0003](decisions/0003-regex-routing-engine.md) | Regex routing engine |
+| [0004](decisions/0004-persistent-spend-tracking.md) | Persistent spend tracking |
+| [0005](decisions/0005-anthropic-native-provider-trait.md) | Anthropic-native provider trait |
+| [0006](decisions/0006-policy-engine-encrypted-audit-hit-gateway.md) | Policy engine, encrypted audit, HIT gateway |
+| [0008](decisions/0008-wizard-lifecycle.md) | Wizard lifecycle |
 
 ## Version
 
-Current release: **v0.30.0** -- see [CHANGELOG](../CHANGELOG.md) for history.
+Current release: **v0.35.1** -- see [CHANGELOG](../CHANGELOG.md) for history.

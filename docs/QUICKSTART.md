@@ -7,7 +7,7 @@ Get up and running in 30 seconds.
 ```bash
 brew install azerozero/tap/grob
 # or without Homebrew:
-curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
+curl -fsSL https://grob.sh | sh
 ```
 
 ## 2. Apply a preset
