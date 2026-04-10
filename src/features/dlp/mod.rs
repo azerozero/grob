@@ -362,7 +362,7 @@ impl DlpEngine {
     pub fn sanitize_request_checked(
         &self,
         request: &mut CanonicalRequest,
-    ) -> Result<(), DlpBlockError> {
+    ) -> Result<Vec<DlpActionReport>, DlpBlockError> {
         let all_text = Self::extract_request_text(request);
 
         // Stage 0: Prompt injection detection (before name anonymization)
@@ -388,8 +388,8 @@ impl DlpEngine {
         }
 
         // Then do normal sanitization (names, secrets, PII)
-        self.sanitize_request(request);
-        Ok(())
+        let reports = self.sanitize_request_reported(request);
+        Ok(reports)
     }
 
     /// Extract all text content from a request for scanning.
@@ -751,7 +751,7 @@ impl crate::traits::DlpPipeline for DlpEngine {
     fn sanitize_request_checked(
         &self,
         request: &mut CanonicalRequest,
-    ) -> Result<(), DlpBlockError> {
+    ) -> Result<Vec<DlpActionReport>, DlpBlockError> {
         self.sanitize_request_checked(request)
     }
 

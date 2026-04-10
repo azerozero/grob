@@ -23,7 +23,10 @@ pub trait DlpPipeline: Send + Sync {
     fn sanitize_request_checked(
         &self,
         request: &mut CanonicalRequest,
-    ) -> std::result::Result<(), crate::features::dlp::DlpBlockError>;
+    ) -> std::result::Result<
+        Vec<crate::features::dlp::DlpActionReport>,
+        crate::features::dlp::DlpBlockError,
+    >;
 
     /// Sanitizes response text (de-anonymize + secret scan).
     fn sanitize_response_text<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str>;
@@ -265,8 +268,11 @@ pub mod mocks {
         fn sanitize_request_checked(
             &self,
             _request: &mut CanonicalRequest,
-        ) -> std::result::Result<(), crate::features::dlp::DlpBlockError> {
-            Ok(())
+        ) -> std::result::Result<
+            Vec<crate::features::dlp::DlpActionReport>,
+            crate::features::dlp::DlpBlockError,
+        > {
+            Ok(vec![])
         }
         fn sanitize_response_text<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
             std::borrow::Cow::Borrowed(text)

@@ -323,6 +323,14 @@ fn draw_alerts(app: &App, frame: &mut Frame, area: ratatui::layout::Rect) {
     frame.render_widget(para, area);
 }
 
+/// Renders a timestamp column for the event stream.
+fn timestamp_span(ts: &chrono::DateTime<chrono::Utc>) -> Span<'static> {
+    Span::styled(
+        format!("  {}  ", ts.format("%H:%M:%S")),
+        Style::default().fg(Color::DarkGray),
+    )
+}
+
 /// Formats a single event as a colored ListItem.
 fn format_event(event: &WatchEvent) -> ListItem<'static> {
     let line = match event {
@@ -333,10 +341,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             timestamp,
             ..
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled("→ ", Style::default().fg(Color::Cyan)),
             Span::styled(format!("{:<24}", model), Style::default().fg(Color::White)),
             Span::styled(
@@ -355,10 +360,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             timestamp,
             ..
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled("← ", Style::default().fg(Color::Green)),
             Span::styled(format!("{:<24}", model), Style::default().fg(Color::White)),
             Span::styled(
@@ -379,10 +381,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             timestamp,
             ..
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled(
                 format!("✗ {}: {}", provider, error),
                 Style::default().fg(Color::Red),
@@ -396,10 +395,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             timestamp,
             ..
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled(
                 format!("DLP {}: {} ({})", action, rule_type, detail),
                 Style::default()
@@ -415,10 +411,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             timestamp,
             ..
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled(
                 format!("FALLBACK {} → {} ({})", from_provider, to_provider, reason),
                 Style::default()
@@ -432,10 +425,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             state,
             timestamp,
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled(
                 format!("CB {} → {}", provider, state),
                 Style::default().fg(if state == "open" {
@@ -456,10 +446,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             timestamp,
             ..
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled(
                 format!("HIT awaiting approval: {}", tool_name),
                 Style::default()
@@ -474,10 +461,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             timestamp,
             ..
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled(
                 format!(
                     "HIT {} {}",
@@ -494,10 +478,7 @@ fn format_event(event: &WatchEvent) -> ListItem<'static> {
             timestamp,
             ..
         } => Line::from(vec![
-            Span::styled(
-                format!("  {}  ", timestamp.format("%H:%M:%S")),
-                Style::default().fg(Color::DarkGray),
-            ),
+            timestamp_span(timestamp),
             Span::styled(
                 format!("HIT flagged [{pattern}]: {matched_text}"),
                 Style::default()

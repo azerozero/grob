@@ -63,6 +63,55 @@ fn convert_tools(tools: &[serde_json::Value]) -> Vec<Tool> {
         .collect()
 }
 
+/// Merges a tool-use block into the last assistant message if possible.
+///
+/// Returns `None` if merged, or `Some(block)` if a new message is needed.
+fn merge_tool_use_into_assistant(
+    messages: &mut [Message],
+    block: ContentBlock,
+) -> Option<ContentBlock> {
+    if let Some(last) = messages.last_mut() {
+        if last.role == "assistant" {
+            match &mut last.content {
+                MessageContent::Blocks(blocks) => {
+                    blocks.push(block);
+                    return None;
+                }
+                MessageContent::Text(text) => {
+                    let mut blocks = Vec::new();
+                    if !text.is_empty() {
+                        blocks.push(ContentBlock::text(std::mem::take(text), None));
+                    }
+                    blocks.push(block);
+                    last.content = MessageContent::Blocks(blocks);
+                    return None;
+                }
+            }
+        }
+    }
+    Some(block)
+}
+
+/// Merges a tool-result block into the last user message if it only contains tool results.
+///
+/// Returns `None` if merged, or `Some(block)` if a new message is needed.
+fn merge_tool_result_into_user(
+    messages: &mut [Message],
+    block: ContentBlock,
+) -> Option<ContentBlock> {
+    if let Some(last) = messages.last_mut() {
+        if last.role == "user" {
+            if let MessageContent::Blocks(ref mut existing) = &mut last.content {
+                if existing.iter().all(|b| b.is_tool_result()) {
+                    existing.push(block);
+                    return None;
+                }
+            }
+        }
+    }
+    Some(block)
+}
+
 /// Transforms a [`ResponsesRequest`] into a [`CanonicalRequest`].
 ///
 /// # Errors
@@ -121,34 +170,13 @@ pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<Canonic
                             serde_json::from_str(arguments).unwrap_or_default();
                         let block = ContentBlock::tool_use(tool_id, name.clone(), input);
 
-                        // Merge into previous assistant message if possible
-                        if let Some(last) = messages.last_mut() {
-                            if last.role == "assistant" {
-                                match &mut last.content {
-                                    MessageContent::Blocks(blocks) => {
-                                        blocks.push(block);
-                                        continue;
-                                    }
-                                    MessageContent::Text(text) => {
-                                        let mut blocks = Vec::new();
-                                        if !text.is_empty() {
-                                            blocks.push(ContentBlock::text(
-                                                std::mem::take(text),
-                                                None,
-                                            ));
-                                        }
-                                        blocks.push(block);
-                                        last.content = MessageContent::Blocks(blocks);
-                                        continue;
-                                    }
-                                }
-                            }
+                        if let Some(remaining) = merge_tool_use_into_assistant(&mut messages, block)
+                        {
+                            messages.push(Message {
+                                role: "assistant".to_string(),
+                                content: MessageContent::Blocks(vec![remaining]),
+                            });
                         }
-
-                        messages.push(Message {
-                            role: "assistant".to_string(),
-                            content: MessageContent::Blocks(vec![block]),
-                        });
                     }
                     InputItem::FunctionCallOutput { call_id, output } => {
                         // function_call_output → user message with tool_result block
@@ -159,23 +187,12 @@ pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<Canonic
                             cache_control: None,
                         });
 
-                        // Merge into previous user message with tool results
-                        if let Some(last) = messages.last_mut() {
-                            if last.role == "user" {
-                                if let MessageContent::Blocks(ref mut existing) = &mut last.content
-                                {
-                                    if existing.iter().all(|b| b.is_tool_result()) {
-                                        existing.push(block);
-                                        continue;
-                                    }
-                                }
-                            }
+                        if let Some(remaining) = merge_tool_result_into_user(&mut messages, block) {
+                            messages.push(Message {
+                                role: "user".to_string(),
+                                content: MessageContent::Blocks(vec![remaining]),
+                            });
                         }
-
-                        messages.push(Message {
-                            role: "user".to_string(),
-                            content: MessageContent::Blocks(vec![block]),
-                        });
                     }
                 }
             }
