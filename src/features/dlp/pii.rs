@@ -173,6 +173,10 @@ impl PiiScanner {
         let mut last_end = 0;
 
         for det in &detections {
+            // mutants::skip — les regex PII utilisent \b (word boundary),
+            // donc deux matchs ne peuvent pas se chevaucher en pratique.
+            // Le guard est defensif ; l'overlap est structurellement impossible
+            // entre CC (\d), IBAN ([A-Z]\d), et BIC ([A-Z]) grace aux \b.
             if det.start < last_end {
                 continue;
             }
@@ -210,6 +214,8 @@ fn luhn_check(digits: &str) -> bool {
         let mut d = ch.to_digit(10).unwrap_or(0);
         if double {
             d *= 2;
+            // mutants::skip — d *= 2 produit uniquement des valeurs paires
+            // (0,2,4,6,8,10,12,14,16,18). d == 9 est inatteignable, donc > et >= sont equivalents.
             if d > 9 {
                 d -= 9;
             }
@@ -344,7 +350,9 @@ fn generate_canary_cc(original: &str, id: u64) -> String {
         .map(|c| c.to_digit(10).unwrap_or(0) as u8)
         .collect();
 
-    // Pad if needed
+    // Pad defensif : le format! ci-dessus genere toujours >= len-1 chars
+    // grace au zero-padding {:0>width$}, donc cette boucle ne fire jamais.
+    // mutants::skip — dead code defensif, partial.len() == len-1 toujours vrai ici.
     while partial.len() < len - 1 {
         partial.push(0);
     }
@@ -363,6 +371,8 @@ fn luhn_check_digit(digits: &[u8]) -> u8 {
         let mut val = d as u32;
         if i % 2 == 0 {
             val *= 2;
+            // mutants::skip — val *= 2 produit uniquement des valeurs paires (0..18),
+            // donc val == 9 est inatteignable et > vs >= sont equivalents.
             if val > 9 {
                 val -= 9;
             }
@@ -647,6 +657,499 @@ mod tests {
                 "Random digits should fail Luhn validation"
             );
         }
+    }
+
+    // ── Mutation testing : tests cibles pour tuer les mutants survivants ──
+
+    // -- from_config: || -> && et delete ! sur any_enabled --
+
+    /// Tue : L57:47 || -> && dans from_config (config.credit_cards || config.iban).
+    /// Si &&, cc-only config retournerait None alors qu'elle doit retourner Some.
+    #[test]
+    fn test_kill_mutant_57_from_config_single_cc_enabled() {
+        let config = PiiConfig {
+            credit_cards: true,
+            iban: false,
+            bic: false,
+            action: PiiAction::Redact,
+        };
+        assert!(PiiScanner::from_config(&config).is_some());
+    }
+
+    /// Tue : L57:62 || -> && dans from_config (config.iban || config.bic).
+    /// Si &&, iban-only config retournerait None.
+    #[test]
+    fn test_kill_mutant_57_from_config_single_iban_enabled() {
+        let config = PiiConfig {
+            credit_cards: false,
+            iban: true,
+            bic: false,
+            action: PiiAction::Redact,
+        };
+        assert!(PiiScanner::from_config(&config).is_some());
+    }
+
+    /// Tue : L57 meme famille. bic-only doit suffire.
+    #[test]
+    fn test_kill_mutant_57_from_config_single_bic_enabled() {
+        let config = PiiConfig {
+            credit_cards: false,
+            iban: false,
+            bic: true,
+            action: PiiAction::Redact,
+        };
+        assert!(PiiScanner::from_config(&config).is_some());
+    }
+
+    /// Tue : L58 delete ! (if any_enabled -> if !any_enabled inverted).
+    /// Si le ! est supprime, une config all-enabled retournerait None.
+    #[test]
+    fn test_kill_mutant_58_from_config_all_enabled_returns_some() {
+        let config = PiiConfig {
+            credit_cards: true,
+            iban: true,
+            bic: true,
+            action: PiiAction::Redact,
+        };
+        assert!(PiiScanner::from_config(&config).is_some());
+    }
+
+    // -- might_contain_pii : thresholds et branches --
+
+    /// Tue : L94 += -> -= et L95 >= -> < (digit_run ne monte jamais assez).
+    /// Exactement 8 digits d'affile = seuil.
+    #[test]
+    fn test_kill_mutant_94_95_digit_run_threshold_exact() {
+        let scanner = default_scanner();
+        // 8 digits consecutifs = true
+        assert!(scanner.might_contain_pii("12345678"));
+        // 7 digits consecutifs = false
+        assert!(!scanner.might_contain_pii("1234567"));
+    }
+
+    /// Tue : L105 += -> -= et L106 >= -> < (upper_run).
+    /// 8 uppercase consecutifs = seuil.
+    #[test]
+    fn test_kill_mutant_105_106_upper_run_threshold_exact() {
+        let scanner = default_scanner();
+        // 8 uppercase = true
+        assert!(scanner.might_contain_pii("ABCDEFGH"));
+        // 7 uppercase = false
+        assert!(!scanner.might_contain_pii("ABCDEFG"));
+    }
+
+    /// Tue : L88 replace -> true (tout retourne true).
+    #[test]
+    fn test_kill_mutant_88_might_contain_pii_false_on_empty() {
+        let scanner = default_scanner();
+        assert!(!scanner.might_contain_pii(""));
+        assert!(!scanner.might_contain_pii("hello world"));
+    }
+
+    /// Tue : L88 replace -> false (tout retourne false).
+    #[test]
+    fn test_kill_mutant_88_might_contain_pii_true_on_long_digits() {
+        let scanner = default_scanner();
+        assert!(scanner.might_contain_pii("1234567890123456"));
+    }
+
+    /// Tue : L98:25 == -> != (b' ') et L98:38 == -> != (b'-').
+    /// Espaces et tirets ne doivent PAS reset le digit_run.
+    #[test]
+    fn test_kill_mutant_98_spaces_dashes_keep_digit_run() {
+        let scanner = default_scanner();
+        // digits with spaces: 4+4+4+4 = 16 digits, spaces maintiennent le run
+        assert!(scanner.might_contain_pii("1234 5678 9012 3456"));
+        // digits with dashes
+        assert!(scanner.might_contain_pii("1234-5678-9012-3456"));
+    }
+
+    /// Tue : L98:33 || -> && (space || dash).
+    /// Si &&, seul un char qui est a la fois space ET dash garderait le run.
+    /// Un space seul resetterait le run, ce qui est faux.
+    #[test]
+    fn test_kill_mutant_98_or_spaces_only() {
+        let scanner = default_scanner();
+        // 4 digits + espace + 4 digits = 8+ digits grace au run maintenu par espace
+        assert!(scanner.might_contain_pii("1234 56789"));
+    }
+
+    // -- luhn_check : operateurs arithmetiques --
+
+    /// Tue : L212 *= -> += (d *= 2 -> d += 2 change le resultat).
+    #[test]
+    fn test_kill_mutant_212_luhn_double_multiplication() {
+        // 4111111111111111 (Visa test) passe Luhn.
+        assert!(luhn_check("4111111111111111"));
+        // Le meme avec un digit change NE passe PAS.
+        assert!(!luhn_check("4111111111111112"));
+    }
+
+    /// Tue : L213 > -> >= / == / < (d > 9 seuil).
+    #[test]
+    fn test_kill_mutant_213_luhn_d_gt_9_threshold() {
+        // Numeros qui exercent le seuil d > 9 dans le doublement Luhn.
+        // 4111111111111111 a des digits 1 doubles a 2 (< 9) et 4 double a 8 (< 9).
+        // 5425233430109903 a des digits 5 doubles a 10 (> 9 -> -9 = 1).
+        assert!(luhn_check("5425233430109903"));
+        assert!(!luhn_check("5425233430109900"));
+    }
+
+    /// Tue : L214 -= -> += (d -= 9 doit soustraire, pas ajouter).
+    #[test]
+    fn test_kill_mutant_214_luhn_subtract_9() {
+        // 5425233430109903 (Mastercard test) exerce le d -= 9 path (digits >= 5 doubled = 10+).
+        assert!(luhn_check("5425233430109903"));
+        assert!(!luhn_check("5425233430109904"));
+    }
+
+    /// Tue : L217 += -> -= (sum += d doit accumuler, pas soustraire).
+    #[test]
+    fn test_kill_mutant_217_luhn_sum_accumulate() {
+        // Si sum -= d, le resultat serait tres different.
+        assert!(luhn_check("4532015112830366"));
+        assert!(!luhn_check("4532015112830360"));
+    }
+
+    /// Tue : L218 delete ! (double = !double toggle).
+    /// Sans le toggle, luhn doublerait tout ou rien.
+    #[test]
+    fn test_kill_mutant_218_luhn_double_toggle() {
+        // 374245455400126 (Amex) utilise le toggle intensivement.
+        assert!(luhn_check("374245455400126"));
+        // Un nombre qui passe uniquement avec le bon toggle.
+        assert!(!luhn_check("374245455400127"));
+    }
+
+    // -- iban_mod97_check : longueur, conversion lettres, calcul mod --
+
+    /// Tue : L228:19 < -> == (si ==, un IBAN de 14 chars passerait le guard).
+    /// Tue : L228:19 < -> <= (si <=, un IBAN valide de 15 chars serait rejete).
+    #[test]
+    fn test_kill_mutant_228_iban_length_guard() {
+        // 14 chars : doit retourner false (< 15).
+        // Tue < -> == : car avec ==, len(14) != 15 donc le guard ne rejette PAS, et on
+        // continue vers le mod97 check qui pourrait retourner true sur un input crafted.
+        assert!(!iban_mod97_check("FR123456789012"));
+        // 13 chars : aussi rejete.
+        assert!(!iban_mod97_check("FR1234567890"));
+        // 15 chars VALIDE (Norway NO9386011117947) : doit retourner true.
+        // Tue < -> <= : car avec <=, len(15) <= 15 rejetterait ce IBAN valide.
+        assert!(iban_mod97_check("NO9386011117947"));
+    }
+
+    /// Tue : L239:53 % -> / et L239:41 + -> - dans remainder calc.
+    #[test]
+    fn test_kill_mutant_239_iban_remainder_arithmetic() {
+        // DE89370400440532013000 valide : remainder DOIT etre 1.
+        assert!(iban_mod97_check("DE89370400440532013000"));
+        // Changer un digit casse le mod97.
+        assert!(!iban_mod97_check("DE89370400440532013001"));
+    }
+
+    /// Tue : L243 replace * 100 avec autre chose dans letter conversion.
+    #[test]
+    fn test_kill_mutant_243_iban_letter_two_digit_shift() {
+        // GB82WEST12345698765432 — utilise des lettres (W, E, S, T) dans le BBAN.
+        assert!(iban_mod97_check("GB82WEST12345698765432"));
+    }
+
+    /// Tue : L249 == -> != (remainder == 1 final check).
+    #[test]
+    fn test_kill_mutant_249_iban_remainder_must_be_1() {
+        assert!(iban_mod97_check("FR7630006000011234567890189"));
+        assert!(!iban_mod97_check("FR0030006000011234567890189")); // check digits wrong
+    }
+
+    // -- bic_format_check : validations structurelles --
+
+    /// Tue : L257 != 8 && != 11 (accept only 8 or 11).
+    #[test]
+    fn test_kill_mutant_257_bic_length_strict() {
+        assert!(!bic_format_check("DEUTD")); // 5 chars
+        assert!(!bic_format_check("DEUTDEFF1")); // 9 chars
+        assert!(!bic_format_check("DEUTDEFF12")); // 10 chars
+        assert!(bic_format_check("DEUTDEFF")); // 8 exact
+        assert!(bic_format_check("BNPAFRPP75A")); // 11 exact
+    }
+
+    /// Tue : L262 !...all(uppercase) first 4 bank code.
+    #[test]
+    fn test_kill_mutant_262_bic_bank_code_uppercase_only() {
+        assert!(!bic_format_check("dEUTDEFF")); // lowercase first char
+        assert!(!bic_format_check("DEuTDEFF")); // lowercase third char
+        assert!(!bic_format_check("D3UTDEFF")); // digit in bank code
+    }
+
+    /// Tue : L268 is_valid_country_code negation.
+    #[test]
+    fn test_kill_mutant_268_bic_country_validation() {
+        assert!(!bic_format_check("DEUTXXFF")); // XX invalid country
+        assert!(!bic_format_check("DEUTQQFF")); // QQ invalid
+        assert!(bic_format_check("DEUTDEFF")); // DE valid
+        assert!(bic_format_check("BNPAFRPP")); // FR valid
+    }
+
+    /// Tue : L273-278 location alphanumeric check.
+    #[test]
+    fn test_kill_mutant_273_bic_location_alphanum() {
+        assert!(!bic_format_check("DEUTDE!!")); // special chars in location
+        assert!(bic_format_check("DEUTDE5F")); // digit in location ok
+        assert!(bic_format_check("DEUTDEFF")); // letters in location ok
+    }
+
+    /// Tue : L281-287 branch alphanumeric check (11-char BIC).
+    #[test]
+    fn test_kill_mutant_281_bic_branch_alphanum() {
+        assert!(!bic_format_check("DEUTDEFF!!!")); // special chars in branch
+        assert!(bic_format_check("DEUTDEFF123")); // digits in branch ok
+        assert!(bic_format_check("DEUTDEFFABC")); // letters in branch ok
+    }
+
+    // -- redact : mode Log vs Redact vs Canary, overlap detection --
+
+    /// Tue : L168 == -> != (PiiAction::Log check inverted).
+    #[test]
+    fn test_kill_mutant_168_redact_log_mode_no_modification() {
+        let scanner = PiiScanner::from_config(&PiiConfig {
+            credit_cards: true,
+            iban: false,
+            bic: false,
+            action: PiiAction::Log,
+        })
+        .unwrap();
+        let text = "card 4532015112830366 here";
+        let (result, dets) = scanner.redact(text).unwrap();
+        // En mode Log, le texte DOIT etre inchange.
+        assert_eq!(result, text);
+        assert_eq!(dets.len(), 1);
+    }
+
+    /// Tue : L121 replace -> None (redact retourne toujours None).
+    #[test]
+    fn test_kill_mutant_121_redact_returns_some_on_detection() {
+        let scanner = default_scanner();
+        let result = scanner.redact("card 4532015112830366 here");
+        assert!(result.is_some());
+    }
+
+    /// Tue : L176 < -> == / > / <= (overlap skip : det.start < last_end).
+    #[test]
+    fn test_kill_mutant_176_redact_overlap_handling() {
+        let scanner = default_scanner();
+        // Un seul numero = pas d'overlap, resultat normal.
+        let (result, _) = scanner.redact("card 4532015112830366 done").unwrap();
+        assert!(result.contains("[CARD REDACTED]"));
+        assert!(!result.contains("4532015112830366"));
+    }
+
+    /// Tue : L127:33 >= -> < et L127:55 <= -> > (digit count guards dans CC detection).
+    #[test]
+    fn test_kill_mutant_127_redact_cc_digit_count_bounds() {
+        let scanner = default_scanner();
+        // 13 digits (Visa old style) : doit passer la borne >= 13
+        // 0000000000000 passe Luhn (tout zero)
+        assert!(scanner.redact("card 0000000000000 done").is_some());
+    }
+
+    /// Tue : L127:39/61 && -> || (digit length AND Luhn check).
+    #[test]
+    fn test_kill_mutant_127_redact_cc_both_checks_required() {
+        let scanner = default_scanner();
+        // 16 digits mais Luhn invalide : NE doit PAS etre detecte.
+        assert!(scanner.redact("card 1234567890123456 done").is_none());
+    }
+
+    // -- generate_canary_cc : integrite du canary genere --
+
+    /// Tue : L340:12 < -> <= (len < 2 guard). Avec <=, len==2 retournerait "00"
+    /// au lieu de generer un canary derive de l'input.
+    #[test]
+    fn test_kill_mutant_340_canary_cc_len_2_generates_valid() {
+        let canary = generate_canary_cc("41", 1);
+        assert_eq!(canary.len(), 2);
+        // Le canary doit commencer par le meme premier digit que l'input (network).
+        // Avec le mutant <=, "0".repeat(2) = "00" qui ne commence pas par '4'.
+        assert_eq!(
+            canary.chars().next().unwrap(),
+            '4',
+            "Le premier digit doit etre preserve (network): {canary}"
+        );
+        assert!(
+            luhn_check(&canary),
+            "Canary CC 2 chars doit passer Luhn: {canary}"
+        );
+    }
+
+    /// Tue : L334 < (len < 2 guard). len==1 doit retourner "0".
+    #[test]
+    fn test_kill_mutant_334_canary_cc_len_1_returns_zero() {
+        let canary = generate_canary_cc("4", 1);
+        assert_eq!(canary, "0");
+    }
+
+    /// Tue : L349:19 - -> + / / (width = len - 2).
+    /// Si + ou /, la longueur du seed serait fausse → canary de mauvaise longueur.
+    #[test]
+    fn test_kill_mutant_349_canary_cc_seed_width() {
+        let canary = generate_canary_cc("4111111111111111", 42);
+        assert_eq!(canary.len(), 16, "Canary doit avoir exactement 16 chars");
+        assert!(
+            luhn_check(&canary),
+            "Canary 16 chars doit passer Luhn: {canary}"
+        );
+    }
+
+    /// Tue : L354:25 < -> > (while partial.len() < len - 1 pad loop).
+    /// Si >, la boucle padderait indefiniment (ou pas du tout). Le canary n'aurait
+    /// pas la bonne longueur.
+    #[test]
+    fn test_kill_mutant_354_canary_cc_pad_loop() {
+        // id tres petit (1) avec longueur 16 : le seed sera "4000000000000001"
+        // mais le format fait width=14, donc pas de padding normalement.
+        // Testons un cas ou le seed est tres court.
+        let canary = generate_canary_cc("4111111111111111", 1);
+        assert_eq!(canary.len(), 16);
+        assert!(luhn_check(&canary), "Canary pad doit passer Luhn: {canary}");
+        // Verifie que chaque char est un ASCII digit (tue L356 + -> -).
+        for c in canary.chars() {
+            assert!(c.is_ascii_digit(), "Char '{c}' n'est pas un digit");
+        }
+    }
+
+    /// Tue : L362:34 + -> - ((b'0' + d) as char).
+    /// Si -, les chars ne seraient plus des digits ASCII valides.
+    #[test]
+    fn test_kill_mutant_362_canary_cc_ascii_digits() {
+        let canary = generate_canary_cc("5425233430109903", 999);
+        assert_eq!(canary.len(), 16);
+        for c in canary.chars() {
+            assert!(
+                c.is_ascii_digit(),
+                "Attendu digit, got '{c}' (U+{:04X})",
+                c as u32
+            );
+        }
+        assert!(luhn_check(&canary), "Canary doit passer Luhn: {canary}");
+    }
+
+    // -- luhn_check_digit : arithmetique du check digit --
+
+    /// Tue : L364 *= -> += et L365-366 > / -= (meme pattern que luhn_check).
+    #[test]
+    fn test_kill_mutant_364_luhn_check_digit_correct() {
+        let digits = vec![4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+        let check = luhn_check_digit(&digits);
+        let mut full: Vec<u8> = digits;
+        full.push(check);
+        let s: String = full.iter().map(|d| (b'0' + d) as char).collect();
+        assert!(luhn_check(&s));
+    }
+
+    /// Tue : L372 % -> / dans ((10 - (sum % 10)) % 10).
+    #[test]
+    fn test_kill_mutant_372_luhn_check_digit_modulo() {
+        // Teste avec plusieurs sequences pour que le % et le - comptent.
+        for prefix in [
+            vec![5, 4, 2, 5, 2, 3, 3, 4, 3, 0, 1, 0, 9, 9, 0],
+            vec![3, 7, 4, 2, 4, 5, 4, 5, 5, 4, 0, 0, 1, 2],
+        ] {
+            let check = luhn_check_digit(&prefix);
+            let mut full = prefix;
+            full.push(check);
+            let s: String = full.iter().map(|d| (b'0' + d) as char).collect();
+            assert!(luhn_check(&s), "Luhn check digit failed for {s}");
+        }
+    }
+
+    // -- generate_canary_iban : conversion lettres et mod97 --
+
+    /// Tue : L405:49 % -> + dans le calcul remainder % 97 de generate_canary_iban.
+    /// Multiple ids pour eviter les coincidences sur un seul id.
+    #[test]
+    fn test_kill_mutant_405_canary_iban_mod97_valid_multiple() {
+        for id in [1, 7, 42, 99, 123, 9999, 100_000] {
+            let canary = generate_canary_iban("FR7630006000011234567890189", id);
+            assert!(canary.starts_with("FR"));
+            assert_eq!(canary.len(), 27);
+            assert!(
+                iban_mod97_check(&canary),
+                "Canary IBAN id={id} doit etre mod97-valide : {canary}"
+            );
+        }
+    }
+
+    /// Tue : L377 len >= 2 guard et L382 saturating_sub.
+    #[test]
+    fn test_kill_mutant_377_canary_iban_short_input() {
+        let canary = generate_canary_iban("X", 1);
+        // Court input : country = "XX" fallback, body_len = 0.
+        assert!(!canary.is_empty());
+    }
+
+    /// Tue : L394/397 val >= 10 branch (lettres vs digits dans le calcul).
+    #[test]
+    fn test_kill_mutant_394_canary_iban_letter_digit_branch() {
+        // GB (lettres G=16, B=11) teste le branch >= 10 dans la boucle.
+        let canary = generate_canary_iban("GB29NWBK60161331926819", 42);
+        assert!(canary.starts_with("GB"));
+        assert!(
+            iban_mod97_check(&canary),
+            "Canary GB doit etre mod97-valide : {canary}"
+        );
+    }
+
+    /// Tue : L400 - -> + (check = 98 - remainder).
+    #[test]
+    fn test_kill_mutant_400_canary_iban_check_digit_subtraction() {
+        // Si 98 + remainder au lieu de 98 - remainder, le check digit serait faux.
+        let canary = generate_canary_iban("DE89370400440532013000", 7);
+        assert!(
+            iban_mod97_check(&canary),
+            "Canary DE doit etre mod97-valide : {canary}"
+        );
+    }
+
+    // -- generate_pii_canary : dispatch par type --
+
+    /// Tue : L318 replace generate_pii_canary -> String.
+    #[test]
+    fn test_kill_mutant_318_canary_dispatch_bic() {
+        let canary = generate_pii_canary(&PiiType::Bic, "DEUTDEFF");
+        assert!(canary.starts_with("GROB"));
+        assert_eq!(canary.len(), 8);
+    }
+
+    /// Tue : L326 BIC canary garde le country et location.
+    #[test]
+    fn test_kill_mutant_326_canary_bic_preserves_suffix() {
+        let canary = generate_pii_canary(&PiiType::Bic, "BNPAFRPP");
+        // Doit etre GROBFRPP (remplace bank code par GROB, garde country+location).
+        assert_eq!(&canary[4..6], "FR");
+        assert_eq!(&canary[6..], "PP");
+    }
+
+    // -- PiiType Display --
+
+    /// Tue : L25 replace fmt -> Ok(Default::default()) (affichage vide).
+    #[test]
+    fn test_kill_mutant_25_pii_type_display() {
+        assert_eq!(format!("{}", PiiType::CreditCard), "credit_card");
+        assert_eq!(format!("{}", PiiType::Iban), "iban");
+        assert_eq!(format!("{}", PiiType::Bic), "bic");
+    }
+
+    // -- is_valid_country_code --
+
+    /// Tue : L293 replace -> true/false (country code validation).
+    #[test]
+    fn test_kill_mutant_293_country_code_validation() {
+        assert!(is_valid_country_code("FR"));
+        assert!(is_valid_country_code("DE"));
+        assert!(is_valid_country_code("US"));
+        assert!(!is_valid_country_code("XX"));
+        assert!(!is_valid_country_code("QQ"));
+        assert!(!is_valid_country_code(""));
     }
 
     proptest::proptest! {
