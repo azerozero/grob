@@ -314,9 +314,11 @@ fn rotated_path(base: &Path, index: usize, compressed: bool) -> PathBuf {
 
 /// Compresses a file to zstd format.
 fn compress_to_zstd(src: &Path, dst: &Path) -> std::io::Result<()> {
-    let input = fs::read(src)?;
-    let compressed = zstd::encode_all(input.as_slice(), 3)?;
-    fs::write(dst, compressed)?;
+    let input = std::fs::File::open(src)?;
+    let output = std::fs::File::create(dst)?;
+    let mut encoder = zstd::Encoder::new(output, 3)?;
+    std::io::copy(&mut std::io::BufReader::new(input), &mut encoder)?;
+    encoder.finish()?;
     Ok(())
 }
 
