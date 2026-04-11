@@ -28,6 +28,7 @@ mod tests {
         let flags = SetupFlags {
             yes: true,
             dry_run: false,
+            edit_section: None,
         };
         let ok = run_setup_wizard(&config_path, &flags)
             .await
