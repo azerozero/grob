@@ -180,6 +180,7 @@ pub mod mocks {
                 model_name: self.model_name.clone(),
                 route_type: RouteType::Default,
                 matched_prompt: None,
+                complexity_tier: None,
             })
         }
     }

@@ -469,6 +469,10 @@ pub struct RouteDecision {
     pub route_type: RouteType,
     /// Prompt-rule pattern that matched, if any.
     pub matched_prompt: Option<String>,
+    /// Heuristic complexity tier (trivial / medium / complex).
+    ///
+    /// `None` when scoring is not configured or was overridden by a hint.
+    pub complexity_tier: Option<crate::router::classify::ComplexityTier>,
 }
 
 /// Type of routing decision
