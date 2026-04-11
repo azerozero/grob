@@ -1,6 +1,7 @@
 use super::*;
 use crate::cli::{RouterConfig, ServerConfig};
 use crate::models::{Message, MessageContent, ThinkingConfig};
+use proptest::prelude::*;
 
 fn create_test_config() -> AppConfig {
     AppConfig {
@@ -765,4 +766,62 @@ fn trailing_literal_single_char() {
     assert_eq!(extract_trailing_literal_byte("9"), None);
     // Single dollar → end == 0 → None.
     assert_eq!(extract_trailing_literal_byte("$"), None);
+}
+
+// ── Property-based tests ─────────────────────────────────────
+
+proptest! {
+    /// extract_trailing_literal_byte never panics on arbitrary input.
+    #[test]
+    fn prop_extract_trailing_never_panics(pattern in ".{0,200}") {
+        let _ = extract_trailing_literal_byte(&pattern);
+    }
+
+    /// Result is deterministic: same input always produces same output.
+    #[test]
+    fn prop_extract_trailing_deterministic(pattern in ".{0,100}") {
+        let a = extract_trailing_literal_byte(&pattern);
+        let b = extract_trailing_literal_byte(&pattern);
+        prop_assert_eq!(a, b);
+    }
+
+    /// If a result is returned, it must be a lowercase ASCII alphabetic byte.
+    #[test]
+    fn prop_extract_trailing_result_is_lowercase_alpha(pattern in ".{0,200}") {
+        if let Some(byte) = extract_trailing_literal_byte(&pattern) {
+            prop_assert!(byte.is_ascii_lowercase(),
+                "Returned byte {:?} is not lowercase ASCII alpha", byte as char);
+        }
+    }
+
+    /// Patterns containing '|' always return None (alternation bail).
+    #[test]
+    fn prop_alternation_always_none(
+        left in "[a-z]{3,10}",
+        right in "[a-z]{3,10}"
+    ) {
+        let pattern = format!("{left}|{right}");
+        prop_assert_eq!(extract_trailing_literal_byte(&pattern), None);
+    }
+
+    /// Router::new + route never panics on arbitrary model names.
+    #[test]
+    fn prop_router_classify_no_panic(model_name in "[a-zA-Z0-9._-]{0,80}") {
+        let config = create_test_config();
+        let router = Router::new(config);
+        let mut request = create_simple_request("hello world");
+        request.model = model_name;
+        let result = router.route(&mut request);
+        prop_assert!(result.is_ok(), "route() must not panic or error");
+    }
+
+    /// Route with arbitrary user text never panics.
+    #[test]
+    fn prop_route_arbitrary_text_no_panic(text in "\\PC{0,200}") {
+        let config = create_test_config();
+        let router = Router::new(config);
+        let mut request = create_simple_request(&text);
+        let result = router.route(&mut request);
+        prop_assert!(result.is_ok(), "route() must not panic on arbitrary text");
+    }
 }
