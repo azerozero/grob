@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+use super::simhash::{self, SimHashCache};
+
 /// A cached LLM response with metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedResponse {
@@ -40,6 +42,7 @@ pub struct CacheStats {
 /// LLM response cache backed by moka.
 pub struct ResponseCache {
     inner: Cache<String, CachedResponse>,
+    simhash: SimHashCache,
     max_entry_bytes: usize,
     hits: AtomicU64,
     misses: AtomicU64,
@@ -63,6 +66,7 @@ impl ResponseCache {
 
         Self {
             inner: cache,
+            simhash: SimHashCache::new(),
             max_entry_bytes,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
@@ -169,6 +173,29 @@ impl std::io::Write for Sha256Writer {
 }
 
 impl ResponseCache {
+    /// Attempts a SimHash fuzzy lookup before the exact SHA-256 lookup.
+    ///
+    /// If `prompt_text` is provided, computes the SimHash fingerprint and
+    /// checks the fuzzy cache first. Falls back to the exact cache on miss.
+    pub async fn get_with_simhash(
+        &self,
+        key: &str,
+        prompt_text: Option<&str>,
+    ) -> Option<CachedResponse> {
+        // Try SimHash fuzzy match first when prompt text is available.
+        if let Some(text) = prompt_text {
+            let fp = simhash::compute(text);
+            if let Some(resp) = self.simhash.get(fp) {
+                self.hits.fetch_add(1, Ordering::Relaxed);
+                metrics::counter!("grob_cache_hits_total").increment(1);
+                return Some(resp);
+            }
+        }
+
+        // Fall back to exact SHA-256 cache.
+        self.get(key).await
+    }
+
     /// Try to get a cached response.
     pub async fn get(&self, key: &str) -> Option<CachedResponse> {
         match self.inner.get(key).await {
@@ -185,6 +212,23 @@ impl ResponseCache {
         }
     }
 
+    /// Stores a response in both the exact and SimHash caches.
+    ///
+    /// If `prompt_text` is provided, the response is also indexed by its
+    /// SimHash fingerprint for future fuzzy lookups.
+    pub async fn put_with_simhash(
+        &self,
+        key: String,
+        response: CachedResponse,
+        prompt_text: Option<&str>,
+    ) {
+        if let Some(text) = prompt_text {
+            let fp = simhash::compute(text);
+            self.simhash.put(fp, response.clone());
+        }
+        self.put(key, response).await;
+    }
+
     /// Store a response in the cache. Skips if too large.
     pub async fn put(&self, key: String, response: CachedResponse) {
         if response.body.len() > self.max_entry_bytes {
@@ -195,9 +239,15 @@ impl ResponseCache {
         self.inner.insert(key, response).await;
     }
 
-    /// Invalidate all entries.
+    /// Invalidate all entries (exact and SimHash).
     pub fn invalidate_all(&self) {
         self.inner.invalidate_all();
+        self.simhash.clear();
+    }
+
+    /// Returns a reference to the underlying SimHash cache.
+    pub fn simhash_cache(&self) -> &SimHashCache {
+        &self.simhash
     }
 
     /// Get cache statistics.
