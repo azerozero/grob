@@ -9,6 +9,7 @@ mod tests {
             model_name: "test-model".to_string(),
             route_type: RouteType::Default,
             matched_prompt: None,
+            complexity_tier: None,
         };
 
         assert_eq!(decision.model_name, "test-model");
@@ -21,6 +22,7 @@ mod tests {
             model_name: "fast-model".to_string(),
             route_type: RouteType::PromptRule,
             matched_prompt: Some("[fast]".to_string()),
+            complexity_tier: None,
         };
 
         assert_eq!(decision.route_type, RouteType::PromptRule);
