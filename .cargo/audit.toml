@@ -13,4 +13,7 @@ ignore = [
     # axum-server 0.8 migrates to rustls-pki-types, but rustls-acme 0.12 pins 0.7.
     # Track: https://github.com/tokio-rs/axum/issues — bump when rustls-acme supports 0.8.
     "RUSTSEC-2025-0134",
+    # rand: Unsound with custom logger calling rand::rng() (RUSTSEC-2026-0097).
+    # No impact: grob does not define a custom logger accessing ThreadRng.
+    "RUSTSEC-2026-0097",
 ]

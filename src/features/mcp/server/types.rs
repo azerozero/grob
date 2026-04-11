@@ -193,6 +193,43 @@ impl std::fmt::Display for CalibrateParams {
     }
 }
 
+/// Client-declared task complexity for routing heuristics.
+///
+/// Consumed once by the dispatch pipeline (stateless, single-request scope).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComplexityHint {
+    /// Fast-path: simple lookup, short answer.
+    Trivial,
+    /// Default: standard reasoning task.
+    Medium,
+    /// Deep reasoning, multi-step, or creative task.
+    Complex,
+}
+
+impl std::fmt::Display for ComplexityHint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ComplexityHint::Trivial => f.write_str("trivial"),
+            ComplexityHint::Medium => f.write_str("medium"),
+            ComplexityHint::Complex => f.write_str("complex"),
+        }
+    }
+}
+
+/// Parameters for `grob_hint`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct HintParams {
+    /// Task complexity declared by the client.
+    pub complexity: ComplexityHint,
+}
+
+impl std::fmt::Display for HintParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "hint complexity={}", self.complexity)
+    }
+}
+
 /// Configurable sections exposed by the `grob_configure` self-tuning tool.
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -311,5 +348,32 @@ mod tests {
         let json = serde_json::to_string(&resp).unwrap();
         assert!(json.contains("-32601"));
         assert!(json.contains("foo/bar"));
+    }
+
+    #[test]
+    fn test_complexity_hint_deserialize() {
+        let cases = [
+            ("\"trivial\"", ComplexityHint::Trivial),
+            ("\"medium\"", ComplexityHint::Medium),
+            ("\"complex\"", ComplexityHint::Complex),
+        ];
+        for (json, expected) in cases {
+            let hint: ComplexityHint = serde_json::from_str(json).unwrap();
+            assert_eq!(hint, expected);
+        }
+    }
+
+    #[test]
+    fn test_complexity_hint_display() {
+        assert_eq!(ComplexityHint::Trivial.to_string(), "trivial");
+        assert_eq!(ComplexityHint::Medium.to_string(), "medium");
+        assert_eq!(ComplexityHint::Complex.to_string(), "complex");
+    }
+
+    #[test]
+    fn test_hint_params_deserialize() {
+        let json = serde_json::json!({"complexity": "complex"});
+        let p: HintParams = serde_json::from_value(json).unwrap();
+        assert_eq!(p.complexity, ComplexityHint::Complex);
     }
 }

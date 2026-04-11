@@ -250,6 +250,34 @@ impl ProviderRegistry {
                 )))
             }
 
+            "openai_compatible" => {
+                let headers: Vec<(String, String)> = config
+                    .headers
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect();
+                let base = config
+                    .base_url
+                    .as_deref()
+                    .unwrap_or(DEFAULT_OPENAI_BASE_URL);
+                let params = Self::build_params(config, api_key, base, build_ctx);
+                Ok(Box::new(OpenAIProvider::with_headers(params, headers)))
+            }
+
+            "anthropic_compatible" => {
+                let base = config
+                    .base_url
+                    .as_deref()
+                    .unwrap_or("https://api.anthropic.com");
+                let params = Self::build_params(config, api_key, base, build_ctx);
+                Ok(Box::new(AnthropicCompatibleProvider::named(
+                    "anthropic_compatible",
+                    base,
+                    params,
+                )))
+            }
+
             other => Err(ProviderError::ConfigError(format!(
                 "Unknown provider type: {}",
                 other
