@@ -88,6 +88,18 @@ struct AuthOverride {
     env_var: String,
 }
 
+/// Custom endpoint configured during setup.
+struct CustomEndpoint {
+    /// User-chosen name for this provider (e.g. "my-llm").
+    name: String,
+    /// `"openai_compatible"` or `"anthropic_compatible"`.
+    provider_type: String,
+    /// Base URL (e.g. `https://my-llm.company.com/v1`).
+    base_url: String,
+    /// API key entered by the user (None = set later via env var).
+    api_key: Option<String>,
+}
+
 /// All wizard choices, collected before any disk write.
 struct Choices {
     tools: Vec<usize>,
@@ -96,6 +108,7 @@ struct Choices {
     auth: Vec<AuthOverride>,
     fallback: FallbackChoice,
     fallback_key: Option<String>,
+    custom_endpoints: Vec<CustomEndpoint>,
     compliance: Compliance,
     budget: Option<BudgetChoice>,
 }
@@ -431,6 +444,97 @@ fn parse_currency(input: &str) -> &'static str {
     }
 }
 
+fn prompt_url(label: &str) -> String {
+    loop {
+        print!("    {}: ", label);
+        io::stdout().flush().ok();
+        let url = read_line();
+        if url.starts_with("http://") || url.starts_with("https://") {
+            return url;
+        }
+        println!("    URL must start with http:// or https://");
+    }
+}
+
+fn validate_custom_key(provider_type: &str, base_url: &str) -> Option<String> {
+    print!("    API key: ");
+    io::stdout().flush().ok();
+    let key = read_line();
+    if key.is_empty() {
+        println!("    Skipped — set the key via env var before running grob");
+        return None;
+    }
+
+    let rt = tokio::runtime::Handle::try_current();
+    let valid = match rt {
+        Ok(handle) => tokio::task::block_in_place(|| {
+            handle.block_on(super::credential_check::validate_custom_endpoint(
+                provider_type,
+                base_url,
+                &key,
+            ))
+        }),
+        Err(_) => true,
+    };
+    if !valid {
+        println!("    Warning: endpoint returned auth error. Continue anyway? [y/N]");
+        if !confirm("    > ") {
+            println!("    Key rejected by user");
+            return None;
+        }
+    }
+
+    println!("    Accepted");
+    Some(key)
+}
+
+fn screen_custom_endpoints() -> Vec<CustomEndpoint> {
+    println!();
+    println!("  Custom endpoints:");
+    println!("    [1] Add a custom OpenAI-compatible endpoint");
+    println!("    [2] Add a custom Anthropic-compatible endpoint");
+    println!("    [3] Skip (no custom endpoints)");
+
+    let mut endpoints = Vec::new();
+    loop {
+        let choice = prompt_choice(3);
+        if choice == 3 {
+            break;
+        }
+
+        let provider_type = if choice == 1 {
+            "openai_compatible"
+        } else {
+            "anthropic_compatible"
+        };
+
+        print!("    Provider name (e.g. my-llm): ");
+        io::stdout().flush().ok();
+        let name = read_line();
+        if name.is_empty() {
+            println!("    Skipped");
+            continue;
+        }
+
+        let base_url = prompt_url("Base URL (e.g. https://my-llm.company.com/v1)");
+        let api_key = validate_custom_key(provider_type, &base_url);
+
+        endpoints.push(CustomEndpoint {
+            name,
+            provider_type: provider_type.to_string(),
+            base_url,
+            api_key,
+        });
+
+        println!();
+        println!("    Add another custom endpoint?");
+        println!("    [1] Add OpenAI-compatible");
+        println!("    [2] Add Anthropic-compatible");
+        println!("    [3] Done");
+    }
+    endpoints
+}
+
 fn gdpr_warnings(tools: &[&ToolInfo]) -> Vec<String> {
     tools
         .iter()
@@ -494,6 +598,12 @@ fn display_recap(c: &Choices, path: &Path, dry_run: bool, auto_confirm: bool) ->
             println!("      (fallback: keep preset default)");
         }
     }
+    for ep in &c.custom_endpoints {
+        println!(
+            "      {:<14} {} ({})",
+            ep.name, ep.provider_type, ep.base_url
+        );
+    }
 
     let label = match c.compliance {
         Compliance::Standard => "Standard",
@@ -541,12 +651,25 @@ fn print_exports(c: &Choices) {
         .filter_map(|a| a.entered_key.as_deref().map(|k| (a.env_var.as_str(), k)))
         .chain(fallback_env.zip(c.fallback_key.as_deref()))
         .collect();
-    if keys.is_empty() {
+    let custom_keys: Vec<(String, &str)> = c
+        .custom_endpoints
+        .iter()
+        .filter_map(|ep| {
+            ep.api_key.as_deref().map(|k| {
+                let env_var = format!("{}_API_KEY", ep.name.to_uppercase().replace('-', "_"));
+                (env_var, k)
+            })
+        })
+        .collect();
+    if keys.is_empty() && custom_keys.is_empty() {
         return;
     }
     println!();
     println!("  Add to your shell profile:");
-    for (var, key) in keys {
+    for (var, key) in &keys {
+        println!("    export {}={}", var, key);
+    }
+    for (var, key) in &custom_keys {
         println!("    export {}={}", var, key);
     }
 }
@@ -681,6 +804,27 @@ fn write_config(choices: &Choices, path: &Path) -> Result<()> {
         }
     }
 
+    // Custom endpoints
+    if !choices.custom_endpoints.is_empty() {
+        if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
+            for ep in &choices.custom_endpoints {
+                let mut t = toml::map::Map::new();
+                t.insert("name".into(), ep.name.clone().into());
+                t.insert("provider_type".into(), ep.provider_type.clone().into());
+                t.insert("base_url".into(), ep.base_url.clone().into());
+                t.insert("enabled".into(), toml::Value::Boolean(true));
+                t.insert("models".into(), toml::Value::Array(vec![]));
+                t.insert("pass_through".into(), toml::Value::Boolean(true));
+                if let Some(ref key) = ep.api_key {
+                    let env_var = format!("{}_API_KEY", ep.name.to_uppercase().replace('-', "_"));
+                    t.insert("api_key".into(), format!("${env_var}").into());
+                    let _ = key;
+                }
+                providers.push(toml::Value::Table(t));
+            }
+        }
+    }
+
     // Compliance patches
     match choices.compliance {
         Compliance::Standard => {}
@@ -798,6 +942,7 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
             // install without a subscription.
             fallback: FallbackChoice::None,
             fallback_key: None,
+            custom_endpoints: vec![],
             compliance: Compliance::Standard,
             budget: None,
         };
@@ -832,11 +977,14 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
     let preset_has_fallback = providers.iter().any(|p| p == "openrouter" || p == "gemini");
     let (fallback, fallback_key) = screen_fallback(preset_has_fallback);
 
-    // Screen 4: Compliance
+    // Screen 4: Custom endpoints
+    let custom_endpoints = screen_custom_endpoints();
+
+    // Screen 5: Compliance
     let tool_refs: Vec<&ToolInfo> = tools.iter().filter_map(|&i| TOOLS.get(i)).collect();
     let compliance = screen_compliance(&tool_refs);
 
-    // Screen 5: Budget
+    // Screen 6: Budget
     let budget = screen_budget();
 
     let choices = Choices {
@@ -846,11 +994,12 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
         auth,
         fallback,
         fallback_key,
+        custom_endpoints,
         compliance,
         budget,
     };
 
-    // Screen 6: Recap
+    // Screen 7: Recap
     if !display_recap(&choices, config_path, flags.dry_run, false) {
         if !flags.dry_run {
             println!("  Setup cancelled.");
@@ -1109,5 +1258,102 @@ priority = 1
             .next()
             .unwrap();
         assert_eq!(mappings_after.len(), 1);
+    }
+
+    /// W-3 : `prompt_url` rejects URLs that don't start with http:// or https://.
+    #[test]
+    fn test_w3_url_validation_rejects_bare_host() {
+        let good = ["http://localhost:8080", "https://my-llm.company.com/v1"];
+        for url in good {
+            assert!(
+                url.starts_with("http://") || url.starts_with("https://"),
+                "{url} should pass"
+            );
+        }
+        let bad = ["ftp://x", "my-llm.company.com", ""];
+        for url in bad {
+            assert!(
+                !(url.starts_with("http://") || url.starts_with("https://")),
+                "{url} should be rejected"
+            );
+        }
+    }
+
+    /// W-3 : custom endpoint providers are appended to the config TOML by
+    /// `write_config`.
+    #[test]
+    fn test_w3_custom_endpoint_written_to_config() {
+        let mut config: toml::Value = toml::from_str(
+            r#"
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+enabled = true
+models = []
+"#,
+        )
+        .unwrap();
+
+        if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
+            let mut t = toml::map::Map::new();
+            t.insert("name".into(), "my-llm".into());
+            t.insert("provider_type".into(), "openai_compatible".into());
+            t.insert("base_url".into(), "https://my-llm.company.com/v1".into());
+            t.insert("enabled".into(), toml::Value::Boolean(true));
+            t.insert("models".into(), toml::Value::Array(vec![]));
+            t.insert("pass_through".into(), toml::Value::Boolean(true));
+            t.insert("api_key".into(), "$MY_LLM_API_KEY".into());
+            providers.push(toml::Value::Table(t));
+        }
+
+        let providers = config.get("providers").and_then(|p| p.as_array()).unwrap();
+        assert_eq!(providers.len(), 2);
+
+        let custom = &providers[1];
+        assert_eq!(custom.get("name").and_then(|n| n.as_str()), Some("my-llm"));
+        assert_eq!(
+            custom.get("provider_type").and_then(|n| n.as_str()),
+            Some("openai_compatible")
+        );
+        assert_eq!(
+            custom.get("base_url").and_then(|n| n.as_str()),
+            Some("https://my-llm.company.com/v1")
+        );
+        assert_eq!(
+            custom.get("pass_through").and_then(|n| n.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            custom.get("api_key").and_then(|n| n.as_str()),
+            Some("$MY_LLM_API_KEY")
+        );
+    }
+
+    /// W-3 : anthropic_compatible endpoint also writes correctly.
+    #[test]
+    fn test_w3_anthropic_compatible_endpoint_written() {
+        let mut config: toml::Value = toml::from_str("[[providers]]").unwrap();
+
+        if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
+            let mut t = toml::map::Map::new();
+            t.insert("name".into(), "corp-claude".into());
+            t.insert("provider_type".into(), "anthropic_compatible".into());
+            t.insert("base_url".into(), "https://claude.corp.internal/api".into());
+            t.insert("enabled".into(), toml::Value::Boolean(true));
+            t.insert("models".into(), toml::Value::Array(vec![]));
+            t.insert("pass_through".into(), toml::Value::Boolean(true));
+            providers.push(toml::Value::Table(t));
+        }
+
+        let providers = config.get("providers").and_then(|p| p.as_array()).unwrap();
+        let custom = providers.last().unwrap();
+        assert_eq!(
+            custom.get("provider_type").and_then(|n| n.as_str()),
+            Some("anthropic_compatible")
+        );
+        assert_eq!(
+            custom.get("base_url").and_then(|n| n.as_str()),
+            Some("https://claude.corp.internal/api")
+        );
     }
 }
