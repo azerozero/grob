@@ -203,13 +203,21 @@ jobs:
             | sudo tar xz -C /usr/local/bin gitleaks
       - name: Run gitleaks
         run: |
-          BEFORE="${{ github.event.before }}"
-          if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
-            # Tag push or new branch — no valid range, scan last 1 commit
-            echo "Tag/new-branch push detected — scanning HEAD~1..HEAD"
-            gitleaks detect --source . --log-opts "HEAD~1..HEAD" --verbose
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            # PR: scan only commits in the PR against its base branch.
+            # Using base ref avoids broken ranges after force-pushes.
+            BASE="origin/${{ github.event.pull_request.base.ref }}"
+            echo "PR detected — scanning ${BASE}..HEAD"
+            gitleaks detect --source . --log-opts "${BASE}..HEAD" --verbose
           else
-            gitleaks detect --source . --log-opts "${BEFORE}..${{ github.sha }}" --verbose
+            BEFORE="${{ github.event.before }}"
+            if [[ "$BEFORE" == "0000000000000000000000000000000000000000" ]]; then
+              # Tag push or new branch — no valid range, scan last 1 commit.
+              echo "Tag/new-branch push detected — scanning HEAD~1..HEAD"
+              gitleaks detect --source . --log-opts "HEAD~1..HEAD" --verbose
+            else
+              gitleaks detect --source . --log-opts "${BEFORE}..${{ github.sha }}" --verbose
+            fi
           fi
 
   deny:
