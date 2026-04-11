@@ -184,6 +184,7 @@ pub struct AppState {
     /// One-shot complexity hint set by the `grob_hint` MCP tool.
     ///
     /// Consumed (taken) by the next dispatch call, then reset to `None`.
+    #[cfg(feature = "mcp")]
     pub grob_hint: std::sync::Mutex<Option<crate::features::mcp::server::types::ComplexityHint>>,
     /// Pending HIT approval channels keyed by `"{request_id}:{tool_name}"`.
     #[cfg(feature = "policies")]
@@ -275,6 +276,7 @@ pub async fn start_server(
         started_at: chrono::Utc::now(),
         event_bus,
         log_exporter,
+        #[cfg(feature = "mcp")]
         grob_hint: std::sync::Mutex::new(None),
         #[cfg(feature = "policies")]
         hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),

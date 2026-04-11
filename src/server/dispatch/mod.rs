@@ -9,6 +9,7 @@ mod telemetry;
 
 use crate::cli::ModelStrategy;
 use crate::features::dlp::DlpEngine;
+#[cfg(feature = "mcp")]
 use crate::features::mcp::server::types::ComplexityHint;
 use crate::models::CanonicalRequest;
 use crate::providers::ProviderResponse;
@@ -185,6 +186,7 @@ pub(crate) enum DispatchResult {
 ///
 /// Priority: `X-Grob-Hint` header → `metadata.grob_hint` body field →
 /// one-shot MCP `grob_hint` slot (consumed on read).
+#[cfg(feature = "mcp")]
 pub(crate) fn resolve_grob_hint(
     ctx: &DispatchContext<'_>,
     request: &CanonicalRequest,
@@ -226,12 +228,15 @@ pub(crate) async fn dispatch(
     request: &mut CanonicalRequest,
 ) -> Result<DispatchResult, AppError> {
     // ── Step 0: Resolve complexity hint ──
-    let grob_hint = resolve_grob_hint(ctx, request);
-    if let Some(ref hint) = grob_hint {
-        tracing::debug!(hint = %hint, "dispatch: grob_hint resolved");
+    #[cfg(feature = "mcp")]
+    {
+        let grob_hint = resolve_grob_hint(ctx, request);
+        if let Some(ref hint) = grob_hint {
+            tracing::debug!(hint = %hint, "dispatch: grob_hint resolved");
+        }
+        // NOTE: `grob_hint` will be consumed by T-P1 scoring heuristics.
+        let _ = grob_hint;
     }
-    // NOTE: `grob_hint` will be consumed by T-P1 scoring heuristics.
-    let _ = grob_hint;
 
     // ── Step 1: DLP input scanning ──
     scan_dlp_input(ctx, request)?;
