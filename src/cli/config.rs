@@ -417,6 +417,15 @@ pub struct TracingConfig {
     /// Omit system prompt from traces (default: true, since system prompts are huge)
     #[serde(default = "default_true")]
     pub omit_system_prompt: bool,
+    /// Maximum trace file size in MB before rotation (default: 50)
+    #[serde(default = "default_max_size_mb")]
+    pub max_size_mb: u64,
+    /// Number of rotated files to keep (default: 3)
+    #[serde(default = "default_max_files")]
+    pub max_files: usize,
+    /// Compress rotated files with zstd (default: false)
+    #[serde(default)]
+    pub compress: bool,
 }
 
 impl Default for TracingConfig {
@@ -425,8 +434,19 @@ impl Default for TracingConfig {
             enabled: false,
             path: default_tracing_path(),
             omit_system_prompt: true,
+            max_size_mb: default_max_size_mb(),
+            max_files: default_max_files(),
+            compress: false,
         }
     }
+}
+
+fn default_max_size_mb() -> u64 {
+    50
+}
+
+fn default_max_files() -> usize {
+    3
 }
 
 fn default_tracing_path() -> String {

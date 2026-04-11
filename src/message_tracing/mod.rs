@@ -1,21 +1,24 @@
 //! Message tracing for debugging
 //!
-//! Logs full request/response messages to a JSONL file for debugging purposes.
+//! Logs full request/response messages to a JSONL file with size-based rotation
+//! and optional zstd compression of rotated files.
 
 use crate::cli::TracingConfig;
 use crate::models::{CanonicalRequest, RouteType};
 use crate::providers::ProviderResponse;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::fs::{File, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use uuid::Uuid;
 
-/// Message tracer that writes to JSONL file
+/// Message tracer that writes to JSONL file with rotation support.
 pub struct MessageTracer {
     config: TracingConfig,
+    /// Expanded absolute path to the trace file.
+    trace_path: PathBuf,
     file: Option<Mutex<File>>,
 }
 
@@ -56,40 +59,52 @@ struct ErrorTrace {
 }
 
 impl MessageTracer {
-    /// Create a new tracer from config
+    /// Creates a new tracer from config.
     pub fn new(config: TracingConfig) -> Self {
+        let trace_path = expand_tilde(&config.path);
+
         if !config.enabled {
-            return Self { config, file: None };
+            return Self {
+                config,
+                trace_path,
+                file: None,
+            };
         }
 
-        // Expand ~ in path
-        let path = expand_tilde(&config.path);
-
         // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
+        if let Some(parent) = trace_path.parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
                 tracing::error!("Failed to create tracing directory: {}", e);
-                return Self { config, file: None };
+                return Self {
+                    config,
+                    trace_path,
+                    file: None,
+                };
             }
         }
 
         // Open file for appending
-        match OpenOptions::new().create(true).append(true).open(&path) {
+        match open_append(&trace_path) {
             Ok(file) => {
-                tracing::info!("📝 Message tracing enabled: {}", path.display());
+                tracing::info!("Message tracing enabled: {}", trace_path.display());
                 Self {
                     config,
+                    trace_path,
                     file: Some(Mutex::new(file)),
                 }
             }
             Err(e) => {
                 tracing::error!("Failed to open trace file: {}", e);
-                Self { config, file: None }
+                Self {
+                    config,
+                    trace_path,
+                    file: None,
+                }
             }
         }
     }
 
-    /// Generate a new trace ID
+    /// Generates a new trace ID.
     pub fn new_trace_id(&self) -> String {
         if self.file.is_some() {
             Uuid::new_v4().to_string()[..8].to_string()
@@ -98,7 +113,7 @@ impl MessageTracer {
         }
     }
 
-    /// Trace an incoming request
+    /// Traces an incoming request.
     pub fn trace_request(
         &self,
         id: &str,
@@ -113,7 +128,6 @@ impl MessageTracer {
 
         // Build messages JSON, optionally omitting system prompt
         let messages = if self.config.omit_system_prompt {
-            // Clone request and clear system prompt
             let mut req_clone = request.clone();
             req_clone.system = None;
             serde_json::to_value(&req_clone.messages).unwrap_or_default()
@@ -136,7 +150,7 @@ impl MessageTracer {
         self.write_trace(&trace, file_mutex);
     }
 
-    /// Trace a response
+    /// Traces a response.
     pub fn trace_response(&self, id: &str, response: &ProviderResponse, latency_ms: u64) {
         let Some(ref file_mutex) = self.file else {
             return;
@@ -156,7 +170,7 @@ impl MessageTracer {
         self.write_trace(&trace, file_mutex);
     }
 
-    /// Trace an error
+    /// Traces an error.
     pub fn trace_error(&self, id: &str, error: &str) {
         let Some(ref file_mutex) = self.file else {
             return;
@@ -177,9 +191,27 @@ impl MessageTracer {
             return;
         };
 
-        if let Ok(mut file) = file_mutex.lock() {
-            let _ = writeln!(file, "{}", json);
+        let Ok(mut file) = file_mutex.lock() else {
+            return;
+        };
+
+        // Check size before writing; rotate if over limit
+        let max_bytes = self.config.max_size_mb * 1024 * 1024;
+        if max_bytes > 0 {
+            if let Ok(meta) = file.metadata() {
+                if meta.len() >= max_bytes {
+                    if let Ok(new_file) = rotate_file(
+                        &self.trace_path,
+                        self.config.max_files,
+                        self.config.compress,
+                    ) {
+                        *file = new_file;
+                    }
+                }
+            }
         }
+
+        let _ = writeln!(file, "{}", json);
     }
 }
 
@@ -215,7 +247,80 @@ impl crate::traits::Tracer for MessageTracer {
     }
 }
 
-/// Expand ~ to home directory
+// ── File helpers ──
+
+/// Opens a file for appending, creating it if needed.
+fn open_append(path: &Path) -> std::io::Result<File> {
+    OpenOptions::new().create(true).append(true).open(path)
+}
+
+/// Rotates trace files and returns a fresh file handle for the main path.
+///
+/// Naming scheme: `trace.jsonl` -> `trace.1.jsonl` (or `.1.jsonl.zst`),
+/// `trace.1.jsonl` -> `trace.2.jsonl`, etc.
+fn rotate_file(base: &Path, max_files: usize, compress: bool) -> std::io::Result<File> {
+    // Delete the oldest if it exists
+    let oldest = rotated_path(base, max_files, compress);
+    if oldest.exists() {
+        fs::remove_file(&oldest)?;
+    }
+
+    // Shift existing rotated files up by one
+    for i in (1..max_files).rev() {
+        let src = rotated_path(base, i, compress);
+        let dst = rotated_path(base, i + 1, compress);
+        if src.exists() {
+            fs::rename(&src, &dst)?;
+        }
+    }
+
+    // Move current file to slot 1
+    let slot1 = rotated_path(base, 1, compress);
+    if base.exists() {
+        if compress {
+            compress_to_zstd(base, &slot1)?;
+            fs::remove_file(base)?;
+        } else {
+            fs::rename(base, &slot1)?;
+        }
+    }
+
+    open_append(base)
+}
+
+/// Builds the path for a rotated file at a given index.
+///
+/// For `trace.jsonl` with index 2: `trace.2.jsonl` (or `trace.2.jsonl.zst`).
+fn rotated_path(base: &Path, index: usize, compressed: bool) -> PathBuf {
+    let stem = base
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+    let ext = base
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    let parent = base.parent().unwrap_or(base);
+    let name = if compressed {
+        format!("{stem}.{index}.{ext}.zst")
+    } else {
+        format!("{stem}.{index}.{ext}")
+    };
+    parent.join(name)
+}
+
+/// Compresses a file to zstd format.
+fn compress_to_zstd(src: &Path, dst: &Path) -> std::io::Result<()> {
+    let input = fs::read(src)?;
+    let compressed = zstd::encode_all(input.as_slice(), 3)?;
+    fs::write(dst, compressed)?;
+    Ok(())
+}
+
+/// Expands ~ to home directory.
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = crate::home_dir() {
@@ -223,4 +328,168 @@ fn expand_tilde(path: &str) -> PathBuf {
         }
     }
     PathBuf::from(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn make_config(
+        dir: &Path,
+        max_size_mb: u64,
+        max_files: usize,
+        compress: bool,
+    ) -> TracingConfig {
+        TracingConfig {
+            enabled: true,
+            path: dir.join("trace.jsonl").to_string_lossy().to_string(),
+            omit_system_prompt: true,
+            max_size_mb,
+            max_files,
+            compress,
+        }
+    }
+
+    #[test]
+    fn rotation_triggers_when_file_exceeds_max_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        let trace_path = tmp.path().join("trace.jsonl");
+
+        {
+            let mut f = File::create(&trace_path).unwrap();
+            writeln!(f, "{}", "x".repeat(100)).unwrap();
+        }
+
+        let new_file = rotate_file(&trace_path, 3, false).unwrap();
+        drop(new_file);
+
+        let meta = fs::metadata(&trace_path).unwrap();
+        assert_eq!(meta.len(), 0);
+
+        let rotated = rotated_path(&trace_path, 1, false);
+        assert!(rotated.exists(), "rotated file at slot 1 should exist");
+    }
+
+    #[test]
+    fn rotation_shifts_existing_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let trace_path = tmp.path().join("trace.jsonl");
+
+        fs::write(rotated_path(&trace_path, 1, false), "old-1").unwrap();
+        fs::write(rotated_path(&trace_path, 2, false), "old-2").unwrap();
+        fs::write(&trace_path, "current").unwrap();
+
+        let new_file = rotate_file(&trace_path, 3, false).unwrap();
+        drop(new_file);
+
+        assert_eq!(
+            fs::read_to_string(rotated_path(&trace_path, 3, false)).unwrap(),
+            "old-2"
+        );
+        assert_eq!(
+            fs::read_to_string(rotated_path(&trace_path, 2, false)).unwrap(),
+            "old-1"
+        );
+        assert_eq!(
+            fs::read_to_string(rotated_path(&trace_path, 1, false)).unwrap(),
+            "current"
+        );
+        assert_eq!(fs::metadata(&trace_path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn rotation_deletes_oldest_beyond_max_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let trace_path = tmp.path().join("trace.jsonl");
+
+        fs::write(rotated_path(&trace_path, 1, false), "old-1").unwrap();
+        fs::write(rotated_path(&trace_path, 2, false), "old-2-should-die").unwrap();
+        fs::write(&trace_path, "current").unwrap();
+
+        let new_file = rotate_file(&trace_path, 2, false).unwrap();
+        drop(new_file);
+
+        assert_eq!(
+            fs::read_to_string(rotated_path(&trace_path, 2, false)).unwrap(),
+            "old-1"
+        );
+        assert_eq!(
+            fs::read_to_string(rotated_path(&trace_path, 1, false)).unwrap(),
+            "current"
+        );
+    }
+
+    #[test]
+    fn rotation_compresses_with_zstd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let trace_path = tmp.path().join("trace.jsonl");
+        let payload = "hello zstd compression test payload";
+        fs::write(&trace_path, payload).unwrap();
+
+        let new_file = rotate_file(&trace_path, 3, true).unwrap();
+        drop(new_file);
+
+        let compressed_path = rotated_path(&trace_path, 1, true);
+        assert!(
+            compressed_path.exists(),
+            "compressed rotated file should exist"
+        );
+        assert!(compressed_path.to_string_lossy().ends_with(".zst"));
+
+        let compressed_data = fs::read(&compressed_path).unwrap();
+        let decompressed = zstd::decode_all(compressed_data.as_slice()).unwrap();
+        assert_eq!(String::from_utf8(decompressed).unwrap(), payload);
+
+        assert_eq!(fs::metadata(&trace_path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn rotated_path_naming() {
+        let base = PathBuf::from("/tmp/trace.jsonl");
+        assert_eq!(
+            rotated_path(&base, 1, false),
+            PathBuf::from("/tmp/trace.1.jsonl")
+        );
+        assert_eq!(
+            rotated_path(&base, 3, true),
+            PathBuf::from("/tmp/trace.3.jsonl.zst")
+        );
+    }
+
+    #[test]
+    fn tracer_write_triggers_rotation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let trace_path = tmp.path().join("trace.jsonl");
+
+        // Pre-fill the file to simulate near-limit (just over 1 MB)
+        {
+            let mut f = File::create(&trace_path).unwrap();
+            let big_line = "x".repeat(1024 * 1024 + 1);
+            write!(f, "{}", big_line).unwrap();
+        }
+
+        let config = make_config(tmp.path(), 1, 3, false);
+        let tracer = MessageTracer::new(config);
+
+        #[derive(Serialize)]
+        struct Dummy {
+            msg: String,
+        }
+        let dummy = Dummy {
+            msg: "test".to_string(),
+        };
+        if let Some(ref fm) = tracer.file {
+            tracer.write_trace(&dummy, fm);
+        }
+
+        let slot1 = rotated_path(&trace_path, 1, false);
+        assert!(slot1.exists(), "rotation should have created slot 1 file");
+
+        let current_size = fs::metadata(&trace_path).unwrap().len();
+        assert!(
+            current_size < 1024,
+            "current file should be small after rotation, got {current_size}"
+        );
+    }
 }

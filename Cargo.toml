@@ -130,6 +130,9 @@ rustls-pemfile = { version = "2", optional = true }
 rustls-acme = { version = "0.12", features = ["axum"], optional = true }
 regex-syntax = "0.8.10"
 
+# Trace log compression (zstd for rotated trace files)
+zstd = "0.13"
+
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
 tikv-jemallocator = { version = "0.6", optional = true }
 # Unix signals (SIGTERM, SIGUSR1) for graceful shutdown and hot restart
