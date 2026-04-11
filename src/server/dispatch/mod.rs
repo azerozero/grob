@@ -9,6 +9,7 @@ mod telemetry;
 
 use crate::cli::ModelStrategy;
 use crate::features::dlp::DlpEngine;
+use crate::features::mcp::server::types::ComplexityHint;
 use crate::models::CanonicalRequest;
 use crate::providers::ProviderResponse;
 use axum::http::HeaderMap;
@@ -180,6 +181,42 @@ pub(crate) enum DispatchResult {
     FanOut { response: ProviderResponse },
 }
 
+/// Resolves the client complexity hint from available sources.
+///
+/// Priority: `X-Grob-Hint` header → `metadata.grob_hint` body field →
+/// one-shot MCP `grob_hint` slot (consumed on read).
+pub(crate) fn resolve_grob_hint(
+    ctx: &DispatchContext<'_>,
+    request: &CanonicalRequest,
+) -> Option<ComplexityHint> {
+    // 1. Header: X-Grob-Hint
+    if let Some(hint) = ctx
+        .headers
+        .get("x-grob-hint")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| serde_json::from_value(serde_json::Value::String(s.to_string())).ok())
+    {
+        return Some(hint);
+    }
+
+    // 2. Body: metadata.grob_hint
+    if let Some(hint) = request
+        .metadata
+        .as_ref()
+        .and_then(|m| m.get("grob_hint"))
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+    {
+        return Some(hint);
+    }
+
+    // 3. MCP one-shot slot (consume on read)
+    ctx.state
+        .grob_hint
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take())
+}
+
 /// Run the full dispatch pipeline: DLP → cache → route → provider loop.
 ///
 /// Returns a `DispatchResult` that the handler transforms into the appropriate
@@ -188,6 +225,14 @@ pub(crate) async fn dispatch(
     ctx: &DispatchContext<'_>,
     request: &mut CanonicalRequest,
 ) -> Result<DispatchResult, AppError> {
+    // ── Step 0: Resolve complexity hint ──
+    let grob_hint = resolve_grob_hint(ctx, request);
+    if let Some(ref hint) = grob_hint {
+        tracing::debug!(hint = %hint, "dispatch: grob_hint resolved");
+    }
+    // NOTE: `grob_hint` will be consumed by T-P1 scoring heuristics.
+    let _ = grob_hint;
+
     // ── Step 1: DLP input scanning ──
     scan_dlp_input(ctx, request)?;
 
