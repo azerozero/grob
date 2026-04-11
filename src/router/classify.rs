@@ -4,6 +4,8 @@
 //! incoming request based on a weighted sum of observable signals.
 //! The tier feeds into the provider-selection pipeline: lighter requests
 //! can be routed to cheaper models, heavier ones to capable tiers.
+//!
+//! See `docs/how-to/auto-tune-routing.md` for tuning weights from trace data.
 
 use crate::models::{CanonicalRequest, MessageContent};
 
