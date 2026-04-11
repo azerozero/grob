@@ -57,7 +57,7 @@ fn test_sanitize_text_secrets() {
     let config = test_config();
     let engine = DlpEngine::from_config(config).unwrap();
     // Fake token assembled at runtime to avoid Semgrep literal detection.
-    let fake_token = format!("ghp_{}", "abcdefghijklmnopqrstuvwxyz1234567890");
+    let fake_token = format!("ghp_{}", "abcdefghijklmnopqrstuvwxyz1234567890"); // nosemgrep: generic.secrets.security.detected-github-token
     let input = format!("token: {fake_token}");
     let result = engine.sanitize_text(&input);
     assert!(!result.contains(&fake_token));
