@@ -968,6 +968,11 @@ jobs:
     steps:
       - name: Check required jobs
         run: |
+          # This is the ONLY job referenced in the GitHub ruleset "Protect develop".
+          # Do NOT add individual job names (Clippy, Rustfmt, etc.) to the ruleset —
+          # path pruning skips them on non-Rust changes, causing eternal "pending".
+          # See: https://github.com/azerozero/grob/pull/153
+          #
           # Fail if any required job failed (skipped is OK for pruned paths).
           results=( \
             "${{ needs.fmt.result }}" \
