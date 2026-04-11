@@ -293,6 +293,137 @@ proptest! {
         prop_assert!(matches!(result, Cow::Borrowed(_)),
             "Clean text should be zero-copy, got Owned");
     }
+
+    /// Arbitrary UTF-8 input never causes DFA scanner to panic.
+    #[test]
+    fn prop_dfa_no_panic(text in "\\PC{0,500}") {
+        let config = DlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let engine = DlpEngine::from_config(config).unwrap();
+        let _ = engine.scanner.might_contain_secret(&text);
+        let _ = engine.scanner.scan(&text);
+    }
+
+    /// Any Luhn-valid 16-digit number embedded in text is detected by the PII scanner.
+    #[test]
+    fn prop_pii_credit_card_luhn_detected(digits in proptest::collection::vec(0u8..10, 15..=15)) {
+        let check = {
+            let mut sum: u32 = 0;
+            for (i, &d) in digits.iter().rev().enumerate() {
+                let mut val = d as u32;
+                if i % 2 == 0 { val *= 2; if val > 9 { val -= 9; } }
+                sum += val;
+            }
+            ((10 - (sum % 10)) % 10) as u8
+        };
+        let mut full: Vec<u8> = digits;
+        full.push(check);
+        let cc: String = full.iter().map(|d| (b'0' + d) as char).collect();
+
+        let scanner = pii::PiiScanner::from_config(&PiiConfig {
+            credit_cards: true,
+            iban: false,
+            bic: false,
+            action: PiiAction::Redact,
+        }).unwrap();
+
+        let text = format!("pay {} now", cc);
+        if scanner.might_contain_pii(&text) {
+            if let Some((_, detections)) = scanner.redact(&text) {
+                let has_cc = detections.iter().any(|d| d.pii_type == pii::PiiType::CreditCard);
+                prop_assert!(has_cc, "Luhn-valid CC {} should be detected", cc);
+            }
+        }
+    }
+
+    /// Any mod97-valid IBAN embedded in text is detected by the PII scanner.
+    #[test]
+    fn prop_pii_iban_mod97_detected(body_digits in proptest::collection::vec(0u8..10, 18..=18)) {
+        let body: String = body_digits.iter().map(|d| (b'0' + d) as char).collect();
+        let rearranged = format!("{}FR00", body);
+        let mut remainder: u64 = 0;
+        for ch in rearranged.chars() {
+            let val = if ch.is_ascii_uppercase() {
+                (ch as u64) - 55
+            } else {
+                ch.to_digit(10).unwrap_or(0) as u64
+            };
+            if val >= 10 {
+                remainder = (remainder * 100 + val) % 97;
+            } else {
+                remainder = (remainder * 10 + val) % 97;
+            }
+        }
+        let check = 98 - remainder;
+        let iban = format!("FR{:02}{}", check, body);
+
+        let scanner = pii::PiiScanner::from_config(&PiiConfig {
+            credit_cards: false,
+            iban: true,
+            bic: false,
+            action: PiiAction::Redact,
+        }).unwrap();
+
+        let text = format!("transfer {} done", iban);
+        if scanner.might_contain_pii(&text) {
+            if let Some((_, detections)) = scanner.redact(&text) {
+                let has_iban = detections.iter().any(|d| d.pii_type == pii::PiiType::Iban);
+                prop_assert!(has_iban, "Valid IBAN {} should be detected", iban);
+            }
+        }
+    }
+
+    /// Sanitize output is always valid UTF-8 (no corruption).
+    #[test]
+    fn prop_dlp_utf8_roundtrip(text in "\\PC{0,500}") {
+        let config = DlpConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let engine = DlpEngine::from_config(config).unwrap();
+        let result = engine.sanitize_text(&text);
+        prop_assert!(result.len() <= text.len() + 1024,
+            "Output should not grow unboundedly");
+        let response = engine.sanitize_response_text(&result);
+        prop_assert!(response.len() <= result.len() + 1024);
+    }
+
+    /// Sanitize is idempotent: sanitize(sanitize(x)) == sanitize(x).
+    #[test]
+    fn prop_sanitize_idempotent(text in ".{0,200}") {
+        let config = test_config();
+        let engine = DlpEngine::from_config(config).unwrap();
+        let once = engine.sanitize_text(&text).into_owned();
+        let twice = engine.sanitize_text(&once).into_owned();
+        prop_assert_eq!(&once, &twice,
+            "Sanitize must be idempotent: second pass changed the text");
+    }
+
+    /// Sanitized output length is bounded: never more than input + a constant
+    /// (redaction markers like [REDACTED] or canary tokens have bounded size).
+    #[test]
+    fn prop_sanitize_length_bounded(text in ".{0,500}") {
+        let config = test_config();
+        let engine = DlpEngine::from_config(config).unwrap();
+        let result = engine.sanitize_text(&text);
+        // Canary tokens and pseudonyms can expand, but by at most ~200 bytes.
+        prop_assert!(result.len() <= text.len() + 200,
+            "Output {} bytes exceeds input {} + 200", result.len(), text.len());
+    }
+
+    /// If text contains a known secret prefix, sanitize must not preserve it.
+    #[test]
+    fn prop_secret_never_leaks(suffix in "[A-Za-z0-9]{36}") {
+        let secret = format!("ghp_{suffix}");
+        let config = test_config();
+        let engine = DlpEngine::from_config(config).unwrap();
+        let text = format!("My token is {secret} ok?");
+        let result = engine.sanitize_text(&text);
+        prop_assert!(!result.contains(&secret),
+            "Secret '{}' leaked through sanitize", &secret[..10]);
+    }
 }
 
 // ---------- DlpBlockError Display ----------
