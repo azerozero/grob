@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.4](https://github.com/azerozero/grob/compare/v0.36.3...v0.36.4) - 2026-04-11
+
+### Fixed
+
+- *(security)* résoudre 6 alertes CodeQL/Semgrep cleartext logging
+
 ## [0.36.3](https://github.com/azerozero/grob/compare/v0.36.2...v0.36.3) - 2026-04-10
 
 ### Other
