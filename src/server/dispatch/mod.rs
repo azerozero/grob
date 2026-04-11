@@ -294,7 +294,32 @@ pub(crate) async fn dispatch(
         return Ok(hit);
     }
 
-    // ── Step 6: Fan-out strategy ──
+    // ── Step 5.5: Tier-based fan-out ──
+    // When the complexity scorer assigns a tier AND the matching [[tiers]]
+    // entry has fanout=true, dispatch to all tier providers in parallel.
+    if let Some(ref tier) = decision.complexity_tier {
+        let tier_name = tier.to_string();
+        if let Some(tier_cfg) = ctx.inner.config.tiers.iter().find(|t| t.name == tier_name) {
+            if tier_cfg.fanout {
+                let fan_out_config = crate::cli::FanOutConfig {
+                    mode: crate::cli::FanOutMode::Fastest,
+                    judge_model: None,
+                    judge_criteria: None,
+                    count: None,
+                };
+                return dispatch_fan_out(
+                    ctx,
+                    request,
+                    &sorted_mappings,
+                    &fan_out_config,
+                    &decision,
+                )
+                .await;
+            }
+        }
+    }
+
+    // ── Step 6: Fan-out strategy (model-level) ──
     if let Some(model_config) = ctx.inner.find_model(&decision.model_name) {
         if model_config.strategy == ModelStrategy::FanOut {
             if let Some(ref fan_out_config) = model_config.fan_out {

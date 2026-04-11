@@ -187,3 +187,85 @@ mode = "kerberos"
         );
     }
 }
+
+#[cfg(test)]
+mod tier_tests {
+    use grob::cli::{AppConfig, TierConfig};
+
+    #[test]
+    fn test_tier_config_toml_round_trip() {
+        let toml_input = r#"
+[server]
+port = 8080
+
+[router]
+default = "test-model"
+
+[[tiers]]
+name = "trivial"
+providers = ["fast-prov"]
+
+[[tiers]]
+name = "medium"
+providers = ["balanced-prov"]
+
+[[tiers]]
+name = "complex"
+providers = ["strong-prov", "backup-prov"]
+fanout = true
+"#;
+        let config = AppConfig::from_content(toml_input, "test").unwrap();
+        assert_eq!(config.tiers.len(), 3);
+        assert_eq!(config.tiers[0].name, "trivial");
+        assert_eq!(config.tiers[0].providers, vec!["fast-prov"]);
+        assert!(!config.tiers[0].fanout);
+        assert_eq!(config.tiers[2].name, "complex");
+        assert!(config.tiers[2].fanout);
+    }
+
+    #[test]
+    fn test_tier_config_empty_is_default() {
+        let toml_input = r#"
+[server]
+port = 8080
+
+[router]
+default = "test-model"
+"#;
+        let config = AppConfig::from_content(toml_input, "test").unwrap();
+        assert!(
+            config.tiers.is_empty(),
+            "No [[tiers]] should yield empty vec"
+        );
+    }
+
+    #[test]
+    fn test_tier_config_single_tier() {
+        let toml_input = r#"
+[server]
+port = 8080
+
+[router]
+default = "test-model"
+
+[[tiers]]
+name = "trivial"
+providers = ["cheap-provider"]
+"#;
+        let config = AppConfig::from_content(toml_input, "test").unwrap();
+        assert_eq!(config.tiers.len(), 1);
+        assert_eq!(config.tiers[0].name, "trivial");
+    }
+
+    #[test]
+    fn test_tier_config_serialization() {
+        let tier = TierConfig {
+            name: "complex".to_string(),
+            providers: vec!["prov-a".to_string(), "prov-b".to_string()],
+            fanout: true,
+        };
+        let toml = toml::to_string(&tier).unwrap();
+        assert!(toml.contains("name = \"complex\""));
+        assert!(toml.contains("fanout = true"));
+    }
+}

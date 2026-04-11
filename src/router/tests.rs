@@ -19,6 +19,7 @@ fn create_test_config() -> AppConfig {
         },
         providers: vec![],
         models: vec![],
+        tiers: vec![],
         presets: Default::default(),
         budget: Default::default(),
         dlp: Default::default(),
@@ -824,4 +825,76 @@ proptest! {
         let result = router.route(&mut request);
         prop_assert!(result.is_ok(), "route() must not panic on arbitrary text");
     }
+}
+
+// ── Tier integration tests ──────────────────────────────────────────────────
+
+#[test]
+fn test_default_routing_has_complexity_tier() {
+    let config = create_test_config();
+    let router = Router::new(config);
+    let mut request = create_simple_request("hello");
+    let decision = router.route(&mut request).unwrap();
+    assert!(
+        decision.complexity_tier.is_some(),
+        "Default route should carry a complexity tier"
+    );
+}
+
+#[test]
+fn test_complexity_tier_complex() {
+    use crate::models::Tool;
+    let config = create_test_config();
+    let router = Router::new(config);
+    let mut request = create_simple_request(
+        "Please refactor the entire authentication module to use async/await",
+    );
+    request.max_tokens = 8000;
+    request.tools = Some(vec![Tool {
+        r#type: Some("function".to_string()),
+        name: Some("code_editor".to_string()),
+        description: Some("Edit code".to_string()),
+        input_schema: Some(serde_json::json!({"type": "object"})),
+    }]);
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(
+        decision.complexity_tier.as_ref().map(|t| t.to_string()),
+        Some("complex".to_string()),
+        "Refactor + 8000 tokens + tools should score as complex"
+    );
+}
+
+#[test]
+fn test_non_default_routes_have_no_tier() {
+    let config = create_test_config();
+    let router = Router::new(config);
+    let mut request = CanonicalRequest {
+        model: "claude-3-5-haiku-latest".to_string(),
+        messages: vec![Message {
+            role: "user".to_string(),
+            content: MessageContent::Text("quick task".to_string()),
+        }],
+        max_tokens: 256,
+        thinking: None,
+        temperature: None,
+        top_p: None,
+        top_k: None,
+        stop_sequences: None,
+        stream: None,
+        metadata: None,
+        system: None,
+        tools: None,
+        tool_choice: None,
+        extensions: Default::default(),
+    };
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(
+        decision.route_type,
+        crate::models::RouteType::Background,
+        "Haiku model should route to background"
+    );
+    assert!(
+        decision.complexity_tier.is_none(),
+        "Non-default routes should not carry a tier"
+    );
 }

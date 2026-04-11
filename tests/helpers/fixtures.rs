@@ -135,6 +135,7 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         router: test_router_config(),
         providers: vec![],
         models: vec![],
+        tiers: vec![],
         presets: Default::default(),
         budget: Default::default(),
         dlp: Default::default(),
