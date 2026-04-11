@@ -12,7 +12,9 @@ use crate::features::mcp::server::types::{
 use axum::{extract::State, response::IntoResponse, Json};
 use std::sync::Arc;
 
-use crate::features::mcp::server::types::{ConfigSection, ConfigureAction, ConfigureParams};
+use crate::features::mcp::server::types::{
+    ConfigSection, ConfigureAction, ConfigureParams, HintParams,
+};
 
 // ── Axum HTTP handlers ──────────────────────────────────────────────────────
 
@@ -37,7 +39,14 @@ pub async fn handle_mcp_rpc(
         "tool_matrix/calibrate" => methods::handle_calibrate(mcp, req.params, req.id.clone()).await,
         "tool_matrix/report" => methods::handle_report(mcp, req.id.clone()).await,
         "grob_configure" => handle_configure(&state, req.params, req.id.clone()).await,
-        "tools/list" => methods::handle_tools_list(mcp, req.id.clone()).await,
+        "grob_hint" => handle_hint(&state, req.params, req.id.clone()).await,
+        "tools/list" => match methods::handle_tools_list(mcp, req.id.clone()).await {
+            Ok(mut resp) => {
+                inject_builtin_tools(&mut resp);
+                Ok(resp)
+            }
+            Err(e) => Err(e),
+        },
         _ => Err(JsonRpcError::method_not_found(req.id.clone(), &req.method)),
     };
 
@@ -75,6 +84,79 @@ fn to_json_value(result: Result<JsonRpcResponse, JsonRpcError>) -> serde_json::V
     match result {
         Ok(resp) => serde_json::to_value(resp).unwrap_or_else(fallback),
         Err(err) => serde_json::to_value(err).unwrap_or_else(fallback),
+    }
+}
+
+// ── grob_hint ──────────────────────────────────────────────────────────────
+
+/// Handles `grob_hint` — stores a one-shot complexity hint for the next dispatch.
+///
+/// The hint is consumed (taken) by the next dispatch call, then cleared.
+/// Clients may also pass the hint inline via `X-Grob-Hint` header or
+/// `metadata.grob_hint` in the request body — this MCP tool is the third
+/// pathway, for MCP-native agents that cannot set custom HTTP headers.
+async fn handle_hint(
+    state: &Arc<AppState>,
+    params: serde_json::Value,
+    id: serde_json::Value,
+) -> Result<JsonRpcResponse, JsonRpcError> {
+    let p: HintParams = serde_json::from_value(params)
+        .map_err(|e| JsonRpcError::invalid_params(id.clone(), &e.to_string()))?;
+
+    // Store the hint for the next dispatch (one-shot).
+    if let Ok(mut slot) = state.grob_hint.lock() {
+        *slot = Some(p.complexity);
+    }
+
+    tracing::info!(complexity = %p.complexity, "MCP: grob_hint stored");
+
+    Ok(JsonRpcResponse::ok(
+        id,
+        serde_json::json!({
+            "status": "accepted",
+            "complexity": p.complexity.to_string(),
+        }),
+    ))
+}
+
+/// Appends built-in tools (`grob_configure`, `grob_hint`) to the `tools/list` response.
+fn inject_builtin_tools(resp: &mut JsonRpcResponse) {
+    if let Some(tools) = resp.result.get_mut("tools").and_then(|v| v.as_array_mut()) {
+        tools.push(serde_json::json!({
+            "name": "grob_hint",
+            "description": "Declare task complexity for routing heuristics (trivial/medium/complex). Stateless: consumed by the next request.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "complexity": {
+                        "type": "string",
+                        "enum": ["trivial", "medium", "complex"],
+                        "description": "Task complexity level"
+                    }
+                },
+                "required": ["complexity"]
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "grob_configure",
+            "description": "Read or update safe configuration sections (router, budget, cache). Credentials and security settings are denied.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["read", "update"]
+                    },
+                    "section": {
+                        "type": "string",
+                        "enum": ["router", "budget", "dlp", "cache"]
+                    },
+                    "key": { "type": "string" },
+                    "value": {}
+                },
+                "required": ["action", "section"]
+            }
+        }));
     }
 }
 
@@ -521,5 +603,31 @@ mod tests {
             }
             _ => panic!("expected Update action"),
         }
+    }
+
+    #[test]
+    fn test_inject_builtin_tools_adds_grob_hint() {
+        let mut resp =
+            JsonRpcResponse::ok(serde_json::json!(1), serde_json::json!({ "tools": [] }));
+        inject_builtin_tools(&mut resp);
+        let tools = resp.result["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["name"], "grob_hint");
+        assert_eq!(tools[1]["name"], "grob_configure");
+    }
+
+    #[test]
+    fn test_inject_builtin_tools_preserves_existing() {
+        let mut resp = JsonRpcResponse::ok(
+            serde_json::json!(1),
+            serde_json::json!({
+                "tools": [{"name": "web_search"}]
+            }),
+        );
+        inject_builtin_tools(&mut resp);
+        let tools = resp.result["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 3);
+        assert_eq!(tools[0]["name"], "web_search");
+        assert_eq!(tools[1]["name"], "grob_hint");
     }
 }
