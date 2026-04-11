@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.7](https://github.com/azerozero/grob/compare/v0.36.6...v0.36.7) - 2026-04-11
+
+### Added
+
+- *(router)* ajouter le scoring heuristique de complexite
+
+### Fixed
+
+- *(ci)* ajouter RUSTSEC-2026-0097 a audit.toml ([#153](https://github.com/azerozero/grob/pull/153))
+
+### Other
+
+- *(ci)* documenter la dépendance ruleset → Required checks ([#154](https://github.com/azerozero/grob/pull/154))
+
 ## [0.36.6](https://github.com/azerozero/grob/compare/v0.36.5...v0.36.6) - 2026-04-11
 
 ### Added
