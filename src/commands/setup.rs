@@ -487,116 +487,133 @@ fn screen_auth(providers: &[String]) -> Vec<AuthOverride> {
         let env_present = discovered.iter().any(|(n, _)| *n == name.as_str());
 
         println!("  {}:", name);
-        if env_present {
-            println!("    ${} detected in environment", env_var);
-            println!("    [1] Use environment variable (recommended)");
-            if supports_oauth {
-                println!("    [2] OAuth (subscription)");
-                println!("    [3] Enter a different API key");
-                let choice = prompt_choice(3);
-                match choice {
-                    1 => {
-                        out.push(AuthOverride {
-                            provider: name.clone(),
-                            use_oauth: false,
-                            oauth_id: String::new(),
-                            entered_key: None,
-                            env_var: env_var.to_string(),
-                        });
-                        println!("    Using ${}", env_var);
-                    }
-                    2 => {
-                        out.push(AuthOverride {
-                            provider: name.clone(),
-                            use_oauth: true,
-                            oauth_id: oauth_id.to_string(),
-                            entered_key: None,
-                            env_var: env_var.to_string(),
-                        });
-                        println!("    OAuth — will prompt on first `grob start`");
-                    }
-                    _ => {
-                        let key = prompt_key_for_provider(env_var, Some(name));
-                        out.push(AuthOverride {
-                            provider: name.clone(),
-                            use_oauth: false,
-                            oauth_id: String::new(),
-                            entered_key: key,
-                            env_var: env_var.to_string(),
-                        });
-                    }
-                }
-            } else {
-                println!("    [2] Enter a different API key");
-                let choice = prompt_choice(2);
-                if choice == 1 {
-                    out.push(AuthOverride {
-                        provider: name.clone(),
-                        use_oauth: false,
-                        oauth_id: String::new(),
-                        entered_key: None,
-                        env_var: env_var.to_string(),
-                    });
-                    println!("    Using ${}", env_var);
-                } else {
-                    let key = prompt_key_for_provider(env_var, Some(name));
-                    out.push(AuthOverride {
-                        provider: name.clone(),
-                        use_oauth: false,
-                        oauth_id: String::new(),
-                        entered_key: key,
-                        env_var: env_var.to_string(),
-                    });
-                }
-            }
+        if env_present && supports_oauth {
+            auth_env_with_oauth(&mut out, name, oauth_id, env_var);
+        } else if env_present {
+            auth_env_no_oauth(&mut out, name, env_var);
         } else if supports_oauth {
-            println!("    [1] OAuth (subscription, recommended)");
-            println!("    [2] API key (${})", env_var);
-            let choice = prompt_choice(2);
-            if choice == 1 {
-                out.push(AuthOverride {
-                    provider: name.clone(),
-                    use_oauth: true,
-                    oauth_id: oauth_id.to_string(),
-                    entered_key: None,
-                    env_var: env_var.to_string(),
-                });
-                println!("    OAuth — will prompt on first `grob start`");
-            } else {
-                let key = prompt_key_for_provider(env_var, Some(name));
-                out.push(AuthOverride {
-                    provider: name.clone(),
-                    use_oauth: false,
-                    oauth_id: String::new(),
-                    entered_key: key,
-                    env_var: env_var.to_string(),
-                });
-            }
+            auth_oauth_or_key(&mut out, name, oauth_id, env_var);
         } else {
-            println!("    [1] Enter API key now");
-            println!(
-                "    [2] Set ${} later. Run: export {}=<your-key>",
-                env_var, env_var
-            );
-            if prompt_choice(2) == 1 {
-                let key = prompt_key_for_provider(env_var, Some(name));
-                out.push(AuthOverride {
-                    provider: name.clone(),
-                    use_oauth: false,
-                    oauth_id: String::new(),
-                    entered_key: key,
-                    env_var: env_var.to_string(),
-                });
-            } else {
-                println!(
-                    "    Set it before running grob: export {}=<your-key>",
-                    env_var
-                );
-            }
+            auth_key_only(&mut out, name, env_var);
         }
         println!();
     }
     out
+}
+
+/// Env var detected + OAuth available: 3 choices.
+fn auth_env_with_oauth(out: &mut Vec<AuthOverride>, name: &str, oauth_id: &str, env_var: &str) {
+    println!("    ${} detected in environment", env_var);
+    println!("    [1] Use environment variable (recommended)");
+    println!("    [2] OAuth (subscription)");
+    println!("    [3] Enter a different API key");
+    match prompt_choice(3) {
+        1 => {
+            out.push(AuthOverride {
+                provider: name.to_string(),
+                use_oauth: false,
+                oauth_id: String::new(),
+                entered_key: None,
+                env_var: env_var.to_string(),
+            });
+            println!("    Using ${}", env_var);
+        }
+        2 => {
+            out.push(AuthOverride {
+                provider: name.to_string(),
+                use_oauth: true,
+                oauth_id: oauth_id.to_string(),
+                entered_key: None,
+                env_var: env_var.to_string(),
+            });
+            println!("    OAuth — will prompt on first `grob start`");
+        }
+        _ => {
+            let key = prompt_key_for_provider(env_var, Some(name));
+            out.push(AuthOverride {
+                provider: name.to_string(),
+                use_oauth: false,
+                oauth_id: String::new(),
+                entered_key: key,
+                env_var: env_var.to_string(),
+            });
+        }
+    }
+}
+
+/// Env var detected, no OAuth: use env or enter key.
+fn auth_env_no_oauth(out: &mut Vec<AuthOverride>, name: &str, env_var: &str) {
+    println!("    ${} detected in environment", env_var);
+    println!("    [1] Use environment variable (recommended)");
+    println!("    [2] Enter a different API key");
+    if prompt_choice(2) == 1 {
+        out.push(AuthOverride {
+            provider: name.to_string(),
+            use_oauth: false,
+            oauth_id: String::new(),
+            entered_key: None,
+            env_var: env_var.to_string(),
+        });
+        println!("    Using ${}", env_var);
+    } else {
+        let key = prompt_key_for_provider(env_var, Some(name));
+        out.push(AuthOverride {
+            provider: name.to_string(),
+            use_oauth: false,
+            oauth_id: String::new(),
+            entered_key: key,
+            env_var: env_var.to_string(),
+        });
+    }
+}
+
+/// No env var, OAuth available: OAuth or API key.
+fn auth_oauth_or_key(out: &mut Vec<AuthOverride>, name: &str, oauth_id: &str, env_var: &str) {
+    println!("    [1] OAuth (subscription, recommended)");
+    println!("    [2] API key (${})", env_var);
+    if prompt_choice(2) == 1 {
+        out.push(AuthOverride {
+            provider: name.to_string(),
+            use_oauth: true,
+            oauth_id: oauth_id.to_string(),
+            entered_key: None,
+            env_var: env_var.to_string(),
+        });
+        println!("    OAuth — will prompt on first `grob start`");
+    } else {
+        let key = prompt_key_for_provider(env_var, Some(name));
+        out.push(AuthOverride {
+            provider: name.to_string(),
+            use_oauth: false,
+            oauth_id: String::new(),
+            entered_key: key,
+            env_var: env_var.to_string(),
+        });
+    }
+}
+
+/// No env var, no OAuth: enter key or set later.
+fn auth_key_only(out: &mut Vec<AuthOverride>, name: &str, env_var: &str) {
+    println!("    [1] Enter API key now");
+    println!(
+        "    [2] Set ${} later. Run: export {}=<your-key>",
+        env_var, env_var
+    );
+    if prompt_choice(2) == 1 {
+        let key = prompt_key_for_provider(env_var, Some(name));
+        out.push(AuthOverride {
+            provider: name.to_string(),
+            use_oauth: false,
+            oauth_id: String::new(),
+            entered_key: key,
+            env_var: env_var.to_string(),
+        });
+    } else {
+        println!(
+            "    Set it before running grob: export {}=<your-key>",
+            env_var
+        );
+    }
 }
 
 fn screen_fallback(preset_has_fallback: bool) -> (FallbackChoice, Option<String>) {
@@ -969,17 +986,131 @@ pub(crate) fn strip_fallback(config: &mut toml::Value, names_to_strip: &[&str]) 
     }
 }
 
-fn patch(config: &mut toml::Value, section: &str, fields: &[(&str, toml::Value)]) {
-    let table = config
+fn patch(config: &mut toml::Value, section: &str, fields: &[(&str, toml::Value)]) -> Result<()> {
+    let top = config
         .as_table_mut()
-        .unwrap()
+        .ok_or_else(|| anyhow::anyhow!("config root is not a TOML table"))?;
+    let table = top
         .entry(section)
         .or_insert_with(|| toml::Value::Table(Default::default()))
         .as_table_mut()
-        .unwrap();
+        .ok_or_else(|| anyhow::anyhow!("[{}] is not a table", section))?;
     for (k, v) in fields {
         table.insert(k.to_string(), v.clone());
     }
+    Ok(())
+}
+
+// ── Shared config mutation helpers ──
+//
+// Used by both `write_config` (full wizard) and `run_edit_section` (--edit).
+
+/// Applies auth overrides to the provider array in config.
+fn apply_auth_overrides(config: &mut toml::Value, auth: &[AuthOverride]) {
+    let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) else {
+        return;
+    };
+    for p in providers.iter_mut() {
+        let pname = p.get("name").and_then(|n| n.as_str()).unwrap_or("");
+        let Some(ov) = auth.iter().find(|a| a.provider == pname) else {
+            continue;
+        };
+        let Some(t) = p.as_table_mut() else {
+            continue;
+        };
+        if ov.use_oauth {
+            t.insert("auth_type".into(), "oauth".into());
+            t.insert(
+                "oauth_provider".into(),
+                toml::Value::String(ov.oauth_id.clone()),
+            );
+            t.remove("api_key");
+        } else {
+            t.insert("auth_type".into(), "apikey".into());
+            t.insert(
+                "api_key".into(),
+                toml::Value::String(format!("${}", ov.env_var)),
+            );
+            t.remove("oauth_provider");
+        }
+    }
+}
+
+/// Applies the chosen fallback provider to config.
+fn apply_fallback(config: &mut toml::Value, fallback: &FallbackChoice) {
+    match fallback {
+        FallbackChoice::None => {
+            strip_fallback(config, &["openrouter", "gemini"]);
+        }
+        FallbackChoice::OpenRouter => {
+            replace_fallback_provider(config, "openrouter", "openrouter", "$OPENROUTER_API_KEY");
+        }
+        FallbackChoice::Gemini => {
+            replace_fallback_provider(config, "gemini", "gemini", "$GEMINI_API_KEY");
+        }
+        FallbackChoice::KeepPreset => {}
+    }
+}
+
+/// Removes an existing provider by name and inserts a fresh one.
+fn replace_fallback_provider(
+    config: &mut toml::Value,
+    name: &str,
+    provider_type: &str,
+    api_key: &str,
+) {
+    let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) else {
+        return;
+    };
+    providers.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some(name));
+    let mut t = toml::map::Map::new();
+    t.insert("name".into(), name.into());
+    t.insert("provider_type".into(), provider_type.into());
+    if provider_type == "openrouter" {
+        t.insert("pass_through".into(), toml::Value::Boolean(true));
+    }
+    t.insert("enabled".into(), toml::Value::Boolean(true));
+    t.insert("models".into(), toml::Value::Array(vec![]));
+    t.insert("api_key".into(), api_key.into());
+    providers.push(toml::Value::Table(t));
+}
+
+/// Applies compliance-related config patches.
+///
+/// Returns `true` when EU/GDPR compliance was applied via overlay (caller
+/// must skip further writes), `false` for all other variants.
+fn apply_compliance(config: &mut toml::Value, compliance: Compliance, path: &Path) -> Result<bool> {
+    match compliance {
+        Compliance::Standard => {}
+        Compliance::Dlp => {
+            patch(config, "dlp", &[("enabled", true.into())])?;
+        }
+        Compliance::Enterprise => {
+            patch(
+                config,
+                "security",
+                &[
+                    ("enabled", true.into()),
+                    ("audit_dir", "~/.grob/audit".into()),
+                    ("rate_limit_rps", 100.into()),
+                    ("rate_limit_burst", 200.into()),
+                    ("circuit_breaker", true.into()),
+                    ("security_headers", true.into()),
+                ],
+            )?;
+            patch(config, "dlp", &[("enabled", true.into())])?;
+        }
+        Compliance::LocalOnly => {
+            patch(config, "security", &[("enabled", true.into())])?;
+            patch(config, "dlp", &[("enabled", true.into())])?;
+        }
+        Compliance::EuGdpr => {
+            std::fs::write(path, toml::to_string_pretty(config)?)?;
+            crate::preset::overlay_compliance("eu-ai-act", path)?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn write_config(choices: &Choices, path: &Path) -> Result<()> {
@@ -1002,70 +1133,8 @@ fn write_config(choices: &Choices, path: &Path) -> Result<()> {
     let content = std::fs::read_to_string(path)?;
     let mut config: toml::Value = toml::from_str(&content)?;
 
-    // Auth overrides
-    if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
-        for p in providers.iter_mut() {
-            let pname = p.get("name").and_then(|n| n.as_str()).unwrap_or("");
-            let Some(ov) = choices.auth.iter().find(|a| a.provider == pname) else {
-                continue;
-            };
-            let t = p.as_table_mut().unwrap();
-            if ov.use_oauth {
-                t.insert("auth_type".into(), "oauth".into());
-                t.insert(
-                    "oauth_provider".into(),
-                    toml::Value::String(ov.oauth_id.clone()),
-                );
-                t.remove("api_key");
-            } else {
-                t.insert("auth_type".into(), "apikey".into());
-                t.insert(
-                    "api_key".into(),
-                    toml::Value::String(format!("${}", ov.env_var)),
-                );
-                t.remove("oauth_provider");
-            }
-        }
-    }
-
-    // Fallback
-    match choices.fallback {
-        FallbackChoice::None => {
-            // Strip any fallback provider shipped by the preset plus the model
-            // mapping references that point to it — otherwise the config
-            // resolver warns at startup on `$OPENROUTER_API_KEY not set` even
-            // though the user explicitly said "no fallback".
-            strip_fallback(&mut config, &["openrouter", "gemini"]);
-        }
-        FallbackChoice::OpenRouter => {
-            if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
-                providers.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some("openrouter"));
-                let mut t = toml::map::Map::new();
-                t.insert("name".into(), "openrouter".into());
-                t.insert("provider_type".into(), "openrouter".into());
-                t.insert("pass_through".into(), toml::Value::Boolean(true));
-                t.insert("enabled".into(), toml::Value::Boolean(true));
-                t.insert("models".into(), toml::Value::Array(vec![]));
-                t.insert("api_key".into(), "$OPENROUTER_API_KEY".into());
-                providers.push(toml::Value::Table(t));
-            }
-        }
-        FallbackChoice::Gemini => {
-            if let Some(providers) = config.get_mut("providers").and_then(|p| p.as_array_mut()) {
-                providers.retain(|p| p.get("name").and_then(|n| n.as_str()) != Some("gemini"));
-                let mut t = toml::map::Map::new();
-                t.insert("name".into(), "gemini".into());
-                t.insert("provider_type".into(), "gemini".into());
-                t.insert("enabled".into(), toml::Value::Boolean(true));
-                t.insert("models".into(), toml::Value::Array(vec![]));
-                t.insert("api_key".into(), "$GEMINI_API_KEY".into());
-                providers.push(toml::Value::Table(t));
-            }
-        }
-        FallbackChoice::KeepPreset => {
-            // Leave the preset as-is.
-        }
-    }
+    apply_auth_overrides(&mut config, &choices.auth);
+    apply_fallback(&mut config, &choices.fallback);
 
     // Custom endpoints
     if !choices.custom_endpoints.is_empty() {
@@ -1088,40 +1157,10 @@ fn write_config(choices: &Choices, path: &Path) -> Result<()> {
         }
     }
 
-    // Compliance patches
-    match choices.compliance {
-        Compliance::Standard => {}
-        Compliance::Dlp => {
-            patch(&mut config, "dlp", &[("enabled", true.into())]);
-        }
-        Compliance::Enterprise => {
-            patch(
-                &mut config,
-                "security",
-                &[
-                    ("enabled", true.into()),
-                    ("audit_dir", "~/.grob/audit".into()),
-                    ("rate_limit_rps", 100.into()),
-                    ("rate_limit_burst", 200.into()),
-                    ("circuit_breaker", true.into()),
-                    ("security_headers", true.into()),
-                ],
-            );
-            patch(&mut config, "dlp", &[("enabled", true.into())]);
-        }
-        Compliance::LocalOnly => {
-            patch(&mut config, "security", &[("enabled", true.into())]);
-            patch(&mut config, "dlp", &[("enabled", true.into())]);
-        }
-        Compliance::EuGdpr => {
-            // Write first, then overlay compliance preset (reads from disk)
-            std::fs::write(path, toml::to_string_pretty(&config)?)?;
-            crate::preset::overlay_compliance("eu-ai-act", path)?;
-            return Ok(());
-        }
+    if apply_compliance(&mut config, choices.compliance, path)? {
+        return Ok(());
     }
 
-    // Budget
     if let Some(ref b) = choices.budget {
         patch(
             &mut config,
@@ -1130,7 +1169,7 @@ fn write_config(choices: &Choices, path: &Path) -> Result<()> {
                 ("monthly_limit_usd", b.amount.into()),
                 ("warn_at_percent", 80.into()),
             ],
-        );
+        )?;
     }
 
     std::fs::write(path, toml::to_string_pretty(&config)?)?;
@@ -1342,32 +1381,7 @@ async fn run_edit_section(config_path: &Path, section: &str, flags: &SetupFlags)
                 .unwrap_or("perf");
             let providers = providers_from_preset(preset_name);
             let auth = screen_auth(&providers);
-
-            if let Some(providers_arr) = config.get_mut("providers").and_then(|p| p.as_array_mut())
-            {
-                for p in providers_arr.iter_mut() {
-                    let pname = p.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    let Some(ov) = auth.iter().find(|a| a.provider == pname) else {
-                        continue;
-                    };
-                    let t = p.as_table_mut().unwrap();
-                    if ov.use_oauth {
-                        t.insert("auth_type".into(), "oauth".into());
-                        t.insert(
-                            "oauth_provider".into(),
-                            toml::Value::String(ov.oauth_id.clone()),
-                        );
-                        t.remove("api_key");
-                    } else {
-                        t.insert("auth_type".into(), "apikey".into());
-                        t.insert(
-                            "api_key".into(),
-                            toml::Value::String(format!("${}", ov.env_var)),
-                        );
-                        t.remove("oauth_provider");
-                    }
-                }
-            }
+            apply_auth_overrides(&mut config, &auth);
         }
         "budget" => {
             let existing = prefill.as_ref().and_then(|(_, _, b)| *b);
@@ -1379,42 +1393,15 @@ async fn run_edit_section(config_path: &Path, section: &str, flags: &SetupFlags)
                         ("monthly_limit_usd", b.amount.into()),
                         ("warn_at_percent", 80.into()),
                     ],
-                );
+                )?;
             }
         }
         "compliance" => {
             let compliance = screen_compliance(&[]);
-            match compliance {
-                Compliance::Standard => {}
-                Compliance::Dlp => {
-                    patch(&mut config, "dlp", &[("enabled", true.into())]);
-                }
-                Compliance::Enterprise => {
-                    patch(
-                        &mut config,
-                        "security",
-                        &[
-                            ("enabled", true.into()),
-                            ("audit_dir", "~/.grob/audit".into()),
-                            ("rate_limit_rps", 100.into()),
-                            ("rate_limit_burst", 200.into()),
-                            ("circuit_breaker", true.into()),
-                            ("security_headers", true.into()),
-                        ],
-                    );
-                    patch(&mut config, "dlp", &[("enabled", true.into())]);
-                }
-                Compliance::LocalOnly => {
-                    patch(&mut config, "security", &[("enabled", true.into())]);
-                    patch(&mut config, "dlp", &[("enabled", true.into())]);
-                }
-                Compliance::EuGdpr => {
-                    std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
-                    crate::preset::overlay_compliance("eu-ai-act", config_path)?;
-                    println!("  Compliance updated in {}", config_path.display());
-                    chain_doctor(config_path).await;
-                    return Ok(true);
-                }
+            if apply_compliance(&mut config, compliance, config_path)? {
+                println!("  Compliance updated in {}", config_path.display());
+                chain_doctor(config_path).await;
+                return Ok(true);
             }
         }
         "fallback" => {
@@ -1426,44 +1413,7 @@ async fn run_edit_section(config_path: &Path, section: &str, flags: &SetupFlags)
                 .iter()
                 .any(|p| p == "openrouter" || p == "gemini");
             let (fallback, _) = screen_fallback(has_fallback);
-            match fallback {
-                FallbackChoice::None => {
-                    strip_fallback(&mut config, &["openrouter", "gemini"]);
-                }
-                FallbackChoice::OpenRouter => {
-                    if let Some(providers) =
-                        config.get_mut("providers").and_then(|p| p.as_array_mut())
-                    {
-                        providers.retain(|p| {
-                            p.get("name").and_then(|n| n.as_str()) != Some("openrouter")
-                        });
-                        let mut t = toml::map::Map::new();
-                        t.insert("name".into(), "openrouter".into());
-                        t.insert("provider_type".into(), "openrouter".into());
-                        t.insert("pass_through".into(), toml::Value::Boolean(true));
-                        t.insert("enabled".into(), toml::Value::Boolean(true));
-                        t.insert("models".into(), toml::Value::Array(vec![]));
-                        t.insert("api_key".into(), "$OPENROUTER_API_KEY".into());
-                        providers.push(toml::Value::Table(t));
-                    }
-                }
-                FallbackChoice::Gemini => {
-                    if let Some(providers) =
-                        config.get_mut("providers").and_then(|p| p.as_array_mut())
-                    {
-                        providers
-                            .retain(|p| p.get("name").and_then(|n| n.as_str()) != Some("gemini"));
-                        let mut t = toml::map::Map::new();
-                        t.insert("name".into(), "gemini".into());
-                        t.insert("provider_type".into(), "gemini".into());
-                        t.insert("enabled".into(), toml::Value::Boolean(true));
-                        t.insert("models".into(), toml::Value::Array(vec![]));
-                        t.insert("api_key".into(), "$GEMINI_API_KEY".into());
-                        providers.push(toml::Value::Table(t));
-                    }
-                }
-                FallbackChoice::KeepPreset => {}
-            }
+            apply_fallback(&mut config, &fallback);
         }
         "endpoints" => {
             let endpoints = screen_custom_endpoints();
@@ -1729,7 +1679,8 @@ mod tests {
                 ("monthly_limit_usd", budget.amount.into()),
                 ("warn_at_percent", 80.into()),
             ],
-        );
+        )
+        .expect("patch should succeed on valid TOML");
         let section = config.get("budget").and_then(|v| v.as_table()).unwrap();
         assert_eq!(
             section
