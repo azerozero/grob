@@ -8,3 +8,4 @@ mod provider_test;
 mod router_test;
 mod rpc_test;
 mod setup_wizard_test;
+mod tier_config_test;

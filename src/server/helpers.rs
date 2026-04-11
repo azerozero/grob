@@ -12,6 +12,28 @@ pub(crate) fn resolve_provider_mappings(
     headers: &HeaderMap,
     decision: &crate::models::RouteDecision,
 ) -> Result<Vec<crate::cli::ModelMapping>, AppError> {
+    // Tier-based provider selection (opt-in via [[tiers]] config)
+    if let Some(ref tier) = decision.complexity_tier {
+        let tier_name = tier.to_string();
+        if let Some(tier_cfg) = inner.config.tiers.iter().find(|t| t.name == tier_name) {
+            info!("📊 Tier '{}' matched — using tier providers", tier_name);
+            let mappings: Vec<crate::cli::ModelMapping> = tier_cfg
+                .providers
+                .iter()
+                .enumerate()
+                .map(|(i, provider_name)| crate::cli::ModelMapping {
+                    priority: (i as u32) + 1,
+                    provider: provider_name.clone(),
+                    actual_model: decision.model_name.clone(),
+                    inject_continuation_prompt: false,
+                })
+                .collect();
+            if !mappings.is_empty() {
+                return Ok(mappings);
+            }
+        }
+    }
+
     if let Some(model_config) = inner.find_model(&decision.model_name) {
         let forced_provider = headers
             .get("x-provider")

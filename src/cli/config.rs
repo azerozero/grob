@@ -823,3 +823,20 @@ impl ProviderConfig {
         self.enabled.unwrap_or(true)
     }
 }
+
+/// Declarative tier configuration mapping complexity tiers to provider lists.
+///
+/// Each `[[tiers]]` entry binds a [`ComplexityTier`](crate::router::classify::ComplexityTier)
+/// name (`trivial`, `medium`, `complex`) to an ordered list of provider names.
+/// When the scoring heuristic classifies a request, the dispatch pipeline
+/// resolves providers from the matching tier instead of the default model mappings.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TierConfig {
+    /// Tier name — must match a `ComplexityTier` variant (case-insensitive).
+    pub name: String,
+    /// Ordered list of provider names to use for this tier.
+    pub providers: Vec<String>,
+    /// Send the request to all tier providers in parallel (fan-out).
+    #[serde(default)]
+    pub fanout: bool,
+}

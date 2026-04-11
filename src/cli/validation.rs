@@ -145,6 +145,22 @@ impl AppConfig {
             }
         }
 
+        // Validate tier config: provider names must exist (skip when no providers defined)
+        if !provider_names.is_empty() {
+            for tier in &self.tiers {
+                for prov in &tier.providers {
+                    if !provider_names.contains(prov.as_str()) {
+                        anyhow::bail!(
+                            "Tier '{}' references unknown provider '{}'. Available: {:?}",
+                            tier.name,
+                            prov,
+                            provider_names.iter().collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 }
