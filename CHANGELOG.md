@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.6](https://github.com/azerozero/grob/compare/v0.36.5...v0.36.6) - 2026-04-11
+
+### Added
+
+- *(setup)* ajouter support custom endpoint OpenAI/Anthropic-compatible
+
+### Fixed
+
+- *(ci)* add RUSTSEC-2026-0097 exception and fix gitleaks force-push
+
+### Other
+
+- *(dlp,router)* ajouter proptests pour robustesse DLP et router
+
 ## [0.36.5](https://github.com/azerozero/grob/compare/v0.36.4...v0.36.5) - 2026-04-11
 
 ### Added
