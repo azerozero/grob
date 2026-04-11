@@ -66,7 +66,7 @@ impl ResponseCache {
 
         Self {
             inner: cache,
-            simhash: SimHashCache::new(),
+            simhash: SimHashCache::new(max_capacity, ttl_secs),
             max_entry_bytes,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
