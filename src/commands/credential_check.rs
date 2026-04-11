@@ -50,6 +50,78 @@ fn validation_request(provider_name: &str, api_key: &str) -> Option<(String, Str
     }
 }
 
+/// Builds a validation request for a custom endpoint with a user-supplied base URL.
+pub fn custom_validation_request(
+    provider_type: &str,
+    base_url: &str,
+    api_key: &str,
+) -> Option<(String, String, String)> {
+    let base = base_url.trim_end_matches('/');
+    match provider_type {
+        "openai_compatible" => Some((
+            format!("{base}/models"),
+            "Authorization".to_string(),
+            format!("Bearer {api_key}"),
+        )),
+        "anthropic_compatible" => Some((
+            format!("{base}/v1/models"),
+            "x-api-key".to_string(),
+            api_key.to_string(),
+        )),
+        _ => None,
+    }
+}
+
+/// Validates an API key against a custom endpoint.
+pub async fn validate_custom_endpoint(provider_type: &str, base_url: &str, api_key: &str) -> bool {
+    let Some((url, header_name, header_value)) =
+        custom_validation_request(provider_type, base_url, api_key)
+    else {
+        return true;
+    };
+
+    let client = match reqwest::Client::builder().timeout(VALIDATE_TIMEOUT).build() {
+        Ok(c) => c,
+        Err(_) => return true,
+    };
+
+    let mut request = client.get(&url);
+    if !header_name.is_empty() {
+        request = request.header(&header_name, &header_value);
+    }
+    if provider_type == "anthropic_compatible" {
+        request = request.header("anthropic-version", "2023-06-01");
+    }
+
+    match request.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                true
+            } else if status.as_u16() == 401 || status.as_u16() == 403 {
+                false
+            } else {
+                warn!(
+                    provider_type,
+                    base_url,
+                    status = status.as_u16(),
+                    "custom endpoint check returned unexpected status, accepting key"
+                );
+                true
+            }
+        }
+        Err(e) => {
+            warn!(
+                provider_type,
+                base_url,
+                error = %e,
+                "custom endpoint check failed (network), accepting key"
+            );
+            true
+        }
+    }
+}
+
 /// Validates an API key by attempting a lightweight provider call.
 ///
 /// Returns `true` when the provider confirms the key is valid (HTTP 2xx).
@@ -211,6 +283,71 @@ mod tests {
             .await
             .unwrap();
         assert!(resp.status().is_success());
+        mock.assert_async().await;
+    }
+
+    #[test]
+    fn custom_openai_compatible_builds_correct_url() {
+        let (url, header, value) =
+            custom_validation_request("openai_compatible", "https://my-llm.com/v1", "sk-test")
+                .unwrap();
+        assert_eq!(url, "https://my-llm.com/v1/models");
+        assert_eq!(header, "Authorization");
+        assert!(value.starts_with("Bearer "));
+    }
+
+    #[test]
+    fn custom_anthropic_compatible_builds_correct_url() {
+        let (url, header, value) = custom_validation_request(
+            "anthropic_compatible",
+            "https://claude.corp.internal",
+            "sk-ant-123",
+        )
+        .unwrap();
+        assert_eq!(url, "https://claude.corp.internal/v1/models");
+        assert_eq!(header, "x-api-key");
+        assert_eq!(value, "sk-ant-123");
+    }
+
+    #[test]
+    fn custom_unknown_type_returns_none() {
+        assert!(custom_validation_request("unknown", "https://x.com", "k").is_none());
+    }
+
+    #[test]
+    fn custom_url_trailing_slash_stripped() {
+        let (url, _, _) =
+            custom_validation_request("openai_compatible", "https://my-llm.com/v1/", "k").unwrap();
+        assert_eq!(url, "https://my-llm.com/v1/models");
+    }
+
+    #[tokio::test]
+    async fn validate_custom_endpoint_with_401_rejects() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models")
+            .with_status(401)
+            .with_body(r#"{"error":"unauthorized"}"#)
+            .create_async()
+            .await;
+
+        let result = validate_custom_endpoint("openai_compatible", &server.url(), "bad-key").await;
+        assert!(!result);
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn validate_custom_endpoint_with_200_accepts() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/models")
+            .with_status(200)
+            .with_body(r#"{"data":[]}"#)
+            .create_async()
+            .await;
+
+        let result = validate_custom_endpoint("openai_compatible", &server.url(), "good-key").await;
+        assert!(result);
         mock.assert_async().await;
     }
 }
