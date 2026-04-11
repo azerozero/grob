@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.9](https://github.com/azerozero/grob/compare/v0.36.8...v0.36.9) - 2026-04-11
+
+### Added
+
+- *(router)* ajouter la config declarative des tiers de complexite
+
 ## [0.36.8](https://github.com/azerozero/grob/compare/v0.36.7...v0.36.8) - 2026-04-11
 
 ### Added
