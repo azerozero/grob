@@ -686,7 +686,7 @@ mod tests {
     fn test_canary_credit_card_is_luhn_valid() {
         let fake = generate_pii_canary(&PiiType::CreditCard, "4532015112830366");
         assert_eq!(fake.len(), 16, "Canary CC must be 16 digits");
-        assert!(luhn_check(&fake), "Canary CC must pass Luhn: {fake}");
+        assert!(luhn_check(&fake), "Canary CC must pass Luhn check");
         assert_ne!(fake, "4532015112830366", "Canary must differ from original");
     }
 
@@ -1150,7 +1150,7 @@ mod tests {
             assert_eq!(canary.len(), 27);
             assert!(
                 iban_mod97_check(&canary),
-                "Canary IBAN id={id} doit etre mod97-valide : {canary}"
+                "Canary IBAN id={id} doit etre mod97-valide"
             );
         }
     }
@@ -1171,7 +1171,7 @@ mod tests {
         assert!(canary.starts_with("GB"));
         assert!(
             iban_mod97_check(&canary),
-            "Canary GB doit etre mod97-valide : {canary}"
+            "Canary GB doit etre mod97-valide"
         );
     }
 
@@ -1182,7 +1182,7 @@ mod tests {
         let canary = generate_canary_iban("DE89370400440532013000", 7);
         assert!(
             iban_mod97_check(&canary),
-            "Canary DE doit etre mod97-valide : {canary}"
+            "Canary DE doit etre mod97-valide"
         );
     }
 
