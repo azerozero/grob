@@ -63,6 +63,21 @@ impl SecretScanner {
     ///
     /// Uses `regex_syntax::parse` for fast AST-only validation. Full DFA
     /// compilation is deferred to the first `scan()` call via `OnceLock`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::dlp::config::{SecretRule, SecretAction};
+    ///
+    /// let rules = vec![SecretRule {
+    ///     name: "github_token".into(),
+    ///     prefix: "ghp_".into(),
+    ///     pattern: "ghp_[A-Za-z0-9]{36}".into(),
+    ///     action: SecretAction::Canary,
+    /// }];
+    /// let scanner = grob::features::dlp::dfa::SecretScanner::new(&rules, &[]);
+    /// assert!(!scanner.is_empty());
+    /// ```
     pub fn new(secrets: &[SecretRule], custom_prefixes: &[CustomPrefixRule]) -> Self {
         let mut patterns = Vec::new();
         let mut rules = Vec::new();
@@ -126,6 +141,15 @@ impl SecretScanner {
     }
 
     /// Returns true if there are no rules loaded.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::dlp::dfa::SecretScanner;
+    ///
+    /// let scanner = SecretScanner::new(&[], &[]);
+    /// assert!(scanner.is_empty());
+    /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.rules.is_empty()
@@ -166,6 +190,15 @@ impl SecretScanner {
     }
 
     /// Returns the length of the longest pattern *string* (not max match length).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::dlp::dfa::SecretScanner;
+    ///
+    /// let empty = SecretScanner::new(&[], &[]);
+    /// assert_eq!(empty.max_pattern_str_len(), 0);
+    /// ```
     pub fn max_pattern_str_len(&self) -> usize {
         self.patterns.iter().map(|p| p.len()).max().unwrap_or(0)
     }
@@ -177,8 +210,28 @@ impl SecretScanner {
             .get_or_init(|| regex::Regex::new(&self.patterns[idx]).expect("pre-validated regex"))
     }
 
-    /// Scan text and return all matches with positions.
-    /// Caller should check `might_contain_secret()` first for fast rejection.
+    /// Scans text and returns all matches with positions.
+    ///
+    /// Caller should check [`might_contain_secret`](Self::might_contain_secret)
+    /// first for fast rejection.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::features::dlp::config::{SecretRule, SecretAction};
+    /// use grob::features::dlp::dfa::SecretScanner;
+    ///
+    /// let rules = vec![SecretRule {
+    ///     name: "aws_key".into(),
+    ///     prefix: "AKIA".into(),
+    ///     pattern: "AKIA[0-9A-Z]{16}".into(),
+    ///     action: SecretAction::Redact,
+    /// }];
+    /// let scanner = SecretScanner::new(&rules, &[]);
+    /// let matches = scanner.scan("key=AKIAIOSFODNN7EXAMPLE done");
+    /// assert_eq!(matches.len(), 1);
+    /// assert_eq!(matches[0].matched_len, 20);
+    /// ```
     pub fn scan(&self, text: &str) -> Vec<SecretMatch> {
         if self.rules.is_empty() {
             return Vec::new();

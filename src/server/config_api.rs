@@ -119,7 +119,7 @@ pub(crate) async fn update_config_json(
         }
     }
 
-    // Write back to config file (only works with local file configs)
+    // Read-only guard: reject remote URL configs early.
     let config_path = match &state.config_source {
         crate::cli::ConfigSource::File(p) => p,
         crate::cli::ConfigSource::Url(_) => {
@@ -129,25 +129,18 @@ pub(crate) async fn update_config_json(
         }
     };
 
-    // Read current config (async to avoid blocking the tokio runtime)
+    // Read current config and merge the incoming JSON updates into it.
     let config_str = tokio::fs::read_to_string(config_path)
         .await
-        .map_err(|e| AppError::ParseError(format!("Failed to read config: {}", e)))?;
+        .map_err(|e| AppError::ParseError(format!("Failed to read config: {e}")))?;
 
     let mut config: toml::Value = toml::from_str(&config_str)
-        .map_err(|e| AppError::ParseError(format!("Failed to parse config: {}", e)))?;
-
-    // Create backup before modifying config
-    let backup_path = config_path.with_extension("toml.backup");
-    tokio::fs::copy(config_path, &backup_path)
-        .await
-        .map_err(|e| AppError::ParseError(format!("Failed to create backup: {}", e)))?;
+        .map_err(|e| AppError::ParseError(format!("Failed to parse config: {e}")))?;
 
     // Update providers section
     if let Some(providers) = new_config.get("providers") {
-        // Convert from serde_json::Value to toml::Value
         let providers_toml: toml::Value = serde_json::from_str(&providers.to_string())
-            .map_err(|e| AppError::ParseError(format!("Failed to convert providers: {}", e)))?;
+            .map_err(|e| AppError::ParseError(format!("Failed to convert providers: {e}")))?;
 
         if let Some(table) = config.as_table_mut() {
             table.insert("providers".to_string(), providers_toml);
@@ -156,9 +149,8 @@ pub(crate) async fn update_config_json(
 
     // Update models section
     if let Some(models) = new_config.get("models") {
-        // Convert from serde_json::Value to toml::Value
         let models_toml: toml::Value = serde_json::from_str(&models.to_string())
-            .map_err(|e| AppError::ParseError(format!("Failed to convert models: {}", e)))?;
+            .map_err(|e| AppError::ParseError(format!("Failed to convert models: {e}")))?;
 
         if let Some(table) = config.as_table_mut() {
             table.insert("models".to_string(), models_toml);
@@ -168,7 +160,6 @@ pub(crate) async fn update_config_json(
     // Update router section if provided
     if let Some(router) = new_config.get("router") {
         if let Some(router_table) = config.get_mut("router").and_then(|v| v.as_table_mut()) {
-            // Helper to update or remove a router field
             let update_field = |table: &mut toml::map::Map<String, toml::Value>,
                                 key: &str,
                                 value: Option<&serde_json::Value>| {
@@ -177,19 +168,16 @@ pub(crate) async fn update_config_json(
                         table.insert(key.to_string(), toml::Value::String(s.to_string()));
                     }
                 } else {
-                    // Remove field if not present in incoming config
                     table.remove(key);
                 }
             };
 
-            // Default is required, always update if present
             if let Some(default) = router.get("default") {
                 if let Some(s) = default.as_str() {
                     router_table.insert("default".to_string(), toml::Value::String(s.to_string()));
                 }
             }
 
-            // Optional fields - remove if not present
             update_field(router_table, "think", router.get("think"));
             update_field(router_table, "websearch", router.get("websearch"));
             update_field(router_table, "background", router.get("background"));
@@ -202,19 +190,20 @@ pub(crate) async fn update_config_json(
         }
     }
 
-    // Write back to file
-    let new_config_str = toml::to_string_pretty(&config)
-        .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {}", e)))?;
+    // Deserialise the merged TOML into AppConfig so we can validate and reload.
+    let merged_toml_str = toml::to_string_pretty(&config)
+        .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {e}")))?;
+    let merged_config: crate::cli::AppConfig = toml::from_str(&merged_toml_str)
+        .map_err(|e| AppError::ParseError(format!("Invalid config after merge: {e}")))?;
 
-    tokio::fs::write(config_path, new_config_str)
-        .await
-        .map_err(|e| AppError::ParseError(format!("Failed to write config: {}", e)))?;
+    // Backup, write, and hot-reload via the shared pipeline.
+    super::config_guard::persist_and_reload(&state, &merged_config).await?;
 
-    info!("✅ Configuration updated successfully via API");
+    info!("Configuration updated successfully via API");
 
     Ok(Json(serde_json::json!({
         "status": "success",
-        "message": "Configuration saved successfully"
+        "message": "Configuration saved and reloaded"
     })))
 }
 

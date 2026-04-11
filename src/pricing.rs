@@ -19,6 +19,15 @@ pub struct ModelPricing {
 
 impl ModelPricing {
     /// Calculates cost for a given number of tokens.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::pricing::ModelPricing;
+    /// let p = ModelPricing { model: "test", input_per_million: 3.0, output_per_million: 15.0 };
+    /// let cost = p.calculate(1_000_000, 0);
+    /// assert!((cost - 3.0).abs() < 1e-9);
+    /// ```
     pub fn calculate(&self, input_tokens: u32, output_tokens: u32) -> f64 {
         (input_tokens as f64 * self.input_per_million
             + output_tokens as f64 * self.output_per_million)
@@ -162,6 +171,14 @@ static PRICING_MAP: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| KNOWN_PRICING.iter().map(|p| (p.model, p)).collect());
 
 /// Looks up static pricing for a model (case-insensitive, fuzzy).
+/// # Examples
+///
+/// ```
+/// use grob::pricing::pricing;
+/// let p = pricing("claude-opus-4-6").unwrap();
+/// assert!(p.input_per_million > 0.0);
+/// assert!(pricing("unknown-model-xyz").is_none());
+/// ```
 pub fn pricing(model: &str) -> Option<&'static ModelPricing> {
     // Try exact match first (O(1), no allocation)
     PRICING_MAP.get(model).copied().or_else(|| {

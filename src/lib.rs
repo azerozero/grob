@@ -47,7 +47,19 @@ pub fn home_dir() -> Option<PathBuf> {
     }
 }
 
-/// Expand a leading `~` to the user home directory.
+/// Expands a leading `~` to the user home directory.
+///
+/// # Examples
+///
+/// ```
+/// use grob::expand_tilde;
+///
+/// // Absolute paths pass through unchanged.
+/// assert_eq!(grob::expand_tilde("/etc/grob.toml").to_str().unwrap(), "/etc/grob.toml");
+///
+/// // Non-tilde relative paths pass through unchanged.
+/// assert_eq!(grob::expand_tilde("relative/path").to_str().unwrap(), "relative/path");
+/// ```
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = home_dir() {
