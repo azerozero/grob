@@ -91,7 +91,7 @@ impl PolicyMatcher {
         }
 
         // Sort by specificity descending (most specific first).
-        matches.sort_by(|a, b| b.specificity.cmp(&a.specificity));
+        matches.sort_by_key(|p| std::cmp::Reverse(p.specificity));
 
         self.merge(&matches)
     }
