@@ -238,10 +238,8 @@ pub fn transform_canonical_to_responses(
 
     for block in &response.content {
         match block {
-            ContentBlock::Known(KnownContentBlock::Text { text, .. }) => {
-                if !text.is_empty() {
-                    text_parts.push(text.clone());
-                }
+            ContentBlock::Known(KnownContentBlock::Text { text, .. }) if !text.is_empty() => {
+                text_parts.push(text.clone());
             }
             ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input }) => {
                 // Flush accumulated text as a message before function call
