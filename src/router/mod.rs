@@ -1,5 +1,7 @@
 //! Request routing engine with regex-based prompt rules and task-type classification.
 
+/// Stateless complexity classifier for tier-based provider selection.
+pub mod classify;
 /// Provider type inference from model name prefixes.
 pub mod inference;
 /// Message content extraction for routing decisions.
@@ -130,6 +132,8 @@ pub struct Router {
     /// Enables SIMD-accelerated `memchr2` rejection before running the full regex.
     background_prefilter_bytes: Option<(u8, u8)>,
     prompt_rules: Vec<CompiledPromptRule>,
+    /// Scoring config for complexity classification. `None` disables scoring.
+    scoring_config: Option<classify::ScoringConfig>,
 }
 
 impl Router {
@@ -193,12 +197,17 @@ impl Router {
             info!("📝 Loaded {} prompt routing rules", prompt_rules.len());
         }
 
+        // Scoring is always active (default config). T-P3 will add
+        // tier-based provider selection; until then the tier is informational.
+        let scoring_config = Some(classify::ScoringConfig::default());
+
         Self {
             config,
             auto_mapper,
             background_regex,
             background_prefilter_bytes,
             prompt_rules,
+            scoring_config,
         }
     }
 
@@ -224,6 +233,7 @@ impl Router {
                     model_name: websearch_model.clone(),
                     route_type: RouteType::WebSearch,
                     matched_prompt: None,
+                    complexity_tier: None,
                 });
             }
         }
@@ -236,6 +246,7 @@ impl Router {
                     model_name: background_model.clone(),
                     route_type: RouteType::Background,
                     matched_prompt: None,
+                    complexity_tier: None,
                 });
             }
         }
@@ -261,6 +272,7 @@ impl Router {
                 model_name: model,
                 route_type: RouteType::Default,
                 matched_prompt: None,
+                complexity_tier: None,
             });
         }
 
@@ -271,6 +283,7 @@ impl Router {
                 model_name: model,
                 route_type: RouteType::PromptRule,
                 matched_prompt: Some(matched_text),
+                complexity_tier: None,
             });
         }
 
@@ -282,16 +295,25 @@ impl Router {
                     model_name: think_model.clone(),
                     route_type: RouteType::Think,
                     matched_prompt: None,
+                    complexity_tier: None,
                 });
             }
         }
 
-        // 7. Default fallback
+        // 8. Complexity scoring (after all rule-based routing, before default)
+        let tier = self.scoring_config.as_ref().map(|cfg| {
+            let t = classify::classify_complexity(request, cfg);
+            debug!(tier = %t, "📊 Complexity scoring");
+            t
+        });
+
+        // 9. Default fallback
         debug!("✅ Using model: {}", request.model);
         Ok(RouteDecision {
             model_name: request.model.clone(),
             route_type: RouteType::Default,
             matched_prompt: None,
+            complexity_tier: tier,
         })
     }
 

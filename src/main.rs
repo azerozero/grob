@@ -50,9 +50,9 @@ async fn main() -> anyhow::Result<()> {
 
     // First-run setup wizard: trigger on `grob setup` or when config doesn't exist
     // for start/exec commands (interactive TTY only).
-    let (wizard_yes, wizard_dry_run) = match &command {
-        Commands::Setup { yes, dry_run } => (*yes, *dry_run),
-        _ => (false, false),
+    let (wizard_yes, wizard_dry_run, wizard_edit) = match &command {
+        Commands::Setup { yes, dry_run, edit } => (*yes, *dry_run, edit.clone()),
+        _ => (false, false, None),
     };
     let needs_wizard = matches!(command, Commands::Setup { .. })
         || (matches!(command, Commands::Start { .. } | Commands::Exec { .. })
@@ -68,6 +68,7 @@ async fn main() -> anyhow::Result<()> {
         let flags = commands::setup::SetupFlags {
             yes: wizard_yes,
             dry_run: wizard_dry_run,
+            edit_section: wizard_edit,
         };
         let completed = commands::setup::run_setup_wizard(&config_path, &flags).await?;
         if !completed {

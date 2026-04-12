@@ -15,8 +15,8 @@ pub use config::{
     AcmeConfig, AuthType, BudgetConfig, CacheConfig, ComplianceConfig, EnforcementMode,
     FanOutConfig, FanOutMode, FipsConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig,
     PoolConfig, PoolStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,
-    ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TimeoutConfig,
-    TlsConfig, TracingConfig, UserConfig,
+    ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TierConfig,
+    TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
@@ -47,6 +47,9 @@ pub struct AppConfig {
     /// Model definitions with provider mappings
     #[serde(default)]
     pub models: Vec<ModelConfig>,
+    /// Declarative tier-to-provider mappings (opt-in complexity routing)
+    #[serde(default)]
+    pub tiers: Vec<TierConfig>,
     /// Preset management and sync settings
     #[serde(default)]
     pub presets: PresetConfig,

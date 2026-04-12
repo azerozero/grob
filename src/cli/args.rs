@@ -214,6 +214,9 @@ pub enum Commands {
         /// Preview changes without writing to disk
         #[arg(long)]
         dry_run: bool,
+        /// Reconfigure a single section (providers, budget, compliance, fallback)
+        #[arg(long, alias = "reconfigure", value_name = "SECTION")]
+        edit: Option<String>,
     },
     /// Live traffic inspector — watch requests, DLP actions, and fallbacks in real time
     #[cfg(feature = "watch")]
