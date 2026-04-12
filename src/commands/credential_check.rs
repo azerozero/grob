@@ -139,10 +139,13 @@ pub async fn validate_api_key(provider_name: &str, api_key: &str) -> bool {
         Err(_) => return true,
     };
 
+    if !url.starts_with("https://") {
+        return true;
+    }
+
     let mut request = client.get(&url);
     if !header_name.is_empty() {
-        // All validation URLs are HTTPS (see validation_request above).
-        request = request.header(&header_name, &header_value); // lgtm[rs/cleartext-transmission]
+        request = request.header(&header_name, &header_value);
     }
     // NOTE: Anthropic requires an anthropic-version header.
     if provider_name == "anthropic" {
