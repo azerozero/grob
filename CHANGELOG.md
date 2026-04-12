@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.10](https://github.com/azerozero/grob/compare/v0.36.9...v0.36.10) - 2026-04-12
+
+### Fixed
+
+- *(security)* resoudre les alertes CodeQL #64 et Semgrep #56
+- *(ci)* supprimer paths-ignore sur pull_request pour debloquer les PRs docs-only
+
+### Other
+
+- *(readme)* synchroniser le README avec l'etat v0.36.9
+- corriger 7 lints clippy nightly (collapsible_match, sort_by_key, checked_div)
+- *(router)* lier classify.rs au guide auto-tune routing
+- corriger le formatage de lib.rs
+- declencher pipeline CI complet pour PR docs-only
+- *(how-to)* ajouter le guide auto-tune routing via trace et MCP
+
 ## [0.36.9](https://github.com/azerozero/grob/compare/v0.36.8...v0.36.9) - 2026-04-11
 
 ### Added
