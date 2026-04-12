@@ -112,13 +112,10 @@ impl CircuitBreaker {
         self.metrics.consecutive_failures = 0;
 
         match self.state {
-            CircuitState::HalfOpen => {
-                if self.metrics.consecutive_successes >= self.config.success_threshold {
-                    self.transition_to(CircuitState::Closed);
-                }
-            }
-            CircuitState::Closed => {
-                // Reset consecutive failures tracking
+            CircuitState::HalfOpen
+                if self.metrics.consecutive_successes >= self.config.success_threshold =>
+            {
+                self.transition_to(CircuitState::Closed);
             }
             _ => {}
         }
@@ -132,10 +129,10 @@ impl CircuitBreaker {
         self.metrics.last_failure_time = Some(Instant::now());
 
         match self.state {
-            CircuitState::Closed => {
-                if self.metrics.consecutive_failures >= self.config.failure_threshold {
-                    self.transition_to(CircuitState::Open);
-                }
+            CircuitState::Closed
+                if self.metrics.consecutive_failures >= self.config.failure_threshold =>
+            {
+                self.transition_to(CircuitState::Open);
             }
             CircuitState::HalfOpen => {
                 self.transition_to(CircuitState::Open);
