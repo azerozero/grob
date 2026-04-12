@@ -9,6 +9,7 @@
   <p align="center">
     <a href="https://github.com/azerozero/grob/actions/workflows/ci.yml"><img src="https://github.com/azerozero/grob/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/azerozero/grob/releases"><img src="https://img.shields.io/github/v/release/azerozero/grob" alt="Release"></a>
+    <a href="https://github.com/azerozero/grob/releases"><img src="https://img.shields.io/github/downloads/azerozero/grob/total" alt="Downloads"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
   </p>
 </p>
@@ -156,10 +157,14 @@ grob preset apply perf
 | **Gemini** | API key / OAuth (Pro) | Google AI Studio |
 | **Vertex AI** | ADC | Google Cloud |
 | **OpenRouter** | API key | 200+ models |
-| **Ollama** | none | Local inference |
 | **DeepSeek** | API key | V3, R1 |
 | **Mistral** | API key | Devstral, Codestral |
 | **Groq** | API key | Fast inference |
+| **z.ai** | API key | GLM-5 |
+| **MiniMax** | API key | MiniMax models |
+| **Kimi Coding** | API key | Kimi K2.5 |
+| **Zenmux** | API key | Aggregated routing |
+| **Ollama** | none | Local inference |
 
 Any OpenAI-compatible API works with `provider_type = "openai"` and a custom `base_url`.
 
@@ -213,6 +218,7 @@ grob preset apply gdpr        # EU-only routing + DLP
 - **Native TLS + ACME** -- Built-in HTTPS with Let's Encrypt auto-certificates
 - **Three API endpoints** -- `/v1/messages` (Anthropic), `/v1/chat/completions` (OpenAI), `/v1/responses` (Codex CLI)
 - **Prometheus + OpenTelemetry** -- `/metrics` endpoint, OTLP distributed tracing
+- **MCP tool matrix** -- JSON-RPC server for tool-calling orchestration
 
 See the [full feature matrix](docs/reference/features.md) for rate limiting, JWT/OAuth, log export, zero-downtime upgrades, record & replay, and more.
 
@@ -284,7 +290,7 @@ src/
 │   ├── dispatch/        Core dispatch: DLP, cache, route, provider loop
 │   ├── openai_compat/   OpenAI /v1/chat/completions translation
 │   ├── responses_compat/  OpenAI Responses API translation
-│   ├── rpc/             JSON-RPC endpoint
+│   ├── rpc/             JSON-RPC control plane
 │   ├── watch_sse.rs     Live traffic inspector SSE backend
 │   └── fan_out.rs       Parallel multi-provider dispatch
 ├── providers/           Provider implementations and registry
@@ -300,9 +306,15 @@ src/
 │   ├── tap/             Webhook event emission
 │   ├── harness/         Record & replay sandwich testing
 │   ├── tool_layer/      Tool-calling abstraction layer
-│   └── pledge/          Pledge-based capability restrictions
+│   ├── pledge/          Pledge-based capability restrictions
+│   ├── watch/           TUI dashboard (grob watch)
+│   ├── log_backend/     Structured audit log backend
+│   └── log_export/      Encrypted audit log export
 ├── security/            Circuit breakers, rate limiting, audit log
-├── storage/             Unified redb storage backend
+├── storage/             Unified redb storage backend (GrobStore)
+├── models/              Model and message type definitions
+├── cache/               Response cache layer
+├── message_tracing/     Request/response trace pipeline
 └── preset/              Preset management system
 ```
 
@@ -312,6 +324,7 @@ src/
 
 - Rust stable (edition 2021)
 - For TUI features: a terminal with 256-color support
+- [prek](https://github.com/j178/prek) for pre-commit hooks (optional but recommended)
 
 ### Build and run
 
@@ -324,6 +337,12 @@ cargo run -- start
 
 ```bash
 cargo test
+```
+
+### Pre-commit hooks
+
+```bash
+prek install   # activates fmt, clippy, gitleaks on commit
 ```
 
 ### Benchmarks
