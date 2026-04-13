@@ -388,6 +388,10 @@ fn scan_dlp_input(
                     "url_exfil",
                     format!("{} exfiltration URL(s) detected", dets.len()),
                 ),
+                crate::features::dlp::DlpBlockError::IndirectInjectionBlocked(dets) => (
+                    "indirect_injection",
+                    format!("{} indirect injection(s) detected", dets.len()),
+                ),
             };
             ctx.state.event_bus.emit(WatchEvent::DlpAction {
                 request_id: ctx.req_id.to_string(),
@@ -401,6 +405,7 @@ fn scan_dlp_input(
             let had_injection = matches!(
                 &block_err,
                 crate::features::dlp::DlpBlockError::InjectionBlocked(_)
+                    | crate::features::dlp::DlpBlockError::IndirectInjectionBlocked(_)
             );
             let risk =
                 crate::security::risk::assess_risk(&crate::security::risk::SecurityOutcome {

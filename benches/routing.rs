@@ -325,6 +325,7 @@ fn dlp_config_injection_only() -> DlpConfig {
             no_builtins: false,
             custom_patterns: Vec::new(),
             languages: vec!["all".to_string()],
+            ..Default::default()
         },
         pii: PiiConfig {
             credit_cards: false,
@@ -380,6 +381,7 @@ fn dlp_config_all() -> DlpConfig {
             no_builtins: false,
             custom_patterns: Vec::new(),
             languages: vec!["all".to_string()],
+            ..Default::default()
         },
         url_exfil: UrlExfilConfig {
             enabled: true,
