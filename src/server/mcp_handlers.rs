@@ -4,6 +4,8 @@
 //! dependency cycle. The pure MCP business logic (query, bench, calibrate,
 //! report, tools/list) stays in `features::mcp::server::methods`.
 
+use super::rpc::auth::CallerIdentity;
+use super::rpc::types::Role;
 use super::AppState;
 use crate::features::mcp::server::methods;
 use crate::features::mcp::server::types::{
@@ -40,6 +42,12 @@ pub async fn handle_mcp_rpc(
         "tool_matrix/report" => methods::handle_report(mcp, req.id.clone()).await,
         "grob_configure" => handle_configure(&state, req.params, req.id.clone()).await,
         "grob_hint" => handle_hint(&state, req.params, req.id.clone()).await,
+        "grob_keys" => handle_control_tool(&state, "grob/keys", req.params, req.id.clone()).await,
+        "grob_tools" => handle_control_tool(&state, "grob/tools", req.params, req.id.clone()).await,
+        "grob_hit" => handle_control_tool(&state, "grob/hit", req.params, req.id.clone()).await,
+        "grob_pledge" => {
+            handle_control_tool(&state, "grob/pledge", req.params, req.id.clone()).await
+        }
         "tools/list" => match methods::handle_tools_list(mcp, req.id.clone()).await {
             Ok(mut resp) => {
                 inject_builtin_tools(&mut resp);
@@ -119,7 +127,57 @@ async fn handle_hint(
     ))
 }
 
-/// Appends built-in tools (`grob_configure`, `grob_hint`) to the `tools/list` response.
+// ── Control plane bridge ───────────────────────────────────────────────────
+
+/// Returns a privileged caller identity for MCP-originated control requests.
+fn mcp_caller() -> CallerIdentity {
+    CallerIdentity {
+        role: Role::Admin,
+        ip: "127.0.0.1".into(),
+        tenant_id: "mcp".into(),
+    }
+}
+
+/// Bridges an MCP tool call to the RPC control plane.
+///
+/// Extracts the `action` parameter, builds the full RPC method name
+/// (e.g., `grob/keys/create`), and delegates to [`super::rpc::dispatch`].
+async fn handle_control_tool(
+    state: &Arc<AppState>,
+    namespace: &str,
+    params: serde_json::Value,
+    id: serde_json::Value,
+) -> Result<JsonRpcResponse, JsonRpcError> {
+    let action = params
+        .get("action")
+        .and_then(|a| a.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    if action.is_empty() {
+        return Err(JsonRpcError::invalid_params(
+            id,
+            "missing required parameter: action",
+        ));
+    }
+
+    let method = format!("{namespace}/{action}");
+    let caller = mcp_caller();
+
+    match super::rpc::dispatch(state, &caller, &method, Some(&params)).await {
+        Ok(data) => {
+            tracing::info!(
+                namespace,
+                action = action.as_str(),
+                "MCP: control tool call"
+            );
+            Ok(JsonRpcResponse::ok(id, data))
+        }
+        Err(e) => Err(JsonRpcError::internal(id, e.message())),
+    }
+}
+
+/// Appends built-in tools to the `tools/list` response.
 fn inject_builtin_tools(resp: &mut JsonRpcResponse) {
     if let Some(tools) = resp.result.get_mut("tools").and_then(|v| v.as_array_mut()) {
         tools.push(serde_json::json!({
@@ -155,6 +213,98 @@ fn inject_builtin_tools(resp: &mut JsonRpcResponse) {
                     "value": {}
                 },
                 "required": ["action", "section"]
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "grob_keys",
+            "description": "Manage virtual API keys: create, list, revoke, or rotate.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["create", "list", "revoke", "rotate"],
+                        "description": "Key management operation"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Human-readable label (required for create)"
+                    },
+                    "key_id": {
+                        "type": "string",
+                        "description": "Key identifier (required for revoke/rotate)"
+                    }
+                },
+                "required": ["action"]
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "grob_tools",
+            "description": "Inspect and toggle the tool layer: list active tools, enable/disable by name, or browse the full catalog.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "enable", "disable", "catalog"],
+                        "description": "Tool layer operation"
+                    },
+                    "tool": {
+                        "type": "string",
+                        "description": "Tool name (required for enable/disable)"
+                    }
+                },
+                "required": ["action"]
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "grob_hit",
+            "description": "Manage HIT (Human Intent Token) policies: list, get, set, or resolve which policy applies to a context.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list_policies", "get_policy", "set_policy", "resolve"],
+                        "description": "HIT policy operation"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Policy name (required for get_policy/set_policy)"
+                    },
+                    "policy": {
+                        "type": "object",
+                        "description": "Policy definition (required for set_policy)"
+                    },
+                    "context": {
+                        "type": "object",
+                        "description": "Request context for policy resolution (required for resolve)"
+                    }
+                },
+                "required": ["action"]
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "grob_pledge",
+            "description": "Manage pledge capability restrictions: activate a profile, clear to defaults, check status, or list available profiles.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["set", "clear", "status", "list_profiles"],
+                        "description": "Pledge operation"
+                    },
+                    "profile": {
+                        "type": "string",
+                        "description": "Profile name (required for set)"
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Optional source filter (for set)"
+                    }
+                },
+                "required": ["action"]
             }
         }));
     }
@@ -606,14 +756,18 @@ mod tests {
     }
 
     #[test]
-    fn test_inject_builtin_tools_adds_grob_hint() {
+    fn test_inject_builtin_tools_adds_all() {
         let mut resp =
             JsonRpcResponse::ok(serde_json::json!(1), serde_json::json!({ "tools": [] }));
         inject_builtin_tools(&mut resp);
         let tools = resp.result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 6);
         assert_eq!(tools[0]["name"], "grob_hint");
         assert_eq!(tools[1]["name"], "grob_configure");
+        assert_eq!(tools[2]["name"], "grob_keys");
+        assert_eq!(tools[3]["name"], "grob_tools");
+        assert_eq!(tools[4]["name"], "grob_hit");
+        assert_eq!(tools[5]["name"], "grob_pledge");
     }
 
     #[test]
@@ -626,8 +780,41 @@ mod tests {
         );
         inject_builtin_tools(&mut resp);
         let tools = resp.result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 7);
         assert_eq!(tools[0]["name"], "web_search");
         assert_eq!(tools[1]["name"], "grob_hint");
+    }
+
+    #[test]
+    fn test_inject_builtin_tools_schemas_valid() {
+        let mut resp =
+            JsonRpcResponse::ok(serde_json::json!(1), serde_json::json!({ "tools": [] }));
+        inject_builtin_tools(&mut resp);
+        let tools = resp.result["tools"].as_array().unwrap();
+        for tool in tools {
+            assert!(tool["name"].is_string(), "tool must have a name");
+            assert!(
+                tool["description"].is_string(),
+                "tool must have a description"
+            );
+            let schema = &tool["inputSchema"];
+            assert_eq!(schema["type"], "object", "schema must be an object");
+            assert!(
+                schema["properties"].is_object(),
+                "schema must have properties"
+            );
+            assert!(
+                schema["required"].is_array(),
+                "schema must have required array"
+            );
+        }
+    }
+
+    #[test]
+    fn test_mcp_caller_is_admin() {
+        let caller = mcp_caller();
+        assert_eq!(caller.role, Role::Admin);
+        assert_eq!(caller.ip, "127.0.0.1");
+        assert_eq!(caller.tenant_id, "mcp");
     }
 }
