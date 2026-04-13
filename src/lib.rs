@@ -80,6 +80,8 @@ pub mod cache;
 pub mod cli;
 /// CLI command implementations (start, stop, exec, doctor, etc.).
 pub mod commands;
+/// Generic control engine for unified CLI / MCP / UI dispatch.
+pub mod control;
 /// Optional features: DLP, MCP, TAP, token pricing.
 pub mod features;
 /// Server instance lifecycle management.
