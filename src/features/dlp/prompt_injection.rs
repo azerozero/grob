@@ -47,6 +47,16 @@ pub enum InjectionResult {
     Blocked(Vec<InjectionDetection>),
 }
 
+/// Result of indirect injection scanning (responses and tool results).
+pub enum IndirectInjectionResult {
+    /// No injection patterns detected.
+    Clean,
+    /// Injection detected; warning emitted without blocking.
+    Warned(Vec<InjectionDetection>),
+    /// Injection detected; response or tool result blocked.
+    Blocked(Vec<InjectionDetection>),
+}
+
 use super::injection_patterns::{builtin_universal_patterns, CompiledPattern, LANGUAGE_BUILDERS};
 
 // ─── Normalization cache ────────────────────────────────────────────────────
@@ -290,44 +300,21 @@ impl InjectionDetector {
         }
     }
 
-    /// Scan text for prompt injection attempts.
+    /// Scans text for prompt injection attempts in user input.
+    ///
     /// Runs normalization pipeline then matches against all compiled patterns.
+    /// Uses `action` from config to determine the outcome.
     pub fn scan(&self, text: &str) -> InjectionResult {
         if text.len() < 10 {
             return InjectionResult::Clean;
         }
 
-        // Phase 1: scan original text (fast path)
-        let mut detections = self.scan_patterns(text);
-
-        // Phase 2: scan normalized text (homoglyphs, invisible chars, NFKC)
-        if detections.is_empty() {
-            let key = fnv1a(text);
-            let normalized = self.normalize_cache.get_with(key, || normalize_text(text));
-            if normalized != text {
-                detections = self.scan_patterns(&normalized);
-            }
-        }
-
-        // Phase 3: scan aggressively normalized text (leet speak)
-        if detections.is_empty() {
-            let key = fnv1a(text).wrapping_add(1);
-            let aggressive = self
-                .normalize_aggressive_cache
-                .get_with(key, || normalize_text_aggressive(text));
-            if aggressive != text {
-                let new_dets = self.scan_patterns(&aggressive);
-                if !new_dets.is_empty() {
-                    detections = new_dets;
-                }
-            }
-        }
+        let detections = self.detect_patterns(text);
 
         if detections.is_empty() {
             return InjectionResult::Clean;
         }
 
-        // EU AI Act Art. 12 compliant structured audit logging
         for det in &detections {
             tracing::warn!(
                 target: "grob::dlp::audit",
@@ -351,6 +338,84 @@ impl InjectionDetector {
             DlpAction::Block => InjectionResult::Blocked(detections),
             DlpAction::Log | DlpAction::Redact => InjectionResult::Logged,
         }
+    }
+
+    /// Returns `true` if response-side injection scanning is enabled.
+    pub fn scan_responses_enabled(&self) -> bool {
+        self.config.scan_responses
+    }
+
+    /// Returns `true` if tool_result injection scanning is enabled.
+    pub fn scan_tool_results_enabled(&self) -> bool {
+        self.config.scan_tool_results
+    }
+
+    /// Scans text for indirect injection (responses and tool results).
+    ///
+    /// Uses `response_action` instead of `action` to determine the outcome.
+    /// Reuses the same pattern matching and normalization pipeline as [`scan`].
+    pub fn scan_indirect(&self, text: &str) -> IndirectInjectionResult {
+        if text.len() < 10 {
+            return IndirectInjectionResult::Clean;
+        }
+
+        let detections = self.detect_patterns(text);
+
+        if detections.is_empty() {
+            return IndirectInjectionResult::Clean;
+        }
+
+        for det in &detections {
+            tracing::warn!(
+                target: "grob::dlp::audit",
+                event = "indirect_injection_detected",
+                pattern = %det.pattern_name,
+                action = %self.config.response_action,
+                matched_text_len = det.matched_text.len(),
+                "DLP indirect injection: {}",
+                det
+            );
+            metrics::counter!(
+                "grob_dlp_detections_total",
+                "type" => "indirect_injection",
+                "rule" => det.pattern_name.clone(),
+                "action" => self.config.response_action.to_string()
+            )
+            .increment(1);
+        }
+
+        match self.config.response_action {
+            DlpAction::Block => IndirectInjectionResult::Blocked(detections),
+            DlpAction::Log | DlpAction::Redact => IndirectInjectionResult::Warned(detections),
+        }
+    }
+
+    /// Runs all three normalization passes and returns detections.
+    fn detect_patterns(&self, text: &str) -> Vec<InjectionDetection> {
+        let mut detections = self.scan_patterns(text);
+
+        if detections.is_empty() {
+            let key = fnv1a(text);
+            let normalized = self.normalize_cache.get_with(key, || normalize_text(text));
+            if normalized != text {
+                detections = self.scan_patterns(&normalized);
+            }
+        }
+
+        if detections.is_empty() {
+            let key = fnv1a(text).wrapping_add(1);
+            let aggressive = self
+                .normalize_aggressive_cache
+                .get_with(key, || normalize_text_aggressive(text));
+            if aggressive != text {
+                let new_dets = self.scan_patterns(&aggressive);
+                if !new_dets.is_empty() {
+                    detections = new_dets;
+                }
+            }
+        }
+
+        detections
     }
 
     /// Run all patterns against a given text, return detections.
@@ -404,6 +469,7 @@ mod tests {
             no_builtins: false,
             custom_patterns: vec![],
             languages: vec!["all".to_string()],
+            ..Default::default()
         };
         let hot = hot_config::build_initial_hot_config(&[], &[], &DomainMatchMode::Suffix, &[]);
         InjectionDetector::new(config, hot)
@@ -642,6 +708,7 @@ mod tests {
             no_builtins: true,
             custom_patterns: vec![r"(?i)corporate\s+confidential\s+override".to_string()],
             languages: vec![],
+            ..Default::default()
         };
         let hot = hot_config::build_initial_hot_config(&[], &[], &DomainMatchMode::Suffix, &[]);
         let det = InjectionDetector::new(config, hot);

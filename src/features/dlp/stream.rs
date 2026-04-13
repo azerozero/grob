@@ -130,12 +130,25 @@ where
                     *this.blocked = true;
                     tracing::warn!("DLP stream blocked: {}", block_err);
                     metrics::counter!("grob_dlp_stream_blocked_total").increment(1);
-                    // Emit error SSE event then terminate
                     let error_event = format!(
                         "event: error\ndata: {{\"type\":\"dlp_block\",\"message\":\"{}\"}}\n\n",
                         block_err.to_string().replace('"', "\\\"")
                     );
                     return Poll::Ready(Some(Ok(Bytes::from(error_event))));
+                }
+
+                // Check for indirect injection in accumulated response
+                if let Err(block_err) = this.engine.check_response_injection(this.buffer) {
+                    if matches!(block_err, super::DlpBlockError::IndirectInjectionBlocked(_)) {
+                        *this.blocked = true;
+                        tracing::warn!("DLP stream blocked (indirect injection): {}", block_err);
+                        metrics::counter!("grob_dlp_stream_blocked_total").increment(1);
+                        let error_event = format!(
+                            "event: error\ndata: {{\"type\":\"dlp_block\",\"message\":\"{}\"}}\n\n",
+                            block_err.to_string().replace('"', "\\\"")
+                        );
+                        return Poll::Ready(Some(Ok(Bytes::from(error_event))));
+                    }
                 }
 
                 result
