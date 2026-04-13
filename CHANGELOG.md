@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.13](https://github.com/azerozero/grob/compare/v0.36.12...v0.36.13) - 2026-04-13
+
+### Fixed
+
+- *(ci)* auto-cleanup des sync-main PRs obsoletes et resolution de conflits
+
+### Other
+
+- absorber l'historique main dans develop
+- *(adr)* marquer ADR-0013 et ADR-0015 done apres Phase A
+
 ## [0.36.12](https://github.com/azerozero/grob/compare/v0.36.11...v0.36.12) - 2026-04-13
 
 ### Added
