@@ -149,7 +149,7 @@ Virtual keys are managed via CLI or API. Each key record contains:
 
 ### Storage
 
-Virtual key records are stored encrypted (AES-256-GCM) in redb with two index entries:
+Virtual key records are stored as individually encrypted files (`~/.grob/vkeys/<hash>.json.enc`, AES-256-GCM) with two index strategies:
 - **Primary**: keyed by SHA-256 hash (for O(1) authentication lookups).
 - **Secondary**: keyed by `id:<uuid>` (for list/revoke/delete by ID).
 
@@ -187,7 +187,7 @@ All providers use PKCE (Proof Key for Code Exchange) with SHA-256 challenge meth
 1. **Generate**: Random 32-byte verifier, base64url-encoded. Challenge = `base64url(SHA-256(verifier))`.
 2. **Authorize**: Redirect user to provider's auth URL with `code_challenge` and `code_challenge_method=S256`.
 3. **Exchange**: POST authorization code + verifier to token endpoint. Provider verifies `SHA-256(verifier) == challenge`.
-4. **Store**: Access token, refresh token, and expiration saved to redb (encrypted).
+4. **Store**: Access token, refresh token, and expiration saved as encrypted files (`~/.grob/tokens/<id>.json.enc`, AES-256-GCM).
 
 ### Token lifecycle
 
@@ -210,7 +210,7 @@ All providers use PKCE (Proof Key for Code Exchange) with SHA-256 challenge meth
 
 ### Token storage
 
-OAuth tokens are stored in `~/.grob/grob.db` (redb) under the `oauth_tokens` table. Each token is encrypted with AES-256-GCM before storage. Legacy `oauth_tokens.json` files are auto-migrated on first database open (see [Storage Reference](storage.md)).
+OAuth tokens are stored as individually encrypted files in `~/.grob/tokens/<id>.json.enc` (AES-256-GCM). Each file is written atomically (write → fsync → rename) and has restricted permissions (`0600`). See [Storage Reference](storage.md).
 
 ### Provider-specific notes
 

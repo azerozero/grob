@@ -221,7 +221,7 @@ Every compliance claim was verified against the actual codebase:
 | Live TUI | `grob watch` — real-time traffic inspector with DLP/fallback events | `grob watch` (feature `watch`) |
 | SSE event stream | `GET /api/events` for programmatic monitoring | Built-in |
 | Message tracing | Per-request trace IDs with structured logging | `[server.tracing] enabled = true` |
-| Spend tracking | Persistent monthly spend per provider/model/tenant (redb) | Built-in |
+| Spend tracking | Persistent monthly spend per provider/model/tenant (JSONL journals) | Built-in |
 | Budget alerts | Warning at configurable threshold (default 80%) | `[budget] warn_at_percent` |
 
 ## Operations
@@ -282,7 +282,7 @@ Every compliance claim was verified against the actual codebase:
 ## Architecture
 
 - **Language**: Rust (tokio async runtime, axum HTTP framework)
-- **Storage**: redb embedded KV store (no PostgreSQL, no Redis)
+- **Storage**: Atomic files + JSONL journals (no PostgreSQL, no Redis, no embedded DB)
 - **Allocator**: jemalloc (non-MSVC) for ~20% throughput improvement
 - **Container**: 6 MB `FROM scratch`, rustls TLS bundled
 - **Codebase**: ~29K lines of Rust, 520+ tests

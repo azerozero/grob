@@ -311,7 +311,7 @@ src/
 │   ├── log_backend/     Structured audit log backend
 │   └── log_export/      Encrypted audit log export
 ├── security/            Circuit breakers, rate limiting, audit log
-├── storage/             Unified redb storage backend (GrobStore)
+├── storage/             Persistent storage layer: atomic files, JSONL journals (GrobStore)
 ├── models/              Model and message type definitions
 ├── cache/               Response cache layer
 ├── message_tracing/     Request/response trace pipeline

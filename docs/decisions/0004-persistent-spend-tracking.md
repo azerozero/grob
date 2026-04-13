@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR-0013](0013-storage-files-no-redb.md)
 
 ## Context and Problem Statement
 
