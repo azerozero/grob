@@ -1903,7 +1903,6 @@ dependencies = [
  "rand 0.8.5",
  "ratatui",
  "rcgen",
- "redb",
  "regex",
  "regex-syntax 0.8.10",
  "reqwest",
@@ -4096,15 +4095,6 @@ dependencies = [
  "rustls-pki-types",
  "time",
  "yasna",
-]
-
-[[package]]
-name = "redb"
-version = "2.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eca1e9d98d5a7e9002d0013e18d5a9b000aee942eb134883a82f06ebffb6c01"
-dependencies = [
- "libc",
 ]
 
 [[package]]
