@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.12](https://github.com/azerozero/grob/compare/v0.36.11...v0.36.12) - 2026-04-13
+
+### Added
+
+- *(mcp)* exposer les namespaces control via MCP tools + pledge CLI ([#179](https://github.com/azerozero/grob/pull/179))
+- *(cli)* migrer les commandes CLI vers le client RPC thin ([#178](https://github.com/azerozero/grob/pull/178))
+
+### Other
+
+- *(storage)* remplacer redb par fichiers atomiques + journal append-only (ADR-0013) ([#180](https://github.com/azerozero/grob/pull/180))
+
 ## [0.36.11](https://github.com/azerozero/grob/compare/v0.36.10...v0.36.11) - 2026-04-13
 
 ### Added
