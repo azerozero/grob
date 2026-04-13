@@ -150,8 +150,8 @@ async fn main() -> anyhow::Result<()> {
             commands::restart::cmd_restart(config, config_source, detach, cli_args.config).await?;
         }
         Commands::Status => commands::status::cmd_status(&config).await?,
-        Commands::Spend => commands::spend::cmd_spend(&config),
-        Commands::Model => commands::model::cmd_model(&config),
+        Commands::Spend => commands::spend::cmd_spend(&config).await,
+        Commands::Model => commands::model::cmd_model(&config).await,
         Commands::Validate => commands::validate::cmd_validate(&config).await?,
         Commands::Run {
             port,
@@ -206,16 +206,22 @@ async fn main() -> anyhow::Result<()> {
                 rate_limit,
                 allowed_models,
                 expires,
-            } => commands::key::cmd_key_create(
-                &name,
-                &tenant,
-                budget,
-                rate_limit,
-                allowed_models,
-                expires,
-            ),
-            KeyAction::List { json } => commands::key::cmd_key_list(json),
-            KeyAction::Revoke { id_or_prefix } => commands::key::cmd_key_revoke(&id_or_prefix),
+            } => {
+                commands::key::cmd_key_create(
+                    &config,
+                    &name,
+                    &tenant,
+                    budget,
+                    rate_limit,
+                    allowed_models,
+                    expires,
+                )
+                .await
+            }
+            KeyAction::List { json } => commands::key::cmd_key_list(&config, json).await,
+            KeyAction::Revoke { id_or_prefix } => {
+                commands::key::cmd_key_revoke(&config, &id_or_prefix).await
+            }
         },
         Commands::Rollback => {
             commands::config_rollback::cmd_config_rollback(&config, &config_source).await?;
