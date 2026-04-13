@@ -29,6 +29,18 @@ jobs:
       # We therefore create a short-lived sync branch, push it, and open a PR
       # that can be auto-merged once CI passes. This replaces the previous
       # direct `git push origin main` which was rejected by the ruleset.
+      - name: Close stale sync-main PRs
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          gh pr list --base main --label sync-main --state open \
+            --json number,headRefName --jq '.[].number' \
+          | while read -r pr_num; do
+              echo "Closing stale sync PR #$pr_num"
+              gh pr close "$pr_num" --comment "Superseded by new sync for ${GITHUB_REF#refs/tags/}" \
+                --delete-branch || true
+            done
+
       - name: Create sync branch from develop
         id: branch
         run: |
@@ -37,7 +49,15 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           git checkout -B "$BRANCH"
-          git push --force-with-lease origin "$BRANCH"
+
+      - name: Merge main into sync branch to prevent conflicts
+        run: |
+          git fetch origin main
+          git merge origin/main --no-edit -X ours || true
+
+      - name: Push sync branch
+        run: |
+          git push --force-with-lease origin "${{ steps.branch.outputs.branch }}"
 
       - name: Open PR from sync branch to main
         env:
@@ -45,28 +65,19 @@ jobs:
         run: |
           TAG="${{ steps.branch.outputs.tag }}"
           BRANCH="${{ steps.branch.outputs.branch }}"
-          # Idempotent: reuse existing open PR if one exists.
-          EXISTING=$(gh pr list --head "$BRANCH" --base main --state open --json number --jq '.[0].number' || true)
-          if [ -n "$EXISTING" ]; then
-            echo "Reusing existing PR #$EXISTING"
-            PR_NUMBER="$EXISTING"
-          else
-            PR_NUMBER=$(gh pr create \
-              --base main \
-              --head "$BRANCH" \
-              --title "chore(sync): develop → main (${TAG})" \
-              --body "Automated sync triggered by tag \`${TAG}\`. This PR promotes the develop branch to main so the tag can be released. Safe to auto-merge once CI passes." \
-              --label sync-main \
-              | grep -oE '[0-9]+$')
-            echo "Opened PR #$PR_NUMBER"
-          fi
+          PR_NUMBER=$(gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore(sync): develop → main (${TAG})" \
+            --body "Automated sync triggered by tag \`${TAG}\`. This PR promotes the develop branch to main so the tag can be released. Safe to auto-merge once CI passes." \
+            --label sync-main \
+            | grep -oE '[0-9]+$')
+          echo "Opened PR #$PR_NUMBER"
           echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Enable auto-merge on PR
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
-          # Try auto-merge; if it fails (e.g. branch protection disables it),
-          # leave the PR open for manual merge. We don't fail the job.
           gh pr merge "${{ steps.branch.outputs.branch }}" --auto --squash --delete-branch \
             || echo "::warning::Auto-merge could not be enabled — merge the PR manually."
