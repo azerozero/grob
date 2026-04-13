@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: done
 date: 2026-04-09
 deciders: [azerozero, architect]
 consulted: []
