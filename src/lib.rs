@@ -108,7 +108,7 @@ pub mod router;
 pub mod security;
 /// Axum HTTP server, middleware, and application state.
 pub mod server;
-/// Unified redb storage backend.
+/// Persistent storage (atomic files + append-only journals).
 pub mod storage;
 /// Core trait contracts for the dispatch pipeline.
 pub mod traits;

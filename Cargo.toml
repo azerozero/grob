@@ -81,8 +81,8 @@ aho-corasick = "1.1"
 memchr = "2"
 hmac = "0.12"
 
-# Storage (embedded key-value store)
-redb = "2"
+# Atomic file writes (storage layer)
+tempfile = "3"
 
 # Credential encryption at rest (AES-256-GCM)
 aes-gcm = "0.10"
