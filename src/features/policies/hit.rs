@@ -33,6 +33,9 @@ pub struct HitOverride {
     /// Quorum voting configuration (used when auth_method is "quorum").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub quorum: Option<crate::features::policies::quorum::QuorumConfig>,
+    /// Dynamic risk scoring configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scoring: Option<super::scoring::HitScoringConfig>,
 }
 
 fn default_auth_method() -> String {
@@ -82,6 +85,40 @@ pub fn evaluate_tool_use(policy: &HitOverride, tool: &ToolUseInfo) -> HitDecisio
     HitDecision::RequireApproval
 }
 
+/// Evaluates a tool_use with optional risk scoring.
+///
+/// Static deny rules always take precedence. When a [`RiskScorer`] is
+/// provided, the numeric score determines the decision. Falls back to
+/// static approve/require lists when no scorer is available.
+///
+/// [`RiskScorer`]: super::scoring::RiskScorer
+pub fn evaluate_tool_use_scored(
+    policy: &HitOverride,
+    tool: &ToolUseInfo,
+    scorer: Option<&super::scoring::RiskScorer>,
+    ctx: &super::scoring::ScoringContext,
+) -> (HitDecision, Option<super::scoring::RiskScore>) {
+    for deny_rule in &policy.deny {
+        if matches_tool_pattern(deny_rule, &tool.name, &tool.input_preview) {
+            return (HitDecision::Deny, None);
+        }
+    }
+
+    if let Some(scorer) = scorer {
+        let risk = scorer.evaluate(tool, ctx);
+        let decision = scorer.decide(&risk);
+        return (decision, Some(risk));
+    }
+
+    for approve_rule in &policy.auto_approve {
+        if tool.name == *approve_rule {
+            return (HitDecision::AutoApprove, None);
+        }
+    }
+
+    (HitDecision::RequireApproval, None)
+}
+
 /// Matches a deny pattern like `"Bash(rm -rf*)"` against tool name and input.
 ///
 /// Format: `"ToolName"` (exact) or `"ToolName(glob_pattern)"` (name + input glob).
@@ -127,6 +164,7 @@ mod tests {
             webhook_url: None,
             required_signatures: None,
             quorum: None,
+            scoring: None,
         }
     }
 
@@ -254,5 +292,62 @@ mod tests {
             "Bash",
             "delete_account"
         ));
+    }
+
+    #[test]
+    fn test_scored_deny_overrides_scoring() {
+        use super::super::scoring::*;
+
+        let mut policy = test_policy();
+        policy.scoring = Some(HitScoringConfig {
+            thresholds: ScoringThresholds::default(),
+            rules: vec![ScoringRule {
+                tool_name: "Bash".into(),
+                args_match: None,
+                base_score: 5,
+            }],
+        });
+        let scorer = RiskScorer::new(policy.scoring.as_ref().unwrap()).unwrap();
+        let ctx = ScoringContext::default();
+
+        let (decision, risk) =
+            evaluate_tool_use_scored(&policy, &tool("Bash", "rm -rf /tmp"), Some(&scorer), &ctx);
+        assert_eq!(decision, HitDecision::Deny);
+        assert!(risk.is_none());
+    }
+
+    #[test]
+    fn test_scored_auto_approve_low_score() {
+        use super::super::scoring::*;
+
+        let policy = HitOverride {
+            scoring: Some(HitScoringConfig {
+                thresholds: ScoringThresholds::default(),
+                rules: vec![ScoringRule {
+                    tool_name: "Bash".into(),
+                    args_match: None,
+                    base_score: 10,
+                }],
+            }),
+            ..Default::default()
+        };
+        let scorer = RiskScorer::new(policy.scoring.as_ref().unwrap()).unwrap();
+        let ctx = ScoringContext::default();
+
+        let (decision, risk) =
+            evaluate_tool_use_scored(&policy, &tool("Bash", "ls -la"), Some(&scorer), &ctx);
+        assert_eq!(decision, HitDecision::AutoApprove);
+        assert_eq!(risk.unwrap().score, 10);
+    }
+
+    #[test]
+    fn test_scored_fallback_without_scorer() {
+        let policy = test_policy();
+        let ctx = super::super::scoring::ScoringContext::default();
+
+        let (decision, risk) =
+            evaluate_tool_use_scored(&policy, &tool("Read", "/some/file"), None, &ctx);
+        assert_eq!(decision, HitDecision::AutoApprove);
+        assert!(risk.is_none());
     }
 }
