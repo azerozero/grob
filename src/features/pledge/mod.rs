@@ -5,6 +5,7 @@
 //! sees them. A pledged `read_only` session cannot call `bash` because the
 //! tool literally does not exist in the request sent to the provider.
 
+pub mod cli;
 pub mod config;
 pub mod profiles;
 
