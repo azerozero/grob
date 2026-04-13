@@ -24,3 +24,4 @@ rust/path-injection,src/auth/token_store.rs,227,"Mitigated: path traversal check
 rust/uncontrolled-allocation-size,src/server/openai_compat/transform.rs,178,"Mitigated: request body size limited by RequestBodyLimitLayer (default 10MB) in middleware stack"
 rust/uncontrolled-allocation-size,src/server/openai_compat/transform.rs,199,"Same — body size capped at middleware level before reaching this code"
 rust/cleartext-transmission,src/commands/credential_check.rs,146,"Mitigated: runtime guard rejects non-HTTPS URLs before sending credentials"
+rust/cleartext-logging,src/commands/key.rs,288,"Key ID (UUID) is a public identifier, not a secret — displayed intentionally for user confirmation"
