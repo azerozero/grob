@@ -37,6 +37,7 @@ fn policy_deny_arg() -> HitOverride {
         webhook_url: None,
         required_signatures: None,
         quorum: None,
+        scoring: None,
     }
 }
 
@@ -50,6 +51,7 @@ fn simple_policy() -> HitOverride {
         webhook_url: None,
         required_signatures: None,
         quorum: None,
+        scoring: None,
     }
 }
 

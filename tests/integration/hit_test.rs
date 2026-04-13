@@ -48,6 +48,7 @@ fn require_approval_policy() -> HitOverride {
         webhook_url: None,
         required_signatures: None,
         quorum: None,
+        scoring: None,
     }
 }
 
