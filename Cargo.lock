@@ -1858,7 +1858,7 @@ dependencies = [
 
 [[package]]
 name = "grob"
-version = "0.36.12"
+version = "0.36.13"
 dependencies = [
  "aes-gcm",
  "age",
