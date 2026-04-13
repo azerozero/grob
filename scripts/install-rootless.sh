@@ -9,11 +9,15 @@ CONFIG_DIR="${GROB_DIR}/config"
 DATA_DIR="${GROB_DIR}/data"
 QUADLET_DIR="${HOME}/.config/containers/systemd"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+# Colors (gated on TTY + NO_COLOR)
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+else
+    RED='' GREEN='' YELLOW='' NC=''
+fi
 
 echo -e "${GREEN}Installing Grob as rootless Podman container...${NC}"
 
