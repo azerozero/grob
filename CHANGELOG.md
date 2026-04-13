@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.11](https://github.com/azerozero/grob/compare/v0.36.10...v0.36.11) - 2026-04-13
+
+### Added
+
+- *(dlp)* ajouter la detection d'injection indirecte dans les responses et tool_result ([#175](https://github.com/azerozero/grob/pull/175))
+- *(control)* implementer le moteur ControlEngine generique ([#174](https://github.com/azerozero/grob/pull/174))
+- *(hit)* implementer le scoring de risque parametrable ([#173](https://github.com/azerozero/grob/pull/173))
+
 ## [0.36.10](https://github.com/azerozero/grob/compare/v0.36.9...v0.36.10) - 2026-04-12
 
 ### Fixed
