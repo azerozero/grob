@@ -1,7 +1,74 @@
-use crate::{cli, features, providers};
+use crate::{cli, features, instance, providers};
 
 /// Displays current month spend breakdown by provider and model.
-pub fn cmd_spend(config: &cli::AppConfig) {
+pub async fn cmd_spend(config: &cli::AppConfig) {
+    let host = &config.server.host;
+    let port = config.server.port.value();
+
+    if instance::is_instance_running(host, port).await {
+        let base_url = cli::format_base_url(host, port);
+        print_spend_from_rpc(&base_url, config).await;
+    } else {
+        print_spend_from_local(config);
+    }
+}
+
+/// Prints spend data by querying the running server via RPC.
+async fn print_spend_from_rpc(base_url: &str, config: &cli::AppConfig) {
+    use super::rpc_client::try_rpc_call;
+
+    let current = try_rpc_call(base_url, "grob/budget/current", None).await;
+    let breakdown = try_rpc_call(base_url, "grob/budget/breakdown", None).await;
+
+    let (total, budget_usd) = match &current {
+        Some(c) => (
+            c["total_usd"].as_f64().unwrap_or(0.0),
+            c["budget_usd"].as_f64().unwrap_or(0.0),
+        ),
+        None => {
+            eprintln!("  (RPC unavailable, falling back to local data)");
+            print_spend_from_local(config);
+            return;
+        }
+    };
+
+    println!("\u{1f4b0} Spend (live from server)");
+    println!();
+
+    if budget_usd > 0.0 {
+        let pct = (total / budget_usd) * 100.0;
+        println!(
+            "  Total:       ${:.2} / ${:.2} ({:.0}%)",
+            total, budget_usd, pct
+        );
+    } else {
+        println!("  Total:       ${:.2} (no limit)", total);
+    }
+    println!();
+
+    if let Some(bd) = &breakdown {
+        if let Some(arr) = bd.as_array() {
+            if !arr.is_empty() {
+                println!("  By provider:");
+                for entry in arr {
+                    let name = entry["provider"].as_str().unwrap_or("?");
+                    let spent = entry["spent_usd"].as_f64().unwrap_or(0.0);
+                    let reqs = entry["request_count"].as_u64().unwrap_or(0);
+                    println!("    {:<20} ${:.2} ({} reqs)", name, spent, reqs);
+                }
+                println!();
+            }
+        }
+    }
+
+    if budget_usd > 0.0 {
+        let remaining = (budget_usd - total).max(0.0);
+        println!("  Budget remaining: ${:.2} (global)", remaining);
+    }
+}
+
+/// Prints spend data from local spend file (server not running).
+fn print_spend_from_local(config: &cli::AppConfig) {
     let spend = features::token_pricing::spend::load_spend_data();
     let budget = &config.budget;
 
@@ -13,7 +80,7 @@ pub fn cmd_spend(config: &cli::AppConfig) {
         spend.month.clone()
     };
 
-    println!("💰 Spend for {}", month_display);
+    println!("\u{1f4b0} Spend for {}", month_display);
     println!();
 
     if budget.monthly_limit_usd.value() > 0.0 {
@@ -55,7 +122,7 @@ pub fn cmd_spend(config: &cli::AppConfig) {
                 let flag = if **amount >= limit {
                     " EXCEEDED"
                 } else if pct >= budget.warn_at_percent as f64 {
-                    " ⚠️"
+                    " \u{26a0}\u{fe0f}"
                 } else {
                     ""
                 };
@@ -87,7 +154,7 @@ pub fn cmd_spend(config: &cli::AppConfig) {
                 let flag = if **amount >= limit {
                     " EXCEEDED"
                 } else if pct >= budget.warn_at_percent as f64 {
-                    " ⚠️"
+                    " \u{26a0}\u{fe0f}"
                 } else {
                     ""
                 };

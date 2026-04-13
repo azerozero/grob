@@ -90,7 +90,7 @@ impl OAuthToken {
     }
 }
 
-/// Token storage - persists to redb (via GrobStore) or JSON file (legacy).
+/// Token storage — persists to file-based GrobStore or JSON file (legacy).
 #[derive(Debug, Clone)]
 pub struct TokenStore {
     /// Path to token storage file (legacy fallback)

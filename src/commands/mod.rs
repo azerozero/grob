@@ -35,6 +35,8 @@ pub mod model;
 pub mod preset;
 /// Stops and restarts the grob server in one operation.
 pub mod restart;
+/// Lightweight JSON-RPC 2.0 client for calling the running server.
+pub mod rpc_client;
 /// Starts the server in foreground (non-daemonized) mode.
 pub mod run;
 /// Interactive first-run setup wizard.

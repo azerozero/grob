@@ -350,6 +350,15 @@ pub struct PromptInjectionConfig {
     /// Languages to scan for injection; `["all"]` covers all 28.
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,
+    /// Scans LLM responses for indirect injection patterns.
+    #[serde(default = "default_true")]
+    pub scan_responses: bool,
+    /// Scans `tool_result` content blocks for indirect injection patterns.
+    #[serde(default = "default_true")]
+    pub scan_tool_results: bool,
+    /// Remediation action for indirect injection (responses and tool results).
+    #[serde(default)]
+    pub response_action: DlpAction,
 }
 
 fn default_languages() -> Vec<String> {
@@ -363,7 +372,10 @@ impl Default for PromptInjectionConfig {
             action: DlpAction::Log,
             no_builtins: false,
             custom_patterns: Vec::new(),
-            languages: default_languages(), // "all" = all 28 languages
+            languages: default_languages(),
+            scan_responses: true,
+            scan_tool_results: true,
+            response_action: DlpAction::Log,
         }
     }
 }

@@ -116,6 +116,8 @@ pub enum DlpBlockError {
     InjectionBlocked(Vec<prompt_injection::InjectionDetection>),
     /// Indicates one or more URL exfiltration attempts were detected.
     UrlExfilBlocked(Vec<url_exfil::UrlExfilDetection>),
+    /// Indicates indirect injection in a response or tool_result block.
+    IndirectInjectionBlocked(Vec<prompt_injection::InjectionDetection>),
 }
 
 impl std::fmt::Display for DlpBlockError {
@@ -133,6 +135,16 @@ impl std::fmt::Display for DlpBlockError {
             }
             DlpBlockError::UrlExfilBlocked(dets) => {
                 write!(f, "URL exfiltration detected: ")?;
+                for (i, d) in dets.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", d)?;
+                }
+                Ok(())
+            }
+            DlpBlockError::IndirectInjectionBlocked(dets) => {
+                write!(f, "Indirect injection detected: ")?;
                 for (i, d) in dets.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
@@ -364,7 +376,7 @@ impl DlpEngine {
         reports
     }
 
-    /// Sanitize an outgoing request with block support.
+    /// Sanitizes an outgoing request with block support.
     ///
     /// Returns `Err(DlpBlockError)` if prompt injection or URL exfiltration
     /// is detected with `action: block`. The request must NOT proceed to
@@ -388,6 +400,22 @@ impl DlpEngine {
             }
         }
 
+        // Stage 0.1: Indirect injection in tool_result blocks
+        if let Some(ref detector) = self.injection_detector {
+            if detector.scan_tool_results_enabled() {
+                let tool_texts = Self::extract_tool_result_text(request);
+                for text in &tool_texts {
+                    match detector.scan_indirect(text) {
+                        prompt_injection::IndirectInjectionResult::Blocked(dets) => {
+                            return Err(DlpBlockError::IndirectInjectionBlocked(dets));
+                        }
+                        prompt_injection::IndirectInjectionResult::Warned(_)
+                        | prompt_injection::IndirectInjectionResult::Clean => {}
+                    }
+                }
+            }
+        }
+
         // Stage 0.5: URL exfiltration detection on inbound requests
         if let Some(ref exfil) = self.url_exfil_scanner {
             for text in &all_text {
@@ -400,6 +428,56 @@ impl DlpEngine {
         // Then do normal sanitization (names, secrets, PII)
         let reports = self.sanitize_request_reported(request);
         Ok(reports)
+    }
+
+    /// Checks response text for indirect injection attempts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DlpBlockError::IndirectInjectionBlocked`] when the text
+    /// matches an injection pattern and `response_action` is `block`.
+    pub fn check_response_injection(
+        &self,
+        text: &str,
+    ) -> Result<Vec<DlpActionReport>, DlpBlockError> {
+        let mut reports = Vec::new();
+        if let Some(ref detector) = self.injection_detector {
+            if detector.scan_responses_enabled() {
+                match detector.scan_indirect(text) {
+                    prompt_injection::IndirectInjectionResult::Blocked(dets) => {
+                        return Err(DlpBlockError::IndirectInjectionBlocked(dets));
+                    }
+                    prompt_injection::IndirectInjectionResult::Warned(dets) => {
+                        for det in &dets {
+                            reports.push(DlpActionReport {
+                                action: DlpAction::Warn,
+                                rule_type: DlpRuleType::Injection,
+                                detail: format!("indirect: {}", det.pattern_name),
+                            });
+                        }
+                    }
+                    prompt_injection::IndirectInjectionResult::Clean => {}
+                }
+            }
+        }
+        Ok(reports)
+    }
+
+    /// Extracts text from all `tool_result` content blocks in a request.
+    fn extract_tool_result_text(request: &CanonicalRequest) -> Vec<String> {
+        let mut texts = Vec::new();
+        for msg in &request.messages {
+            if let MessageContent::Blocks(blocks) = &msg.content {
+                for block in blocks {
+                    if let ContentBlock::Known(KnownContentBlock::ToolResult { content, .. }) =
+                        block
+                    {
+                        texts.push(content.to_string());
+                    }
+                }
+            }
+        }
+        texts
     }
 
     /// Extract all text content from a request for scanning.
@@ -627,6 +705,26 @@ impl DlpEngine {
                     detail: "suspicious URL sanitized".into(),
                 });
                 modified = Some(sanitized);
+            }
+        }
+
+        // 5. Indirect injection scan on response text (ADR-0015)
+        if let Some(ref detector) = self.injection_detector {
+            if detector.scan_responses_enabled() {
+                let current = modified.as_deref().unwrap_or(text);
+                match detector.scan_indirect(current) {
+                    prompt_injection::IndirectInjectionResult::Warned(dets) => {
+                        for det in &dets {
+                            reports.push(DlpActionReport {
+                                action: DlpAction::Warn,
+                                rule_type: DlpRuleType::Injection,
+                                detail: format!("indirect: {}", det.pattern_name),
+                            });
+                        }
+                    }
+                    prompt_injection::IndirectInjectionResult::Blocked(_)
+                    | prompt_injection::IndirectInjectionResult::Clean => {}
+                }
             }
         }
 

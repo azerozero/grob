@@ -1,143 +1,115 @@
-//! Persistent storage layer using redb (embedded key-value store).
+//! Persistent storage layer using atomic files and append-only journals.
+//!
+//! Replaces the former `redb` backend (see ADR-0013). Layout:
+//!
+//! ```text
+//! ~/.grob/
+//! ├── spend/YYYY-MM.jsonl   # append-only spend journal
+//! ├── tokens/<id>.json.enc  # AES-256-GCM encrypted OAuth tokens
+//! └── vkeys/<hash>.json.enc # AES-256-GCM encrypted virtual keys
+//! ```
 
+/// Atomic file write (write → fsync → rename).
+pub(crate) mod atomic;
 /// AES-256-GCM encryption for credential storage at rest.
 pub(crate) mod encrypt;
-/// JSON-to-redb migration logic for legacy spend and token files.
+/// Append-only JSONL spend journal.
+pub(crate) mod journal;
+/// Legacy storage detection and warning.
 pub mod migrate;
 
 use crate::auth::token_store::OAuthToken;
 use crate::auth::virtual_keys::VirtualKeyRecord;
 use crate::features::token_pricing::spend::SpendData;
 use anyhow::{Context, Result};
-use redb::{Database, ReadableTable, TableDefinition};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
-const SPEND_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("spend");
-const OAUTH_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("oauth_tokens");
-const META_TABLE: TableDefinition<&str, &str> = TableDefinition::new("meta");
-const VKEYS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("virtual_keys");
-
-/// Unified storage backend using redb (embedded key-value store).
-/// Replaces spend.json and oauth_tokens.json with a single ACID database.
+/// Unified storage backend using atomic files and append-only journals.
+///
+/// Stores spend data as JSONL journals, OAuth tokens and virtual keys
+/// as individually encrypted JSON files. All writes are crash-safe:
+/// journals use `O_APPEND`, other files use atomic rename.
 pub struct GrobStore {
-    db: Database,
-    /// Hot-path in-memory spend cache (avoids read txn on every request)
+    /// Root directory (e.g. `~/.grob`).
+    base_dir: PathBuf,
+    /// Append-only spend journal.
+    journal: Mutex<journal::SpendJournal>,
+    /// Hot-path in-memory spend cache.
     spend_cache: Mutex<SpendData>,
-    /// Batch writes: flush to disk every N record_spend calls
+    /// Batch writes: fsync every N record_spend calls.
     save_counter: AtomicU32,
-    path: PathBuf,
-    /// AES-256-GCM cipher for encrypting OAuth tokens at rest.
+    /// AES-256-GCM cipher for encrypting tokens and keys at rest.
     cipher: encrypt::StorageCipher,
 }
 
 impl std::fmt::Debug for GrobStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GrobStore")
-            .field("path", &self.path)
+            .field("path", &self.base_dir)
             .finish_non_exhaustive()
     }
 }
 
 impl GrobStore {
-    /// Opens or creates the database at the given path.
-    /// Runs JSON migration on first open if legacy files exist.
+    /// Opens or creates the storage directory.
+    ///
+    /// Replays the current-month spend journal into memory.
+    /// Warns if a legacy `grob.db` (redb) file is detected.
     ///
     /// # Errors
     ///
-    /// - Returns an error if the parent directory cannot be created.
-    /// - Returns an error if the redb database cannot be opened or created.
+    /// - Returns an error if the storage directory cannot be created.
     /// - Returns an error if storage encryption initialization fails.
-    /// - Returns an error if JSON migration from legacy files fails.
+    /// - Returns an error if the spend journal cannot be opened.
     pub fn open(path: &Path) -> Result<Self> {
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create storage directory: {}", parent.display())
-            })?;
-        }
+        // `path` was formerly the DB file path (e.g. ~/.grob/grob.db).
+        // Derive the base directory from it for backward compat with callers.
+        let base_dir = path
+            .parent()
+            .unwrap_or_else(|| Path::new(".grob"))
+            .to_path_buf();
 
-        let db = Database::create(path)
-            .with_context(|| format!("Failed to open redb database: {}", path.display()))?;
+        std::fs::create_dir_all(&base_dir).with_context(|| {
+            format!("failed to create storage directory: {}", base_dir.display())
+        })?;
 
-        // Restrict file permissions (owner-only) since DB contains OAuth tokens.
-        if let Err(e) = crate::auth::token_store::set_owner_only_permissions(path) {
-            tracing::warn!("Failed to set permissions on {}: {}", path.display(), e);
-        }
+        // Warn about legacy redb file (ADR-0013: no migration).
+        migrate::warn_legacy_redb(&base_dir);
 
-        // Ensure tables exist
-        {
-            let write_txn = db.begin_write()?;
-            {
-                let _ = write_txn.open_table(SPEND_TABLE)?;
-                let _ = write_txn.open_table(OAUTH_TABLE)?;
-                let _ = write_txn.open_table(META_TABLE)?;
-                let _ = write_txn.open_table(VKEYS_TABLE)?;
-            }
-            write_txn.commit()?;
-        }
+        // Ensure sub-directories exist.
+        let tokens_dir = base_dir.join("tokens");
+        let vkeys_dir = base_dir.join("vkeys");
+        std::fs::create_dir_all(&tokens_dir)?;
+        std::fs::create_dir_all(&vkeys_dir)?;
 
-        // Initialize encryption cipher (generates key on first run).
+        // Initialize encryption cipher.
         let cipher = encrypt::StorageCipher::load_or_generate(path)
-            .with_context(|| "Failed to initialize storage encryption")?;
+            .context("failed to initialize storage encryption")?;
 
-        // Run migration if needed
-        migrate::migrate_from_json(&db, path)?;
-
-        // Load spend cache from db
-        let spend_cache = Self::load_spend_from_db(&db, None)?;
+        // Open spend journal and replay current month.
+        let journal =
+            journal::SpendJournal::open(&base_dir).context("failed to open spend journal")?;
+        let spend_cache = journal.replay_current();
 
         Ok(Self {
-            db,
+            base_dir,
+            journal: Mutex::new(journal),
             spend_cache: Mutex::new(spend_cache),
             save_counter: AtomicU32::new(0),
-            path: path.to_path_buf(),
             cipher,
         })
     }
 
-    /// Default path: ~/.grob/grob.db
+    /// Default path: `~/.grob/grob.db` (kept for caller compatibility).
     pub fn default_path() -> PathBuf {
         crate::grob_home()
             .unwrap_or_else(|| PathBuf::from(".grob"))
             .join("grob.db")
     }
 
-    /// Load spend data from the database for a given tenant (None = global).
-    fn load_spend_from_db(db: &Database, tenant: Option<&str>) -> Result<SpendData> {
-        let key = Self::spend_key(tenant);
-        let read_txn = db.begin_read()?;
-        let table = read_txn.open_table(SPEND_TABLE)?;
-
-        match table.get(key.as_str())? {
-            Some(value) => {
-                let bytes = value.value();
-                let mut data: SpendData = serde_json::from_slice(bytes).unwrap_or_default();
-                // Auto-reset if new month
-                let now = crate::features::token_pricing::spend::current_month();
-                if data.month != now {
-                    tracing::info!(
-                        "New month detected ({} -> {}), resetting spend",
-                        data.month,
-                        now
-                    );
-                    data = SpendData::default();
-                }
-                Ok(data)
-            }
-            None => Ok(SpendData::default()),
-        }
-    }
-
-    fn spend_key(tenant: Option<&str>) -> String {
-        match tenant {
-            Some(t) => format!("tenant:{}", t),
-            None => "global".to_string(),
-        }
-    }
-
-    /// Load spend data (from in-memory cache for global, from db for tenants).
+    /// Loads spend data (from cache for global, from journal for tenants).
     pub(crate) fn load_spend(&self, tenant: Option<&str>) -> SpendData {
         if tenant.is_none() {
             return self
@@ -146,10 +118,11 @@ impl GrobStore {
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
         }
-        Self::load_spend_from_db(&self.db, tenant).unwrap_or_default()
+        let journal = self.journal.lock().unwrap_or_else(|e| e.into_inner());
+        journal.replay_for_tenant(tenant.unwrap_or(""))
     }
 
-    /// Record spend for a request. Uses in-memory cache + batched writes.
+    /// Records spend for a request. Uses in-memory cache + batched fsync.
     pub(crate) fn record_spend(
         &self,
         tenant: Option<&str>,
@@ -157,7 +130,9 @@ impl GrobStore {
         provider: &str,
         model: &str,
     ) {
-        // Update in-memory cache (always for global)
+        let ts = chrono::Utc::now().to_rfc3339();
+
+        // Update in-memory cache (global).
         if tenant.is_none() {
             let mut cache = self.spend_cache.lock().unwrap_or_else(|e| e.into_inner());
             let now = crate::features::token_pricing::spend::current_month();
@@ -173,83 +148,64 @@ impl GrobStore {
                 .or_default() += 1;
         }
 
-        // Batch writes: persist every 10 calls
-        let count = self.save_counter.fetch_add(1, Ordering::Relaxed);
-        if count.is_multiple_of(10) {
-            self.flush_spend_for(tenant);
+        // Append to journal.
+        let event = journal::SpendEvent {
+            ts,
+            kind: "spend".to_string(),
+            provider: provider.to_string(),
+            model: model.to_string(),
+            cost_usd: amount,
+            tenant: tenant.map(String::from),
+        };
+        if let Ok(mut j) = self.journal.lock() {
+            if let Err(e) = j.append(&event) {
+                tracing::warn!("failed to append spend event to journal: {e}");
+            }
         }
 
-        // Also record per-tenant if specified
-        if let Some(t) = tenant {
-            let mut data = Self::load_spend_from_db(&self.db, Some(t)).unwrap_or_default();
-            data.total += amount;
-            *data.by_provider.entry(provider.to_string()).or_default() += amount;
-            *data.by_model.entry(model.to_string()).or_default() += amount;
-            *data
-                .by_provider_count
-                .entry(provider.to_string())
-                .or_default() += 1;
-            if let Err(e) = self.write_spend_data(Some(t), &data) {
-                tracing::warn!("Failed to persist tenant spend data for {}: {}", t, e);
+        // Batch fsync every 10 calls.
+        let count = self.save_counter.fetch_add(1, Ordering::Relaxed);
+        if count.is_multiple_of(10) {
+            self.flush_spend();
+        }
+    }
+
+    /// Forces journal fsync to disk.
+    pub(crate) fn flush_spend(&self) {
+        if let Ok(mut j) = self.journal.lock() {
+            if let Err(e) = j.fsync() {
+                tracing::warn!("failed to fsync spend journal: {e}");
             }
         }
     }
 
-    /// Force write spend data to disk.
-    pub(crate) fn flush_spend(&self) {
-        self.flush_spend_for(None);
+    // ── OAuth token storage ─────────────────────────────────────────
+
+    fn token_path(&self, provider_id: &str) -> PathBuf {
+        self.base_dir
+            .join("tokens")
+            .join(format!("{}.json.enc", sanitize_filename(provider_id)))
     }
 
-    fn flush_spend_for(&self, tenant: Option<&str>) {
-        let data = if tenant.is_none() {
-            self.spend_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone()
-        } else {
-            Self::load_spend_from_db(&self.db, tenant).unwrap_or_default()
-        };
-        if let Err(e) = self.write_spend_data(tenant, &data) {
-            tracing::warn!("Failed to flush spend data to disk: {}", e);
-        }
-    }
-
-    fn write_spend_data(&self, tenant: Option<&str>, data: &SpendData) -> Result<()> {
-        let key = Self::spend_key(tenant);
-        let bytes = serde_json::to_vec(data)?;
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(SPEND_TABLE)?;
-            table.insert(key.as_str(), bytes.as_slice())?;
-        }
-        write_txn.commit()?;
-        Ok(())
-    }
-
-    /// Saves an OAuth token to the database (encrypted with AES-256-GCM).
+    /// Saves an OAuth token (encrypted with AES-256-GCM).
     ///
     /// # Errors
     ///
-    /// Returns an error if serialization, encryption, or the database
-    /// write transaction fails.
+    /// Returns an error if serialization, encryption, or the
+    /// atomic file write fails.
     pub fn save_oauth_token(&self, token: &OAuthToken) -> Result<()> {
         let plaintext = serde_json::to_vec(token)?;
         let encrypted = self.cipher.encrypt(&plaintext)?;
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(OAUTH_TABLE)?;
-            table.insert(token.provider_id.as_str(), encrypted.as_slice())?;
-        }
-        write_txn.commit()?;
+        let path = self.token_path(&token.provider_id);
+        atomic::write_atomic(&path, &encrypted)?;
         Ok(())
     }
 
     /// Gets an OAuth token by provider ID (decrypts from AES-256-GCM).
     pub fn get_oauth_token(&self, provider_id: &str) -> Option<OAuthToken> {
-        let read_txn = self.db.begin_read().ok()?;
-        let table = read_txn.open_table(OAUTH_TABLE).ok()?;
-        let value = table.get(provider_id).ok()??;
-        let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        let path = self.token_path(provider_id);
+        let encrypted = std::fs::read(&path).ok()?;
+        let decrypted = self.cipher.decrypt_or_plaintext(&encrypted);
         serde_json::from_slice(&decrypted).ok()
     }
 
@@ -257,120 +213,103 @@ impl GrobStore {
     ///
     /// # Errors
     ///
-    /// Returns an error if the database write transaction fails.
+    /// Returns an error if the file cannot be removed.
     pub fn delete_oauth_token(&self, provider_id: &str) -> Result<()> {
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(OAUTH_TABLE)?;
-            table.remove(provider_id)?;
+        let path = self.token_path(provider_id);
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .with_context(|| format!("failed to delete token: {}", path.display()))?;
         }
-        write_txn.commit()?;
         Ok(())
     }
 
-    /// List all provider IDs that have tokens.
+    /// Lists all provider IDs that have tokens.
     pub fn list_oauth_providers(&self) -> Vec<String> {
-        let read_txn = match self.db.begin_read() {
-            Ok(t) => t,
-            Err(_) => return vec![],
-        };
-        let table = match read_txn.open_table(OAUTH_TABLE) {
-            Ok(t) => t,
-            Err(_) => return vec![],
-        };
-        let mut providers = vec![];
-        if let Ok(iter) = table.iter() {
-            for entry in iter.flatten() {
-                let (key, _) = entry;
-                providers.push(key.value().to_string());
-            }
-        }
-        providers
+        let tokens_dir = self.base_dir.join("tokens");
+        Self::list_enc_files(&tokens_dir)
     }
 
     /// Gets all OAuth tokens (decrypts each from AES-256-GCM).
     pub fn all_oauth_tokens(&self) -> std::collections::HashMap<String, OAuthToken> {
         let mut map = std::collections::HashMap::new();
-        let read_txn = match self.db.begin_read() {
-            Ok(t) => t,
-            Err(_) => return map,
-        };
-        let table = match read_txn.open_table(OAUTH_TABLE) {
-            Ok(t) => t,
-            Err(_) => return map,
-        };
-        if let Ok(iter) = table.iter() {
-            for (key, value) in iter.flatten() {
-                let decrypted = self.cipher.decrypt_or_plaintext(value.value());
-                if let Ok(token) = serde_json::from_slice::<OAuthToken>(&decrypted) {
-                    map.insert(key.value().to_string(), token);
-                }
+        for provider_id in self.list_oauth_providers() {
+            if let Some(token) = self.get_oauth_token(&provider_id) {
+                map.insert(provider_id, token);
             }
         }
         map
     }
 
-    /// Get database file path (for diagnostics).
+    /// Gets the storage base directory path (for diagnostics).
     pub fn path(&self) -> &Path {
-        &self.path
+        &self.base_dir
     }
 
-    // ── Virtual key storage ──────────────────────────────────────────
+    // ── Virtual key storage ─────────────────────────────────────────
+
+    fn vkey_hash_path(&self, key_hash: &str) -> PathBuf {
+        self.base_dir
+            .join("vkeys")
+            .join(format!("{}.json.enc", sanitize_filename(key_hash)))
+    }
+
+    fn vkey_id_path(&self, id: &uuid::Uuid) -> PathBuf {
+        self.base_dir
+            .join("vkeys")
+            .join(format!("id_{id}.json.enc"))
+    }
 
     /// Stores a virtual key record (encrypted with AES-256-GCM).
     ///
-    /// The record is keyed by its SHA-256 hash for O(1) authentication lookups.
-    /// A secondary index keyed by `id:` + UUID enables list and revoke by id.
+    /// Creates two files: one keyed by hash (for O(1) auth lookup) and
+    /// one keyed by UUID (for management operations).
     ///
     /// # Errors
     ///
-    /// Returns an error if serialization, encryption, or the database
-    /// write transaction fails.
+    /// Returns an error if serialization, encryption, or the
+    /// atomic file write fails.
     pub fn store_virtual_key(&self, record: &VirtualKeyRecord) -> Result<()> {
         let plaintext = serde_json::to_vec(record)?;
         let encrypted = self.cipher.encrypt(&plaintext)?;
 
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(VKEYS_TABLE)?;
-            // Primary key: hash (for auth lookup).
-            table.insert(record.key_hash.as_str(), encrypted.as_slice())?;
-            // Secondary key: id (for management operations).
-            let id_key = format!("id:{}", record.id);
-            table.insert(id_key.as_str(), encrypted.as_slice())?;
-        }
-        write_txn.commit()?;
+        // Primary: by hash.
+        atomic::write_atomic(&self.vkey_hash_path(&record.key_hash), &encrypted)?;
+        // Secondary: by UUID.
+        let encrypted2 = self.cipher.encrypt(&plaintext)?;
+        atomic::write_atomic(&self.vkey_id_path(&record.id), &encrypted2)?;
+
         Ok(())
     }
 
     /// Looks up a virtual key record by its SHA-256 hash.
     pub fn lookup_virtual_key(&self, key_hash: &str) -> Option<VirtualKeyRecord> {
-        let read_txn = self.db.begin_read().ok()?;
-        let table = read_txn.open_table(VKEYS_TABLE).ok()?;
-        let value = table.get(key_hash).ok()??;
-        let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        let path = self.vkey_hash_path(key_hash);
+        let encrypted = std::fs::read(&path).ok()?;
+        let decrypted = self.cipher.decrypt_or_plaintext(&encrypted);
         serde_json::from_slice(&decrypted).ok()
     }
 
-    /// Lists all virtual key records (skips secondary `id:` index entries).
+    /// Lists all virtual key records.
     pub fn list_virtual_keys(&self) -> Vec<VirtualKeyRecord> {
-        let read_txn = match self.db.begin_read() {
-            Ok(t) => t,
+        let vkeys_dir = self.base_dir.join("vkeys");
+        let entries = match std::fs::read_dir(&vkeys_dir) {
+            Ok(e) => e,
             Err(_) => return vec![],
         };
-        let table = match read_txn.open_table(VKEYS_TABLE) {
-            Ok(t) => t,
-            Err(_) => return vec![],
-        };
+
         let mut records = vec![];
-        if let Ok(iter) = table.iter() {
-            for entry in iter.flatten() {
-                let (key, value) = entry;
-                // Skip secondary id: index entries to avoid duplicates.
-                if key.value().starts_with("id:") {
-                    continue;
-                }
-                let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            // Skip id_ files to avoid duplicates.
+            if name_str.starts_with("id_") {
+                continue;
+            }
+            if !name_str.ends_with(".json.enc") {
+                continue;
+            }
+            if let Ok(data) = std::fs::read(entry.path()) {
+                let decrypted = self.cipher.decrypt_or_plaintext(&data);
                 if let Ok(record) = serde_json::from_slice::<VirtualKeyRecord>(&decrypted) {
                     records.push(record);
                 }
@@ -383,53 +322,73 @@ impl GrobStore {
     ///
     /// # Errors
     ///
-    /// Returns an error if the database transaction, deserialization,
-    /// or re-encryption of the updated record fails.
+    /// Returns an error if the record cannot be read, deserialized,
+    /// or re-encrypted.
     pub fn revoke_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
-        let id_key = format!("id:{id}");
-        let read_txn = self.db.begin_read()?;
-        let table = read_txn.open_table(VKEYS_TABLE)?;
-        let value = match table.get(id_key.as_str())? {
-            Some(v) => v,
-            None => return Ok(false),
+        let id_path = self.vkey_id_path(id);
+        let data = match std::fs::read(&id_path) {
+            Ok(d) => d,
+            Err(_) => return Ok(false),
         };
-        let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        let decrypted = self.cipher.decrypt_or_plaintext(&data);
         let mut record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
-        drop(table);
-        drop(read_txn);
-
         record.revoked = true;
         self.store_virtual_key(&record)?;
         Ok(true)
     }
 
-    /// Deletes a virtual key by UUID (removes both hash and id entries).
+    /// Deletes a virtual key by UUID (removes both hash and id files).
     ///
     /// # Errors
     ///
-    /// Returns an error if the database read or write transaction fails.
+    /// Returns an error if the files cannot be removed.
     pub fn delete_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
-        let id_key = format!("id:{id}");
-        let read_txn = self.db.begin_read()?;
-        let table = read_txn.open_table(VKEYS_TABLE)?;
-        let value = match table.get(id_key.as_str())? {
-            Some(v) => v,
-            None => return Ok(false),
+        let id_path = self.vkey_id_path(id);
+        let data = match std::fs::read(&id_path) {
+            Ok(d) => d,
+            Err(_) => return Ok(false),
         };
-        let decrypted = self.cipher.decrypt_or_plaintext(value.value());
+        let decrypted = self.cipher.decrypt_or_plaintext(&data);
         let record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
-        drop(table);
-        drop(read_txn);
 
-        let write_txn = self.db.begin_write()?;
-        {
-            let mut table = write_txn.open_table(VKEYS_TABLE)?;
-            table.remove(record.key_hash.as_str())?;
-            table.remove(id_key.as_str())?;
-        }
-        write_txn.commit()?;
+        // Remove both files.
+        let hash_path = self.vkey_hash_path(&record.key_hash);
+        let _ = std::fs::remove_file(&hash_path);
+        let _ = std::fs::remove_file(&id_path);
         Ok(true)
     }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    /// Lists entity IDs from `*.json.enc` files in a directory.
+    fn list_enc_files(dir: &Path) -> Vec<String> {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => return vec![],
+        };
+        let mut ids = vec![];
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if let Some(id) = name_str.strip_suffix(".json.enc") {
+                ids.push(id.to_string());
+            }
+        }
+        ids
+    }
+}
+
+/// Sanitizes a string for use as a filename.
+fn sanitize_filename(s: &str) -> String {
+    s.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -441,14 +400,12 @@ mod tests {
     #[test]
     fn test_open_and_spend_cycle() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("grob.db");
         let store = GrobStore::open(&db_path).unwrap();
 
-        // Initial spend should be zero
         let spend = store.load_spend(None);
         assert_eq!(spend.total, 0.0);
 
-        // Record spend
         store.record_spend(None, 0.05, "openrouter", "claude-sonnet");
         store.record_spend(None, 0.10, "anthropic", "claude-opus");
         store.flush_spend();
@@ -462,7 +419,7 @@ mod tests {
     #[test]
     fn test_oauth_crud() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("grob.db");
         let store = GrobStore::open(&db_path).unwrap();
 
         let token = OAuthToken {
@@ -489,7 +446,7 @@ mod tests {
     #[test]
     fn test_per_tenant_spend() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("grob.db");
         let store = GrobStore::open(&db_path).unwrap();
 
         store.record_spend(Some("tenant-a"), 1.0, "provider", "model");
@@ -509,7 +466,7 @@ mod tests {
     #[test]
     fn test_persistence_across_open() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("grob.db");
 
         {
             let store = GrobStore::open(&db_path).unwrap();
@@ -517,7 +474,6 @@ mod tests {
             store.flush_spend();
         }
 
-        // Reopen
         let store = GrobStore::open(&db_path).unwrap();
         let spend = store.load_spend(None);
         assert!((spend.total - 5.0).abs() < 0.001);
@@ -526,7 +482,7 @@ mod tests {
     #[test]
     fn test_virtual_key_store_and_lookup() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("grob.db");
         let store = GrobStore::open(&db_path).unwrap();
 
         let (full_key, hash) = crate::auth::virtual_keys::generate_key();
@@ -557,7 +513,7 @@ mod tests {
     #[test]
     fn test_virtual_key_list() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("grob.db");
         let store = GrobStore::open(&db_path).unwrap();
 
         for i in 0..3 {
@@ -586,7 +542,7 @@ mod tests {
     #[test]
     fn test_virtual_key_revoke() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("grob.db");
         let store = GrobStore::open(&db_path).unwrap();
 
         let (full_key, hash) = crate::auth::virtual_keys::generate_key();
@@ -613,7 +569,6 @@ mod tests {
         assert!(revoked);
         assert!(store.lookup_virtual_key(&hash).unwrap().revoked);
 
-        // Revoking non-existent key returns false.
         let missing = store.revoke_virtual_key(&uuid::Uuid::new_v4()).unwrap();
         assert!(!missing);
     }
@@ -621,7 +576,7 @@ mod tests {
     #[test]
     fn test_virtual_key_delete() {
         let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("test.db");
+        let db_path = dir.path().join("grob.db");
         let store = GrobStore::open(&db_path).unwrap();
 
         let (full_key, hash) = crate::auth::virtual_keys::generate_key();
@@ -648,8 +603,14 @@ mod tests {
         assert!(deleted);
         assert!(store.lookup_virtual_key(&hash).is_none());
 
-        // Deleting again returns false.
         let again = store.delete_virtual_key(&id).unwrap();
         assert!(!again);
+    }
+
+    #[test]
+    fn test_sanitize_filename() {
+        assert_eq!(sanitize_filename("claude-max"), "claude-max");
+        assert_eq!(sanitize_filename("tenant/evil"), "tenant_evil");
+        assert_eq!(sanitize_filename("a:b"), "a_b");
     }
 }

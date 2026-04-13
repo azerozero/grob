@@ -164,7 +164,7 @@ pub struct AppState {
 
     /// Persistent state - NOT reloaded
     pub token_store: TokenStore,
-    /// Shared storage backend (redb) for virtual key lookups and spend tracking.
+    /// Shared storage backend for virtual key lookups and spend tracking.
     pub grob_store: Arc<crate::storage::GrobStore>,
     /// Identifies how the configuration was loaded (file, env, CLI).
     pub config_source: crate::cli::ConfigSource,

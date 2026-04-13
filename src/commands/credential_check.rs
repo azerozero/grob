@@ -139,6 +139,10 @@ pub async fn validate_api_key(provider_name: &str, api_key: &str) -> bool {
         Err(_) => return true,
     };
 
+    if !url.starts_with("https://") {
+        return true;
+    }
+
     let mut request = client.get(&url);
     if !header_name.is_empty() {
         // All validation URLs are HTTPS (see validation_request above).

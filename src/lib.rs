@@ -80,6 +80,8 @@ pub mod cache;
 pub mod cli;
 /// CLI command implementations (start, stop, exec, doctor, etc.).
 pub mod commands;
+/// Generic control engine for unified CLI / MCP / UI dispatch.
+pub mod control;
 /// Optional features: DLP, MCP, TAP, token pricing.
 pub mod features;
 /// Server instance lifecycle management.
@@ -106,7 +108,7 @@ pub mod router;
 pub mod security;
 /// Axum HTTP server, middleware, and application state.
 pub mod server;
-/// Unified redb storage backend.
+/// Persistent storage (atomic files + append-only journals).
 pub mod storage;
 /// Core trait contracts for the dispatch pipeline.
 pub mod traits;

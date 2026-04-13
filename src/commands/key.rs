@@ -1,12 +1,169 @@
 //! Virtual API key management commands (create, list, revoke).
 
 use crate::auth::virtual_keys::{generate_key, VirtualKeyRecord};
+use crate::cli;
 use crate::storage::GrobStore;
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
-/// Creates a new virtual API key, stores it, and prints the full key once.
-pub fn cmd_key_create(
+/// Returns the RPC base URL if the server is running, `None` otherwise.
+async fn live_base_url(config: &cli::AppConfig) -> Option<String> {
+    let host = &config.server.host;
+    let port = config.server.port.value();
+    if crate::instance::is_instance_running(host, port).await {
+        Some(cli::format_base_url(host, port))
+    } else {
+        None
+    }
+}
+
+/// Creates a new virtual API key via RPC or local store.
+pub async fn cmd_key_create(
+    config: &cli::AppConfig,
+    name: &str,
+    tenant: &str,
+    budget: Option<f64>,
+    rate_limit: Option<u32>,
+    allowed_models: Option<Vec<String>>,
+    expires_in_days: Option<u64>,
+) {
+    if let Some(base_url) = live_base_url(config).await {
+        create_via_rpc(&base_url, name).await;
+    } else {
+        create_local(
+            name,
+            tenant,
+            budget,
+            rate_limit,
+            allowed_models,
+            expires_in_days,
+        );
+    }
+}
+
+/// Lists all virtual API keys via RPC or local store.
+pub async fn cmd_key_list(config: &cli::AppConfig, json: bool) {
+    if let Some(base_url) = live_base_url(config).await {
+        list_via_rpc(&base_url, json).await;
+    } else {
+        list_local(json);
+    }
+}
+
+/// Revokes a virtual key via RPC or local store.
+pub async fn cmd_key_revoke(config: &cli::AppConfig, id_or_prefix: &str) {
+    if let Some(base_url) = live_base_url(config).await {
+        revoke_via_rpc(&base_url, id_or_prefix).await;
+    } else {
+        revoke_local(id_or_prefix);
+    }
+}
+
+// ── RPC path ──
+
+async fn create_via_rpc(base_url: &str, name: &str) {
+    use super::rpc_client::rpc_call;
+
+    let params = serde_json::json!({ "name": name });
+    match rpc_call(base_url, "grob/keys/create", Some(params)).await {
+        Ok(result) => {
+            println!("Virtual key created successfully.\n");
+            if let Some(id) = result["key_id"].as_str() {
+                println!("  ID:       {}", id);
+            }
+            if let Some(n) = result["name"].as_str() {
+                println!("  Name:     {}", n);
+            }
+            if let Some(p) = result["prefix"].as_str() {
+                println!("  Prefix:   {}", p);
+            }
+            if let Some(s) = result["secret"].as_str() {
+                println!("\n  Key: {}\n", s);
+                println!("  Save this key now -- it will not be shown again.");
+            }
+        }
+        Err(e) => {
+            eprintln!("Failed to create key via RPC: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn list_via_rpc(base_url: &str, json: bool) {
+    use super::rpc_client::rpc_call;
+
+    match rpc_call(base_url, "grob/keys/list", None).await {
+        Ok(result) => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&result).unwrap_or_default()
+                );
+                return;
+            }
+
+            let keys = match result.as_array() {
+                Some(arr) => arr,
+                None => {
+                    println!("No virtual keys found.");
+                    return;
+                }
+            };
+
+            if keys.is_empty() {
+                println!("No virtual keys found.");
+                return;
+            }
+
+            println!(
+                "{:<36}  {:<16}  {:<14}  {:<8}  CREATED",
+                "ID", "NAME", "PREFIX", "REVOKED"
+            );
+            println!("{}", "-".repeat(90));
+
+            for k in keys {
+                println!(
+                    "{:<36}  {:<16}  {:<14}  {:<8}  {}",
+                    k["id"].as_str().unwrap_or("?"),
+                    truncate(k["name"].as_str().unwrap_or("?"), 16),
+                    k["prefix"].as_str().unwrap_or("?"),
+                    if k["revoked"].as_bool().unwrap_or(false) {
+                        "yes"
+                    } else {
+                        "no"
+                    },
+                    k["created_at"].as_str().unwrap_or("?"),
+                );
+            }
+
+            println!("\n{} key(s) total.", keys.len());
+        }
+        Err(e) => {
+            eprintln!("Failed to list keys via RPC: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+async fn revoke_via_rpc(base_url: &str, id_or_prefix: &str) {
+    use super::rpc_client::rpc_call;
+
+    let params = serde_json::json!({ "key_id": id_or_prefix });
+    match rpc_call(base_url, "grob/keys/revoke", Some(params)).await {
+        Ok(result) => {
+            let msg = result["message"].as_str().unwrap_or("Key revoked");
+            println!("{msg}");
+        }
+        Err(e) => {
+            eprintln!("Failed to revoke key via RPC: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+// ── Local path (server not running) ──
+
+fn create_local(
     name: &str,
     tenant: &str,
     budget: Option<f64>,
@@ -68,8 +225,7 @@ pub fn cmd_key_create(
     println!("  Save this key now -- it will not be shown again.");
 }
 
-/// Lists all virtual keys in table or JSON format.
-pub fn cmd_key_list(json: bool) {
+fn list_local(json: bool) {
     let store = match GrobStore::open(&GrobStore::default_path()) {
         Ok(s) => s,
         Err(e) => {
@@ -117,8 +273,7 @@ pub fn cmd_key_list(json: bool) {
     println!("\n{} key(s) total.", keys.len());
 }
 
-/// Revokes a virtual key by UUID or prefix match.
-pub fn cmd_key_revoke(id_or_prefix: &str) {
+fn revoke_local(id_or_prefix: &str) {
     let store = match GrobStore::open(&GrobStore::default_path()) {
         Ok(s) => s,
         Err(e) => {
@@ -127,16 +282,13 @@ pub fn cmd_key_revoke(id_or_prefix: &str) {
         }
     };
 
-    // Try UUID first.
     if let Ok(uuid) = Uuid::parse_str(id_or_prefix) {
         match store.revoke_virtual_key(&uuid) {
             Ok(true) => {
-                // SAFETY: key ID (UUID) is a public identifier, not a secret.
                 println!("Key {uuid} revoked.");
                 return;
             }
             Ok(false) => {
-                // SAFETY: key ID (UUID) is a public identifier, not a secret.
                 eprintln!("No key found with ID {uuid}.");
                 std::process::exit(1);
             }
@@ -147,7 +299,6 @@ pub fn cmd_key_revoke(id_or_prefix: &str) {
         }
     }
 
-    // Fall back to prefix match.
     let keys = store.list_virtual_keys();
     let matches: Vec<_> = keys
         .iter()

@@ -105,9 +105,9 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
 
     // 9. Storage
     match storage::GrobStore::open(&storage::GrobStore::default_path()) {
-        Ok(_) => println!("  ✅ Storage (redb): accessible"),
+        Ok(_) => println!("  ✅ Storage (files): accessible"),
         Err(e) => {
-            println!("  ❌ Storage (redb): {}", e);
+            println!("  ❌ Storage (files): {}", e);
             errors += 1;
         }
     }

@@ -198,7 +198,7 @@ pub(crate) async fn auth_middleware(
 
 /// Resolves a bearer token as a virtual API key.
 ///
-/// Hashes the token with SHA-256, looks up the record in redb,
+/// Hashes the token with SHA-256, looks up the record in storage,
 /// and returns a [`VirtualKeyContext`] if the key is valid (not revoked, not expired).
 fn resolve_virtual_key(
     state: &Arc<AppState>,
