@@ -88,6 +88,8 @@ feature/* ──► main ──► release-plz PR ──► tag v* ──► rel
 
 - **Never commit or push directly to `main`**. All changes go through feature branches + PRs.
 - **`main` is protected** by a GitHub ruleset (no deletion, no force push, PR required).
+- **Always enable auto-merge** after creating a PR: `gh pr merge <num> --auto --merge`. Do not wait for CI to merge manually.
+- **Check file overlap before parallel PRs**: if two PRs modify the same files, base the second on the first branch (`git checkout -b feat/B feat/A`), not on `main`. This prevents merge conflicts when the first PR lands.
 - **Conventional commits required**: `feat:`, `fix:`, `refactor:`, `perf:` with scopes trigger release-plz version bumps. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes.
 - **release-plz `release_commits` filter**: only `feat|fix|refactor|perf` commits (any scope or no scope) trigger a version bump. The prefix is the gate, not the scope.
 
