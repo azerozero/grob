@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.15](https://github.com/azerozero/grob/compare/v0.36.14...v0.36.15) - 2026-04-14
+
+### Fixed
+
+- *(ci)* absorber main dans develop apres chaque sync-main
+
+### Other
+
+- *(dlp)* kill mutation survivor in IndirectInjectionBlocked Display
+
 ## [0.36.14](https://github.com/azerozero/grob/compare/v0.36.13...v0.36.14) - 2026-04-14
 
 ### Fixed
