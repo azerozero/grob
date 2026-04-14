@@ -8,7 +8,7 @@ This guide shows how to test the OAuth authentication flow for Claude Pro/Max.
 grob connect anthropic
 ```
 
-This will open your browser, complete the OAuth PKCE flow, and save the token to the redb store (`~/.grob/grob.db`).
+This will open your browser, complete the OAuth PKCE flow, and save the token as an encrypted file in `~/.grob/tokens/`.
 
 ## Testing with API Endpoints
 
@@ -138,7 +138,7 @@ The provider will automatically use the OAuth token from TokenStore and authenti
 
 Check if token exists:
 ```bash
-cat ~/.grob/oauth_tokens.json
+ls ~/.grob/tokens/
 ```
 
 Should show:
@@ -176,14 +176,14 @@ Common issues:
 
 After successful authentication:
 
-1. ✅ Token saved to `~/.grob/oauth_tokens.json`
+1. ✅ Token saved to `~/.grob/tokens/<provider>.json.enc`
 2. ✅ Configure provider with `auth_type = "oauth"`
 3. ✅ Bearer token injection works automatically
 
 ## Security Notes
 
-- Tokens stored with `0600` permissions (owner read/write only)
-- Never commit `oauth_tokens.json` to version control
+- Token files stored with `0600` permissions (owner read/write only)
+- Never commit `~/.grob/tokens/` contents to version control
 - Tokens auto-refresh before expiration
 - PKCE ensures secure authorization flow
 

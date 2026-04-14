@@ -19,7 +19,8 @@ runs:
       shell: bash
       run: |
         sudo apt-get update -qq && sudo apt-get install -y -qq podman
-        curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
+        curl -fsSL --retry 3 --retry-delay 10 --retry-all-errors \
+          "https://github.com/google/go-containerregistry/releases/download/v0.21.2/go-containerregistry_Linux_x86_64.tar.gz" \
           | sudo tar xz -C /usr/local/bin crane
 
     - name: Pull grob image (multi-registry fallback)

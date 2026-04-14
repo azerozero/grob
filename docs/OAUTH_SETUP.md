@@ -7,7 +7,7 @@ grob now supports OAuth authentication for Claude Pro/Max subscriptions, allowin
 - ✅ **Zero Cost**: Max plan users pay $0 for API calls
 - ✅ **PKCE Security**: Secure OAuth 2.0 with PKCE (Proof Key for Code Exchange)
 - ✅ **Auto Refresh**: Tokens are automatically refreshed when expired
-- ✅ **Persistent Storage**: Tokens stored securely in `~/.grob/grob.db` (redb)
+- ✅ **Persistent Storage**: Tokens stored securely in `~/.grob/tokens/<id>.json.enc` (AES-256-GCM)
 
 ## OAuth PKCE Flow
 
@@ -124,7 +124,7 @@ For creating an API key via OAuth (alternative flow):
 
 ## Token Storage
 
-Tokens are stored in `~/.grob/grob.db` using redb (embedded key-value store). Legacy `oauth_tokens.json` data is auto-migrated on first run. The database file is created with restricted permissions for security.
+Tokens are stored as individually encrypted files in `~/.grob/tokens/<id>.json.enc` (AES-256-GCM). Each file is created with restricted permissions (`0600`) for security.
 
 ## API Endpoints
 
@@ -160,8 +160,8 @@ let response = reqwest::Client::new()
 
 ## Security Notes
 
-1. **Never commit tokens**: The `grob.db` file contains sensitive credentials
-2. **File permissions**: The database file has restricted permissions (Unix)
+1. **Never commit tokens**: The `~/.grob/tokens/` directory contains sensitive credentials
+2. **File permissions**: Token files have restricted permissions (`0600`, Unix)
 3. **PKCE**: Uses SHA-256 challenge for additional security
 4. **Auto-refresh**: Tokens are refreshed 5 minutes before expiration
 

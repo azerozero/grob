@@ -205,6 +205,6 @@ The `grob doctor` command runs 11 diagnostic checks:
 6. Port availability
 7. DLP enabled/disabled
 8. Security configuration (rate limit, circuit breaker)
-9. Storage backend (redb) accessibility
+9. Storage backend (atomic files) accessibility
 10. Missing environment variables
 11. Podman availability (optional)

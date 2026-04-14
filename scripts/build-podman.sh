@@ -7,11 +7,15 @@ set -e
 TAG=${1:-latest}
 CONTAINERFILE="Containerfile"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Colors (gated on TTY + NO_COLOR)
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+else
+    RED='' GREEN='' YELLOW='' NC=''
+fi
 
 echo -e "${GREEN}Building Grob container image with Podman...${NC}"
 echo "Tag: ${TAG}"

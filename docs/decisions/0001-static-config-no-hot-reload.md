@@ -45,7 +45,7 @@ Chosen option: "Explicit API-triggered reload", because it eliminates filesystem
 | Field | Why stable |
 |-------|-----------|
 | `spend_tracker` | Cross-reload spend continuity |
-| `grob_store` | Embedded redb database |
+| `grob_store` | File-based storage backend |
 | `token_store` | OAuth token cache |
 | `audit_log` | Hash chain must be continuous |
 | `rate_limiter` | Token bucket state must persist |

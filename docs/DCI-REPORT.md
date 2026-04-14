@@ -88,7 +88,7 @@ The README has curl examples but SDK examples are still missing:
 The how-to/deploy.md covers basics but could benefit from:
 
 - Grafana dashboard setup guide (the JSON file exists at `docs/grafana-dashboard.json` but is undocumented)
-- Backup/restore procedures for the redb database
+- Backup/restore procedures for the storage directory (`~/.grob/`)
 - Terraform/Pulumi snippets for cloud deployment
 
 ### 3. CI Workflow Documentation (Impact: Low-Medium, Effort: Low)

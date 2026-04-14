@@ -9,7 +9,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 - **HTTP framework**: Axum 0.7 with Tower middleware
 - **HTTP client**: reqwest 0.12 (HTTP/2, rustls)
 - **Config**: TOML (serde)
-- **Storage**: redb (embedded key-value store for tokens, spend) + spend.json (legacy fallback)
+- **Storage**: Atomic files + append-only JSONL journals (tokens in `~/.grob/tokens/*.json.enc`, spend in `~/.grob/spend/YYYY-MM.jsonl`)
 - **CLI**: clap 4 (derive mode)
 - **Allocator**: jemalloc on non-MSVC targets
 - **CI**: GitHub Actions (fmt, clippy, nextest, coverage, cargo-audit, cargo-deny, cargo-hack, cargo-machete)
@@ -18,7 +18,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Architecture
 
-Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`) formats. All requests are normalized to a canonical internal message format (the `CanonicalRequest` type). OpenAI-specific extension fields (response_format, reasoning_effort, seed, etc.) are captured in `RequestExtensions` for lossless roundtrips. A regex-based router classifies each request by task type (web_search, background, subagent, prompt_rule, think, default) and selects a named model. Each model maps to one or more providers ordered by priority. If the highest-priority provider fails, the request falls through to the next. Circuit breakers (5 failures = open, 30s timeout) prevent hammering degraded providers. DLP scanning runs on stream chunks using Aho-Corasick automata. Persistent spend tracking in redb (`~/.grob/grob.db`) enforces monthly budgets at global, per-provider, and per-model granularity.
+Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/completions`) formats. All requests are normalized to a canonical internal message format (the `CanonicalRequest` type). OpenAI-specific extension fields (response_format, reasoning_effort, seed, etc.) are captured in `RequestExtensions` for lossless roundtrips. A regex-based router classifies each request by task type (web_search, background, subagent, prompt_rule, think, default) and selects a named model. Each model maps to one or more providers ordered by priority. If the highest-priority provider fails, the request falls through to the next. Circuit breakers (5 failures = open, 30s timeout) prevent hammering degraded providers. DLP scanning runs on stream chunks using Aho-Corasick automata. Persistent spend tracking in append-only JSONL journals (`~/.grob/spend/YYYY-MM.jsonl`) enforces monthly budgets at global, per-provider, and per-model granularity.
 
 ## Domain Concepts
 
@@ -35,7 +35,7 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 - **Spend**: Monthly cost tracking per provider/model with budget enforcement (HTTP 402 on exceed).
 - **MCP**: Model Context Protocol tool matrix -- tool-calling capability catalogue with per-provider reliability scoring.
 - **Subagent model**: A system prompt tag (`GROB-SUBAGENT-MODEL`) that overrides model selection for nested agent calls.
-- **GrobStore**: Unified redb storage backend (`~/.grob/grob.db`) for OAuth tokens and spend. Migrates from legacy JSON files on first open.
+- **GrobStore**: Persistent storage layer using atomic files and append-only JSONL journals (`~/.grob/`). OAuth tokens stored as individually encrypted files (`tokens/<id>.json.enc`, AES-256-GCM), spend tracked in monthly journals (`spend/YYYY-MM.jsonl`).
 - **Harness**: Record & replay sandwich testing. Captures raw HTTP traffic as `.tape.jsonl` files, then replays through grob with a mock backend to exercise the full pipeline (DLP, routing, cache, streaming, etc.).
 
 ## Key Patterns
@@ -115,7 +115,7 @@ cargo bench --bench hotpath
 
 - Default port is **13456**, not 3456. Default bind address is `::1` (IPv6 localhost).
 - Config file is `~/.grob/config.toml`. Override with `--config <path>` or `GROB_CONFIG=<path|url>`.
-- OAuth tokens and spend stored in `~/.grob/grob.db` (redb). Legacy spend data may also exist in `~/.grob/spend.json` (auto-migrated on first run).
+- OAuth tokens stored in `~/.grob/tokens/<id>.json.enc` (AES-256-GCM encrypted). Spend tracked in `~/.grob/spend/YYYY-MM.jsonl` (append-only journals).
 - The `models` field on `ProviderConfig` is a legacy field -- model support is determined by `[[models.mappings]]`, not by listing models on the provider.
 - `jemalloc` is not available on MSVC targets -- the `#[cfg(not(target_env = "msvc"))]` guard handles this.
 - `cargo chef` is used in the Containerfile for layer caching.

@@ -51,7 +51,7 @@ auth_type = "oauth"
 oauth_provider = "anthropic-max"
 ```
 
-On first `grob start`, a browser window opens for OAuth login. Tokens are stored in `~/.grob/grob.db` (redb) and refreshed automatically.
+On first `grob start`, a browser window opens for OAuth login. Tokens are stored as encrypted files in `~/.grob/tokens/` (AES-256-GCM) and refreshed automatically.
 
 See [OAuth Setup](OAUTH_SETUP.md) for details.
 
