@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.17](https://github.com/azerozero/grob/compare/v0.36.16...v0.36.17) - 2026-04-14
+
+### Added
+
+- *(config)* exposer ScoringConfig en TOML via la section [classifier]
+
 ## [0.36.16](https://github.com/azerozero/grob/compare/v0.36.15...v0.36.16) - 2026-04-14
 
 ### Added
