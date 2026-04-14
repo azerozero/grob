@@ -93,11 +93,13 @@ default = "my-model"
                 name: "trivial".to_string(),
                 providers: vec!["haiku-provider".to_string(), "flash-provider".to_string()],
                 fanout: false,
+                match_conditions: None,
             },
             TierConfig {
                 name: "complex".to_string(),
                 providers: vec!["opus-provider".to_string()],
                 fanout: false,
+                match_conditions: None,
             },
         ];
 
@@ -118,6 +120,7 @@ default = "my-model"
             name: "trivial".to_string(),
             providers: vec!["cheap".to_string()],
             fanout: false,
+            match_conditions: None,
         }];
 
         // Medium is not configured -- fallback to default routing
@@ -131,6 +134,7 @@ default = "my-model"
             name: "trivial".to_string(),
             providers: vec![],
             fanout: false,
+            match_conditions: None,
         }];
 
         let result = resolve_tier_providers(&tiers, &ComplexityTier::Trivial, "my-model");
@@ -146,11 +150,13 @@ default = "my-model"
                 name: "trivial".to_string(),
                 providers: vec!["a".to_string()],
                 fanout: false,
+                match_conditions: None,
             },
             TierConfig {
                 name: "complex".to_string(),
                 providers: vec!["b".to_string(), "c".to_string()],
                 fanout: true,
+                match_conditions: None,
             },
         ];
 
@@ -186,6 +192,7 @@ providers = ["cheap"]
             name: "complex".to_string(),
             providers: vec!["opus".to_string(), "sonnet".to_string()],
             fanout: false,
+            match_conditions: None,
         }];
 
         let decision = RouteDecision {
