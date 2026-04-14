@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.14](https://github.com/azerozero/grob/compare/v0.36.13...v0.36.14) - 2026-04-14
+
+### Fixed
+
+- *(ci)* ajouter retry aux installations curl dans le pipeline
+- *(shell)* gater les couleurs ANSI sur TTY et NO_COLOR
+- *(shell)* supprimer le chemin hardcode et renforcer build.sh
+- *(security)* passer SARIF_FILE par variable d'env dans codeql-check.sh
+
+### Other
+
+- *(control)* deplacer Role dans le control engine
+
 ## [0.36.13](https://github.com/azerozero/grob/compare/v0.36.12...v0.36.13) - 2026-04-13
 
 ### Fixed
