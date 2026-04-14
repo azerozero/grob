@@ -13,7 +13,7 @@ name: CI
 on:
   merge_group:
   push:
-    branches: [develop]
+    branches: [main]
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+*"
     paths-ignore:
@@ -27,7 +27,7 @@ on:
       - "CODEOWNERS"
       - ".vscode/**"
   pull_request:
-    branches: [main, develop]
+    branches: [main]
   workflow_dispatch:
     inputs:
       run_load:
@@ -148,7 +148,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: clippy-${{ matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Run clippy
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
@@ -239,7 +239,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: docs
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Check missing doc comments
         env:
           RUSTDOCFLAGS: "-W missing-docs"
@@ -267,7 +267,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: machete
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: bnjbvr/cargo-machete@v0.9.1 # pinned — update manually
 
   coverage:
@@ -287,7 +287,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: coverage
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v6
@@ -338,7 +338,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: hack-${{ matrix.group }}
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@cargo-hack
       - run: cargo hack check --feature-powerset --depth 2 --no-dev-deps --partition ${{ matrix.partition }}/2 ${{ matrix.hack_args }}
 
@@ -372,7 +372,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test-ubuntu-latest
-          save-if: ${{ github.ref == 'refs/heads/develop' && matrix.shard == 1 }}
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 }}
       - uses: taiki-e/install-action@nextest
       - run: cargo nextest run --profile ci --partition count:${{ matrix.shard }}/4
       - run: cargo test --doc
@@ -419,7 +419,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: test-${{ matrix.os }}
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
       - name: Run tests
         run: |
@@ -433,12 +433,12 @@ jobs:
         shell: bash
 
   # =========================================================================
-  # Stage 2.5: Mutation testing (develop push only, informational)
+  # Stage 2.5: Mutation testing (main push only, informational)
   #   Sharded: 1 file per job for ~4x speedup (was ~45min sequential).
   # =========================================================================
   mutants:
     name: Mutation Testing (shard ${{ matrix.shard }}/${{ strategy.job-total }})
-    if: github.ref == 'refs/heads/develop'
+    if: github.ref == 'refs/heads/main'
     needs: [test-ubuntu, test-other]
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -473,7 +473,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: mutants-${{ matrix.shard }}
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install cargo-mutants
         run: cargo install cargo-mutants@24.11.2 --locked  # pinned — update manually
       - name: Run mutation testing on ${{ matrix.file }}
@@ -495,7 +495,7 @@ jobs:
           if-no-files-found: ignore
 
   # =========================================================================
-  # Stage 3: Cross build (develop push + tag push only, not PRs)
+  # Stage 3: Cross build (main push + tag push only, not PRs)
   # =========================================================================
   build:
     name: Build ${{ matrix.target }}
@@ -572,7 +572,7 @@ jobs:
           compression-level: 9
 
   # =========================================================================
-  # Stage 4: Push GHCR multi-arch image (develop push + tag push only)
+  # Stage 4: Push GHCR multi-arch image (main push + tag push only)
   # =========================================================================
   container:
     name: Container image
@@ -758,7 +758,7 @@ jobs:
           git push
 
   # =========================================================================
-  # Stage 6: E2E tests (develop push + tag push only)
+  # Stage 6: E2E tests (main push + tag push only)
   # Pulls the SPECIFIC version image just pushed by container job.
   # =========================================================================
   e2e:
@@ -961,7 +961,7 @@ jobs:
     steps:
       - name: Check required jobs
         run: |
-          # This is the ONLY job referenced in the GitHub ruleset "Protect develop".
+          # This is the ONLY job referenced in the GitHub ruleset "Protect main".
           # Do NOT add individual job names (Clippy, Rustfmt, etc.) to the ruleset —
           # path pruning skips them on non-Rust changes, causing eternal "pending".
           # See: https://github.com/azerozero/grob/pull/153
