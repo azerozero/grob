@@ -824,6 +824,34 @@ impl ProviderConfig {
     }
 }
 
+/// Declarative match conditions for tier activation.
+///
+/// All specified fields are AND-combined: every non-empty field must match
+/// for the tier to activate. Within a field (e.g. `keywords`), values are
+/// OR-combined (any hit satisfies that field). Omitted/empty fields are
+/// unconstrained.
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+pub struct TierMatchCondition {
+    /// Substring keywords matched against the last user message (OR-combined, case-insensitive).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
+    /// Glob patterns matched against file paths found in message content (OR-combined).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_patterns: Vec<String>,
+    /// Tool names that must be present in the request (OR-combined).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+    /// Activates when `max_tokens >= this` value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens_above: Option<u32>,
+    /// Activates when `max_tokens <= this` value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens_below: Option<u32>,
+    /// Activates when message count `>= this` value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_messages: Option<usize>,
+}
+
 /// Declarative tier configuration mapping complexity tiers to provider lists.
 ///
 /// Each `[[tiers]]` entry binds a [`ComplexityTier`](crate::router::classify::ComplexityTier)
@@ -839,4 +867,7 @@ pub struct TierConfig {
     /// Send the request to all tier providers in parallel (fan-out).
     #[serde(default)]
     pub fanout: bool,
+    /// Optional declarative match conditions (bypasses the algorithmic scorer).
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "match")]
+    pub match_conditions: Option<TierMatchCondition>,
 }

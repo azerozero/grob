@@ -263,6 +263,7 @@ providers = ["cheap-provider"]
             name: "complex".to_string(),
             providers: vec!["prov-a".to_string(), "prov-b".to_string()],
             fanout: true,
+            match_conditions: None,
         };
         let toml = toml::to_string(&tier).unwrap();
         assert!(toml.contains("name = \"complex\""));

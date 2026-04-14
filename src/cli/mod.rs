@@ -16,7 +16,7 @@ pub use config::{
     FanOutConfig, FanOutMode, FipsConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig,
     PoolConfig, PoolStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,
     ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TierConfig,
-    TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
+    TierMatchCondition, TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 

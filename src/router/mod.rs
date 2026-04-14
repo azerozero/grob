@@ -8,6 +8,8 @@ pub mod inference;
 mod message;
 /// Regex compilation and capture-group utilities.
 mod rules;
+/// Declarative tier matcher for `[tiers.match]` conditions.
+pub(crate) mod tier_match;
 
 use crate::cli::AppConfig;
 use crate::models::{CanonicalRequest, RouteDecision, RouteType};
@@ -134,6 +136,8 @@ pub struct Router {
     prompt_rules: Vec<CompiledPromptRule>,
     /// Scoring config for complexity classification. `None` disables scoring.
     scoring_config: Option<classify::ScoringConfig>,
+    /// Compiled declarative tier matchers from `[[tiers]]` with `[tiers.match]`.
+    tier_matchers: Vec<tier_match::CompiledTierMatch>,
 }
 
 impl Router {
@@ -197,9 +201,40 @@ impl Router {
             info!("📝 Loaded {} prompt routing rules", prompt_rules.len());
         }
 
-        // Scoring is always active (default config). T-P3 will add
-        // tier-based provider selection; until then the tier is informational.
         let scoring_config = Some(classify::ScoringConfig::default());
+
+        let tier_matchers: Vec<tier_match::CompiledTierMatch> = config
+            .tiers
+            .iter()
+            .filter_map(|tier_cfg| {
+                let condition = tier_cfg.match_conditions.as_ref()?;
+                let tier = match tier_cfg.name.to_lowercase().as_str() {
+                    "trivial" => classify::ComplexityTier::Trivial,
+                    "medium" => classify::ComplexityTier::Medium,
+                    "complex" => classify::ComplexityTier::Complex,
+                    _ => {
+                        tracing::warn!(
+                            "Unknown tier '{}' in [tiers.match], skipping",
+                            tier_cfg.name
+                        );
+                        return None;
+                    }
+                };
+                match tier_match::CompiledTierMatch::new(tier, condition.clone()) {
+                    Ok(m) => Some(m),
+                    Err(e) => {
+                        tracing::warn!("Invalid glob in tier '{}': {e}. Skipping.", tier_cfg.name);
+                        None
+                    }
+                }
+            })
+            .collect();
+        if !tier_matchers.is_empty() {
+            info!(
+                "📊 Loaded {} declarative tier matchers",
+                tier_matchers.len()
+            );
+        }
 
         Self {
             config,
@@ -208,6 +243,7 @@ impl Router {
             background_prefilter_bytes,
             prompt_rules,
             scoring_config,
+            tier_matchers,
         }
     }
 
@@ -300,11 +336,14 @@ impl Router {
             }
         }
 
-        // 8. Complexity scoring (after all rule-based routing, before default)
-        let tier = self.scoring_config.as_ref().map(|cfg| {
-            let t = classify::classify_complexity(request, cfg);
-            debug!(tier = %t, "📊 Complexity scoring");
-            t
+        // 8. Declarative tier match (checked FIRST, before algorithmic scorer)
+        // 9. Fallback: algorithmic complexity scoring
+        let tier = tier_match::evaluate_tier_matches(&self.tier_matchers, request).or_else(|| {
+            self.scoring_config.as_ref().map(|cfg| {
+                let t = classify::classify_complexity(request, cfg);
+                debug!(tier = %t, "📊 Complexity scoring (fallback)");
+                t
+            })
         });
 
         // 9. Default fallback

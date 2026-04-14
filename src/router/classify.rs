@@ -200,7 +200,7 @@ fn score_keywords(request: &CanonicalRequest) -> f32 {
 }
 
 /// Extracts text from the last user message for keyword scanning.
-fn extract_last_user_text(request: &CanonicalRequest) -> Option<String> {
+pub(crate) fn extract_last_user_text(request: &CanonicalRequest) -> Option<String> {
     let last_user = request.messages.iter().rev().find(|m| m.role == "user")?;
     match &last_user.content {
         MessageContent::Text(t) => Some(t.clone()),

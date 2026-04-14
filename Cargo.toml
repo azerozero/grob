@@ -87,8 +87,8 @@ tempfile = "3"
 # Credential encryption at rest (AES-256-GCM)
 aes-gcm = "0.10"
 
-# Policy engine (glob pattern matching for policy rules)
-globset = { version = "0.4", optional = true }
+# Glob pattern matching (tier routing + policy engine)
+globset = "0.4"
 
 # Encrypted audit export (envelope encryption, multi-recipient)
 age = { version = "0.11", features = ["armor"] }
@@ -207,7 +207,7 @@ tap = []
 compliance = []
 mcp = []
 harness = []
-policies = ["globset"]
+policies = []
 test-util = []
 
 [package.metadata.cargo-machete]
