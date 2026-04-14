@@ -1102,6 +1102,41 @@ fn display_indirect_injection_blocked() {
 }
 
 #[test]
+fn display_indirect_injection_blocked_multi() {
+    let err = DlpBlockError::IndirectInjectionBlocked(vec![
+        prompt_injection::InjectionDetection {
+            pattern_name: "en_ignore".into(),
+            matched_text: "ignore previous".into(),
+            start: 0,
+            end: 15,
+        },
+        prompt_injection::InjectionDetection {
+            pattern_name: "en_system".into(),
+            matched_text: "new system prompt".into(),
+            start: 20,
+            end: 37,
+        },
+    ]);
+    let msg = err.to_string();
+    assert!(
+        msg.starts_with("Indirect injection detected: "),
+        "must start with prefix"
+    );
+    assert!(
+        msg.contains(", "),
+        "multiple detections must be comma-separated"
+    );
+    assert!(
+        msg.contains("ignore previous"),
+        "must contain first detection"
+    );
+    assert!(
+        msg.contains("new system prompt"),
+        "must contain second detection"
+    );
+}
+
+#[test]
 fn indirect_injection_config_defaults() {
     let config = config::PromptInjectionConfig::default();
     assert!(config.scan_responses, "scan_responses default must be true");
