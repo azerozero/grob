@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.16](https://github.com/azerozero/grob/compare/v0.36.15...v0.36.16) - 2026-04-14
+
+### Added
+
+- *(router)* ajouter le match declaratif [tiers.match] pour le routing par complexite
+
+### Other
+
+- migrate from Git Flow (develop+main) to GitHub Flow (main only) ([#198](https://github.com/azerozero/grob/pull/198))
+
 ## [0.36.15](https://github.com/azerozero/grob/compare/v0.36.14...v0.36.15) - 2026-04-14
 
 ### Fixed
