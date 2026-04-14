@@ -79,5 +79,76 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
         run: |
-          gh pr merge "${{ steps.branch.outputs.branch }}" --auto --squash --delete-branch \
+          gh pr merge "${{ steps.branch.outputs.branch }}" --auto --merge --delete-branch \
             || echo "::warning::Auto-merge could not be enabled — merge the PR manually."
+
+  # After the sync PR merges into main, absorb main back into develop
+  # so that develop stays 0 commits behind main (the squash/merge commit
+  # on main would otherwise cause perpetual "N behind" drift).
+  absorb:
+    name: Absorb main → develop
+    needs: sync
+    runs-on: ubuntu-latest
+    # Only run after the sync job succeeds
+    if: success()
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: develop
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Wait for sync PR to merge
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Wait up to 15 minutes for the sync PR to merge
+          for i in $(seq 1 30); do
+            MERGED=$(gh pr list --base main --label sync-main --state merged \
+              --json title --jq "[.[] | select(.title | contains(\"${TAG}\"))] | length")
+            if [ "$MERGED" -gt 0 ]; then
+              echo "Sync PR for $TAG merged."
+              break
+            fi
+            echo "Waiting for sync PR to merge... ($i/30)"
+            sleep 30
+          done
+
+      - name: Create absorb branch
+        id: absorb
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          BRANCH="absorb-main-${TAG}"
+          git fetch origin main
+          git merge origin/main --no-edit || true
+          git checkout -B "$BRANCH"
+          git push --force-with-lease origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Open absorb PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+        run: |
+          TAG="${{ steps.absorb.outputs.tag }}"
+          BRANCH="${{ steps.absorb.outputs.branch }}"
+          # Skip if develop is already up to date with main
+          BEHIND=$(git rev-list --count origin/develop..origin/main)
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "develop already up to date with main, skipping."
+            exit 0
+          fi
+          gh pr create \
+            --base develop \
+            --head "$BRANCH" \
+            --title "chore(sync): absorb main → develop (${TAG})" \
+            --body "Automated absorb after sync. Keeps develop 0 behind main." \
+            --label sync-main \
+          && gh pr merge "$BRANCH" --auto --merge --delete-branch \
+          || echo "::warning::Absorb PR could not be created or auto-merged."
