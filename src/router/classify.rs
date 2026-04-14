@@ -34,7 +34,7 @@ impl std::fmt::Display for ComplexityTier {
 ///
 /// All weights default to `1.0`. Set a weight to `0.0` to disable
 /// the corresponding signal entirely.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ScoringWeights {
     /// Weight for the max_tokens signal.
     pub max_tokens: f32,
@@ -65,7 +65,7 @@ impl Default for ScoringWeights {
 /// `score < medium_threshold` → Trivial
 /// `score < complex_threshold` → Medium
 /// otherwise → Complex
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct ScoringThresholds {
     /// Score below which the request is considered trivial.
     pub medium_threshold: f32,
@@ -83,7 +83,7 @@ impl Default for ScoringThresholds {
 }
 
 /// Scoring configuration combining weights and thresholds.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct ScoringConfig {
     /// Per-signal weights.
     pub weights: ScoringWeights,

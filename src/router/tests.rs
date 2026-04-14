@@ -20,6 +20,7 @@ fn create_test_config() -> AppConfig {
         providers: vec![],
         models: vec![],
         tiers: vec![],
+        classifier: None,
         presets: Default::default(),
         budget: Default::default(),
         dlp: Default::default(),

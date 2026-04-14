@@ -50,6 +50,9 @@ pub struct AppConfig {
     /// Declarative tier-to-provider mappings (opt-in complexity routing)
     #[serde(default)]
     pub tiers: Vec<TierConfig>,
+    /// Complexity classifier scoring weights and thresholds
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub classifier: Option<crate::router::classify::ScoringConfig>,
     /// Preset management and sync settings
     #[serde(default)]
     pub presets: PresetConfig,
