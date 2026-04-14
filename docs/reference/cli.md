@@ -93,7 +93,7 @@ Run 11 diagnostic checks:
 6. Port availability (if service not running)
 7. DLP status
 8. Security settings (rate limit, circuit breaker)
-9. Storage backend (redb)
+9. Storage backend (atomic files)
 10. Missing environment variables
 11. Podman availability
 

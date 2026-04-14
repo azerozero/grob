@@ -36,12 +36,16 @@ NESTING_CRITICAL=5
 NESTING_MIN_LINES=20
 CLONE_DENSITY_FLAG=10
 
-# --- Colors for terminal ---
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-GREEN='\033[0;32m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+# --- Colors for terminal (gated on TTY + NO_COLOR) ---
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+    RED='\033[0;31m'
+    YELLOW='\033[0;33m'
+    GREEN='\033[0;32m'
+    CYAN='\033[0;36m'
+    NC='\033[0m'
+else
+    RED='' YELLOW='' GREEN='' CYAN='' NC=''
+fi
 
 # --- Counters ---
 critical_count=0

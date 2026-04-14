@@ -7,6 +7,29 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+// ── RBAC role hierarchy ──
+
+/// Access role derived from transport credentials.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Role {
+    /// Read-only: list endpoints and budget queries.
+    Observer = 0,
+    /// Operational: server control, routing changes.
+    Operator = 1,
+    /// Administrative: config and key management.
+    Admin = 2,
+    /// Unrestricted: localhost-only, full access.
+    Superadmin = 3,
+}
+
+impl Role {
+    /// Returns `true` if this role has at least the given privilege level.
+    pub fn has_at_least(self, required: Role) -> bool {
+        (self as u8) >= (required as u8)
+    }
+}
+
 // ── Action catalog ──
 
 /// Top-level action routed by the control engine.
@@ -291,8 +314,6 @@ impl ControlError {
 }
 
 // ── Role requirement mapping (pure) ──
-
-use crate::server::rpc::types::Role;
 
 /// Returns the minimum [`Role`] required for the given action.
 pub fn required_role(action: &Action) -> Role {

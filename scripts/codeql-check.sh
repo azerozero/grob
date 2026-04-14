@@ -36,9 +36,9 @@ RESULTS=$(codeql database analyze "$DB_DIR" \
 echo "$RESULTS"
 
 if [[ -n "$SARIF_FILE" ]] && [[ -f "$SARIF_FILE" ]]; then
-    ALERT_COUNT=$(python3 -c "
-import json, sys
-with open('$SARIF_FILE') as f:
+    ALERT_COUNT=$(SARIF_FILE="$SARIF_FILE" python3 -c "
+import json, os
+with open(os.environ['SARIF_FILE']) as f:
     d = json.load(f)
     total = sum(len(r.get('results', [])) for r in d.get('runs', []))
     print(total)

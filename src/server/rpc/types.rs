@@ -23,28 +23,9 @@ pub fn rpc_err(code: i32, msg: impl Into<String>) -> ErrorObjectOwned {
     ErrorObjectOwned::owned(code, msg.into(), None::<()>)
 }
 
-// ── RBAC role hierarchy ──
+// ── RBAC role hierarchy (canonical definition in control::engine) ──
 
-/// Access role derived from transport credentials.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Role {
-    /// Read-only: list endpoints and budget queries.
-    Observer = 0,
-    /// Operational: server control, routing changes.
-    Operator = 1,
-    /// Administrative: config and key management.
-    Admin = 2,
-    /// Unrestricted: localhost-only, full access.
-    Superadmin = 3,
-}
-
-impl Role {
-    /// Returns `true` if this role has at least the given privilege level.
-    pub fn has_at_least(self, required: Role) -> bool {
-        (self as u8) >= (required as u8)
-    }
-}
+pub use crate::control::engine::Role;
 
 // ── Common response envelopes ──
 

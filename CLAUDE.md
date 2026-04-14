@@ -18,7 +18,7 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 - **Provider abstraction**: All providers implement the `LlmProvider` trait (`src/providers/mod.rs`).
 - **Routing**: Regex-based prompt rules in `src/router/mod.rs` classify requests into task types (thinking, web_search, background, default).
 - **OAuth**: Custom implementation (no `oauth2` crate) with PKCE in `src/auth/oauth.rs`.
-- **Spend tracking**: Persistent monthly spend in redb (`~/.grob/grob.db`) with budget enforcement.
+- **Spend tracking**: Persistent monthly spend in append-only JSONL journals (`~/.grob/spend/YYYY-MM.jsonl`) with budget enforcement.
 
 ### Module Layout
 
@@ -47,7 +47,7 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/features/harness/` | Record & replay sandwich testing (opt-in `harness` feature) |
 | `src/security/` | Circuit breakers, rate limiting, audit log, headers, scoring |
 | `src/traits.rs` | Core trait contracts (7+ traits for dispatch pipeline) |
-| `src/storage/` | Unified redb storage backend (GrobStore) |
+| `src/storage/` | Persistent storage layer: atomic files, JSONL journals, AES-256-GCM encryption (GrobStore) |
 | `src/preset/` | Preset management system |
 | `src/auth/auto_flow.rs` | Automatic credential setup at startup |
 | `src/features/tool_layer/` | Tool-calling abstraction layer |

@@ -199,7 +199,7 @@ The event bus uses a broadcast channel with a capacity of 1024 events. The TUI k
 
 ## Spend tracking
 
-Monthly spend is tracked persistently in `~/.grob/grob.db` (redb) or `~/.grob/spend.json` (legacy fallback). Data auto-resets on the first request of a new calendar month.
+Monthly spend is tracked persistently in append-only JSONL journals (`~/.grob/spend/YYYY-MM.jsonl`). Data auto-resets on the first request of a new calendar month (new journal file).
 
 ### Budget enforcement
 

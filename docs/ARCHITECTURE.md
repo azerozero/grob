@@ -55,7 +55,7 @@ flowchart TB
     subgraph response["Response"]
         resp1["Stream SSE events / buffer"]
         resp2["Record metrics (latency, tokens, cost)"]
-        resp3["Update spend tracker (redb)"]
+        resp3["Update spend tracker (JSONL journal)"]
         resp4["Emit webhook tap event"]
         resp5["Write audit log entry"]
     end
@@ -88,7 +88,7 @@ flowchart TB
 | `preset` | `src/preset/mod.rs` | Preset management (list, apply, export, sync, validate) |
 | `auth` | `src/auth/mod.rs` | Auth module aggregator |
 | `auth::oauth` | `src/auth/oauth.rs` | OAuth client with PKCE |
-| `auth::token_store` | `src/auth/token_store.rs` | Persistent OAuth token storage (redb-backed) |
+| `auth::token_store` | `src/auth/token_store.rs` | Persistent OAuth token storage (encrypted files) |
 | `auth::jwt` | `src/auth/jwt.rs` | JWT validation and JWKS refresh |
 | `features::token_pricing` | `src/features/token_pricing/mod.rs` | Token counting and dynamic pricing table |
 | `features::token_pricing::spend` | `src/features/token_pricing/spend.rs` | Persistent monthly spend tracking and budget enforcement |
@@ -108,7 +108,7 @@ flowchart TB
 | `security::cache` | `src/security/cache.rs` | Response caching (moka) |
 | `security::provider_scorer` | `src/security/provider_scorer.rs` | Adaptive provider scoring (EWMA latency, success rate) |
 | `security::risk` | `src/security/risk.rs` | Risk assessment for EU AI Act compliance |
-| `storage` | `src/storage/mod.rs` | Unified redb storage backend (GrobStore) |
+| `storage` | `src/storage/mod.rs` | Persistent storage layer: atomic files, JSONL journals (GrobStore) |
 | `storage::migrate` | `src/storage/migrate.rs` | Storage migrations |
 | `models` | `src/models/mod.rs` | Anthropic request/response types, route types |
 | `features::mcp` | `src/features/mcp/mod.rs` | MCP tool matrix: tool catalogue, scoring, calibration |
@@ -135,7 +135,7 @@ flowchart TB
 
 **Streaming-first.** Both SSE streaming and buffered responses are supported. DLP scanning operates on stream chunks using Aho-Corasick automata, so no full-response buffering is needed.
 
-**Persistent state in redb.** OAuth tokens, monthly spend, and storage data are kept in an embedded redb database at `~/.grob/grob.db`. This survives restarts without requiring an external database.
+**Persistent state in atomic files.** OAuth tokens are stored as individually encrypted files (`~/.grob/tokens/<id>.json.enc`, AES-256-GCM). Monthly spend is tracked in append-only JSONL journals (`~/.grob/spend/YYYY-MM.jsonl`). Virtual keys are stored in `~/.grob/vkeys/<hash>.json.enc`. All writes are crash-safe (journals use `O_APPEND`, other files use atomic rename). See ADR-0013.
 
 **Security middleware stack.** All security features are toggled via the `[security]` TOML section: `rate_limit_rps`, `rate_limit_burst`, `max_body_size`, `security_headers`, `circuit_breaker`, `audit_dir`. Set `enabled = false` to disable the entire security layer. Each request gets a `X-Request-Id` (UUID v4 if not provided) for tracing across logs.
 
