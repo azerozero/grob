@@ -102,5 +102,5 @@ Our goal is to minimize the complexity developers face when using multiple AI pr
 ## References
 
 ### Project Documentation
-- [Configuration Reference](./CONFIGURATION.md) - All config options
-- [Provider Setup](./PROVIDERS.md) - Per-provider setup guides
+- [Configuration Reference](../reference/configuration.md) - All config options
+- [Provider Setup](../how-to/providers.md) - Per-provider setup guides

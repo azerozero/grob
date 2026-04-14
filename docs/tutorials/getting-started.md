@@ -146,8 +146,8 @@ When you ran `grob exec -- claude`:
 
 ## Next steps
 
-- **Customize your config**: Edit `~/.grob/config.toml` directly -- see [Configuration Reference](../CONFIGURATION.md)
-- **Add more providers**: See [Provider Setup](../PROVIDERS.md) for all 13+ supported backends
+- **Customize your config**: Edit `~/.grob/config.toml` directly -- see [Configuration Reference](../reference/configuration.md)
+- **Add more providers**: See [Provider Setup](../how-to/providers.md) for all 13+ supported backends
 - **Set a budget**: Add `[budget] monthly_limit_usd = 50.0` to your config -- see [How to Configure](../how-to/configure.md)
-- **Understand the architecture**: Read the [Architecture Overview](../ARCHITECTURE.md)
-- **Fix problems**: Check [Troubleshooting](../TROUBLESHOOTING.md)
+- **Understand the architecture**: Read the [Architecture Overview](../explanation/architecture.md)
+- **Fix problems**: Check [Troubleshooting](../how-to/troubleshooting.md)
