@@ -4,7 +4,7 @@
 # --------
 # Le workflow principal `ci.yml` ignore les changements docs via `paths-ignore:
 # docs/**, **.md, ...` → sur une PR docs-only, aucun des required checks
-# declares dans le ruleset develop ("Rustfmt", "Clippy (ubuntu-latest)",
+# declares dans le ruleset main ("Rustfmt", "Clippy (ubuntu-latest)",
 # "Test (ubuntu-latest)") n'est rapporte → le `statusCheckRollup` reste vide
 # et GitHub bloque le merge (deadlock).
 #
@@ -24,7 +24,7 @@ name: CI
 
 on:
   push:
-    branches: [develop]
+    branches: [main]
     paths:
       - "docs/**"
       - "**.md"
@@ -36,7 +36,7 @@ on:
       - "CODEOWNERS"
       - ".vscode/**"
   pull_request:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - "docs/**"
       - "**.md"

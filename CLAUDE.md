@@ -9,7 +9,7 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 - **Binary only** — grob is distributed as a standalone binary, NOT as a crate on crates.io.
 - **crates.io/crates/grob is a different project** (Coding-Badly/grob, "Growable buffer for Windows API"). Do not confuse or reference it.
 - Container image: `ghcr.io/azerozero/grob:<version>` (scratch, ~6MB)
-- Releases: GitHub Releases via release-plz (auto-bumps version on develop push)
+- Releases: GitHub Releases via release-plz (auto-bumps version on main push)
 - Install: `brew install azerozero/tap/grob` or `curl -fsSL https://grob.sh | sh`
 
 ### Key Architectural Decisions
@@ -74,23 +74,20 @@ brew install j178/tap/prek   # macOS / Linuxbrew
 
 ## Git Flow & CI/CD
 
-### Branching Model
+### Branching Model (GitHub Flow)
 
 ```
-feature/* ──► develop ──► tag v* ──► release
-                              └──► sync-main PR ──► main
+feature/* ──► main ──► release-plz PR ──► tag v* ──► release
 ```
 
-1. **Feature branches**: Create from `develop`, name `feature/<topic>` or `fix/<topic>`. PR targets `develop`.
-2. **`develop`**: Integration branch. Every push triggers the full CI pipeline (lint, test, mutation testing). release-plz watches `develop` and creates a tag `v*` directly from it when releasable commits land.
-3. **Release**: The tag push triggers the release pipeline (cross-builds, container image, Homebrew formula update).
-4. **`main`**: Stable branch. After a tag is created, `sync-main.yml` automatically opens a PR from `develop` to `main` to keep it in sync. `main` receives the merge **after** the tag, not before.
+1. **Feature branches**: Create from `main`, name `feat/<topic>` or `fix/<topic>`. PR targets `main`.
+2. **`main`**: The only long-lived branch. Every push triggers the full CI pipeline. release-plz watches `main` and creates a Release PR when releasable commits land.
+3. **Release**: The Release PR merges (auto-merge), release-plz creates a `v*` tag, which triggers the release pipeline (cross-builds, container image, Homebrew).
 
 ### Critical Rules
 
-- **Never commit or push directly to `main`**. All changes go through `develop` or feature branches.
-- **Never create a PR with `develop` as the head branch targeting `main`**. Only `sync-main.yml` creates PRs to `main` (via short-lived `sync-main-v*` branches). Creating a manual PR from `develop` to `main` risks `develop` being deleted by GitHub's auto-delete-head-branch setting.
-- **Both `main` and `develop` are protected** by GitHub rulesets (no deletion, no force push).
+- **Never commit or push directly to `main`**. All changes go through feature branches + PRs.
+- **`main` is protected** by a GitHub ruleset (no deletion, no force push, PR required).
 - **Conventional commits required**: `feat:`, `fix:`, `refactor:`, `perf:` with scopes trigger release-plz version bumps. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes.
 - **release-plz `release_commits` filter**: only `feat|fix|refactor|perf` commits (any scope or no scope) trigger a version bump. The prefix is the gate, not the scope.
 
@@ -98,18 +95,18 @@ feature/* ──► develop ──► tag v* ──► release
 
 | Stage | Trigger | Jobs |
 |-------|---------|------|
-| Quality gates | push to `develop` / PR | fmt, clippy, doc, actionlint |
-| Tests | push to `develop` / PR | unit tests (Ubuntu + macOS + Windows), integration tests |
-| Mutation testing | push to `develop` only | cargo-mutants on critical paths (router, DLP) |
-| Cross-build | push to `develop` + tag push | Multi-target binaries (Linux amd64/arm64/musl, macOS, Windows) |
+| Quality gates | push to `main` / PR | fmt, clippy, doc, actionlint |
+| Tests | push to `main` / PR | unit tests (Ubuntu + macOS + Windows), integration tests |
+| Mutation testing | push to `main` only | cargo-mutants on critical paths (router, DLP) |
+| Cross-build | push to `main` + tag push | Multi-target binaries (Linux amd64/arm64/musl, macOS, Windows) |
 | Release | tag `v*` push | GitHub Release, container image, Homebrew formula |
 
-### Release Flow (`.github/workflows/release-plz.yml` + `sync-main.yml`)
+### Release Flow (`.github/workflows/release-plz.yml`)
 
-- Triggered by push to `develop` (only `src/**`, `Cargo.toml`, `Cargo.lock`).
-- release-plz bumps the version, updates `CHANGELOG.md`, and creates a `v*` tag directly on `develop`.
-- The tag push triggers the full release pipeline (cross-builds, container image, Homebrew).
-- `sync-main.yml` reacts to the tag push and opens a PR from `develop` to `main` (via a `sync-main-v*` branch) to keep `main` in sync. This PR is auto-merged when CI passes.
+- Triggered by push to `main` (only `src/**`, `Cargo.toml`, `Cargo.lock`).
+- release-plz creates a Release PR with version bump + CHANGELOG update.
+- Release PR auto-merges when CI passes.
+- release-plz creates the `v*` tag, which triggers the release pipeline.
 
 ## Documentation Standards
 

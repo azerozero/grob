@@ -24,7 +24,7 @@ jobs:
         with:
           script: |
             const branch = context.payload.pull_request.head.ref;
-            const protectedPrefixes = ['main', 'develop'];
+            const protectedPrefixes = ['main'];
             if (protectedPrefixes.includes(branch)) {
               console.log(`Skipping protected branch: ${branch}`);
               return;
@@ -50,7 +50,7 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const protectedBranches = ['main', 'develop'];
+            const protectedBranches = ['main'];
             // Patterns for branches that should be auto-cleaned.
             const stalePatterns = [/^release-plz-/, /^claude\//];
 
@@ -63,14 +63,14 @@ jobs:
               if (protectedBranches.includes(branch.name)) continue;
               if (!stalePatterns.some(p => p.test(branch.name))) continue;
 
-              // Only delete if fully merged into develop or main.
+              // Only delete if fully merged into main.
               try {
                 const { status } = await github.rest.repos.compareCommits({
                   owner, repo,
-                  base: 'develop',
+                  base: 'main',
                   head: branch.name,
                 });
-                // ahead_by == 0 means all commits are in develop.
+                // ahead_by == 0 means all commits are in main.
                 if (status !== 'behind' && status !== 'identical') continue;
               } catch {
                 continue;

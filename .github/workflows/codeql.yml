@@ -2,7 +2,7 @@ name: "CodeQL Security Analysis"
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
   schedule:
@@ -30,7 +30,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: codeql
-          save-if: ${{ github.ref == 'refs/heads/develop' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3

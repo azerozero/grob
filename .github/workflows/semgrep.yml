@@ -2,7 +2,7 @@ name: "Semgrep SAST"
 
 on:
   push:
-    branches: [develop]
+    branches: [main]
     paths:
       - "src/**"
   pull_request:
