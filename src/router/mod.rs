@@ -201,7 +201,7 @@ impl Router {
             info!("📝 Loaded {} prompt routing rules", prompt_rules.len());
         }
 
-        let scoring_config = Some(classify::ScoringConfig::default());
+        let scoring_config = Some(config.classifier.clone().unwrap_or_default());
 
         let tier_matchers: Vec<tier_match::CompiledTierMatch> = config
             .tiers

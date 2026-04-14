@@ -136,6 +136,7 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         providers: vec![],
         models: vec![],
         tiers: vec![],
+        classifier: None,
         presets: Default::default(),
         budget: Default::default(),
         dlp: Default::default(),

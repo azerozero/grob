@@ -22,6 +22,7 @@ mod tests {
             providers: vec![],
             models: vec![],
             tiers: vec![],
+            classifier: None,
             presets: Default::default(),
             budget: Default::default(),
             dlp: Default::default(),

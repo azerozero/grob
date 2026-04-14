@@ -269,4 +269,49 @@ providers = ["cheap-provider"]
         assert!(toml.contains("name = \"complex\""));
         assert!(toml.contains("fanout = true"));
     }
+
+    #[test]
+    fn test_classifier_config_toml_round_trip() {
+        let toml_str = r#"
+[server]
+port = 8080
+
+[router]
+default = "my-model"
+
+[classifier]
+[classifier.weights]
+max_tokens = 2.0
+tools = 0.5
+context_size = 1.0
+keywords = 1.5
+system_prompt = 0.0
+
+[classifier.thresholds]
+medium_threshold = 3.0
+complex_threshold = 7.0
+        "#;
+
+        let config = AppConfig::from_content(toml_str, "test").unwrap();
+        let c = config.classifier.expect("classifier must be present");
+        assert!((c.weights.max_tokens - 2.0).abs() < f32::EPSILON);
+        assert!((c.weights.tools - 0.5).abs() < f32::EPSILON);
+        assert!((c.weights.system_prompt).abs() < f32::EPSILON);
+        assert!((c.thresholds.medium_threshold - 3.0).abs() < f32::EPSILON);
+        assert!((c.thresholds.complex_threshold - 7.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_classifier_absent_uses_defaults() {
+        let toml_str = r#"
+[server]
+port = 8080
+
+[router]
+default = "my-model"
+        "#;
+
+        let config = AppConfig::from_content(toml_str, "test").unwrap();
+        assert!(config.classifier.is_none());
+    }
 }
