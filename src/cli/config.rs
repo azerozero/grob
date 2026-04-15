@@ -426,6 +426,9 @@ pub struct TracingConfig {
     /// Compress rotated files with zstd (default: false)
     #[serde(default)]
     pub compress: bool,
+    /// Encrypt trace entries with AES-256-GCM at rest (default: false)
+    #[serde(default)]
+    pub encrypt: bool,
 }
 
 impl Default for TracingConfig {
@@ -437,6 +440,7 @@ impl Default for TracingConfig {
             max_size_mb: default_max_size_mb(),
             max_files: default_max_files(),
             compress: false,
+            encrypt: false,
         }
     }
 }

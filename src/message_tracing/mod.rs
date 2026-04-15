@@ -1,7 +1,7 @@
 //! Message tracing for debugging
 //!
-//! Logs full request/response messages to a JSONL file with size-based rotation
-//! and optional zstd compression of rotated files.
+//! Logs full request/response messages to a JSONL file with size-based rotation,
+//! optional zstd compression of rotated files, and optional AES-256-GCM encryption.
 
 use crate::cli::TracingConfig;
 use crate::models::{CanonicalRequest, RouteType};
@@ -20,6 +20,7 @@ pub struct MessageTracer {
     /// Expanded absolute path to the trace file.
     trace_path: PathBuf,
     file: Option<Mutex<File>>,
+    cipher: Option<crate::storage::encrypt::StorageCipher>,
 }
 
 /// A trace entry for a request
@@ -68,8 +69,26 @@ impl MessageTracer {
                 config,
                 trace_path,
                 file: None,
+                cipher: None,
             };
         }
+
+        let cipher = if config.encrypt {
+            match crate::storage::encrypt::StorageCipher::load_or_generate(
+                &crate::storage::GrobStore::default_path(),
+            ) {
+                Ok(c) => {
+                    tracing::info!("Trace encryption enabled (AES-256-GCM)");
+                    Some(c)
+                }
+                Err(e) => {
+                    tracing::error!("Failed to initialize trace encryption: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         // Ensure parent directory exists
         if let Some(parent) = trace_path.parent() {
@@ -79,6 +98,7 @@ impl MessageTracer {
                     config,
                     trace_path,
                     file: None,
+                    cipher: None,
                 };
             }
         }
@@ -91,6 +111,7 @@ impl MessageTracer {
                     config,
                     trace_path,
                     file: Some(Mutex::new(file)),
+                    cipher,
                 }
             }
             Err(e) => {
@@ -99,6 +120,7 @@ impl MessageTracer {
                     config,
                     trace_path,
                     file: None,
+                    cipher: None,
                 }
             }
         }
@@ -211,7 +233,21 @@ impl MessageTracer {
             }
         }
 
-        let _ = writeln!(file, "{}", json);
+        let line = if let Some(ref cipher) = self.cipher {
+            match cipher.encrypt(json.as_bytes()) {
+                Ok(encrypted) => {
+                    use base64::Engine;
+                    base64::engine::general_purpose::STANDARD.encode(&encrypted)
+                }
+                Err(e) => {
+                    tracing::error!("Trace encryption failed: {e}");
+                    return;
+                }
+            }
+        } else {
+            json
+        };
+        let _ = writeln!(file, "{}", line);
     }
 }
 
@@ -350,6 +386,7 @@ mod tests {
             max_size_mb,
             max_files,
             compress,
+            encrypt: false,
         }
     }
 
