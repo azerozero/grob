@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.18](https://github.com/azerozero/grob/compare/v0.36.17...v0.36.18) - 2026-04-15
+
+### Added
+
+- *(tracing)* chiffrer les traces JSONL avec AES-256-GCM + grob logs decrypt
+
 ## [0.36.17](https://github.com/azerozero/grob/compare/v0.36.16...v0.36.17) - 2026-04-14
 
 ### Added
