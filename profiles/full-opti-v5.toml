@@ -1,0 +1,229 @@
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║  grob full-opti-v5 — Multi-provider intelligent routing        ║
+# ║  Qualité Opus, vitesse Mercury, prix M2.5                      ║
+# ╚══════════════════════════════════════════════════════════════════╝
+#
+# Routing : trivial → Mercury/Groq, medium → M2.5, complex → Opus
+# Rust/IaC → Sonnet/Opus (qualité prioritaire sur ces langages)
+# Cache SimHash + fan-out racing sur complex
+#
+# Prérequis : créer les comptes et stocker les clés
+# Voir : obsidian/grob/30 - Roadmap/TODO Comptes Providers.md
+
+# ── Server ───────────────────────────────────────────────────────
+
+[server]
+port = 8642
+host = "127.0.0.1"
+
+[server.tracing]
+enabled = true
+compress = true
+encrypt = true
+max_size_mb = 100
+max_files = 5
+
+# ── Router ───────────────────────────────────────────────────────
+
+[router]
+default = "claude-sonnet-4-6"
+think = "claude-opus-4-6"
+background = "background-model"
+web_search = "claude-sonnet-4-6"
+
+# ── Classifier (seuils du scorer heuristique) ───────────────────
+
+[classifier.weights]
+max_tokens = 1.0
+tools = 1.0
+context_size = 1.0
+keywords = 1.5
+system_prompt = 1.0
+
+[classifier.thresholds]
+medium_threshold = 2.0
+complex_threshold = 5.0
+
+# ── Tiers (routing par complexité) ──────────────────────────────
+
+# Trivial : petits edits, lint fixes, imports — fast & cheap
+[[tiers]]
+name = "trivial"
+providers = ["groq", "mercury", "deepinfra-m25"]
+
+# Medium : refactors standards, features Python/JS/TS
+[[tiers]]
+name = "medium"
+providers = ["deepinfra-m25", "minimax", "openrouter"]
+
+# Complex : architecture, multi-file refactors, design
+[[tiers]]
+name = "complex"
+providers = ["anthropic", "gemini"]
+fanout = true
+
+# ── Tier match rules (évaluées AVANT le scorer) ─────────────────
+
+# Rust → toujours Sonnet/Opus (LLMs faibles sur unsafe/lifetimes)
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+keywords = ["unsafe", "lifetime", "Pin<", "trait impl", "borrow checker", "PhantomData", "#[derive"]
+file_patterns = ["*.rs"]
+
+# Terraform / OpenTofu / HCL → Sonnet/Opus (LLMs hallucinent du HCL)
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+keywords = ["terraform", "opentofu", "module", "resource", "data source"]
+file_patterns = ["*.tf", "*.tfvars", "*.tofu"]
+
+# Kubernetes / Helm → Sonnet
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+file_patterns = ["*.yaml", "*.yml"]
+keywords = ["kubectl", "helm", "deployment", "ingress", "configmap"]
+
+# CI/CD YAML → Sonnet (workflows complexes)
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+file_patterns = [".github/workflows/*.yml", ".gitlab-ci.yml"]
+
+# Très petites requêtes (< 500 tokens) → trivial forcé
+[[tiers]]
+name = "trivial"
+providers = ["groq", "mercury"]
+[tiers.match]
+max_tokens_below = 500
+
+# ── Providers ────────────────────────────────────────────────────
+
+# 1. Anthropic (OAuth — déjà configuré via grob connect)
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+auth_type = "oauth"
+oauth_provider = "anthropic-max"
+models = ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+
+# 2. MiniMax M2.5 (direct — OpenAI-compatible)
+[[providers]]
+name = "minimax"
+provider_type = "openai"
+base_url = "https://api.minimax.chat/v1"
+api_key = "$MINIMAX_API_KEY"
+models = ["MiniMax-M2.5"]
+
+# 3. DeepInfra (M2.5 hébergé — plus rapide, OpenAI-compatible)
+[[providers]]
+name = "deepinfra-m25"
+provider_type = "openai"
+base_url = "https://api.deepinfra.com/v1/openai"
+api_key = "$DEEPINFRA_API_KEY"
+models = ["MiniMax/MiniMax-M2.5"]
+
+# 4. Mercury (speculative decoding — ultra rapide)
+[[providers]]
+name = "mercury"
+provider_type = "openai"
+base_url = "https://api.inceptionlabs.ai/v1"
+api_key = "$MERCURY_API_KEY"
+models = ["mercury-coder-small"]
+
+# 5. GLM 4.7 Flash (Zhipu — gratuit, background tasks)
+[[providers]]
+name = "glm"
+provider_type = "openai"
+base_url = "https://open.bigmodel.cn/api/paas/v4"
+api_key = "$GLM_API_KEY"
+models = ["glm-4.7-flash"]
+
+# 6. Groq (Llama — ultra low latency)
+[[providers]]
+name = "groq"
+provider_type = "openai"
+base_url = "https://api.groq.com/openai/v1"
+api_key = "$GROQ_API_KEY"
+models = ["llama-3.1-8b-instant", "llama-3.3-70b-versatile"]
+
+# 7. OpenRouter (fallback universel)
+[[providers]]
+name = "openrouter"
+provider_type = "openai"
+base_url = "https://openrouter.ai/api/v1"
+api_key = "$OPENROUTER_API_KEY"
+models = ["anthropic/claude-sonnet-4", "minimax/minimax-m2.5"]
+
+# 8. Gemini (OAuth ou API key)
+[[providers]]
+name = "gemini"
+provider_type = "gemini"
+api_key = "$GEMINI_API_KEY"
+models = ["gemini-2.5-pro"]
+
+# ── Models (virtual → provider mapping) ──────────────────────────
+
+# Le modèle par défaut : Sonnet sur Anthropic, fallback DeepInfra
+[[models]]
+name = "claude-sonnet-4-6"
+[[models.mappings]]
+actual_model = "claude-sonnet-4-6"
+priority = 1
+provider = "anthropic"
+
+[[models]]
+name = "claude-opus-4-6"
+[[models.mappings]]
+actual_model = "claude-opus-4-6"
+priority = 1
+provider = "anthropic"
+
+[[models]]
+name = "claude-haiku-4-5-20251001"
+[[models.mappings]]
+actual_model = "claude-haiku-4-5-20251001"
+priority = 1
+provider = "anthropic"
+
+# Background : GLM gratuit, fallback Groq
+[[models]]
+name = "background-model"
+[[models.mappings]]
+actual_model = "glm-4.7-flash"
+priority = 1
+provider = "glm"
+[[models.mappings]]
+actual_model = "llama-3.1-8b-instant"
+priority = 2
+provider = "groq"
+
+# ── Cache ────────────────────────────────────────────────────────
+
+[cache]
+enabled = true
+ttl_seconds = 3600
+max_entries = 1000
+
+# ── Budget ───────────────────────────────────────────────────────
+
+[budget]
+monthly_limit_usd = 100.0
+warning_threshold_percent = 80
+
+# ── DLP ──────────────────────────────────────────────────────────
+
+[dlp]
+enabled = true
+scan_input = true
+scan_output = true
+
+# ── Security ─────────────────────────────────────────────────────
+
+[security]
+rate_limit_rpm = 120
