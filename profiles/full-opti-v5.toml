@@ -102,6 +102,29 @@ providers = ["groq", "mercury"]
 [tiers.match]
 max_tokens_below = 500
 
+# ── Context guards (évite les dépassements par provider) ─────────
+
+# Grosses requêtes (> 16K output) → Opus uniquement (seul à supporter 32K out)
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+max_tokens_above = 16000
+
+# Requêtes moyennes (> 8K output) → Sonnet/Opus (Mercury/Groq plafonnent à 8K)
+[[tiers]]
+name = "medium"
+providers = ["anthropic", "deepinfra-m25"]
+[tiers.match]
+max_tokens_above = 8000
+
+# Conversations longues (> 20 messages) → providers avec gros context
+[[tiers]]
+name = "complex"
+providers = ["anthropic", "minimax"]
+[tiers.match]
+min_messages = 20
+
 # ── Providers ────────────────────────────────────────────────────
 
 # 1. Anthropic (OAuth — déjà configuré via grob connect)
