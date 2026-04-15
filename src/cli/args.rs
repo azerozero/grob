@@ -37,6 +37,7 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
     "init",
     "key",
     "launch", // alias of exec
+    "logs",
     "model",
     "preset",
     "restart",
@@ -227,6 +228,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: KeyAction,
     },
+    /// Manage trace logs (decrypt encrypted traces)
+    Logs {
+        /// Logs subcommand
+        #[command(subcommand)]
+        action: LogsAction,
+    },
     /// Restore previous configuration from backup
     Rollback,
     /// Run performance benchmark on the current system
@@ -302,6 +309,20 @@ pub enum HarnessAction {
         /// Maximum duration in seconds (0 = no limit)
         #[arg(long, default_value = "0")]
         duration: u64,
+    },
+}
+
+/// Subcommands for trace log management.
+#[derive(Subcommand)]
+pub enum LogsAction {
+    /// Decrypt and display encrypted trace entries
+    Decrypt {
+        /// Path to trace file (default: ~/.grob/trace.jsonl)
+        #[arg(short, long)]
+        path: Option<std::path::PathBuf>,
+        /// Write decrypted output to file instead of stdout
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
     },
 }
 

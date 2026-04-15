@@ -13,7 +13,9 @@ use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 use grob::cli;
-use grob::cli::args::{detect_bare_trailing_cmd, Cli, Commands, KeyAction, PresetAction};
+use grob::cli::args::{
+    detect_bare_trailing_cmd, Cli, Commands, KeyAction, LogsAction, PresetAction,
+};
 use grob::commands;
 
 #[tokio::main]
@@ -198,6 +200,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::Setup { .. } => {
             // Already handled above; if we reach here, wizard already ran.
         }
+        Commands::Logs { action } => match action {
+            LogsAction::Decrypt { path, output } => {
+                commands::logs::cmd_logs_decrypt(path, output)?;
+            }
+        },
         Commands::Key { action } => match action {
             KeyAction::Create {
                 name,

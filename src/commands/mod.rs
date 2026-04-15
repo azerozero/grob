@@ -29,6 +29,8 @@ pub mod harness;
 pub mod init;
 /// Virtual API key management (create, list, revoke).
 pub mod key;
+/// Trace log management (decrypt encrypted traces).
+pub mod logs;
 /// Lists, inspects, and manages available LLM models.
 pub mod model;
 /// Manages named configuration presets (save, load, delete).
