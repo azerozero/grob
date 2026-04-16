@@ -854,6 +854,9 @@ pub struct TierMatchCondition {
     /// Activates when message count `>= this` value.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_messages: Option<usize>,
+    /// Activates when estimated input tokens `>= this` value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_input_tokens: Option<u32>,
 }
 
 /// Declarative tier configuration mapping complexity tiers to provider lists.
