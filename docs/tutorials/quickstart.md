@@ -56,7 +56,7 @@ grob doctor     # Full diagnostic check
 
 ## Next steps
 
-- [Architecture overview](ARCHITECTURE.md) -- how the request pipeline works
-- [Troubleshooting](TROUBLESHOOTING.md) -- common errors and fixes
-- [Configuration reference](CONFIGURATION.md) -- all TOML options
+- [Architecture overview](explanation/architecture.md) -- how the request pipeline works
+- [Troubleshooting](how-to/troubleshooting.md) -- common errors and fixes
+- [Configuration reference](reference/configuration.md) -- all TOML options
 - [OpenAPI spec](openapi.yaml) -- full API reference

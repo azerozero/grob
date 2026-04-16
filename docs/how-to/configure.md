@@ -152,4 +152,4 @@ With pass-through enabled, you can request any model available on that provider 
 
 ## Full reference
 
-See [Configuration Reference](../CONFIGURATION.md) for every option with defaults and types.
+See [Configuration Reference](../reference/configuration.md) for every option with defaults and types.

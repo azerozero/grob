@@ -27,25 +27,25 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Level | Document | Time |
 |-------|----------|------|
 | First contact | [Getting Started](tutorials/getting-started.md) | 10 min |
-| Quick reference | [Quick Start](QUICKSTART.md) | 2 min |
+| Quick reference | [Quick Start](tutorials/quickstart.md) | 2 min |
 
 ### Task-oriented guides
 
 | Task | Guide |
 |------|-------|
-| Set up a provider | [Provider Setup](PROVIDERS.md) |
-| Configure OAuth | [OAuth Setup](OAUTH_SETUP.md) |
+| Set up a provider | [Provider Setup](how-to/providers.md) |
+| Configure OAuth | [OAuth Setup](how-to/oauth-setup.md) |
 | Configure DLP | [How to Configure DLP](how-to/dlp.md) |
 | Configure options | [How to Configure Grob](how-to/configure.md) |
 | Deploy in a container | [How to Deploy Grob](how-to/deploy.md) |
-| Fix common problems | [Troubleshooting](TROUBLESHOOTING.md) |
+| Fix common problems | [Troubleshooting](how-to/troubleshooting.md) |
 | Contribute | [How to Contribute](how-to/contribute.md) |
 
 ### Reference
 
 | Topic | Document |
 |-------|----------|
-| All config options | [Configuration Reference](CONFIGURATION.md) |
+| All config options | [Configuration Reference](reference/configuration.md) |
 | CLI commands | [CLI Reference](reference/cli.md) |
 | DLP engine | [DLP Reference](reference/dlp.md) |
 | Routing engine | [Routing Reference](reference/routing.md) |
@@ -63,19 +63,19 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Provider internals | [Provider Reference](reference/providers.md) |
 | API compatibility | [API Compatibility Reference](reference/api-compatibility.md) |
 | API endpoints | [OpenAPI Spec](openapi.yaml) |
-| OpenAI compatibility | [OpenAI Compatibility](openai-compatibility.md) |
-| Responses API | [Responses API Compatibility](responses-api-compatibility.md) |
+| OpenAI compatibility | [OpenAI Compatibility](reference/openai-compatibility.md) |
+| Responses API | [Responses API Compatibility](reference/responses-api-compatibility.md) |
 | Error codes | [Error Reference](reference/errors.md) |
 
 ### Understanding Grob
 
 | Topic | Document |
 |-------|----------|
-| Architecture | [Architecture Overview](ARCHITECTURE.md) |
+| Architecture | [Architecture Overview](explanation/architecture.md) |
 | Security model | [Security Model](explanation/security.md) |
 | Policy engine | [Policy Engine](explanation/policies.md) |
-| Design philosophy | [Design Principles](design-principles.md) |
-| Gemini specifics | [Gemini Integration](gemini-integration.md) |
+| Design philosophy | [Design Principles](explanation/design-principles.md) |
+| Gemini specifics | [Gemini Integration](how-to/gemini-integration.md) |
 | Design doc template | [Design Doc Template](design/000-template.md) |
 
 ### Architecture decisions (ADRs)
