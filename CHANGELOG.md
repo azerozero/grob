@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.19](https://github.com/azerozero/grob/compare/v0.36.18...v0.36.19) - 2026-04-15
+
+### Fixed
+
+- *(deps)* mettre a jour rustls-webpki 0.103.11 → 0.103.12
+- *(ci)* ajouter paths-ignore a CodeQL pour eviter la boucle de rebase docs PRs
+
 ## [0.36.18](https://github.com/azerozero/grob/compare/v0.36.17...v0.36.18) - 2026-04-15
 
 ### Added
