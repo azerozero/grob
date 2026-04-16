@@ -3,8 +3,30 @@ name: "CodeQL Security Analysis"
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "profiles/**"
+      - "LICENSE*"
+      - ".editorconfig"
+      - ".gitignore"
+      - ".gitattributes"
+      - "**.txt"
+      - "CODEOWNERS"
+      - ".vscode/**"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+      - "profiles/**"
+      - "LICENSE*"
+      - ".editorconfig"
+      - ".gitignore"
+      - ".gitattributes"
+      - "**.txt"
+      - "CODEOWNERS"
+      - ".vscode/**"
   schedule:
     # Weekly scan (Mondays 06:00 UTC)
     - cron: "0 6 * * 1"
