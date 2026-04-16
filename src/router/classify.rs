@@ -159,7 +159,7 @@ fn score_context_size(request: &CanonicalRequest) -> f32 {
 
 /// Converts character count to estimated token count.
 #[inline]
-fn estimate_tokens_from_chars(chars: usize) -> usize {
+pub(crate) fn estimate_tokens_from_chars(chars: usize) -> usize {
     chars / 4
 }
 

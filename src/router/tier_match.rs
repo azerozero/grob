@@ -62,6 +62,24 @@ impl CompiledTierMatch {
                 return false;
             }
         }
+        if let Some(min_input) = self.condition.min_input_tokens {
+            let total_chars: usize = request
+                .messages
+                .iter()
+                .map(|m| match &m.content {
+                    crate::models::MessageContent::Text(t) => t.len(),
+                    crate::models::MessageContent::Blocks(blocks) => blocks
+                        .iter()
+                        .filter_map(|b| b.as_text())
+                        .map(|t| t.len())
+                        .sum(),
+                })
+                .sum();
+            let est_tokens = classify::estimate_tokens_from_chars(total_chars);
+            if est_tokens < min_input as usize {
+                return false;
+            }
+        }
         true
     }
 
@@ -325,6 +343,28 @@ mod tests {
     fn no_matchers_returns_none() {
         let req = request_with_text("anything", 4096);
         assert_eq!(evaluate_tier_matches(&[], &req), None);
+    }
+
+    #[test]
+    fn min_input_tokens_match() {
+        let cond = TierMatchCondition {
+            min_input_tokens: Some(100),
+            ..Default::default()
+        };
+        let m = CompiledTierMatch::new(ComplexityTier::Complex, cond).unwrap();
+        // 500 chars ≈ 125 tokens (chars/4)
+        let long_text = "a".repeat(500);
+        assert!(m.matches(&request_with_text(&long_text, 4096)));
+    }
+
+    #[test]
+    fn min_input_tokens_no_match() {
+        let cond = TierMatchCondition {
+            min_input_tokens: Some(1000),
+            ..Default::default()
+        };
+        let m = CompiledTierMatch::new(ComplexityTier::Complex, cond).unwrap();
+        assert!(!m.matches(&request_with_text("short message", 4096)));
     }
 
     #[test]
