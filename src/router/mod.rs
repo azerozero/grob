@@ -290,8 +290,8 @@ impl Router {
         // 3. Auto-mapping (model name transformation, after background check)
         if let Some(ref mapper) = self.auto_mapper {
             if mapper.is_match(&request.model) {
-                debug!(
-                    "🔀 Auto-mapped model '{}' → '{}'",
+                info!(
+                    "Auto-mapped model '{}' → '{}'",
                     request.model, self.config.router.default
                 );
                 request.model.clone_from(&self.config.router.default);
