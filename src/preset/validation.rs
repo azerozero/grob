@@ -262,6 +262,47 @@ pub fn print_validation_results(results: &[ModelValidation]) {
     }
 }
 
+/// Extracts the first HTTP status code (400–599) found in `detail`.
+///
+/// Returns `Some(code)` when a 3-digit code in the 400–599 range is present,
+/// `None` for network errors, timeouts, or any other non-HTTP failure text.
+fn extract_http_code(detail: &str) -> Option<u16> {
+    // Walk through the string looking for a standalone 3-digit sequence.
+    let bytes = detail.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i + 2 < len {
+        let a = bytes[i];
+        let b = bytes[i + 1];
+        let c = bytes[i + 2];
+        if a.is_ascii_digit() && b.is_ascii_digit() && c.is_ascii_digit() {
+            // Ensure the digit run is exactly 3 (not part of a longer number).
+            let before_ok = i == 0 || !bytes[i - 1].is_ascii_digit();
+            let after_ok = i + 3 >= len || !bytes[i + 3].is_ascii_digit();
+            if before_ok && after_ok {
+                let code = (a - b'0') as u16 * 100 + (b - b'0') as u16 * 10 + (c - b'0') as u16;
+                if (400..=599).contains(&code) {
+                    return Some(code);
+                }
+            }
+            // Skip past these three digits to avoid overlapping matches.
+            i += 3;
+        } else {
+            i += 1;
+        }
+    }
+    None
+}
+
+/// Returns true when all broken mappings are "expected" 429 fallbacks
+/// (priority > 1, rate-limited but not the primary provider).
+fn all_failures_expected(mappings: &[MappingResult]) -> bool {
+    mappings
+        .iter()
+        .filter(|m| !m.ok)
+        .all(|m| m.priority > 1 && extract_http_code(&m.detail) == Some(429))
+}
+
 /// Log validation results (for server startup / reload).
 pub fn log_validation_results(results: &[ModelValidation]) {
     for r in results {
@@ -271,23 +312,30 @@ pub fn log_validation_results(results: &[ModelValidation]) {
         if r.all_ok() {
             tracing::info!("✅ {} [{}]: {}/{} OK", r.model_name, r.role, healthy, total);
         } else if r.any_ok() {
-            tracing::warn!(
-                "⚠️ {} [{}]: {}/{} OK (some fallbacks broken)",
-                r.model_name,
-                r.role,
-                healthy,
-                total
-            );
+            // Log each broken fallback with a level that reflects its HTTP status.
             for m in &r.mappings {
                 if !m.ok {
-                    tracing::warn!(
-                        "  ❌ [{}] {}/{}: {}",
-                        m.priority,
-                        m.provider,
-                        m.actual_model,
-                        m.detail
-                    );
+                    log_broken_mapping(m);
                 }
+            }
+
+            // Rollup: downgrade to info when every failure is an expected fallback 429.
+            if all_failures_expected(&r.mappings) {
+                tracing::info!(
+                    "ℹ️  {} [{}]: {}/{} OK (expected fallbacks rate-limited)",
+                    r.model_name,
+                    r.role,
+                    healthy,
+                    total,
+                );
+            } else {
+                tracing::warn!(
+                    "⚠️ {} [{}]: {}/{} OK (some fallbacks broken)",
+                    r.model_name,
+                    r.role,
+                    healthy,
+                    total,
+                );
             }
         } else {
             tracing::error!(
@@ -297,14 +345,172 @@ pub fn log_validation_results(results: &[ModelValidation]) {
                 total
             );
             for m in &r.mappings {
-                tracing::error!(
-                    "  ❌ [{}] {}/{}: {}",
-                    m.priority,
-                    m.provider,
-                    m.actual_model,
-                    m.detail
-                );
+                log_broken_mapping(m);
             }
         }
+    }
+}
+
+/// Emits a single broken-mapping log line at the appropriate level.
+fn log_broken_mapping(m: &MappingResult) {
+    match extract_http_code(&m.detail) {
+        Some(429) if m.priority > 1 => {
+            // Rate-limited fallback — expected operational behaviour.
+            tracing::info!(
+                "  💤 [{}] {}/{}: rate-limited (expected fallback)",
+                m.priority,
+                m.provider,
+                m.actual_model,
+            );
+        }
+        Some(429) => {
+            // Primary provider is rate-limited — unexpected.
+            tracing::warn!(
+                "  ⚠️ [{}] {}/{}: primary rate-limited — {}",
+                m.priority,
+                m.provider,
+                m.actual_model,
+                m.detail,
+            );
+        }
+        Some(401) => {
+            tracing::error!(
+                "  🔒 [{}] {}/{}: auth revoked — run grob connect --force-reauth",
+                m.priority,
+                m.provider,
+                m.actual_model,
+            );
+        }
+        Some(code) if (500..=599).contains(&code) => {
+            tracing::warn!(
+                "  ⚠️ [{}] {}/{}: transient server error: {}",
+                m.priority,
+                m.provider,
+                m.actual_model,
+                m.detail,
+            );
+        }
+        _ => {
+            // 400, 404, network errors, timeouts, etc.
+            tracing::warn!(
+                "  ❌ [{}] {}/{}: {}",
+                m.priority,
+                m.provider,
+                m.actual_model,
+                m.detail,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── extract_http_code ──────────────────────────────────────────────────────
+
+    #[test]
+    fn extract_http_code_recognises_429_in_anthropic_error() {
+        assert_eq!(extract_http_code("429 - anthropic API error"), Some(429));
+    }
+
+    #[test]
+    fn extract_http_code_returns_none_for_connection_refused() {
+        assert_eq!(extract_http_code("connection refused"), None);
+    }
+
+    #[test]
+    fn extract_http_code_recognises_401_with_prefix() {
+        assert_eq!(extract_http_code("Provider API error: 401"), Some(401));
+    }
+
+    #[test]
+    fn extract_http_code_returns_none_for_timeout() {
+        assert_eq!(extract_http_code("timeout after 5s"), None);
+    }
+
+    #[test]
+    fn extract_http_code_recognises_500() {
+        assert_eq!(
+            extract_http_code("HTTP 500 Internal Server Error"),
+            Some(500)
+        );
+    }
+
+    #[test]
+    fn extract_http_code_ignores_non_http_three_digit_numbers() {
+        // 200 is not in 400-599 range
+        assert_eq!(extract_http_code("response 200 OK"), None);
+    }
+
+    #[test]
+    fn extract_http_code_ignores_longer_digit_sequences() {
+        // 12345 contains no standalone 4xx/5xx code
+        assert_eq!(extract_http_code("error code 12345"), None);
+    }
+
+    // ── log_validation_results: level routing via log capture ─────────────────
+    //
+    // We test the *classification logic* by asserting on `all_failures_expected`
+    // and `extract_http_code` rather than capturing tracing output (which would
+    // require a subscriber harness).  The mapping-level helpers are tested
+    // indirectly through `all_failures_expected`.
+
+    fn make_mapping(priority: u32, ok: bool, detail: &str) -> MappingResult {
+        MappingResult {
+            priority,
+            provider: "test-provider".to_string(),
+            actual_model: "test-model".to_string(),
+            ok,
+            detail: detail.to_string(),
+        }
+    }
+
+    /// priority=1 + 429 → NOT an expected failure (primary is rate-limited).
+    #[test]
+    fn primary_429_is_not_expected() {
+        let mappings = vec![make_mapping(1, false, "429 - rate limited")];
+        assert!(!all_failures_expected(&mappings));
+    }
+
+    /// priority=2 + 429 → expected fallback failure.
+    #[test]
+    fn fallback_429_is_expected() {
+        let mappings = vec![make_mapping(2, false, "429 - rate limited")];
+        assert!(all_failures_expected(&mappings));
+    }
+
+    /// priority=1 + 401 → NOT expected (auth error is always a real problem).
+    #[test]
+    fn primary_401_is_not_expected() {
+        let mappings = vec![make_mapping(1, false, "Provider API error: 401")];
+        assert!(!all_failures_expected(&mappings));
+    }
+
+    /// priority=2 + 500 → NOT expected (5xx server errors are not expected fallbacks).
+    #[test]
+    fn fallback_500_is_not_expected() {
+        let mappings = vec![make_mapping(2, false, "HTTP 500 Internal Server Error")];
+        assert!(!all_failures_expected(&mappings));
+    }
+
+    /// Mix: one ok mapping + one fallback 429 → all_failures_expected is true.
+    #[test]
+    fn mixed_ok_and_fallback_429_all_expected() {
+        let mappings = vec![
+            make_mapping(1, true, "OK (123ms)"),
+            make_mapping(2, false, "429 - anthropic API error"),
+        ];
+        assert!(all_failures_expected(&mappings));
+    }
+
+    /// Mix: one ok + one fallback with 500 → not all expected.
+    #[test]
+    fn mixed_ok_and_fallback_500_not_all_expected() {
+        let mappings = vec![
+            make_mapping(1, true, "OK (123ms)"),
+            make_mapping(2, false, "HTTP 500"),
+        ];
+        assert!(!all_failures_expected(&mappings));
     }
 }

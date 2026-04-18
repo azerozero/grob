@@ -423,6 +423,10 @@ pub(crate) fn emit_tee_attestation(
 }
 
 /// Spawns background tasks: webhook relay and model mapping validation.
+#[cfg_attr(
+    not(all(feature = "policies", feature = "watch")),
+    allow(unused_variables)
+)]
 pub(crate) fn spawn_background_tasks(state: &Arc<super::AppState>) {
     // Webhook relay: HitApprovalRequest events with auth_method="webhook"
     #[cfg(all(feature = "policies", feature = "watch"))]
@@ -461,15 +465,6 @@ pub(crate) fn spawn_background_tasks(state: &Arc<super::AppState>) {
             }
         });
     }
-
-    // Validate model mappings in background (non-blocking).
-    let validation_state = state.clone();
-    tokio::spawn(async move {
-        let inner = validation_state.snapshot();
-        info!("Validating model mappings...");
-        let results = crate::preset::validate_config(&inner.config, &inner.provider_registry).await;
-        crate::preset::log_validation_results(&results);
-    });
 }
 
 /// Performs initial preset sync and spawns background sync if configured.
