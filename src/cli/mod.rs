@@ -9,14 +9,15 @@ mod validation;
 
 pub use crate::features::log_export::LogExportConfig;
 pub use crate::features::tool_layer::config::ToolLayerConfig;
+pub use config::parse_duration;
 #[cfg(feature = "harness")]
 pub use config::HarnessConfig;
 pub use config::{
-    AcmeConfig, AuthType, BudgetConfig, CacheConfig, ComplianceConfig, EnforcementMode,
-    FanOutConfig, FanOutMode, FipsConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig,
-    PoolConfig, PoolStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,
-    ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TierConfig,
-    TierMatchCondition, TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
+    AcmeConfig, AuthType, BudgetConfig, CacheConfig, CircuitBreakerProviderConfig,
+    ComplianceConfig, EnforcementMode, FanOutConfig, FanOutMode, FipsConfig, ModelConfig,
+    ModelMapping, ModelStrategy, OtelConfig, PoolConfig, PoolStrategy, PresetConfig, ProjectConfig,
+    ProjectRouterOverlay, PromptRule, ProviderConfig, RouterConfig, SecurityConfig, ServerConfig,
+    TeeConfig, TierConfig, TierMatchCondition, TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 

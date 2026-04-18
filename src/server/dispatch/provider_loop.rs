@@ -60,6 +60,27 @@ pub(super) async fn resolve_provider(
         }
     }
 
+    // Routing-layer passive CB (RE-1a, ADR-0018). Per-endpoint, orthogonal
+    // to the global per-provider security CB above — an endpoint can be
+    // down while the provider still has other endpoints up.
+    if !ctx
+        .inner
+        .provider_registry
+        .is_endpoint_healthy(&mapping.provider, &mapping.actual_model)
+    {
+        info!(
+            "Endpoint {}/{} tripped by passive CB, skipping",
+            mapping.provider, mapping.actual_model
+        );
+        metrics::counter!(
+            "grob_routing_endpoint_cb_rejected_total",
+            "provider" => mapping.provider.clone(),
+            "model" => mapping.actual_model.clone(),
+        )
+        .increment(1);
+        return None;
+    }
+
     Some(provider)
 }
 
@@ -460,6 +481,7 @@ async fn dispatch_streaming(
             let latency_ms = overhead_ms;
             ctx.record_provider_success(&mapping.provider, latency_ms)
                 .await;
+            ctx.record_endpoint_success(&mapping.provider, &mapping.actual_model);
 
             let stream = wrap_stream_with_middleware(ctx, stream_response.stream, tap_request_body);
 
@@ -476,6 +498,7 @@ async fn dispatch_streaming(
         }
         Err(e) => {
             ctx.record_provider_failure(&mapping.provider).await;
+            ctx.record_endpoint_failure(&mapping.provider, &mapping.actual_model);
             if let Some(ref trace_id) = ctx.trace_id {
                 ctx.state
                     .observability
@@ -586,6 +609,10 @@ async fn dispatch_non_streaming(
                 let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
                 ctx.record_provider_success(&attempt.mapping.provider, latency_ms)
                     .await;
+                ctx.record_endpoint_success(
+                    &attempt.mapping.provider,
+                    &attempt.mapping.actual_model,
+                );
                 ctx.sanitize_output(&mut response);
                 response.model = attempt.original_model.to_string();
 
@@ -685,6 +712,10 @@ async fn dispatch_non_streaming(
                 }
 
                 ctx.record_provider_failure(&attempt.mapping.provider).await;
+                ctx.record_endpoint_failure(
+                    &attempt.mapping.provider,
+                    &attempt.mapping.actual_model,
+                );
                 info!(
                     "Provider {} failed: {}, trying next fallback",
                     attempt.mapping.provider, e

@@ -91,6 +91,11 @@ aes-gcm = "0.10"
 # Glob pattern matching (tier routing + policy engine)
 globset = "0.4"
 
+# Concurrent map (routing: per-endpoint circuit breaker state)
+dashmap = "6"
+# Atomic Arc swap (routing: lock-free tripped_until timestamp)
+arc-swap = "1"
+
 # Encrypted audit export (envelope encryption, multi-recipient)
 age = { version = "0.11", features = ["armor"] }
 
