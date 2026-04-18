@@ -16,9 +16,9 @@ jobs:
         run: |
           gh pr list --base main --state open --json number,autoMergeRequest,mergeStateStatus \
             --jq '.[] | select(.autoMergeRequest != null) | select(.mergeStateStatus=="BEHIND") | .number' \
-            | while read pr; do
-                echo "Updating PR #$pr"
-                gh pr update-branch $pr || echo "Skip PR #$pr"
+            | while read -r pr; do
+                echo "Updating PR #${pr}"
+                gh pr update-branch "${pr}" || echo "Skip PR #${pr}"
               done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
