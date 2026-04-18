@@ -1,0 +1,24 @@
+name: Auto-update PR branches on main push
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-prs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update BEHIND PRs with auto-merge
+        run: |
+          gh pr list --base main --state open --json number,autoMergeRequest,mergeStateStatus \
+            --jq '.[] | select(.autoMergeRequest != null) | select(.mergeStateStatus=="BEHIND") | .number' \
+            | while read -r pr; do
+                echo "Updating PR #${pr}"
+                gh pr update-branch "${pr}" || echo "Skip PR #${pr}"
+              done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
