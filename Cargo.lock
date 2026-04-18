@@ -1920,6 +1920,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio",
  "tokio-test",
+ "tokio-util",
  "toml 0.8.23",
  "tower 0.5.3",
  "tower-http",
@@ -5300,6 +5301,7 @@ dependencies = [
  "futures-core",
  "futures-io",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

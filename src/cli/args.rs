@@ -199,6 +199,11 @@ pub enum Commands {
     Connect {
         /// Specific provider name to configure (all if omitted)
         provider: Option<String>,
+        /// Force re-authentication: discards existing OAuth tokens and initiates a fresh OAuth flow.
+        ///
+        /// Use when 'grob connect' reports a revoked token.
+        #[arg(long)]
+        force_reauth: bool,
     },
     /// Initialize a per-project .grob.toml in the current directory
     Init,

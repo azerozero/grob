@@ -37,6 +37,10 @@ pub(crate) async fn init_core_services(
                 "🔐 Loaded {} OAuth tokens from storage",
                 existing_tokens.len()
             );
+            // NOTE: Daemon handle is leaked intentionally — it lives for the
+            // process lifetime. Graceful shutdown is driven by the tokio runtime
+            // cancelling outstanding tasks.
+            let _daemon = crate::auth::refresh_daemon::spawn(ts.clone());
         }
         ts
     };

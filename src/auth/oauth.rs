@@ -332,6 +332,7 @@ impl OAuthClient {
             expires_at,
             enterprise_url: None,
             project_id: None,
+            needs_reauth: None,
         };
 
         self.token_store.save(token.clone())?;
@@ -427,6 +428,7 @@ impl OAuthClient {
             expires_at,
             enterprise_url: existing_token.enterprise_url,
             project_id: existing_token.project_id,
+            needs_reauth: None,
         };
 
         self.token_store.save(token.clone())?;

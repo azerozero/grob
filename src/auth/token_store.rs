@@ -74,6 +74,12 @@ pub struct OAuthToken {
     /// Optional Google Cloud project ID for Gemini Code Assist API
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    /// Marks the token as needing manual re-authentication (e.g. after a refresh 401).
+    ///
+    /// Optional with `#[serde(default)]` for backward compatibility with tokens
+    /// persisted before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs_reauth: Option<bool>,
 }
 
 impl OAuthToken {
@@ -201,6 +207,34 @@ impl TokenStore {
     pub fn get(&self, provider_id: &str) -> Option<OAuthToken> {
         let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         tokens.get(provider_id).cloned()
+    }
+
+    /// Marks the token for `provider_id` as needing manual re-authentication.
+    ///
+    /// Called after a refresh-token failure (401) so the operator can be
+    /// prompted to run `grob connect --force-reauth`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if re-saving the updated token fails.
+    pub fn mark_needs_reauth(&self, provider_id: &str) -> Result<bool> {
+        let updated = {
+            let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
+            match tokens.get(provider_id) {
+                Some(t) => {
+                    let mut cloned = t.clone();
+                    cloned.needs_reauth = Some(true);
+                    Some(cloned)
+                }
+                None => None,
+            }
+        };
+        if let Some(token) = updated {
+            self.save(token)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
     /// Removes a token for a provider.
@@ -465,6 +499,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,
+            needs_reauth: None,
         };
 
         store.save(token.clone()).unwrap();
@@ -486,6 +521,7 @@ mod tests {
             expires_at: Utc::now() - chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,
+            needs_reauth: None,
         };
 
         assert!(expired_token.is_expired());
@@ -498,6 +534,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,
+            needs_reauth: None,
         };
 
         assert!(!valid_token.is_expired());

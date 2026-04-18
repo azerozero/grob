@@ -34,8 +34,8 @@ mod watch_sse;
 pub use audit::AuditEntryBuilder;
 pub(crate) use audit::{log_audit, AuditCompliance, AuditParams};
 pub(crate) use budget::{
-    calculate_cost, check_budget, is_provider_subscription, is_retryable, record_request_metrics,
-    record_spend, retry_delay, RequestMetrics, MAX_RETRIES,
+    calculate_cost, check_budget, is_auth_revoked_error, is_provider_subscription, is_retryable,
+    record_request_metrics, record_spend, retry_delay, RequestMetrics, MAX_RETRIES,
 };
 pub use error::AppError;
 pub(crate) use helpers::{

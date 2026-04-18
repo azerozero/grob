@@ -159,12 +159,42 @@ pub(crate) async fn calculate_cost(
 }
 
 /// Check if a provider error is retryable (429, 500, 502, 503, network errors).
+///
+/// Notably excludes 401 (`authentication_error`): a revoked OAuth token is a
+/// permanent failure that requires operator action (`grob connect
+/// --force-reauth`). 401 with `rate_limit_error` payload is handled as 429.
 pub(crate) fn is_retryable(e: &crate::providers::error::ProviderError) -> bool {
     match e {
-        crate::providers::error::ProviderError::ApiError { status, .. } => {
-            matches!(status, 429 | 500 | 502 | 503)
-        }
+        crate::providers::error::ProviderError::ApiError { status, message } => match status {
+            429 | 500 | 502 | 503 => true,
+            401 => is_rate_limit_payload(message),
+            _ => false,
+        },
         crate::providers::error::ProviderError::HttpError(_) => true,
+        _ => false,
+    }
+}
+
+/// Returns `true` when a 401 payload actually carries a `rate_limit_error`.
+///
+/// Some upstreams (notably Anthropic) will return 401 with
+/// `"type": "rate_limit_error"` — that is a transient signal, not a revoked
+/// credential. Any other 401 is treated as a permanent authentication failure.
+pub(crate) fn is_rate_limit_payload(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("rate_limit_error") || lower.contains("\"rate_limit\"")
+}
+
+/// Returns `true` when a 401 response indicates a revoked or invalid OAuth token.
+///
+/// Used by the provider loop to abort fallback and surface a terminal
+/// `authentication_error` to the client.
+pub(crate) fn is_auth_revoked_error(e: &crate::providers::error::ProviderError) -> bool {
+    match e {
+        crate::providers::error::ProviderError::ApiError {
+            status: 401,
+            message,
+        } => !is_rate_limit_payload(message),
         _ => false,
     }
 }
@@ -223,6 +253,49 @@ mod tests {
             message: "unauthorized".to_string(),
         };
         assert!(!is_retryable(&err));
+    }
+
+    #[test]
+    fn test_401_with_rate_limit_payload_is_retryable() {
+        let err = crate::providers::error::ProviderError::ApiError {
+            status: 401,
+            message:
+                r#"{"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#
+                    .to_string(),
+        };
+        assert!(is_retryable(&err));
+        assert!(!is_auth_revoked_error(&err));
+    }
+
+    #[test]
+    fn test_401_authentication_error_marks_revoked() {
+        let err = crate::providers::error::ProviderError::ApiError {
+            status: 401,
+            message: r#"{"type":"error","error":{"type":"authentication_error","message":"invalid bearer token"}}"#
+                .to_string(),
+        };
+        assert!(!is_retryable(&err));
+        assert!(is_auth_revoked_error(&err));
+    }
+
+    #[test]
+    fn test_429_is_not_auth_revoked() {
+        let err = crate::providers::error::ProviderError::ApiError {
+            status: 429,
+            message: "rate limited".to_string(),
+        };
+        assert!(is_retryable(&err));
+        assert!(!is_auth_revoked_error(&err));
+    }
+
+    #[test]
+    fn test_500_is_retryable_not_auth_revoked() {
+        let err = crate::providers::error::ProviderError::ApiError {
+            status: 500,
+            message: "internal".to_string(),
+        };
+        assert!(is_retryable(&err));
+        assert!(!is_auth_revoked_error(&err));
     }
 
     #[test]

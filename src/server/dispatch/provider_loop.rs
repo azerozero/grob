@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use super::super::{
-    check_budget, format_route_type, inject_continuation_text, is_provider_subscription,
-    is_retryable, retry_delay, AppError, MAX_RETRIES,
+    check_budget, format_route_type, inject_continuation_text, is_auth_revoked_error,
+    is_provider_subscription, is_retryable, retry_delay, AppError, MAX_RETRIES,
 };
 use super::telemetry::{
     calculate_and_record_metrics, record_success_telemetry, store_response_cache,
@@ -178,6 +178,19 @@ pub(super) async fn dispatch_provider_loop(
                 );
                 tokio::task::yield_now().await;
                 continue;
+            }
+            Err(ProviderLoopAction::AuthRevoked(msg)) => {
+                tracing::error!(
+                    provider = %mapping.provider,
+                    "OAuth token for provider {} revoked. Run: grob connect --force-reauth",
+                    mapping.provider
+                );
+                // Abort the fallback cascade: this is a user-actionable error,
+                // not a transient provider failure.
+                return Err(AppError::AuthenticationError(format!(
+                    "OAuth token for provider '{}' revoked. Run: grob connect --force-reauth. Details: {}",
+                    mapping.provider, msg
+                )));
             }
         }
     }
@@ -420,6 +433,10 @@ enum ProviderLoopAction {
     /// Rate-limited (429): the caller should attempt key pool rotation
     /// before falling through to the next provider mapping.
     RateLimited,
+    /// Terminal auth failure (401 `authentication_error`): do NOT fall back
+    /// to sibling providers — surface the error directly to the client so the
+    /// user is prompted to run `grob connect --force-reauth`.
+    AuthRevoked(String),
 }
 
 /// Handle the streaming path for a single provider attempt.
@@ -466,6 +483,9 @@ async fn dispatch_streaming(
                     .trace_error(trace_id, &e.to_string());
             }
             handle_provider_error(mapping, &e);
+            if is_auth_revoked_error(&e) {
+                return Err(ProviderLoopAction::AuthRevoked(e.to_string()));
+            }
             let is_rate_limit = matches!(
                 e,
                 crate::providers::error::ProviderError::ApiError { status: 429, .. }
@@ -625,6 +645,12 @@ async fn dispatch_non_streaming(
                 });
             }
             Err(e) => {
+                // 401 authentication_error is terminal — abort the cascade.
+                if is_auth_revoked_error(&e) {
+                    ctx.record_provider_failure(&attempt.mapping.provider).await;
+                    return Err(ProviderLoopAction::AuthRevoked(e.to_string()));
+                }
+
                 if classify_and_handle_error(ctx, attempt.mapping, &e, retry) {
                     // On 429, try rotating to next pooled key before retrying.
                     let is_rate_limit = matches!(
