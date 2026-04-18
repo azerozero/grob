@@ -6,6 +6,8 @@ pub mod auto_flow;
 pub mod jwt;
 /// OAuth PKCE flows for Anthropic, OpenAI, and Gemini.
 pub mod oauth;
+/// Background daemon that proactively refreshes OAuth tokens.
+pub mod refresh_daemon;
 /// Persistent token storage for OAuth credentials.
 pub mod token_store;
 /// Virtual API key management for multi-tenant access control.

@@ -429,6 +429,7 @@ mod tests {
             expires_at: Utc::now() + chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,
+            needs_reauth: None,
         };
 
         store.save_oauth_token(&token).unwrap();
