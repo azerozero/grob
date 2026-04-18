@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.21](https://github.com/azerozero/grob/compare/v0.36.20...v0.36.21) - 2026-04-18
+
+### Fixed
+
+- *(init)* silence unused state sur --no-default-features
+- *(logs)* classifier validation par HTTP code
+- *(init)* supprimer la validation dupliquee au startup
+
+### Other
+
+- Merge pull request #217 from azerozero/fix/smart-validation-logs
+
 ## [0.36.20](https://github.com/azerozero/grob/compare/v0.36.19...v0.36.20) - 2026-04-18
 
 ### Fixed
