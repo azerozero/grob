@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.20](https://github.com/azerozero/grob/compare/v0.36.19...v0.36.20) - 2026-04-18
+
+### Fixed
+
+- *(routing)* resoudre actual_model via [[models]] dans branche tiers
+
+### Other
+
+- *(adr)* proposer 0018 nature-inspired routing
+
 ## [0.36.19](https://github.com/azerozero/grob/compare/v0.36.18...v0.36.19) - 2026-04-15
 
 ### Fixed
