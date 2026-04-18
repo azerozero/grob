@@ -104,6 +104,12 @@ pub mod pricing;
 pub mod providers;
 /// Request routing engine with regex-based rules.
 pub mod router;
+/// Nature-inspired routing primitives (circuit breaker, EMA stats, bandit).
+///
+/// Tracks the RE phase of the ADR-0018 roadmap. Currently hosts the RE-1a
+/// passive circuit breaker; future primitives (health check, EMA stats,
+/// hedging, Thompson sampling) land here as sibling modules.
+pub mod routing;
 /// Security: rate limiting, circuit breakers, audit, headers.
 pub mod security;
 /// Axum HTTP server, middleware, and application state.

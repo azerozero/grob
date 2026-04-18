@@ -128,6 +128,22 @@ impl DispatchContext<'_> {
         }
     }
 
+    /// Records a successful dispatch on the routing-layer per-endpoint CB (RE-1a).
+    ///
+    /// Orthogonal to the security-layer global per-provider CB above.
+    pub(crate) fn record_endpoint_success(&self, provider: &str, model: &str) {
+        self.inner
+            .provider_registry
+            .record_endpoint_success(provider, model);
+    }
+
+    /// Records a failed dispatch on the routing-layer per-endpoint CB (RE-1a).
+    pub(crate) fn record_endpoint_failure(&self, provider: &str, model: &str) {
+        self.inner
+            .provider_registry
+            .record_endpoint_failure(provider, model);
+    }
+
     /// Emit an audit log entry if the audit log is enabled.
     /// Centralizes the repeated `AuditParams` / `AuditCompliance` construction.
     fn log_audit_if_enabled(&self, entry: AuditEntry<'_>) {

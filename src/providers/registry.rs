@@ -6,6 +6,8 @@ use super::{
 };
 use crate::auth::TokenStore;
 use crate::cli::{ModelConfig, TimeoutConfig};
+use crate::routing::{CircuitBreaker, CircuitBreakerConfig, EndpointId};
+use dashmap::DashMap;
 use secrecy::SecretString;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +32,18 @@ pub struct ProviderRegistry {
     providers: HashMap<String, Arc<dyn LlmProvider>>,
     /// Map of model name -> provider name for fast lookup
     model_to_provider: HashMap<String, String>,
+    /// Per-provider circuit breaker template used to lazily mint endpoint breakers.
+    ///
+    /// Populated from each provider's `[providers.circuit_breaker]` TOML
+    /// section. A provider with no section maps to
+    /// [`CircuitBreakerConfig::default`] (disabled, Caddy parity).
+    cb_templates: HashMap<String, CircuitBreakerConfig>,
+    /// Per-endpoint passive circuit breakers (RE-1a, ADR-0018).
+    ///
+    /// Keyed by `(provider_name, actual_model)`. Entries are created
+    /// lazily on the first hit from the provider loop, so configs with
+    /// hundreds of models do not allocate hundreds of unused breakers.
+    endpoint_breakers: DashMap<EndpointId, Arc<CircuitBreaker>>,
 }
 
 impl ProviderRegistry {
@@ -38,6 +52,8 @@ impl ProviderRegistry {
         Self {
             providers: HashMap::new(),
             model_to_provider: HashMap::new(),
+            cb_templates: HashMap::new(),
+            endpoint_breakers: DashMap::new(),
         }
     }
 
@@ -310,6 +326,24 @@ impl ProviderRegistry {
             registry
                 .providers
                 .insert(config.name.clone(), Arc::from(provider));
+
+            // Materialise the circuit-breaker template for this provider. Lazy
+            // endpoint registration happens on the first call — this only
+            // stores the config shape (cheap clone).
+            if let Some(cb_cfg) = config.circuit_breaker.as_ref() {
+                match cb_cfg.to_runtime() {
+                    Ok(runtime) => {
+                        registry.cb_templates.insert(config.name.clone(), runtime);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            provider = %config.name,
+                            "invalid circuit_breaker config, using disabled defaults: {}",
+                            e
+                        );
+                    }
+                }
+            }
         }
 
         for model in models {
@@ -358,6 +392,66 @@ impl ProviderRegistry {
     /// List all providers
     pub fn list_providers(&self) -> Vec<String> {
         self.providers.keys().cloned().collect()
+    }
+
+    /// Returns the circuit-breaker template configured for a provider.
+    ///
+    /// When no `[providers.circuit_breaker]` section was supplied for the
+    /// provider, returns the disabled default (Caddy parity).
+    fn cb_template_for(&self, provider: &str) -> CircuitBreakerConfig {
+        self.cb_templates.get(provider).cloned().unwrap_or_default()
+    }
+
+    /// Looks up (or lazily creates) the passive circuit breaker for an endpoint.
+    ///
+    /// The endpoint identity is the `(provider, actual_model)` tuple —
+    /// two models served by the same provider own independent breakers.
+    pub fn endpoint_breaker(&self, provider: &str, model: &str) -> Arc<CircuitBreaker> {
+        let key: EndpointId = (provider.to_string(), model.to_string());
+        if let Some(cb) = self.endpoint_breakers.get(&key) {
+            return Arc::clone(cb.value());
+        }
+        let label = format!("{provider}/{model}");
+        let cfg = self.cb_template_for(provider);
+        let cb = CircuitBreaker::new(label, cfg);
+        // NOTE: `entry().or_insert_with` handles the race where two callers mint at once.
+        self.endpoint_breakers
+            .entry(key)
+            .or_insert_with(|| cb)
+            .value()
+            .clone()
+    }
+
+    /// Returns whether an endpoint is currently healthy (RE-1a, ADR-0018).
+    ///
+    /// Short-circuits to `true` when the breaker is disabled (no config
+    /// or `fail_duration = 0`).
+    pub fn is_endpoint_healthy(&self, provider: &str, model: &str) -> bool {
+        // Fast path: no breaker template for this provider means disabled.
+        if !self.cb_templates.contains_key(provider) {
+            return true;
+        }
+        self.endpoint_breaker(provider, model).is_healthy()
+    }
+
+    /// Records a successful dispatch against the endpoint breaker.
+    ///
+    /// No-op when no breaker template was configured for the provider.
+    pub fn record_endpoint_success(&self, provider: &str, model: &str) {
+        if !self.cb_templates.contains_key(provider) {
+            return;
+        }
+        self.endpoint_breaker(provider, model).record_success();
+    }
+
+    /// Records a failed dispatch against the endpoint breaker.
+    ///
+    /// No-op when no breaker template was configured for the provider.
+    pub fn record_endpoint_failure(&self, provider: &str, model: &str) {
+        if !self.cb_templates.contains_key(provider) {
+            return;
+        }
+        self.endpoint_breaker(provider, model).record_failure();
     }
 
     /// Pre-warm TLS connections to all providers (fire-and-forget).
@@ -431,6 +525,7 @@ mod tests {
                 tls_key: None,
                 tls_ca: None,
                 pool: None,
+                circuit_breaker: None,
             },
             ProviderConfig {
                 name: "provider-b".to_string(),
@@ -451,6 +546,7 @@ mod tests {
                 tls_key: None,
                 tls_ca: None,
                 pool: None,
+                circuit_breaker: None,
             },
         ];
 

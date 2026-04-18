@@ -819,12 +819,136 @@ pub struct ProviderConfig {
     /// Multi-account key pool for chaining API keys.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pool: Option<PoolConfig>,
+
+    /// Passive circuit breaker configuration (RE-1a, ADR-0018).
+    ///
+    /// Opt-in. When absent the breaker stays disabled (Caddy defaults
+    /// `max_fails = 1`, `fail_duration = 0`). Applies to every
+    /// `(provider, model)` endpoint served by this provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circuit_breaker: Option<CircuitBreakerProviderConfig>,
 }
 
 impl ProviderConfig {
     /// Returns `true` if the provider is enabled (defaults to `true`).
     pub fn is_enabled(&self) -> bool {
         self.enabled.unwrap_or(true)
+    }
+}
+
+/// Passive circuit breaker knobs exposed through `[providers.circuit_breaker]`.
+///
+/// Mirror of [`crate::routing::CircuitBreakerConfig`] with TOML-friendly
+/// duration strings (`"30s"`, `"500ms"`). Durations accept any suffix
+/// understood by [`parse_duration`].
+///
+/// # Examples
+///
+/// ```toml
+/// [[providers]]
+/// name = "anthropic"
+/// provider_type = "anthropic"
+///
+/// [providers.circuit_breaker]
+/// max_fails = 3
+/// fail_duration = "30s"
+/// cooldown = "60s"
+/// ```
+///
+/// [`parse_duration`]: crate::cli::config::parse_duration
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct CircuitBreakerProviderConfig {
+    /// Consecutive failures that trip the breaker. Defaults to 1 (Caddy parity).
+    #[serde(default = "default_cb_max_fails")]
+    pub max_fails: u32,
+    /// Sliding window during which failures count. `"0s"` (or omitted) disables the breaker.
+    #[serde(default)]
+    pub fail_duration: Option<String>,
+    /// Post-trip cooldown. Omit to recover as soon as `fail_duration` expires.
+    #[serde(default)]
+    pub cooldown: Option<String>,
+}
+
+fn default_cb_max_fails() -> u32 {
+    1
+}
+
+/// Parses a duration string used across provider TOML knobs.
+///
+/// Accepts `"<int|float><unit>"` where unit is one of `ms`, `s`, `m`, `h`.
+/// Bare integers are treated as seconds for convenience.
+///
+/// # Errors
+///
+/// Returns a descriptive error string when the input is unparseable.
+///
+/// # Examples
+///
+/// ```
+/// use grob::cli::parse_duration;
+/// use std::time::Duration;
+///
+/// assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
+/// assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
+/// assert_eq!(parse_duration("2m").unwrap(), Duration::from_secs(120));
+/// ```
+pub fn parse_duration(input: &str) -> Result<std::time::Duration, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("empty duration".to_string());
+    }
+
+    // Suffix-aware parse.
+    let parse_number = |s: &str| -> Result<f64, String> {
+        s.parse::<f64>()
+            .map_err(|_| format!("invalid duration number '{s}'"))
+    };
+
+    if let Some(rest) = trimmed.strip_suffix("ms") {
+        let n = parse_number(rest)?;
+        return Ok(std::time::Duration::from_millis(n as u64));
+    }
+    if let Some(rest) = trimmed.strip_suffix('s') {
+        let n = parse_number(rest)?;
+        return Ok(std::time::Duration::from_secs_f64(n));
+    }
+    if let Some(rest) = trimmed.strip_suffix('m') {
+        let n = parse_number(rest)?;
+        return Ok(std::time::Duration::from_secs_f64(n * 60.0));
+    }
+    if let Some(rest) = trimmed.strip_suffix('h') {
+        let n = parse_number(rest)?;
+        return Ok(std::time::Duration::from_secs_f64(n * 3600.0));
+    }
+    // Bare integer -> seconds (lenient).
+    if let Ok(n) = trimmed.parse::<u64>() {
+        return Ok(std::time::Duration::from_secs(n));
+    }
+    Err(format!(
+        "unknown duration '{input}' (expected suffix ms|s|m|h)"
+    ))
+}
+
+impl CircuitBreakerProviderConfig {
+    /// Converts the TOML view into a runtime [`crate::routing::CircuitBreakerConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any duration string fails to parse.
+    pub fn to_runtime(&self) -> Result<crate::routing::CircuitBreakerConfig, String> {
+        let fail_duration = match self.fail_duration.as_deref() {
+            None => std::time::Duration::ZERO,
+            Some(s) => parse_duration(s)?,
+        };
+        let cooldown = match self.cooldown.as_deref() {
+            None => None,
+            Some(s) => Some(parse_duration(s)?),
+        };
+        Ok(crate::routing::CircuitBreakerConfig {
+            max_fails: self.max_fails,
+            fail_duration,
+            cooldown,
+        })
     }
 }
 
