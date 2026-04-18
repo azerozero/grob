@@ -16,21 +16,81 @@ pub(crate) fn resolve_provider_mappings(
     if let Some(ref tier) = decision.complexity_tier {
         let tier_name = tier.to_string();
         if let Some(tier_cfg) = inner.config.tiers.iter().find(|t| t.name == tier_name) {
-            info!("📊 Tier '{}' matched — using tier providers", tier_name);
+            info!(
+                "📊 Tier '{}' matched — resolving provider mappings",
+                tier_name
+            );
+
+            // Look up [[models]] config once so we can pick actual_model per provider.
+            let model_config = inner.find_model(&decision.model_name);
+
+            let mut priority: u32 = 0;
             let mappings: Vec<crate::cli::ModelMapping> = tier_cfg
                 .providers
                 .iter()
-                .enumerate()
-                .map(|(i, provider_name)| crate::cli::ModelMapping {
-                    priority: (i as u32) + 1,
-                    provider: provider_name.clone(),
-                    actual_model: decision.model_name.clone(),
-                    inject_continuation_prompt: false,
+                .filter_map(|provider_name| {
+                    // Step 1: prefer explicit actual_model from [[models.mappings]].
+                    if let Some(mc) = model_config {
+                        if let Some(mapping) =
+                            mc.mappings.iter().find(|m| m.provider == *provider_name)
+                        {
+                            info!(
+                                "tier {} -> provider {} -> actual_model {} (from [[models]] mapping)",
+                                tier_name, provider_name, mapping.actual_model
+                            );
+                            priority += 1;
+                            return Some(crate::cli::ModelMapping {
+                                priority,
+                                provider: provider_name.clone(),
+                                actual_model: mapping.actual_model.clone(),
+                                inject_continuation_prompt: mapping.inject_continuation_prompt,
+                            });
+                        }
+                    }
+
+                    // Step 2: provider explicitly lists the model name — use as-is.
+                    let provider_supports = inner
+                        .config
+                        .providers
+                        .iter()
+                        .find(|p| p.name == *provider_name)
+                        .map(|p| {
+                            p.models.iter().any(|m| m == &decision.model_name)
+                                || p.pass_through.unwrap_or(false)
+                        })
+                        .unwrap_or(false);
+
+                    if provider_supports {
+                        info!(
+                            "tier {} -> provider {} -> actual_model {} (provider models list)",
+                            tier_name, provider_name, decision.model_name
+                        );
+                        priority += 1;
+                        return Some(crate::cli::ModelMapping {
+                            priority,
+                            provider: provider_name.clone(),
+                            actual_model: decision.model_name.clone(),
+                            inject_continuation_prompt: false,
+                        });
+                    }
+
+                    // Step 3: no resolution — skip this provider to avoid sending an unknown model name.
+                    info!(
+                        "tier {} -> provider {} SKIP (no resolution for model '{}')",
+                        tier_name, provider_name, decision.model_name
+                    );
+                    None
                 })
                 .collect();
+
             if !mappings.is_empty() {
                 return Ok(mappings);
             }
+            // All tier providers were skipped — fall through to [[models]] / pass-through logic.
+            info!(
+                "tier {} — all providers skipped, falling back to [[models]] routing",
+                tier_name
+            );
         }
     }
 
@@ -230,5 +290,156 @@ pub(crate) fn inject_continuation_text(msg: &mut crate::models::Message) {
             // Prepend continuation text to existing blocks
             blocks.insert(0, ContentBlock::text(continuation.to_string(), None));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::providers::ProviderRegistry;
+    use crate::router::Router;
+    use crate::server::ReloadableState;
+    use axum::http::HeaderMap;
+
+    /// Builds a minimal [`ReloadableState`] from a TOML snippet.
+    fn make_state(toml: &str) -> Arc<ReloadableState> {
+        let config: crate::cli::AppConfig = toml::from_str(toml).expect("valid test TOML");
+        let router = Router::new(config.clone());
+        let registry = Arc::new(ProviderRegistry::new());
+        Arc::new(ReloadableState::new(config, router, registry))
+    }
+
+    /// Builds a [`RouteDecision`] with the given model name and tier.
+    fn decision(
+        model: &str,
+        tier: Option<crate::router::classify::ComplexityTier>,
+    ) -> crate::models::RouteDecision {
+        crate::models::RouteDecision {
+            model_name: model.to_string(),
+            route_type: crate::models::RouteType::Default,
+            matched_prompt: None,
+            complexity_tier: tier,
+        }
+    }
+
+    // Cas 1: tier match + mapping [[models]] existe pour ce provider
+    // → actual_model du mapping est utilisé, pas le model_name brut.
+    #[test]
+    fn tier_with_model_mapping_uses_actual_model() {
+        let toml = r#"
+[router]
+default = "claude-sonnet-4-6"
+
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+models = []
+enabled = true
+
+[[tiers]]
+name = "complex"
+providers = ["openrouter"]
+
+[[models]]
+name = "claude-sonnet-4-6"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "anthropic/claude-sonnet-4-6"
+priority = 1
+"#;
+        let state = make_state(toml);
+        let headers = HeaderMap::new();
+        let dec = decision(
+            "claude-sonnet-4-6",
+            Some(crate::router::classify::ComplexityTier::Complex),
+        );
+
+        let mappings = resolve_provider_mappings(&state, &headers, &dec).expect("should resolve");
+
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].provider, "openrouter");
+        // Must use the actual_model from [[models.mappings]], not the raw model name.
+        assert_eq!(mappings[0].actual_model, "anthropic/claude-sonnet-4-6");
+    }
+
+    // Cas 2: tier match + pas de [[models]] mapping mais provider liste le model → used as-is.
+    #[test]
+    fn tier_without_mapping_but_provider_knows_model_uses_raw_name() {
+        let toml = r#"
+[router]
+default = "claude-sonnet-4-6"
+
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+models = ["claude-sonnet-4-6"]
+enabled = true
+
+[[tiers]]
+name = "medium"
+providers = ["anthropic"]
+"#;
+        let state = make_state(toml);
+        let headers = HeaderMap::new();
+        let dec = decision(
+            "claude-sonnet-4-6",
+            Some(crate::router::classify::ComplexityTier::Medium),
+        );
+
+        let mappings = resolve_provider_mappings(&state, &headers, &dec).expect("should resolve");
+
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].provider, "anthropic");
+        assert_eq!(mappings[0].actual_model, "claude-sonnet-4-6");
+    }
+
+    // Cas 3: tier match + aucun mapping + provider ne connaît pas le model
+    // → provider SKIP, fallback sur [[models]] classique.
+    #[test]
+    fn tier_all_providers_skipped_falls_back_to_models_routing() {
+        let toml = r#"
+[router]
+default = "claude-sonnet-4-6"
+
+[[providers]]
+name = "deepinfra"
+provider_type = "openai"
+models = ["some-other-model"]
+enabled = true
+
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+models = ["claude-sonnet-4-6"]
+enabled = true
+
+[[tiers]]
+name = "trivial"
+providers = ["deepinfra"]
+
+[[models]]
+name = "claude-sonnet-4-6"
+
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+priority = 1
+"#;
+        let state = make_state(toml);
+        let headers = HeaderMap::new();
+        let dec = decision(
+            "claude-sonnet-4-6",
+            Some(crate::router::classify::ComplexityTier::Trivial),
+        );
+
+        // deepinfra is in the tier but doesn't know "claude-sonnet-4-6" and has no mapping.
+        // The tier loop produces an empty list → fallback to [[models]] which gives anthropic.
+        let mappings =
+            resolve_provider_mappings(&state, &headers, &dec).expect("should fallback and resolve");
+
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].provider, "anthropic");
+        assert_eq!(mappings[0].actual_model, "claude-sonnet-4-6");
     }
 }
