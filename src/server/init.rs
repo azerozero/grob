@@ -419,6 +419,10 @@ pub(crate) fn emit_tee_attestation(
 }
 
 /// Spawns background tasks: webhook relay and model mapping validation.
+#[cfg_attr(
+    not(all(feature = "policies", feature = "watch")),
+    allow(unused_variables)
+)]
 pub(crate) fn spawn_background_tasks(state: &Arc<super::AppState>) {
     // Webhook relay: HitApprovalRequest events with auth_method="webhook"
     #[cfg(all(feature = "policies", feature = "watch"))]
