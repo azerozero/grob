@@ -190,8 +190,11 @@ async fn main() -> anyhow::Result<()> {
         Commands::Completions { shell } => commands::completions::cmd_completions::<Cli>(shell),
         Commands::SetupCompletions => commands::setup_completions::cmd_setup_completions::<Cli>()?,
         Commands::Env => commands::env::cmd_env(&config),
-        Commands::Connect { provider } => {
-            commands::connect::cmd_connect(&config, &config_source, provider)?;
+        Commands::Connect {
+            provider,
+            force_reauth,
+        } => {
+            commands::connect::cmd_connect(&config, &config_source, provider, force_reauth).await?;
         }
         Commands::Init => commands::init::cmd_init()?,
         Commands::ConfigDiff { target } => {
