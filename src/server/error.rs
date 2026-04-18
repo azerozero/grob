@@ -17,6 +17,10 @@ pub enum AppError {
     BudgetExceeded(String),
     /// Indicates the DLP pipeline blocked the request.
     DlpBlocked(String),
+    /// Indicates an upstream OAuth token is revoked or invalid (401 authentication_error).
+    ///
+    /// Surfaced to the client as a terminal 401 without fallback to sibling providers.
+    AuthenticationError(String),
 }
 
 impl IntoResponse for AppError {
@@ -27,6 +31,9 @@ impl IntoResponse for AppError {
             AppError::ProviderError(msg) => (StatusCode::BAD_GATEWAY, "error", msg),
             AppError::BudgetExceeded(msg) => (StatusCode::PAYMENT_REQUIRED, "budget_exceeded", msg),
             AppError::DlpBlocked(msg) => (StatusCode::BAD_REQUEST, "dlp_block", msg),
+            AppError::AuthenticationError(msg) => {
+                (StatusCode::UNAUTHORIZED, "authentication_error", msg)
+            }
         };
 
         let body = Json(serde_json::json!({
@@ -48,6 +55,7 @@ impl std::fmt::Display for AppError {
             AppError::ProviderError(msg) => write!(f, "Provider error: {}", msg),
             AppError::BudgetExceeded(msg) => write!(f, "Budget exceeded: {}", msg),
             AppError::DlpBlocked(msg) => write!(f, "DLP blocked: {}", msg),
+            AppError::AuthenticationError(msg) => write!(f, "Authentication error: {}", msg),
         }
     }
 }
@@ -118,6 +126,22 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(json["error"]["type"], "dlp_block");
         assert_eq!(json["error"]["message"], "secret detected in prompt");
+    }
+
+    #[tokio::test]
+    async fn authentication_error_returns_401_with_authentication_error_type() {
+        let err = AppError::AuthenticationError(
+            "OAuth token for provider 'anthropic' revoked. Run: grob connect --force-reauth"
+                .to_string(),
+        );
+        let (status, json) = error_response_parts(err).await;
+
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(json["error"]["type"], "authentication_error");
+        assert!(json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("grob connect --force-reauth"));
     }
 
     #[test]

@@ -186,7 +186,41 @@ impl AnthropicCompatibleProvider {
                 .unwrap_or_else(|_| "Unknown error".to_string());
 
             if status == 401 && self.base.is_oauth() {
-                tracing::warn!("🔄 Received 401, OAuth token may be invalid or expired");
+                // A 401 can mean two things:
+                //   1. `rate_limit_error` — transient, provider loop will retry.
+                //   2. `authentication_error` — terminal, OAuth token revoked.
+                // Only invalidate the token for case (2) to avoid triggering
+                // reauth loops on rate-limit spikes.
+                let lower = error_text.to_ascii_lowercase();
+                let is_auth_error =
+                    !(lower.contains("rate_limit_error") || lower.contains("\"rate_limit\""));
+                if is_auth_error {
+                    if let (Some(provider_id), Some(store)) = (
+                        self.base.oauth_provider.as_deref(),
+                        self.base.token_store.as_ref(),
+                    ) {
+                        tracing::error!(
+                            provider = %provider_id,
+                            "OAuth token for provider {} revoked. Run: grob connect --force-reauth",
+                            provider_id
+                        );
+                        if let Err(e) = store.mark_needs_reauth(provider_id) {
+                            tracing::warn!(
+                                provider = %provider_id,
+                                error = %e,
+                                "Failed to mark token as needs_reauth"
+                            );
+                        }
+                    } else {
+                        tracing::error!(
+                            "OAuth 401 but no oauth_provider/token_store attached to base"
+                        );
+                    }
+                } else {
+                    tracing::warn!(
+                        "🔄 Received 401 with rate_limit payload, treating as transient"
+                    );
+                }
             }
 
             return Err(ProviderError::ApiError {
