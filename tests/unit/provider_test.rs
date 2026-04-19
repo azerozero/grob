@@ -30,6 +30,8 @@ mod tests {
             tls_ca: None,
             pool: None,
             circuit_breaker: None,
+
+            health_check: None,
         };
 
         assert!(config.is_enabled());
@@ -58,6 +60,8 @@ mod tests {
             tls_ca: None,
             pool: None,
             circuit_breaker: None,
+
+            health_check: None,
         };
 
         assert!(!config.is_enabled());

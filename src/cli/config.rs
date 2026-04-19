@@ -827,6 +827,16 @@ pub struct ProviderConfig {
     /// `(provider, model)` endpoint served by this provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circuit_breaker: Option<CircuitBreakerProviderConfig>,
+
+    /// Active health check configuration (RE-1b, ADR-0018).
+    ///
+    /// Opt-in. When absent no probe runs and the provider is considered
+    /// healthy by this signal. When enabled, a background tokio task
+    /// polls `health_uri` on the `health_interval` cadence. Orthogonal to
+    /// `circuit_breaker` above — an endpoint is healthy only when both
+    /// signals agree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_check: Option<HealthCheckProviderConfig>,
 }
 
 impl ProviderConfig {
@@ -948,6 +958,72 @@ impl CircuitBreakerProviderConfig {
             max_fails: self.max_fails,
             fail_duration,
             cooldown,
+        })
+    }
+}
+
+/// Active health check knobs exposed through `[providers.health_check]`.
+///
+/// Mirror of [`crate::routing::HealthCheckConfig`] with TOML-friendly
+/// duration strings (`"30s"`, `"500ms"`). Durations accept any suffix
+/// understood by [`parse_duration`]. `health_status` accepts `"2xx"`,
+/// `"200-204"`, `"*"`, exact codes, and comma-separated mixes.
+///
+/// # Examples
+///
+/// ```toml
+/// [[providers]]
+/// name = "anthropic"
+/// provider_type = "anthropic"
+///
+/// [providers.health_check]
+/// health_uri = "https://api.anthropic.com/v1/models"
+/// health_interval = "30s"
+/// health_timeout = "5s"
+/// health_status = "2xx"
+/// ```
+///
+/// [`parse_duration`]: crate::cli::config::parse_duration
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct HealthCheckProviderConfig {
+    /// Probe URI. Omit to disable the checker (Caddy parity — `health_uri` is mandatory to activate).
+    #[serde(default)]
+    pub health_uri: Option<String>,
+    /// Interval between probes. Defaults to `"30s"`.
+    #[serde(default)]
+    pub health_interval: Option<String>,
+    /// Per-probe request timeout. Defaults to `"5s"`.
+    #[serde(default)]
+    pub health_timeout: Option<String>,
+    /// Expected status predicate. Defaults to `"2xx"`.
+    #[serde(default)]
+    pub health_status: Option<String>,
+}
+
+impl HealthCheckProviderConfig {
+    /// Converts the TOML view into a runtime [`crate::routing::HealthCheckConfig`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any duration string or status predicate is unparseable.
+    pub fn to_runtime(&self) -> Result<crate::routing::HealthCheckConfig, String> {
+        let interval = match self.health_interval.as_deref() {
+            None => std::time::Duration::from_secs(30),
+            Some(s) => parse_duration(s)?,
+        };
+        let timeout = match self.health_timeout.as_deref() {
+            None => std::time::Duration::from_secs(5),
+            Some(s) => parse_duration(s)?,
+        };
+        let status = match self.health_status.as_deref() {
+            None => crate::routing::StatusMatcher::default(),
+            Some(s) => crate::routing::StatusMatcher::parse(s)?,
+        };
+        Ok(crate::routing::HealthCheckConfig {
+            uri: self.health_uri.clone().filter(|s| !s.is_empty()),
+            interval,
+            timeout,
+            status,
         })
     }
 }
