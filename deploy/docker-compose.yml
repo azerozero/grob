@@ -33,7 +33,7 @@ services:
 
     volumes:
       # Config (read-only bind mount)
-      - ${GROB_CONFIG:-~/.grob/config}:/etc/grob:ro
+      - ${GROB_CONFIG:-${HOME}/.grob/config}:/etc/grob:ro
       # Persistent data (spend DB, encryption keys)
       - grob-data:/var/lib/grob
 
