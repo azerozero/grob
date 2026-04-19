@@ -14,10 +14,10 @@
 ## dispatch(ctx, request)
 
 **Module:** `src/server/dispatch/mod.rs`
-**Intention:** Execute the full request pipeline in a strict, ordered sequence: DLP input scan, MCP tool calibration, pledge filtering, cache lookup, routing, provider mapping resolution, tool layer processing, cache hit check, fan-out (if configured), and finally the provider fallback loop. Returns either a streaming or complete response.
+**Intention:** Execute the full request pipeline in a strict, ordered sequence: grob_hint harvesting (Step 0, header/MCP hint), DLP input scan, MCP tool calibration, pledge filtering, cache lookup, routing, provider mapping resolution (including Step 5.5 tier fan-out when a `[[tiers]]` matches), tool layer processing, cache hit check, fan-out (if configured), and finally the provider fallback loop. Returns either a streaming or complete response.
 
 **Invariants:**
-- INV-1 (Pipeline order): Steps must execute in the documented order (DLP -> MCP -> pledge -> cache key -> route -> resolve mappings -> tool layer -> cache hit -> fan-out -> provider loop). No step may be skipped except when gated by feature flags.
+- INV-1 (Pipeline order): Steps must execute in the documented order (Step 0 grob_hint -> DLP -> MCP -> pledge -> cache key -> route -> resolve mappings (+ Step 5.5 tier fan-out) -> tool layer -> cache hit -> fan-out -> provider loop). No step may be skipped except when gated by feature flags.
 - INV-2 (DLP before provider): DLP input scanning must always complete before any data is sent to an external provider. A DLP block must prevent the request from reaching any provider.
 - INV-3 (Fallback exhaustion): The provider loop must try all available mappings in order before returning an error. Circuit-broken providers are skipped, not retried.
 - INV-4 (Atomic routing): The routing decision is computed once and used for all provider attempts within a single dispatch. Re-routing mid-dispatch is not allowed.
@@ -50,10 +50,10 @@
 ## Router::route(request)
 
 **Module:** `src/router/mod.rs`
-**Intention:** Classify an incoming request into a route type and resolve the target model name by evaluating rules in strict priority order: WebSearch > Background > AutoMap > SubagentTag > PromptRules > Think > Default. Note: SubagentTag extracts a model from `<GROB-SUBAGENT-MODEL>` system prompt tags but returns `RouteType::Default` (no dedicated variant).
+**Intention:** Classify an incoming request into a route type and resolve the target model name by evaluating rules in strict priority order: `grob_hint` header/MCP (Step 0) > WebSearch > Background > AutoMap > SubagentTag > PromptRules > Think > ComplexityTier (T-P1 classifier) > Default. Note: SubagentTag extracts a model from `<GROB-SUBAGENT-MODEL>` system prompt tags but returns `RouteType::Default` (no dedicated variant). The `complexity_tier` field on `RouteDecision` is populated when the stateless classifier matches, and feeds the tier fan-out layer downstream (Step 5.5 in `dispatch`).
 
 **Invariants:**
-- INV-1 (Priority order): A higher-priority rule always wins. If a request matches both WebSearch and Think, WebSearch is returned.
+- INV-1 (Priority order): A higher-priority rule always wins. If a request matches both WebSearch and Think, WebSearch is returned. An explicit `grob_hint` always short-circuits classification.
 - INV-2 (Determinism): Given the same request and config, `route()` always returns the same `RouteDecision`.
 - INV-3 (Auto-map mutation): Auto-mapping mutates `request.model` in place. This mutation must only happen if no higher-priority rule matched, and must happen before prompt-rule evaluation.
 - INV-4 (Single match): Exactly one route type is returned per call. The function never returns multiple matches.
@@ -209,10 +209,10 @@
 
 ---
 
-## CircuitBreaker::can_execute()
+## CircuitBreaker::can_execute() (security)
 
 **Module:** `src/security/circuit_breaker.rs`
-**Intention:** Determine whether a request should be allowed through to a provider based on the circuit breaker's current state.
+**Intention:** Determine whether a request should be allowed through to a provider based on the circuit breaker's current state. This is the **provider-level, stateful** breaker (Closed/Open/HalfOpen state machine). See `routing::CircuitBreaker::is_healthy()` below for the **endpoint-level, passive** breaker introduced by ADR-0018 (RE-1a). The two coexist: the security CB gates the provider globally, the routing CB gates each `(provider, model)` endpoint. Both must agree for a dispatch to proceed.
 
 **Invariants:**
 - INV-1 (State machine): Three states only: Closed (allow all), Open (reject unless timeout elapsed), HalfOpen (allow up to `half_open_max_calls`).
@@ -306,3 +306,71 @@
 - Block error returned but request still sent to provider
 - Content added to request during sanitization (amplification)
 - Scan skipped for certain message roles or content types
+
+---
+
+## routing::CircuitBreaker::is_healthy() (passive, RE-1a)
+
+**Module:** `src/routing/circuit_breaker.rs`
+**Intention:** Caddy-style passive per-endpoint circuit breaker. Observes real dispatch outcomes via `record_success` / `record_failure` and trips the `(provider, model)` endpoint when consecutive failures exceed `max_fails` within the `fail_duration` sliding window. The hot path (`is_healthy()`) is a single atomic load + one `ArcSwap` load — no lock, no syscall.
+
+**Invariants:**
+- INV-1 (Opt-in): `fail_duration = 0` disables the breaker; `is_healthy()` unconditionally returns `true`.
+- INV-2 (Atomic counter): Failures and successes mutate `AtomicU32` / `ArcSwap<Option<Instant>>` only. No mutex on the hot path.
+- INV-3 (Sliding window): Each failure spawns a tokio task that decrements the counter after `fail_duration`, implementing the sliding window without a timestamp ring buffer.
+- INV-4 (Cooldown priority): When tripped, the endpoint stays down for `cooldown.unwrap_or(fail_duration)` regardless of the counter; `record_success` clears the trip early.
+- INV-5 (Independence from security CB): The routing CB gates one endpoint; the security CB gates the provider globally. The AND gate in `ProviderRegistry::is_endpoint_healthy` composes both.
+
+**Preconditions:**
+- Breaker is constructed with a valid `CircuitBreakerConfig` (may be `Default` = disabled).
+
+**Postconditions:**
+- Returns `true` if the endpoint is usable, `false` if tripped (within cooldown).
+- Idempotent — calling multiple times without intervening `record_*` returns the same answer.
+
+**Boundary behavior:**
+- `fail_duration = 0` (disabled): always `true`, no allocation, no counter mutation.
+- Concurrent failures beyond `max_fails`: only one trip log emitted (guarded by the tripped-until timestamp check).
+
+**Known drifts:**
+- (none recorded yet)
+
+**Red flags to detect:**
+- Mutex or async lock reintroduced on `is_healthy()` hot path.
+- `record_failure` that skips the decrement task (counter grows unbounded).
+- Trip log emitted on every failure after the first (instead of once per trip cycle).
+
+---
+
+## routing::HealthChecker::status() (active, RE-1b)
+
+**Module:** `src/routing/health_check.rs`
+**Intention:** Caddy-style active per-provider health probe. Background tokio task polls `health_uri` on a fixed interval and flips the provider's aggregate health status based on the status-code predicate. Independent of the passive CB above; both signals are AND-gated at the registry layer.
+
+**Invariants:**
+- INV-1 (Opt-in, zero cost): Without a `[providers.health_check]` section, no task is spawned and `status()` returns `HealthStatus::NotConfigured` (treated as healthy by the AND gate).
+- INV-2 (Lifecycle): Each enabled checker owns a `tokio::task::JoinHandle`. `Drop` aborts the task, so replacing the `ProviderRegistry` (via `/api/config/reload`) cleans up probes deterministically — no background leak.
+- INV-3 (Status predicate): `StatusMatcher::parse` accepts `"2xx"`, `"200-204"`, `"200"`, `"*"`, and comma-separated mixes. Invalid specs fail at parse time, never at probe time.
+- INV-4 (Dedicated client): The probe uses its own `reqwest::Client` with `timeout = health_timeout`, not the provider's main client. A health-check timeout cannot disturb in-flight real requests.
+- INV-5 (AND gate priority): In `ProviderRegistry::is_endpoint_healthy`, a `HealthStatus::Down` immediately short-circuits to `false` regardless of the CB state.
+
+**Preconditions:**
+- Called from within a tokio runtime.
+- `HealthCheckConfig::uri` is `Some(_)` when the checker was spawned (construction-time guarantee).
+
+**Postconditions:**
+- `status()` returns one of `NotConfigured`, `Up`, `Down` — never blocks.
+- `is_healthy()` returns `true` for both `NotConfigured` and `Up`.
+
+**Boundary behavior:**
+- Probe HTTP error (timeout, DNS, TLS): endpoint is marked `Down`.
+- Probe returns an unexpected status code: endpoint is marked `Down`, logged at `debug!`.
+- State transition (Up -> Down or Down -> Up): logged at `info!` once per flip.
+
+**Known drifts:**
+- (none recorded yet)
+
+**Red flags to detect:**
+- Probe spawned with `BlockingClient` or on the dispatch runtime — must stay on tokio, timeout isolated.
+- `JoinHandle::abort()` missing from `Drop` — registry reload would leak tasks.
+- `HealthStatus` retrieved via mutex on the hot path — must stay `AtomicBool`.

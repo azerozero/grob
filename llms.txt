@@ -4,20 +4,20 @@
 
 ## Guides
 
-- [Quick Start](docs/QUICKSTART.md): Install and run Grob in 30 seconds
+- [Quick Start](docs/tutorials/quickstart.md): Install and run Grob in 30 seconds
 - [Getting Started](docs/tutorials/getting-started.md): Step-by-step tutorial from install to running
-- [Provider Setup](docs/PROVIDERS.md): Per-provider configuration guides for all 13+ supported backends
-- [OAuth Setup](docs/OAUTH_SETUP.md): OAuth authentication for Anthropic Pro/Max and Gemini Pro subscriptions
+- [Provider Setup](docs/how-to/providers.md): Per-provider configuration guides for all 13+ supported backends
+- [OAuth Setup](docs/how-to/oauth-setup.md): OAuth authentication for Anthropic Pro/Max and Gemini Pro subscriptions
 
 ## Reference
 
-- [Configuration Reference](docs/CONFIGURATION.md): All TOML config options with defaults and examples
+- [Configuration Reference](docs/reference/configuration.md): All TOML config options with defaults and examples
 - [CLI Reference](docs/reference/cli.md): All CLI commands and flags
 - [OpenAI Compatibility](docs/openai-compatibility.md): `/v1/chat/completions` endpoint details, supported features, and limitations
 - [OpenAPI Specification](docs/openapi.yaml): Full API reference in OpenAPI 3.0 format
 - [Error Reference](docs/reference/errors.md): HTTP status codes and error types
 - [Provider Reference](docs/reference/providers.md): Provider trait, implementations, format translation, streaming, and error types
-- [Troubleshooting](docs/TROUBLESHOOTING.md): Common errors, diagnostics, and fixes
+- [Troubleshooting](docs/how-to/troubleshooting.md): Common errors, diagnostics, and fixes
 
 ## How-to
 
@@ -27,7 +27,7 @@
 
 ## Architecture
 
-- [Architecture Overview](docs/ARCHITECTURE.md): Request flow, module layout, and key design decisions
+- [Architecture Overview](docs/explanation/architecture.md): Request flow, module layout, and key design decisions
 - [Design Principles](docs/design-principles.md): Philosophy, writing principles, and UX guidelines
 - [Security Model](docs/explanation/security.md): Threat model, defense layers, TLS, audit logging
 - [Gemini Integration](docs/gemini-integration.md): Gemini and Vertex AI provider specifics
@@ -62,7 +62,7 @@
 
 ## Configuration
 
-- [Configuration Reference](docs/CONFIGURATION.md): All TOML options
+- [Configuration Reference](docs/reference/configuration.md): All TOML options
 - [Example configs](docs/examples/): Sample configurations for common setups
 - [Presets](presets/): Built-in preset configurations (perf, medium, cheap, fast, local, gdpr, eu-ai-act)
 
