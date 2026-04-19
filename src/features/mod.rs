@@ -3,7 +3,6 @@
 pub mod dlp;
 #[cfg(feature = "harness")]
 pub mod harness;
-pub mod log_backend;
 pub mod log_export;
 #[cfg(feature = "mcp")]
 pub mod mcp;
