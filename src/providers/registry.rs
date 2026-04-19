@@ -6,7 +6,10 @@ use super::{
 };
 use crate::auth::TokenStore;
 use crate::cli::{ModelConfig, TimeoutConfig};
-use crate::routing::{CircuitBreaker, CircuitBreakerConfig, EndpointId};
+use crate::routing::{
+    CircuitBreaker, CircuitBreakerConfig, EndpointId, HealthCheckConfig, HealthChecker,
+    HealthStatus,
+};
 use dashmap::DashMap;
 use secrecy::SecretString;
 use std::collections::HashMap;
@@ -44,6 +47,12 @@ pub struct ProviderRegistry {
     /// lazily on the first hit from the provider loop, so configs with
     /// hundreds of models do not allocate hundreds of unused breakers.
     endpoint_breakers: DashMap<EndpointId, Arc<CircuitBreaker>>,
+    /// Per-provider active health checkers (RE-1b, ADR-0018).
+    ///
+    /// Keyed by provider name. Populated eagerly at build time so the
+    /// probe starts ticking before the first dispatch lands. Dropping the
+    /// registry aborts every spawned probe (see [`HealthChecker::drop`]).
+    health_checkers: HashMap<String, Arc<HealthChecker>>,
 }
 
 impl ProviderRegistry {
@@ -54,6 +63,7 @@ impl ProviderRegistry {
             model_to_provider: HashMap::new(),
             cb_templates: HashMap::new(),
             endpoint_breakers: DashMap::new(),
+            health_checkers: HashMap::new(),
         }
     }
 
@@ -344,6 +354,33 @@ impl ProviderRegistry {
                     }
                 }
             }
+
+            // RE-1b: spawn the active health checker eagerly so the first
+            // probe lands before the first real request. Disabled configs
+            // (no `health_uri`) are cheap — no task spawned.
+            if let Some(hc_cfg) = config.health_check.as_ref() {
+                match hc_cfg.to_runtime() {
+                    Ok(runtime) if runtime.uri.is_some() => {
+                        let checker = HealthChecker::new(config.name.clone(), runtime);
+                        registry
+                            .health_checkers
+                            .insert(config.name.clone(), checker);
+                    }
+                    Ok(_) => {
+                        tracing::debug!(
+                            provider = %config.name,
+                            "health_check section present but health_uri empty, checker disabled"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            provider = %config.name,
+                            "invalid health_check config, checker disabled: {}",
+                            e
+                        );
+                    }
+                }
+            }
         }
 
         for model in models {
@@ -422,12 +459,47 @@ impl ProviderRegistry {
             .clone()
     }
 
-    /// Returns whether an endpoint is currently healthy (RE-1a, ADR-0018).
+    /// Returns the active-health-check status for a provider.
     ///
-    /// Short-circuits to `true` when the breaker is disabled (no config
-    /// or `fail_duration = 0`).
+    /// Returns [`HealthStatus::NotConfigured`] when no
+    /// `[providers.health_check]` section was supplied. The AND gate in
+    /// [`is_endpoint_healthy`](Self::is_endpoint_healthy) consumes this.
+    pub fn provider_health_status(&self, provider: &str) -> HealthStatus {
+        match self.health_checkers.get(provider) {
+            Some(hc) => hc.status(),
+            None => HealthStatus::NotConfigured,
+        }
+    }
+
+    /// Returns the health checker for a provider, if one is configured.
+    ///
+    /// Exposed mainly for testing and observability endpoints.
+    pub fn health_checker(&self, provider: &str) -> Option<Arc<HealthChecker>> {
+        self.health_checkers.get(provider).cloned()
+    }
+
+    /// Returns the runtime health-check config for a provider, if any.
+    ///
+    /// Exposed so the CLI/RPC surface can report the configured knobs
+    /// without exposing the checker internals.
+    pub fn health_check_config(&self, provider: &str) -> Option<&HealthCheckConfig> {
+        self.health_checkers.get(provider).map(|hc| hc.config())
+    }
+
+    /// Returns whether an endpoint is currently healthy (ADR-0018 AND gate).
+    ///
+    /// Combines the passive circuit breaker (RE-1a) with the active
+    /// health checker (RE-1b): the endpoint is healthy only when *both*
+    /// signals agree. Each signal short-circuits to "healthy" when not
+    /// configured, so a registry with neither section behaves exactly as
+    /// before this module existed.
     pub fn is_endpoint_healthy(&self, provider: &str, model: &str) -> bool {
-        // Fast path: no breaker template for this provider means disabled.
+        // RE-1b active health check: if configured and reporting Down,
+        // the endpoint is out regardless of the passive breaker.
+        if self.provider_health_status(provider) == HealthStatus::Down {
+            return false;
+        }
+        // RE-1a passive circuit breaker: fast path when no template.
         if !self.cb_templates.contains_key(provider) {
             return true;
         }
@@ -526,6 +598,8 @@ mod tests {
                 tls_ca: None,
                 pool: None,
                 circuit_breaker: None,
+
+                health_check: None,
             },
             ProviderConfig {
                 name: "provider-b".to_string(),
@@ -547,6 +621,8 @@ mod tests {
                 tls_ca: None,
                 pool: None,
                 circuit_breaker: None,
+
+                health_check: None,
             },
         ];
 
