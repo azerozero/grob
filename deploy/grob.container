@@ -5,7 +5,7 @@
 
 [Unit]
 Description=Grob LLM Routing Proxy
-Documentation=https://github.com/gelwood/grob
+Documentation=https://github.com/azerozero/grob
 Wants=network-online.target
 After=network-online.target
 
