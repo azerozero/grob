@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.22](https://github.com/azerozero/grob/compare/v0.36.21...v0.36.22) - 2026-04-19
+
+### Added
+
+- *(routing)* active health checks Caddy-style (RE-1b)
+
 ## [0.36.21](https://github.com/azerozero/grob/compare/v0.36.20...v0.36.21) - 2026-04-18
 
 ### Fixed
