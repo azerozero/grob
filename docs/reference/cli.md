@@ -288,6 +288,24 @@ Check which environment variables are required by configured providers. Shows wh
 grob env
 ```
 
+### `grob logs`
+
+Decrypt and display encrypted trace entries from `~/.grob/trace.jsonl`. Only subcommand today: `decrypt`.
+
+```bash
+grob logs decrypt                             # pretty-print to stdout
+grob logs decrypt --path <trace.jsonl>        # custom trace file
+grob logs decrypt --output <out.jsonl>        # write plaintext to file
+```
+
+### `grob record` (harness)
+
+Record live traffic to a tape file for later replay. Counterpart to `grob replay` (not yet surfaced here). Part of the opt-in `harness` feature.
+
+```bash
+grob record --output <tape.jsonl>
+```
+
 ### `grob connect`
 
 Interactive credential setup for providers. Without arguments, checks all providers. With a provider name, sets up that specific provider only.

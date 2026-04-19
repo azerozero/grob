@@ -1,6 +1,6 @@
 # CI/CD Pipeline PERT
 
-## CI Workflow (push to develop / PR)
+## CI Workflow (push to main / PR)
 
 ```mermaid
 flowchart LR
@@ -55,7 +55,7 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  push["push develop"]
+  push["push main"]
   releasePlz["release-plz\nbump + tag\n~1min"]
   push --> releasePlz
 

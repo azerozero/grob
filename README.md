@@ -255,7 +255,7 @@ think = "claude-opus-thinking"
 port = 13456
 ```
 
-See [Configuration Reference](docs/CONFIGURATION.md) for all options.
+See [Configuration Reference](docs/reference/configuration.md) for all options.
 
 ## CLI
 
@@ -294,7 +294,10 @@ src/
 │   ├── watch_sse.rs     Live traffic inspector SSE backend
 │   └── fan_out.rs       Parallel multi-provider dispatch
 ├── providers/           Provider implementations and registry
-├── router/              Regex-based request routing engine
+├── router/              Regex-based request routing engine (classify task type)
+├── routing/             Nature-inspired routing primitives (ADR-0018: RE-1a/RE-1b)
+│   ├── circuit_breaker.rs  Passive per-endpoint circuit breaker (Caddy-style)
+│   └── health_check.rs     Active health probe (opt-in)
 ├── cli/                 Config structs and CLI argument parsing
 ├── commands/            CLI command implementations
 ├── auth/                OAuth client, token store, JWT validation
@@ -358,15 +361,15 @@ cargo bench --bench hotpath
 |-----|-------------|
 | [Feature Matrix](docs/reference/features.md) | Complete feature list with config references |
 | [Getting Started](docs/tutorials/getting-started.md) | Step-by-step tutorial |
-| [Configuration Reference](docs/CONFIGURATION.md) | All config options |
+| [Configuration Reference](docs/reference/configuration.md) | All config options |
 | [DLP Reference](docs/reference/dlp.md) | Secret scanning, PII, injection, URL exfil |
 | [DLP How-To](docs/how-to/dlp.md) | Recipes for each DLP feature |
 | [Security Model](docs/explanation/security.md) | Rate limiting, audit, circuit breakers |
-| [Architecture](docs/ARCHITECTURE.md) | Module layout and design decisions |
+| [Architecture](docs/explanation/architecture.md) | Module layout and design decisions |
 | [CLI Reference](docs/reference/cli.md) | Full command documentation |
-| [OAuth Setup](docs/OAUTH_SETUP.md) | Anthropic Max, Gemini Pro |
+| [OAuth Setup](docs/how-to/oauth-setup.md) | Anthropic Max, Gemini Pro |
 | [Benchmarks](docs/reference/benchmarks.md) | AWS results, competitor comparison |
-| [Provider Setup](docs/PROVIDERS.md) | Per-provider guides |
+| [Provider Setup](docs/how-to/providers.md) | Per-provider guides |
 
 ## Contributing
 

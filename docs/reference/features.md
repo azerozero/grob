@@ -1,6 +1,6 @@
 # Feature Matrix
 
-Exhaustive list of grob capabilities, extracted from the codebase (v0.35.1).
+Exhaustive list of grob capabilities, extracted from the codebase (v0.36.22).
 
 ## Core Proxy
 
@@ -285,5 +285,5 @@ Every compliance claim was verified against the actual codebase:
 - **Storage**: Atomic files + JSONL journals (no PostgreSQL, no Redis, no embedded DB)
 - **Allocator**: jemalloc (non-MSVC) for ~20% throughput improvement
 - **Container**: 6 MB `FROM scratch`, rustls TLS bundled
-- **Codebase**: ~29K lines of Rust, 520+ tests
+- **Codebase**: ~66K lines of Rust, 1193 tests
 - **Traits**: 7 core abstractions (DlpPipeline, RequestRouter, Tracer, SpendTracking, AuditWriter, EventTap, ProviderAvailability)

@@ -84,6 +84,9 @@ flowchart TB
 | `providers::streaming` | `src/providers/streaming.rs` | SSE stream parsing and forwarding |
 | `providers::registry` | `src/providers/registry.rs` | Provider registration and model lookup |
 | `router` | `src/router/mod.rs` | Request routing engine (regex rules, task classification) |
+| `routing` | `src/routing/mod.rs` | Nature-inspired routing primitives (ADR-0018). Opt-in, independent. |
+| `routing::circuit_breaker` | `src/routing/circuit_breaker.rs` | RE-1a passive per-endpoint circuit breaker (Caddy-style `max_fails` + `fail_duration`) |
+| `routing::health_check` | `src/routing/health_check.rs` | RE-1b active per-provider health probe (Caddy-style `health_uri`/`health_interval`/`health_timeout`/`health_status`). AND-gated with RE-1a in `ProviderRegistry::is_endpoint_healthy` |
 | `cli` | `src/cli/mod.rs` | Config structs (AppConfig, ServerConfig, etc.) and CLI parsing |
 | `preset` | `src/preset/mod.rs` | Preset management (list, apply, export, sync, validate) |
 | `auth` | `src/auth/mod.rs` | Auth module aggregator |

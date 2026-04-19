@@ -89,7 +89,17 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | [0005](decisions/0005-anthropic-native-provider-trait.md) | Anthropic-native provider trait |
 | [0006](decisions/0006-policy-engine-encrypted-audit-hit-gateway.md) | Policy engine, encrypted audit, HIT gateway |
 | [0008](decisions/0008-wizard-lifecycle.md) | Wizard lifecycle |
+| [0009](decisions/0009-pledge-structural-tool-filtering.md) | Pledge structural tool filtering |
+| [0010](decisions/0010-universal-tool-layer.md) | Universal tool layer |
+| [0011](decisions/0011-control-engine-mcp-tools.md) | Control engine + MCP tools |
+| [0012](decisions/0012-no-unikernel.md) | No unikernel (rejected) |
+| [0013](decisions/0013-storage-files-no-redb.md) | Storage: atomic files, no redb |
+| [0014](decisions/0014-mesh-wireguard-kiss.md) | Mesh: WireGuard KISS |
+| [0015](decisions/0015-indirect-prompt-injection-coverage.md) | Indirect prompt injection coverage |
+| [0016](decisions/0016-decision-tokens-transparent-routing.md) | Decision tokens, transparent routing |
+| [0017](decisions/0017-sokolsky-log-backend.md) | Sokolsky log backend |
+| [0018](decisions/0018-nature-inspired-routing.md) | Nature-inspired routing (RE-1a/RE-1b) |
 
 ## Version
 
-Current release: **v0.35.1** -- see [CHANGELOG](../CHANGELOG.md) for history.
+Current release: **v0.36.22** -- see [CHANGELOG](../CHANGELOG.md) for history.
