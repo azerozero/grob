@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.23](https://github.com/azerozero/grob/compare/v0.36.22...v0.36.23) - 2026-04-20
+
+### Fixed
+
+- *(infra)* corriger 5 regressions Tier 3 Containerfile + deploy
+
+### Other
+
+- *(features)* supprimer log_backend orphelin (1469 LOC)
+
 ## [0.36.22](https://github.com/azerozero/grob/compare/v0.36.21...v0.36.22) - 2026-04-19
 
 ### Added
