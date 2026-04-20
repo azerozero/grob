@@ -1,8 +1,8 @@
 //! CLI command: `grob harness record` / `grob harness replay`.
 
 use crate::cli::args::HarnessAction;
-use crate::cli::AppConfig;
 use crate::features::harness::{load_tape, Driver, DriverConfig, MockBackend, MockConfig};
+use crate::models::config::AppConfig;
 use std::path::PathBuf;
 
 /// Dispatches harness subcommands.

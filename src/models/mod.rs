@@ -1,5 +1,7 @@
 //! Shared data models: canonical request/response types, routing types.
 
+/// Top-level application configuration ([`config::AppConfig`]).
+pub mod config;
 /// Provider-specific request extensions for lossless roundtrips.
 pub mod extensions;
 /// Spend tracking data types shared between storage and pricing.

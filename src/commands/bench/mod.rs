@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 
 use crate::auth::virtual_keys::{generate_key, VirtualKeyRecord};
-use crate::cli::AppConfig;
+use crate::models::config::AppConfig;
 use crate::storage::GrobStore;
 
 use mock::{start_mock_backend, start_proxy, ProxyState};

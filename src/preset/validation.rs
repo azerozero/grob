@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::sync::Arc;
 
 use crate::auth::TokenStore;
-use crate::cli::AppConfig;
+use crate::models::config::AppConfig;
 use crate::models::{CanonicalRequest, Message, MessageContent};
 use crate::providers::ProviderRegistry;
 

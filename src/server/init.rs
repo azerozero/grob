@@ -1,8 +1,8 @@
 use crate::auth::TokenStore;
-use crate::cli::AppConfig;
 use crate::features::dlp::session::DlpSessionManager;
 use crate::features::token_pricing::spend::SpendTracker;
 use crate::features::token_pricing::SharedPricingTable;
+use crate::models::config::AppConfig;
 use crate::providers::ProviderRegistry;
 use crate::security::{AuditLog, CircuitBreakerRegistry, RateLimitConfig, RateLimiter};
 use crate::shared::message_tracing::MessageTracer;

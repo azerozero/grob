@@ -52,7 +52,7 @@ pub(crate) fn apply_transparency_headers(
 }
 
 /// Returns true when EU AI Act transparency headers should be added.
-pub(crate) fn should_apply_transparency(config: &crate::cli::AppConfig) -> bool {
+pub(crate) fn should_apply_transparency(config: &crate::models::config::AppConfig) -> bool {
     config.compliance.enabled && config.compliance.transparency_headers
 }
 

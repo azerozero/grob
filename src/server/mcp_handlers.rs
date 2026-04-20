@@ -316,7 +316,7 @@ use super::config_guard::is_key_denied;
 
 /// Returns a safe JSON view of the requested config section (no secrets).
 fn read_config_section(
-    config: &crate::cli::AppConfig,
+    config: &crate::models::config::AppConfig,
     section: &ConfigSection,
 ) -> serde_json::Value {
     match section {
@@ -360,7 +360,7 @@ fn read_config_section(
 ///
 /// The caller is responsible for triggering the hot-reload after a successful update.
 fn apply_config_update(
-    config: &mut crate::cli::AppConfig,
+    config: &mut crate::models::config::AppConfig,
     section: &ConfigSection,
     key: &str,
     value: &serde_json::Value,
@@ -531,7 +531,7 @@ pub async fn handle_configure(
 mod tests {
     use super::*;
 
-    fn test_app_config() -> crate::cli::AppConfig {
+    fn test_app_config() -> crate::models::config::AppConfig {
         let toml_str = r#"
             [router]
             default = "claude-sonnet"
