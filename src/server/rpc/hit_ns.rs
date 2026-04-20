@@ -47,7 +47,7 @@ pub async fn set_policy(
 ) -> Result<serde_json::Value, ErrorObjectOwned> {
     require_role(caller, Role::Admin)?;
 
-    // TODO: Implement runtime policy mutation with config reload.
+    // TODO(#228): Implement runtime policy mutation with config reload.
     let _ = state;
 
     Ok(serde_json::json!({
@@ -88,7 +88,7 @@ pub async fn resolve(
     {
         match &inner.policy_matcher {
             Some(_matcher) => {
-                // TODO: Build RequestContext from JSON and run matcher.resolve().
+                // TODO(#228): Build RequestContext from JSON and run matcher.resolve().
                 Ok(serde_json::json!({
                     "resolved": true,
                     "message": "Policy resolution placeholder — full implementation in Phase 2"

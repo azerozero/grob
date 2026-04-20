@@ -39,7 +39,7 @@ pub async fn set(
 ) -> Result<StatusResponse, ErrorObjectOwned> {
     require_role(caller, Role::Admin)?;
 
-    // TODO: Implement in-memory config mutation with validation.
+    // TODO(#228): Implement in-memory config mutation with validation.
     // Phase 2 will add persistence and diff tracking.
     let _ = state;
 

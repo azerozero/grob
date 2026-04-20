@@ -632,21 +632,24 @@ pub struct Beta {
 
 impl Beta {
     pub fn sample(&self, rng: &mut impl Rng) -> f64 {
-        let a = self.alpha.load(Ordering::Relaxed);
-        let b = self.beta.load(Ordering::Relaxed);
-        rand_distr::Beta::new(a, b).unwrap().sample(rng)
+        // NOTE: illustrative snippet; the real implementation threads a
+        // recoverable error so a pathological (alpha, beta) pair cannot
+        // panic the dispatch hot path.
+        let a = self.alpha.load(Ordering::Relaxed).max(f64::EPSILON);
+        let b = self.beta.load(Ordering::Relaxed).max(f64::EPSILON);
+        rand_distr::Beta::new(a, b)
+            .map(|d| d.sample(rng))
+            .unwrap_or(0.5)
     }
 }
 
-pub fn pick(endpoints: &[Endpoint], rng: &mut impl Rng) -> &Endpoint {
-    endpoints
-        .iter()
-        .max_by(|a, b| {
-            a.beta.sample(rng)
-                .partial_cmp(&b.beta.sample(rng))
-                .unwrap()
-        })
-        .unwrap()
+pub fn pick<'a>(endpoints: &'a [Endpoint], rng: &mut impl Rng) -> Option<&'a Endpoint> {
+    endpoints.iter().max_by(|a, b| {
+        a.beta
+            .sample(rng)
+            .partial_cmp(&b.beta.sample(rng))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 ```
 
