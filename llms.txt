@@ -37,7 +37,7 @@
 - [ADR-0001: Static config](docs/decisions/0001-static-config-no-hot-reload.md): Why no hot reload
 - [ADR-0002: Custom OAuth](docs/decisions/0002-custom-oauth-no-crate.md): Why no oauth2 crate
 - [ADR-0003: Regex routing](docs/decisions/0003-regex-routing-engine.md): Why regex-based routing
-- [ADR-0004: Persistent spend](docs/decisions/0004-persistent-spend-tracking.md): Why redb for spend tracking
+- [ADR-0004: Persistent spend](docs/decisions/0004-persistent-spend-tracking.md): Persistent spend tracking (superseded by ADR-0013)
 - [ADR-0005: Anthropic-native trait](docs/decisions/0005-anthropic-native-provider-trait.md): Why Anthropic as the internal format
 
 ## Source
@@ -47,14 +47,14 @@
 - [Trait contracts](src/traits.rs): 7+ core traits (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, etc.)
 - [Request extensions](src/models/extensions.rs): Provider-specific fields for lossless OpenAI roundtrips
 - [Provider trait](src/providers/mod.rs): LlmProvider trait definition and provider types
-- [Router](src/router/mod.rs): Regex-based request classification and model selection
+- [Router](src/routing/classify/mod.rs): Regex-based request classification and model selection (post T-VS)
 - [Dispatch pipeline](src/server/dispatch/mod.rs): DLP, cache, routing, provider loop with fallback
 - [Provider loop](src/server/dispatch/provider_loop.rs): Fallback/retry logic per mapping
 - [Server](src/server/mod.rs): Axum HTTP server, middleware stack, and application state
 - [CLI config](src/cli/mod.rs): AppConfig and all configuration structs
 - [Config structs](src/cli/config.rs): ServerConfig, SecurityConfig, RouterConfig, etc.
 - [Commands](src/commands/mod.rs): CLI command implementations
-- [Storage](src/storage/mod.rs): Unified redb storage backend (GrobStore)
+- [Storage](src/storage/mod.rs): Atomic files + JSONL journals backend (GrobStore), AES-256-GCM at rest
 - [Spend tracking](src/features/token_pricing/spend.rs): Monthly spend with budget enforcement
 - [DLP engine](src/features/dlp/mod.rs): Secret/PII scanning with Aho-Corasick
 - [MCP tool matrix](src/features/mcp/mod.rs): Tool-calling capability catalogue and scoring
