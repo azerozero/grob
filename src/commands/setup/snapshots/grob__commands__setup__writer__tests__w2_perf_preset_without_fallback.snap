@@ -1,6 +1,5 @@
 ---
-source: src/commands/setup.rs
-assertion_line: 973
+source: src/commands/setup/writer.rs
 expression: rendered
 ---
 [[models]]
