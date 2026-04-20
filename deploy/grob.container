@@ -53,8 +53,10 @@ CPUQuota=100%
 PidsLimit=1024
 
 [Service]
-Type=notify
-NotifyAccess=all
+# NOTE: grob does not call sd_notify itself, so Type=simple is the correct
+# contract. The Quadlet HealthCmd above is what signals readiness to
+# systemd — no user-space sd_notify glue needed.
+Type=simple
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60

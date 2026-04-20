@@ -37,7 +37,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 E2E_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 JWT="${JWT:-$(cat "${E2E_ROOT}/auth/tokens/jwt-default.txt" 2>/dev/null || echo "")}"
 
-HURL_OPTS="--test --color --variable host=${HOST} --variable jwt_default=${JWT}"
+HURL_OPTS=(--test --color --variable "host=${HOST}" --variable "jwt_default=${JWT}")
 
 PASS=0
 FAIL=0
@@ -87,7 +87,7 @@ run_hurl() {
     TOTAL=$((TOTAL + 1))
     echo ""
     echo "--- [${TOTAL}] ${label} ---"
-    if hurl ${HURL_OPTS} "${file}"; then
+    if hurl "${HURL_OPTS[@]}" "${file}"; then
         echo "PASS: ${label}"
         PASS=$((PASS + 1))
     else

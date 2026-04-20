@@ -17,7 +17,13 @@ CONFIG="config/mock/grob-test.toml"
 BACKUP="${CONFIG}.bak"
 
 cp "$CONFIG" "$BACKUP"
-trap 'cp "$BACKUP" "$CONFIG"; curl -sf -X POST "http://$HOST/api/config/reload" -H "Authorization: Bearer $JWT" >/dev/null 2>&1; rm -f "$BACKUP"' EXIT
+
+# NOTE: the EXIT trap is installed exactly once, after all temp paths are
+# known. Bash traps are last-write-wins, so a second `trap ... EXIT` later
+# in the script would silently drop the earlier cleanup and leak tempfiles.
+RESP_FILE="$(mktemp)"
+HEADER_FILE="$(mktemp)"
+trap 'cp "$BACKUP" "$CONFIG"; curl -sf -X POST "http://$HOST/api/config/reload" -H "Authorization: Bearer $JWT" >/dev/null 2>&1; rm -f "$BACKUP" "$RESP_FILE" "$HEADER_FILE"' EXIT
 
 # Add provider (tool-mock → vidaimock-tool:8102) + model + HIT policy
 cat >> "$CONFIG" << 'TOML'
@@ -55,11 +61,9 @@ if [ "$status" != "200" ]; then
     exit 1
 fi
 
-# Send request in background (streaming, will block on HIT approval)
-RESP_FILE=$(mktemp)
-HEADER_FILE=$(mktemp)
-trap 'cp "$BACKUP" "$CONFIG"; curl -sf -X POST "http://$HOST/api/config/reload" -H "Authorization: Bearer $JWT" >/dev/null 2>&1; rm -f "$BACKUP" "$RESP_FILE" "$HEADER_FILE"' EXIT
-
+# Send request in background (streaming, will block on HIT approval).
+# Temp paths already created + trap already installed at the top of the
+# script, so nothing extra to register here.
 curl -sf -N -D "$HEADER_FILE" -o "$RESP_FILE" \
     "http://$HOST/v1/chat/completions" -X POST \
     -H "Authorization: Bearer $JWT" -H "Content-Type: application/json" \
