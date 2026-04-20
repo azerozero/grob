@@ -22,6 +22,7 @@ jobs:
     name: Create Release PR
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency:
       group: release-plz-pr
       cancel-in-progress: false
@@ -46,6 +47,7 @@ jobs:
       && github.event.pull_request.merged == true
       && contains(github.event.pull_request.labels.*.name, 'release')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency:
       group: release-plz-tag
       cancel-in-progress: false
