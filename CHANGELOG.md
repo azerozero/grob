@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.24](https://github.com/azerozero/grob/compare/v0.36.23...v0.36.24) - 2026-04-20
+
+### Other
+
+- *(structure)* migrate root modules + fuse router into routing/classify (T-VS #12 #35)
+
 ## [0.36.23](https://github.com/azerozero/grob/compare/v0.36.22...v0.36.23) - 2026-04-20
 
 ### Fixed
