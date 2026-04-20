@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.25](https://github.com/azerozero/grob/compare/v0.36.24...v0.36.25) - 2026-04-20
+
+### Other
+
+- *(cli)* move AppConfig to models::config to break mega-SCC (T-SP-1 #7)
+
 ## [0.36.24](https://github.com/azerozero/grob/compare/v0.36.23...v0.36.24) - 2026-04-20
 
 ### Other
