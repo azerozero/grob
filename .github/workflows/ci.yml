@@ -782,13 +782,11 @@ jobs:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
 
-      - name: Run hurl tests (with retry)
-        uses: nick-fields/retry@v4
-        with:
-          timeout_minutes: 10
-          max_attempts: 2
-          retry_on: error
-          command: cd tests/e2e && make test-hurl
+      # NOTE: no retry — flaky E2E must be fixed at the source, not masked.
+      # Audit 2026-04-18 flagged retry-masking as structural Tier 2 smell.
+      - name: Run hurl tests
+        timeout-minutes: 10
+        run: cd tests/e2e && make test-hurl
 
       - name: Collect logs
         if: failure()
@@ -821,13 +819,10 @@ jobs:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
 
-      - name: Run k6 smoke load test (with retry)
-        uses: nick-fields/retry@v4
-        with:
-          timeout_minutes: 15
-          max_attempts: 2
-          retry_on: error
-          command: cd tests/e2e && make load
+      # NOTE: no retry — see hurl block above for rationale (audit 2026-04-18).
+      - name: Run k6 smoke load test
+        timeout-minutes: 15
+        run: cd tests/e2e && make load
 
       - name: Teardown
         if: always()

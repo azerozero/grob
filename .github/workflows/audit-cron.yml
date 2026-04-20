@@ -1,0 +1,36 @@
+name: Security Audit (daily)
+
+# Runs `cargo audit` on a fixed cron so newly-published CVEs are caught
+# within 24h even if the repository has not been modified. The PR-gated
+# audit job in ci.yml only fires on Rust/CI changes, which is insufficient
+# for supply-chain monitoring.
+#
+# Audit 2026-04-18 Tier 2 item 25.
+
+on:
+  schedule:
+    # 04:17 UTC daily — off-peak for GitHub Actions scheduler.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: audit-cron-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: cargo audit (scheduled)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v6
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
