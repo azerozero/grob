@@ -48,6 +48,52 @@ pub(crate) fn should_refresh(
     now + window >= token.expires_at
 }
 
+/// Classification of an OAuth refresh error, derived from the error message.
+///
+/// Replaces the ad-hoc `msg.contains("401")` heuristic with a typed verdict
+/// so callers can decide terminal vs transient without touching strings.
+/// The heuristic stays in one place and is unit-tested.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub(crate) enum OAuthRefreshError {
+    /// `invalid_grant` / `invalid_token` / `unauthorized_client` — the
+    /// refresh token is permanently rejected. Requires user re-auth.
+    InvalidGrant,
+    /// HTTP 401 without a specific OAuth error body — treat as terminal.
+    Unauthorized,
+    /// Transient network error, rate limit, or 5xx from the authorization server.
+    Transient,
+}
+
+impl OAuthRefreshError {
+    /// Returns `true` when the token must be marked `needs_reauth`.
+    pub(crate) fn is_terminal(self) -> bool {
+        matches!(self, Self::InvalidGrant | Self::Unauthorized)
+    }
+}
+
+/// Classifies an OAuth refresh error message.
+///
+/// # Examples
+///
+/// ```ignore
+/// use crate::auth::refresh_daemon::{classify_refresh_error, OAuthRefreshError};
+/// assert!(classify_refresh_error("invalid_grant").is_terminal());
+/// assert!(!classify_refresh_error("connection reset by peer").is_terminal());
+/// ```
+pub(crate) fn classify_refresh_error(msg: &str) -> OAuthRefreshError {
+    let lower = msg.to_ascii_lowercase();
+    if lower.contains("invalid_grant")
+        || lower.contains("invalid_token")
+        || lower.contains("unauthorized_client")
+    {
+        OAuthRefreshError::InvalidGrant
+    } else if lower.contains("401") {
+        OAuthRefreshError::Unauthorized
+    } else {
+        OAuthRefreshError::Transient
+    }
+}
+
 /// Possible outcomes of a single-token refresh attempt.
 ///
 /// Returned by [`refresh_one`] for ease of unit testing.
@@ -93,13 +139,8 @@ pub(crate) async fn refresh_one(
         }
         Err(e) => {
             let msg = e.to_string();
-            // Terminal failures: the refresh_token itself was rejected.
-            // 401/invalid_grant/invalid_token are all treated as permanent.
-            let terminal = msg.contains("401")
-                || msg.contains("invalid_grant")
-                || msg.contains("invalid_token")
-                || msg.contains("unauthorized_client");
-            if terminal {
+            let classification = classify_refresh_error(&msg);
+            if classification.is_terminal() {
                 warn!(
                     provider = %token.provider_id,
                     error = %msg,
@@ -269,5 +310,36 @@ mod tests {
         cancel.cancel();
         // Give the task a moment to notice cancellation.
         tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    #[test]
+    fn classify_invalid_grant_is_terminal() {
+        assert_eq!(
+            classify_refresh_error("oauth: invalid_grant"),
+            OAuthRefreshError::InvalidGrant
+        );
+        assert!(classify_refresh_error("invalid_grant").is_terminal());
+        assert!(classify_refresh_error("INVALID_TOKEN").is_terminal());
+        assert!(classify_refresh_error("unauthorized_client").is_terminal());
+    }
+
+    #[test]
+    fn classify_bare_401_is_terminal() {
+        assert_eq!(
+            classify_refresh_error("HTTP 401"),
+            OAuthRefreshError::Unauthorized
+        );
+        assert!(classify_refresh_error("401 Unauthorized").is_terminal());
+    }
+
+    #[test]
+    fn classify_transient_errors_are_not_terminal() {
+        assert_eq!(
+            classify_refresh_error("connection reset by peer"),
+            OAuthRefreshError::Transient
+        );
+        assert!(!classify_refresh_error("timeout").is_terminal());
+        assert!(!classify_refresh_error("500 Internal Server Error").is_terminal());
+        assert!(!classify_refresh_error("rate limited").is_terminal());
     }
 }

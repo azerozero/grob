@@ -53,7 +53,7 @@ pub async fn enable(
 ) -> Result<StatusResponse, ErrorObjectOwned> {
     require_role(caller, Role::Admin)?;
 
-    // TODO: Implement runtime tool enable with config mutation.
+    // TODO(#228): Implement runtime tool enable with config mutation.
     let _ = state;
 
     Ok(StatusResponse {
@@ -70,7 +70,7 @@ pub async fn disable(
 ) -> Result<StatusResponse, ErrorObjectOwned> {
     require_role(caller, Role::Admin)?;
 
-    // TODO: Implement runtime tool disable with config mutation.
+    // TODO(#228): Implement runtime tool disable with config mutation.
     let _ = state;
 
     Ok(StatusResponse {

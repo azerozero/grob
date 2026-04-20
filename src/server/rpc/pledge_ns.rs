@@ -27,7 +27,7 @@ pub async fn set(
 ) -> Result<StatusResponse, ErrorObjectOwned> {
     require_role(caller, Role::Admin)?;
 
-    // TODO: Implement runtime pledge activation with config mutation.
+    // TODO(#228): Implement runtime pledge activation with config mutation.
     let _ = state;
 
     Ok(StatusResponse {
@@ -43,7 +43,7 @@ pub async fn clear(
 ) -> Result<StatusResponse, ErrorObjectOwned> {
     require_role(caller, Role::Admin)?;
 
-    // TODO: Implement pledge clear with config mutation.
+    // TODO(#228): Implement pledge clear with config mutation.
     let _ = state;
 
     Ok(StatusResponse {
