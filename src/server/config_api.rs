@@ -1,6 +1,6 @@
 use crate::cli::AppConfig;
 use crate::providers::ProviderRegistry;
-use crate::router::Router;
+use crate::routing::classify::Router;
 use axum::{
     extract::State,
     response::{IntoResponse, Response},

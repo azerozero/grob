@@ -1,4 +1,5 @@
-use crate::{cli, features, instance, preset, providers};
+use crate::shared::instance;
+use crate::{cli, features, preset, providers};
 
 /// Prints service status, router config, providers, models, and spend.
 pub async fn cmd_status(config: &cli::AppConfig) -> anyhow::Result<()> {

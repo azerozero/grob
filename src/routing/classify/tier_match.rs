@@ -1,8 +1,8 @@
 //! Declarative tier matcher: evaluates `[tiers.match]` conditions at routing time.
 
+use super::classify::{self, ComplexityTier};
 use crate::cli::TierMatchCondition;
 use crate::models::CanonicalRequest;
-use crate::router::classify::{self, ComplexityTier};
 use globset::{Glob, GlobMatcher};
 use tracing::debug;
 

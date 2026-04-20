@@ -1061,7 +1061,7 @@ pub struct TierMatchCondition {
 
 /// Declarative tier configuration mapping complexity tiers to provider lists.
 ///
-/// Each `[[tiers]]` entry binds a [`ComplexityTier`](crate::router::classify::ComplexityTier)
+/// Each `[[tiers]]` entry binds a [`ComplexityTier`](crate::routing::classify::ComplexityTier)
 /// name (`trivial`, `medium`, `complex`) to an ordered list of provider names.
 /// When the scoring heuristic classifies a request, the dispatch pipeline
 /// resolves providers from the matching tier instead of the default model mappings.

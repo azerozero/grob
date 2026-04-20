@@ -102,7 +102,7 @@ fn reload_state(
     config: crate::cli::AppConfig,
     _config_path: &Path,
 ) -> Result<(), super::AppError> {
-    let new_router = crate::router::Router::new(config.clone());
+    let new_router = crate::routing::classify::Router::new(config.clone());
 
     let new_registry = crate::providers::ProviderRegistry::from_configs_with_models(
         &config.providers,

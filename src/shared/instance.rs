@@ -82,17 +82,17 @@ pub async fn stop_instance(host: &str, port: u16) -> anyhow::Result<()> {
 
 /// Clean up legacy PID file if it exists.
 pub fn cleanup_legacy_pid() {
-    let _ = crate::pid::cleanup_pid();
+    let _ = super::pid::cleanup_pid();
 }
 
 /// Try to read PID from legacy PID file (backward compat).
 pub fn legacy_pid() -> Option<u32> {
-    crate::pid::read_pid().ok()
+    super::pid::read_pid().ok()
 }
 
 /// Check if a process is running (backward compat wrapper).
 pub fn is_process_running(pid: u32) -> bool {
-    crate::pid::is_process_running(pid)
+    super::pid::is_process_running(pid)
 }
 
 #[cfg(test)]

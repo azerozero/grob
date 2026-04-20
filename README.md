@@ -294,10 +294,10 @@ src/
 │   ├── watch_sse.rs     Live traffic inspector SSE backend
 │   └── fan_out.rs       Parallel multi-provider dispatch
 ├── providers/           Provider implementations and registry
-├── router/              Regex-based request routing engine (classify task type)
-├── routing/             Nature-inspired routing primitives (ADR-0018: RE-1a/RE-1b)
-│   ├── circuit_breaker.rs  Passive per-endpoint circuit breaker (Caddy-style)
-│   └── health_check.rs     Active health probe (opt-in)
+├── routing/             Request routing: classification + nature-inspired primitives
+│   ├── classify/        Regex-based request classification engine (task type, tier, auto-map)
+│   ├── circuit_breaker.rs  Passive per-endpoint circuit breaker (RE-1a, ADR-0018)
+│   └── health_check.rs     Active per-provider health probe (RE-1b, opt-in)
 ├── cli/                 Config structs and CLI argument parsing
 ├── commands/            CLI command implementations
 ├── auth/                OAuth client, token store, JWT validation
@@ -313,11 +313,18 @@ src/
 │   ├── watch/           TUI dashboard (grob watch)
 │   ├── log_backend/     Structured audit log backend
 │   └── log_export/      Encrypted audit log export
+├── shared/              Cross-cutting modules (not tied to a single slice)
+│   ├── acme.rs          Automatic TLS certificate provisioning via ACME
+│   ├── instance.rs      Multi-instance coordination (PID + port probing)
+│   ├── net.rs           Network binding with SO_REUSEPORT
+│   ├── otel.rs          OpenTelemetry subscriber bootstrap
+│   ├── pid.rs           PID file management for daemon mode
+│   └── message_tracing/ Request/response trace pipeline (JSONL + rotation)
 ├── security/            Circuit breakers, rate limiting, audit log
 ├── storage/             Persistent storage layer: atomic files, JSONL journals (GrobStore)
 ├── models/              Model and message type definitions
 ├── cache/               Response cache layer
-├── message_tracing/     Request/response trace pipeline
+├── pricing.rs           Static model pricing (leaf module, breaks cycle providers↔features)
 └── preset/              Preset management system
 ```
 

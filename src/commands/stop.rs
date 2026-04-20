@@ -1,5 +1,6 @@
 use super::common::*;
-use crate::{cli, instance};
+use crate::cli;
+use crate::shared::instance;
 
 /// Stops the running Grob service by PID and cleans up stale state.
 ///

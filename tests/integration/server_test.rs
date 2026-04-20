@@ -13,7 +13,7 @@ mod tests {
     use grob::features::dlp::session::DlpSessionManager;
     use grob::features::dlp::DlpEngine;
     use grob::models::*;
-    use grob::router::Router;
+    use grob::routing::classify::Router;
 
     // ── DLP Engine End-to-End ────────────────────────────────
 

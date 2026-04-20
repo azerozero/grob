@@ -1,16 +1,19 @@
-//! Routing primitives for the Grob dispatch pipeline (RE phase, ADR-0018).
+//! Routing primitives for the Grob dispatch pipeline.
 //!
-//! This module hosts the nature-inspired routing primitives defined by
-//! [ADR-0018](../../../docs/decisions/0018-nature-inspired-routing.md). The
-//! primitives are **opt-in** and **independent** — each adds one concern at a
-//! time on top of the existing provider loop:
+//! This module unifies two concerns that previously lived in separate top-level
+//! modules:
 //!
-//! - [`circuit_breaker`] — RE-1a passive circuit breaker (Caddy-style
-//!   `max_fails` + `fail_duration`). Per-endpoint (provider + model pair),
-//!   lock-free hot path, tokio-driven failure decay. Off by default.
-//! - [`health_check`] — RE-1b active health checks (Caddy-style
-//!   `health_uri` / `health_interval` / `health_timeout` / `health_status`).
-//!   Per-provider background probe. Off by default.
+//! - [`classify`] — request classification engine (regex prompt rules, tier
+//!   matching, auto-map, complexity classifier). Previously at
+//!   `crate::router`; merged here as part of the vertical-slice foundation
+//!   (audit item #12).
+//! - Nature-inspired primitives from [ADR-0018][adr]:
+//!   - [`circuit_breaker`] — RE-1a passive circuit breaker (Caddy-style
+//!     `max_fails` + `fail_duration`). Per-endpoint (provider + model pair),
+//!     lock-free hot path, tokio-driven failure decay. Off by default.
+//!   - [`health_check`] — RE-1b active health checks (Caddy-style
+//!     `health_uri` / `health_interval` / `health_timeout` / `health_status`).
+//!     Per-provider background probe. Off by default.
 //!
 //! Future phases (tracked in ADR-0018):
 //!
@@ -18,6 +21,11 @@
 //! - RE-2 EMA stats per endpoint.
 //! - RE-3 hedged requests.
 //! - RE-4 Thompson sampling bandit.
+//!
+//! [adr]: ../../../docs/decisions/0018-nature-inspired-routing.md
+
+/// Request classification engine (prompt rules, tier matching, auto-map).
+pub mod classify;
 
 /// Passive per-endpoint circuit breaker (RE-1a, Caddy-style).
 pub mod circuit_breaker;

@@ -167,7 +167,8 @@ pub(crate) fn resolve_provider_mappings(
             .collect();
 
         // Smart filtering: prefer providers whose type matches the inferred model family
-        let inferred = crate::router::inference::infer_provider_type(&decision.model_name);
+        let inferred =
+            crate::routing::classify::inference::infer_provider_type(&decision.model_name);
         let filtered: Vec<&crate::providers::ProviderConfig> = if let Some(inf) = inferred {
             let matched: Vec<_> = all_pass_through
                 .iter()
@@ -297,7 +298,7 @@ pub(crate) fn inject_continuation_text(msg: &mut crate::models::Message) {
 mod tests {
     use super::*;
     use crate::providers::ProviderRegistry;
-    use crate::router::Router;
+    use crate::routing::classify::Router;
     use crate::server::ReloadableState;
     use axum::http::HeaderMap;
 
@@ -312,7 +313,7 @@ mod tests {
     /// Builds a [`RouteDecision`] with the given model name and tier.
     fn decision(
         model: &str,
-        tier: Option<crate::router::classify::ComplexityTier>,
+        tier: Option<crate::routing::classify::ComplexityTier>,
     ) -> crate::models::RouteDecision {
         crate::models::RouteDecision {
             model_name: model.to_string(),
@@ -352,7 +353,7 @@ priority = 1
         let headers = HeaderMap::new();
         let dec = decision(
             "claude-sonnet-4-6",
-            Some(crate::router::classify::ComplexityTier::Complex),
+            Some(crate::routing::classify::ComplexityTier::Complex),
         );
 
         let mappings = resolve_provider_mappings(&state, &headers, &dec).expect("should resolve");
@@ -384,7 +385,7 @@ providers = ["anthropic"]
         let headers = HeaderMap::new();
         let dec = decision(
             "claude-sonnet-4-6",
-            Some(crate::router::classify::ComplexityTier::Medium),
+            Some(crate::routing::classify::ComplexityTier::Medium),
         );
 
         let mappings = resolve_provider_mappings(&state, &headers, &dec).expect("should resolve");
@@ -430,7 +431,7 @@ priority = 1
         let headers = HeaderMap::new();
         let dec = decision(
             "claude-sonnet-4-6",
-            Some(crate::router::classify::ComplexityTier::Trivial),
+            Some(crate::routing::classify::ComplexityTier::Trivial),
         );
 
         // deepinfra is in the tier but doesn't know "claude-sonnet-4-6" and has no mapping.

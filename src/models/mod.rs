@@ -472,7 +472,7 @@ pub struct RouteDecision {
     /// Heuristic complexity tier (trivial / medium / complex).
     ///
     /// `None` when scoring is not configured or was overridden by a hint.
-    pub complexity_tier: Option<crate::router::classify::ComplexityTier>,
+    pub complexity_tier: Option<crate::routing::classify::ComplexityTier>,
 }
 
 /// Type of routing decision

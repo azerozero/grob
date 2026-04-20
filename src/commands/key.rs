@@ -10,7 +10,7 @@ use uuid::Uuid;
 async fn live_base_url(config: &cli::AppConfig) -> Option<String> {
     let host = &config.server.host;
     let port = config.server.port.value();
-    if crate::instance::is_instance_running(host, port).await {
+    if crate::shared::instance::is_instance_running(host, port).await {
         Some(cli::format_base_url(host, port))
     } else {
         None

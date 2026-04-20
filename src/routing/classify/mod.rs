@@ -1,6 +1,17 @@
 //! Request routing engine with regex-based prompt rules and task-type classification.
+//!
+//! This module was previously at `crate::router`. It was merged into
+//! `crate::routing::classify` as part of the vertical-slice foundation (audit
+//! item #12) so that all routing-related code lives under a single `routing`
+//! parent alongside the nature-inspired primitives (circuit breaker, health
+//! check) introduced by ADR-0018.
 
 /// Stateless complexity classifier for tier-based provider selection.
+// NOTE: `classify` inside `classify/` is intentional — the outer module hosts
+// the full classification engine (router, inference, rules, tier_match), and
+// the inner `classify` module keeps its original filename since it predates
+// the merge (audit item #12) and is re-exported here.
+#[allow(clippy::module_inception)]
 pub mod classify;
 /// Provider type inference from model name prefixes.
 pub mod inference;
@@ -10,6 +21,11 @@ mod message;
 mod rules;
 /// Declarative tier matcher for `[tiers.match]` conditions.
 pub(crate) mod tier_match;
+
+// Re-export the stateless complexity classifier's public types so callers can
+// reach them as `routing::classify::ComplexityTier` instead of the more
+// awkward `routing::classify::classify::ComplexityTier`.
+pub use classify::{ComplexityTier, ScoringConfig, ScoringWeights};
 
 use crate::cli::AppConfig;
 use crate::models::{CanonicalRequest, RouteDecision, RouteType};

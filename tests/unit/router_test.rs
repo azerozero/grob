@@ -3,7 +3,7 @@
 mod tests {
     use grob::cli::{AppConfig, RouterConfig, ServerConfig};
     use grob::models::{CanonicalRequest, Message, MessageContent, RouteType, ThinkingConfig};
-    use grob::router::Router;
+    use grob::routing::classify::Router;
 
     fn create_test_config() -> AppConfig {
         AppConfig {

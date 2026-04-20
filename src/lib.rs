@@ -69,9 +69,6 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// Automatic TLS certificate provisioning via ACME.
-#[cfg(feature = "acme")]
-pub mod acme;
 /// Authentication: JWT validation, OAuth flows, and token storage.
 pub mod auth;
 /// LLM response caching for deterministic requests.
@@ -84,36 +81,35 @@ pub mod commands;
 pub mod control;
 /// Optional features: DLP, MCP, TAP, token pricing.
 pub mod features;
-/// Server instance lifecycle management.
-pub mod instance;
-/// Request/response message tracing utilities.
-pub mod message_tracing;
 /// Shared data models (requests, responses, routing).
 pub mod models;
-/// Network utilities and port management.
-pub mod net;
-/// OpenTelemetry distributed tracing export.
-pub mod otel;
-/// PID file management for daemon mode.
-pub mod pid;
 /// Preset management: builtin/installed presets and apply/export.
 pub mod preset;
 /// Static model pricing lookup (leaf module, no cross-module dependencies).
+///
+/// INTENTIONALLY a top-level module (not under `shared/`): both
+/// `providers::streaming` and `features::token_pricing` import from here, and
+/// keeping it as a leaf at the crate root breaks an otherwise circular
+/// dependency between those two modules.
 pub mod pricing;
 /// LLM provider implementations and registry.
 pub mod providers;
-/// Request routing engine with regex-based rules.
-pub mod router;
-/// Nature-inspired routing primitives (circuit breaker, EMA stats, bandit).
+/// Request routing (classification engine + nature-inspired primitives).
 ///
-/// Tracks the RE phase of the ADR-0018 roadmap. Currently hosts the RE-1a
-/// passive circuit breaker; future primitives (health check, EMA stats,
-/// hedging, Thompson sampling) land here as sibling modules.
+/// Hosts the request classification engine under [`routing::classify`] plus
+/// the nature-inspired primitives defined by ADR-0018 (circuit breaker,
+/// health check, future EMA stats / hedging / bandit).
 pub mod routing;
 /// Security: rate limiting, circuit breakers, audit, headers.
 pub mod security;
 /// Axum HTTP server, middleware, and application state.
 pub mod server;
+/// Cross-cutting modules shared across vertical slices.
+///
+/// Hosts small, low-coupling modules used by multiple features but that do
+/// not themselves define a feature slice: ACME TLS, instance coordination,
+/// message tracing, network binding, OTel, PID file.
+pub mod shared;
 /// Persistent storage (atomic files + append-only journals).
 pub mod storage;
 /// Core trait contracts for the dispatch pipeline.

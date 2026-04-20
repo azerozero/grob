@@ -1,9 +1,9 @@
 #[cfg(any(feature = "unix-signals", windows))]
 use super::common::*;
 use crate::cli;
-use crate::instance;
+use crate::shared::instance;
 #[cfg(any(feature = "unix-signals", windows))]
-use crate::pid;
+use crate::shared::pid;
 
 /// Performs a zero-downtime upgrade by replacing the running instance.
 pub async fn cmd_upgrade(

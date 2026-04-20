@@ -12,7 +12,7 @@
 /// # Examples
 ///
 /// ```
-/// use grob::router::inference::infer_provider_type;
+/// use grob::routing::classify::inference::infer_provider_type;
 /// assert_eq!(infer_provider_type("gpt-5.4"), Some("openai"));
 /// assert_eq!(infer_provider_type("claude-sonnet-4-6"), Some("anthropic"));
 /// assert_eq!(infer_provider_type("anthropic/claude-opus-4-6"), Some("openrouter"));

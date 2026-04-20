@@ -52,7 +52,7 @@ pub(super) async fn bind_and_serve(
     const REUSE_LABEL: &str = "plain";
 
     if !tls_enabled {
-        let listener = crate::net::bind_reuseport(&addr).await?;
+        let listener = crate::shared::net::bind_reuseport(&addr).await?;
         info!("Server listening on {} ({})", addr, REUSE_LABEL);
         axum::serve(listener, app)
             .with_graceful_shutdown(shutdown_signal)
@@ -60,9 +60,9 @@ pub(super) async fn bind_and_serve(
     } else if tls_acme {
         #[cfg(feature = "acme")]
         {
-            let acceptor = crate::acme::build_acme_acceptor(&config.server.tls.acme)?;
+            let acceptor = crate::shared::acme::build_acme_acceptor(&config.server.tls.acme)?;
             info!("Server listening on {} (ACME TLS, {})", addr, REUSE_LABEL);
-            let listener = crate::net::bind_reuseport(&addr).await?;
+            let listener = crate::shared::net::bind_reuseport(&addr).await?;
             axum_server::Server::bind(addr.parse()?)
                 .acceptor(acceptor)
                 .serve(app.into_make_service())
@@ -79,7 +79,7 @@ pub(super) async fn bind_and_serve(
             )
             .await?;
             info!("Server listening on {} (TLS, {})", addr, REUSE_LABEL);
-            let std_listener = crate::net::bind_reuseport_std(&addr)?;
+            let std_listener = crate::shared::net::bind_reuseport_std(&addr)?;
             axum_server::from_tcp_rustls(std_listener, rustls_config)
                 .serve(app.into_make_service())
                 .await?;
