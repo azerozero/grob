@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.26](https://github.com/azerozero/grob/compare/v0.36.25...v0.36.26) - 2026-04-20
+
+### Other
+
+- *(commands)* split setup.rs 1877 LoC into setup/ submodules (T-SP-2 #8)
+
 ## [0.36.25](https://github.com/azerozero/grob/compare/v0.36.24...v0.36.25) - 2026-04-20
 
 ### Other
