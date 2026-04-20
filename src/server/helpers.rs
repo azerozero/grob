@@ -304,7 +304,8 @@ mod tests {
 
     /// Builds a minimal [`ReloadableState`] from a TOML snippet.
     fn make_state(toml: &str) -> Arc<ReloadableState> {
-        let config: crate::cli::AppConfig = toml::from_str(toml).expect("valid test TOML");
+        let config: crate::models::config::AppConfig =
+            toml::from_str(toml).expect("valid test TOML");
         let router = Router::new(config.clone());
         let registry = Arc::new(ProviderRegistry::new());
         Arc::new(ReloadableState::new(config, router, registry))

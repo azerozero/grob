@@ -74,7 +74,7 @@ pub async fn diff(
             .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to serialize config: {e}")))?
     };
 
-    let disk = match crate::cli::AppConfig::from_source(&state.config_source).await {
+    let disk = match crate::models::config::AppConfig::from_source(&state.config_source).await {
         Ok(cfg) => serde_json::to_value(&cfg).map_err(|e| {
             rpc_err(
                 ERR_INTERNAL,

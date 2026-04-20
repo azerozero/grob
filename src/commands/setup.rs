@@ -1461,7 +1461,7 @@ async fn run_edit_section(config_path: &Path, section: &str, flags: &SetupFlags)
 
 /// Chains `grob doctor` after the wizard writes the config.
 async fn chain_doctor(config_path: &Path) {
-    let Ok(config) = crate::cli::AppConfig::from_file(config_path) else {
+    let Ok(config) = crate::models::config::AppConfig::from_file(config_path) else {
         return;
     };
     let source = crate::cli::ConfigSource::File(config_path.to_path_buf());
@@ -1485,7 +1485,7 @@ async fn chain_auto_flow(config_path: &Path, flags: &SetupFlags) {
     if flags.yes || !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         return;
     }
-    let Ok(config) = crate::cli::AppConfig::from_file(config_path) else {
+    let Ok(config) = crate::models::config::AppConfig::from_file(config_path) else {
         return;
     };
     let Ok(store) = crate::storage::GrobStore::open(&crate::storage::GrobStore::default_path())
