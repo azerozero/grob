@@ -1,7 +1,7 @@
 //! Tests for provider type inference and smart pass-through routing.
 
 mod tests {
-    use grob::router::inference::infer_provider_type;
+    use grob::routing::classify::inference::infer_provider_type;
 
     // ── Codex CLI models ──
 

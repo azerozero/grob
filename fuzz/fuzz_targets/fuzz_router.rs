@@ -4,7 +4,7 @@ use libfuzzer_sys::fuzz_target;
 
 use grob::cli::{AppConfig, RouterConfig, PromptRule, ServerConfig};
 use grob::models::{CanonicalRequest, Message, MessageContent};
-use grob::router::Router;
+use grob::routing::classify::Router;
 
 /// Build a minimal AppConfig with several prompt_rules containing various regex patterns.
 /// This is constructed once conceptually per fuzz iteration (cheap enough).

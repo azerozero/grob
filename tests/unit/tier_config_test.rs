@@ -7,7 +7,7 @@
 mod tests {
     use grob::cli::{AppConfig, ModelMapping, TierConfig};
     use grob::models::{RouteDecision, RouteType};
-    use grob::router::classify::ComplexityTier;
+    use grob::routing::classify::ComplexityTier;
 
     // ── TOML parsing ────────────────────────────────────────────────
 

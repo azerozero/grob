@@ -7,7 +7,7 @@
 use grob::cli::RouterConfig;
 use grob::models::{CanonicalRequest, RouteDecision};
 use grob::preset::preset_content;
-use grob::router::Router;
+use grob::routing::classify::Router;
 
 // ── Helpers ──────────────────────────────────────────────────────
 

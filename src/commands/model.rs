@@ -1,4 +1,5 @@
-use crate::{cli, instance};
+use crate::cli;
+use crate::shared::instance;
 
 /// Prints the configured router models and enabled providers.
 pub async fn cmd_model(config: &cli::AppConfig) {

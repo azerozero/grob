@@ -6,7 +6,7 @@ use grob::features::dlp::dfa::SecretScanner;
 use grob::features::dlp::pii::PiiScanner;
 use grob::features::dlp::DlpEngine;
 use grob::models::*;
-use grob::router::Router;
+use grob::routing::classify::Router;
 
 // ── Router Benchmarks ────────────────────────────────────────
 

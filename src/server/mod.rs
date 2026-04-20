@@ -59,7 +59,7 @@ use crate::cli::AppConfig;
 use crate::features::dlp::session::DlpSessionManager;
 use crate::features::token_pricing::SharedPricingTable;
 use crate::providers::ProviderRegistry;
-use crate::router::Router;
+use crate::routing::classify::Router;
 use crate::security::{AuditLog, RateLimiter};
 use crate::traits;
 use axum::{
@@ -308,7 +308,7 @@ pub async fn start_server(
     lifecycle::spawn_oauth_callback(state.clone());
     lifecycle::bind_and_serve(&config, app, shutdown_signal).await?;
     lifecycle::drain_in_flight(&state).await;
-    crate::otel::shutdown_otel();
+    crate::shared::otel::shutdown_otel();
 
     Ok(())
 }

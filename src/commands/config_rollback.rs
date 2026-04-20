@@ -31,7 +31,7 @@ pub async fn cmd_config_rollback(
     // Attempt hot-reload if grob is running.
     let host = &config.server.host;
     let port: u16 = config.server.port.into();
-    if crate::instance::is_instance_running(host, port).await {
+    if crate::shared::instance::is_instance_running(host, port).await {
         let url = format!("{}/api/config/reload", cli::format_base_url(host, port));
         match reqwest::Client::new()
             .post(&url)

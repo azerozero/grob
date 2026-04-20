@@ -4,7 +4,7 @@
 //! - Routing NEVER panics for any well-formed input.
 //! - Routing is deterministic: same input always produces the same decision.
 
-use grob::router::Router;
+use grob::routing::classify::Router;
 use proptest::prelude::*;
 
 // ── Helpers ─────────────────────────────────────────────────────

@@ -54,7 +54,7 @@ pub struct AppConfig {
     pub tiers: Vec<TierConfig>,
     /// Complexity classifier scoring weights and thresholds
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub classifier: Option<crate::router::classify::ScoringConfig>,
+    pub classifier: Option<crate::routing::classify::ScoringConfig>,
     /// Preset management and sync settings
     #[serde(default)]
     pub presets: PresetConfig,

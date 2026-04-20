@@ -92,7 +92,7 @@ pub async fn start_foreground(
     config: crate::cli::AppConfig,
     config_source: crate::cli::ConfigSource,
 ) -> anyhow::Result<()> {
-    if let Err(e) = crate::pid::write_pid() {
+    if let Err(e) = crate::shared::pid::write_pid() {
         eprintln!("Warning: Failed to write PID file: {}", e);
     }
 
@@ -142,7 +142,7 @@ pub async fn start_foreground(
     };
 
     let result = crate::server::start_server(config, config_source, shutdown).await;
-    let _ = crate::pid::cleanup_pid();
+    let _ = crate::shared::pid::cleanup_pid();
     result
 }
 

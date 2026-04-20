@@ -113,7 +113,8 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "otel")]
     {
         if config.otel.enabled {
-            match grob::otel::init_subscriber_with_otel(&config.otel, filter, use_json_logs) {
+            match grob::shared::otel::init_subscriber_with_otel(&config.otel, filter, use_json_logs)
+            {
                 Ok(()) => {}
                 Err(e) => {
                     eprintln!("OpenTelemetry init failed: {}", e);

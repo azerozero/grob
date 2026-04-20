@@ -137,7 +137,7 @@ api_key = "my-secret-key"
             mcp: Default::default(),
         };
 
-        let router = grob::router::Router::new(config);
+        let router = grob::routing::classify::Router::new(config);
         let mut req = grob::models::CanonicalRequest {
             model: "claude-3-5-sonnet".to_string(),
             messages: vec![grob::models::Message {
@@ -204,7 +204,7 @@ api_key = "my-secret-key"
             mcp: Default::default(),
         };
 
-        let router = grob::router::Router::new(config);
+        let router = grob::routing::classify::Router::new(config);
         let mut req = grob::models::CanonicalRequest {
             model: "gpt-4o".to_string(),
             messages: vec![grob::models::Message {

@@ -16,7 +16,7 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 
 - **Config is static at runtime**: The server loads TOML config on startup. The `/api/config/reload` endpoint atomically swaps reloadable state (router, provider registry, model index) without restart. In-flight requests continue on the old snapshot.
 - **Provider abstraction**: All providers implement the `LlmProvider` trait (`src/providers/mod.rs`).
-- **Routing**: Regex-based prompt rules in `src/router/mod.rs` classify requests into task types (thinking, web_search, background, default).
+- **Routing**: Regex-based prompt rules in `src/routing/classify/mod.rs` classify requests into task types (thinking, web_search, background, default).
 - **OAuth**: Custom implementation (no `oauth2` crate) with PKCE in `src/auth/oauth.rs`.
 - **Spend tracking**: Persistent monthly spend in append-only JSONL journals (`~/.grob/spend/YYYY-MM.jsonl`) with budget enforcement.
 
@@ -32,7 +32,12 @@ Grob is a multi-provider LLM routing proxy written in Rust. It routes requests t
 | `src/server/fan_out.rs` | Parallel multi-provider dispatch (fan-out strategy) |
 | `src/providers/` | Provider implementations (Anthropic, OpenAI, Gemini, etc.) |
 | `src/providers/registry.rs` | Provider registration and model lookup |
-| `src/router/mod.rs` | Request routing engine |
+| `src/routing/mod.rs` | Routing parent: classification engine + nature-inspired primitives |
+| `src/routing/classify/mod.rs` | Request classification engine (prompt rules, tier matching, auto-map, complexity classifier) |
+| `src/routing/circuit_breaker.rs` | Passive per-endpoint circuit breaker (RE-1a, ADR-0018) |
+| `src/routing/health_check.rs` | Active per-provider health checker (RE-1b, ADR-0018) |
+| `src/shared/` | Cross-cutting modules: `acme`, `instance`, `message_tracing`, `net`, `otel`, `pid` |
+| `src/pricing.rs` | Static model pricing (leaf module at root, breaks cycle between `providers::streaming` and `features::token_pricing`) |
 | `src/cli/mod.rs` | Config structs and CLI argument parsing |
 | `src/cli/args.rs` | CLI command definitions (clap derive) |
 | `src/cli/config.rs` | All config struct definitions |

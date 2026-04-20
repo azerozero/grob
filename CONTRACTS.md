@@ -49,7 +49,7 @@
 
 ## Router::route(request)
 
-**Module:** `src/router/mod.rs`
+**Module:** `src/routing/classify/mod.rs`
 **Intention:** Classify an incoming request into a route type and resolve the target model name by evaluating rules in strict priority order: `grob_hint` header/MCP (Step 0) > WebSearch > Background > AutoMap > SubagentTag > PromptRules > Think > ComplexityTier (T-P1 classifier) > Default. Note: SubagentTag extracts a model from `<GROB-SUBAGENT-MODEL>` system prompt tags but returns `RouteType::Default` (no dedicated variant). The `complexity_tier` field on `RouteDecision` is populated when the stateless classifier matches, and feeds the tier fan-out layer downstream (Step 5.5 in `dispatch`).
 
 **Invariants:**

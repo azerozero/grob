@@ -83,8 +83,8 @@ flowchart TB
 | `providers::gemini` | `src/providers/gemini/mod.rs` | Gemini API provider (with retry, transform, types submodules) |
 | `providers::streaming` | `src/providers/streaming.rs` | SSE stream parsing and forwarding |
 | `providers::registry` | `src/providers/registry.rs` | Provider registration and model lookup |
-| `router` | `src/router/mod.rs` | Request routing engine (regex rules, task classification) |
-| `routing` | `src/routing/mod.rs` | Nature-inspired routing primitives (ADR-0018). Opt-in, independent. |
+| `routing` | `src/routing/mod.rs` | Routing parent: request classification + nature-inspired primitives (ADR-0018) |
+| `routing::classify` | `src/routing/classify/mod.rs` | Request classification engine (regex prompt rules, tier matching, auto-map, complexity classifier). Previously at `src/router/` — merged here as part of the vertical-slice foundation (audit #12). |
 | `routing::circuit_breaker` | `src/routing/circuit_breaker.rs` | RE-1a passive per-endpoint circuit breaker (Caddy-style `max_fails` + `fail_duration`) |
 | `routing::health_check` | `src/routing/health_check.rs` | RE-1b active per-provider health probe (Caddy-style `health_uri`/`health_interval`/`health_timeout`/`health_status`). AND-gated with RE-1a in `ProviderRegistry::is_endpoint_healthy` |
 | `cli` | `src/cli/mod.rs` | Config structs (AppConfig, ServerConfig, etc.) and CLI parsing |
@@ -122,11 +122,15 @@ flowchart TB
 | `features::log_export::encryption` | `src/features/log_export/encryption.rs` | Age envelope encryption for multi-recipient audit export |
 | `features::harness` | `src/features/harness/mod.rs` | Record & replay sandwich testing harness (tape, mock backend, driver) |
 | `cache` | `src/cache/mod.rs` | Response cache (moka) for deterministic requests |
-| `message_tracing` | `src/message_tracing/mod.rs` | Request/response trace logging (JSONL) |
-| `pid` | `src/pid.rs` | PID file management for daemon mode |
-| `instance` | `src/instance.rs` | Multi-instance coordination |
+| `shared` | `src/shared/mod.rs` | Cross-cutting modules shared across vertical slices (audit #35) |
+| `shared::message_tracing` | `src/shared/message_tracing/mod.rs` | Request/response trace logging (JSONL with rotation) |
+| `shared::pid` | `src/shared/pid.rs` | PID file management for daemon mode |
+| `shared::instance` | `src/shared/instance.rs` | Multi-instance coordination |
+| `shared::net` | `src/shared/net.rs` | Network binding with SO_REUSEPORT for zero-downtime upgrades |
+| `shared::otel` | `src/shared/otel.rs` | OpenTelemetry subscriber bootstrap |
+| `shared::acme` | `src/shared/acme.rs` | Automatic TLS certificate provisioning via ACME |
 | `commands` | `src/commands/mod.rs` | CLI command implementations (start, stop, exec, doctor, etc.) |
-| `net` | `src/net.rs` | Network binding with SO_REUSEPORT for zero-downtime upgrades |
+| `pricing` | `src/pricing.rs` | Static model pricing table (leaf module at crate root — intentionally breaks the cycle between `providers::streaming` and `features::token_pricing`) |
 
 ## Key design decisions
 

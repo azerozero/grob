@@ -1,4 +1,5 @@
-use crate::{cli, features, instance, providers};
+use crate::shared::instance;
+use crate::{cli, features, providers};
 
 /// Displays current month spend breakdown by provider and model.
 pub async fn cmd_spend(config: &cli::AppConfig) {

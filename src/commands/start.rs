@@ -1,6 +1,7 @@
 use super::common::*;
 use crate::providers::AuthType;
-use crate::{cli, cli::Port, instance};
+use crate::shared::instance;
+use crate::{cli, cli::Port};
 
 /// Deprecated or upgradable model hints shown at startup.
 const MODEL_HINTS: &[(&str, &str)] = &[
