@@ -9,7 +9,6 @@ metadata:
   name: grob
   labels:
     app: grob
-    version: v0.8.0
 spec:
   # Security context for rootless operation
   securityContext:

@@ -27,7 +27,11 @@ passed=0
 failed=0
 skipped=0
 
-inc() { eval "$1=\$(( $1 + 1 ))"; }
+inc() {
+    # Bash 4.3+ nameref avoids `eval` on caller-controlled strings.
+    local -n _counter="$1"
+    _counter=$((_counter + 1))
+}
 
 cleanup() {
     # Stop grob if running
