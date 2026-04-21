@@ -31,30 +31,42 @@ pub(in crate::commands::setup) fn discover_credentials() -> Vec<(&'static str, &
         .collect()
 }
 
-/// Checks the existing config for unknown or deprecated top-level keys.
-pub(in crate::commands::setup) fn check_schema_drift(config_path: &Path) {
+/// Schema drift items discovered in an existing config.
+#[derive(Debug, Default)]
+pub(in crate::commands::setup) struct DriftReport {
+    /// Deprecated top-level keys present in the config (name, hint).
+    pub(in crate::commands::setup) deprecated: Vec<(&'static str, &'static str)>,
+    /// Unknown top-level keys that are neither known nor deprecated.
+    pub(in crate::commands::setup) unknown: Vec<String>,
+}
+
+impl DriftReport {
+    pub(in crate::commands::setup) fn is_empty(&self) -> bool {
+        self.deprecated.is_empty() && self.unknown.is_empty()
+    }
+}
+
+/// Scans the existing config and returns a drift report without printing.
+///
+/// Returns an empty report if the file is missing or not parseable — in
+/// either case there is nothing the wizard can migrate automatically.
+pub(in crate::commands::setup) fn detect_schema_drift(config_path: &Path) -> DriftReport {
+    let mut report = DriftReport::default();
     let content = match std::fs::read_to_string(config_path) {
         Ok(c) => c,
-        Err(_) => return,
+        Err(_) => return report,
     };
     let table: toml::Value = match toml::from_str(&content) {
         Ok(v) => v,
-        Err(_) => return,
+        Err(_) => return report,
     };
     let Some(top) = table.as_table() else {
-        return;
+        return report;
     };
-
-    let mut drift_found = false;
 
     for (key, hint) in DEPRECATED_KEYS {
         if top.contains_key(*key) {
-            if !drift_found {
-                println!();
-                println!("  Schema drift detected in existing config:");
-                drift_found = true;
-            }
-            println!("    [deprecated] '{}': {}", key, hint);
+            report.deprecated.push((*key, *hint));
         }
     }
 
@@ -62,17 +74,11 @@ pub(in crate::commands::setup) fn check_schema_drift(config_path: &Path) {
         if !KNOWN_SECTIONS.contains(&key.as_str())
             && !DEPRECATED_KEYS.iter().any(|(k, _)| *k == key.as_str())
         {
-            if !drift_found {
-                println!();
-                println!("  Schema drift detected in existing config:");
-                drift_found = true;
-            }
-            println!(
-                "    [unknown] '{}': not a recognized section. Remove it or check for typos.",
-                key
-            );
+            report.unknown.push(key.clone());
         }
     }
+
+    report
 }
 
 /// Opens a URL in the default browser (best-effort, no error on failure).
