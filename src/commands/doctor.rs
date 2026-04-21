@@ -19,6 +19,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
                 println!("  ✅ Config file: {}", p.display());
             } else {
                 println!("  ❌ Config file not found: {}", p.display());
+                println!("     → run: grob setup");
                 errors += 1;
             }
         }
@@ -32,6 +33,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         println!("  ✅ Config version: {}", v);
     } else {
         println!("  ℹ️  Config version: not set (optional)");
+        println!("     → run: grob setup --edit version");
     }
 
     // 3. Providers with credentials
@@ -43,9 +45,11 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         .count();
     if total == 0 {
         println!("  ❌ No providers configured");
+        println!("     → run: grob setup --edit providers");
         errors += 1;
     } else if with_keys < total {
         println!("  ⚠️  Providers: {}/{} have credentials", with_keys, total);
+        println!("     → run: grob connect");
         warnings += 1;
     } else {
         println!(
@@ -58,6 +62,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
     let model_count = config.models.len();
     if model_count == 0 {
         println!("  ❌ No models configured");
+        println!("     → run: grob setup --edit providers");
         errors += 1;
     } else {
         println!("  ✅ Models: {} configured", model_count);
@@ -69,6 +74,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         println!("  ✅ Service: running on {}", base_url);
     } else {
         println!("  ℹ️  Service: not running (start with `grob start -d`)");
+        println!("     → run: grob start -d");
     }
 
     // 6. Port availability
@@ -81,6 +87,10 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
                     "  ❌ Port {}: in use by another process",
                     config.server.port
                 );
+                println!(
+                    "     → run: grob stop   (or: lsof -i :{})",
+                    config.server.port
+                );
                 errors += 1;
             }
         }
@@ -91,6 +101,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         println!("  ✅ DLP: enabled");
     } else {
         println!("  ℹ️  DLP: disabled");
+        println!("     → run: grob setup --edit compliance");
     }
 
     // 8. Security
@@ -101,6 +112,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         );
     } else {
         println!("  ℹ️  Security: disabled");
+        println!("     → run: grob setup --edit compliance");
     }
 
     // 9. Storage
@@ -108,12 +120,17 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         Ok(_) => println!("  ✅ Storage (files): accessible"),
         Err(e) => {
             println!("  ❌ Storage (files): {}", e);
+            println!(
+                "     → check: ls -la {}",
+                storage::GrobStore::default_path().display()
+            );
             errors += 1;
         }
     }
 
     // 10. Missing env vars
     let mut missing_env = Vec::new();
+    let mut missing_env_vars: Vec<String> = Vec::new();
     for provider in &config.providers {
         if !provider.is_enabled() {
             continue;
@@ -122,6 +139,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
             if let Some(var) = secrecy::ExposeSecret::expose_secret(key).strip_prefix('$') {
                 if std::env::var(var).is_err() {
                     missing_env.push(format!("${} ({})", var, provider.name));
+                    missing_env_vars.push(var.to_string());
                 }
             }
         }
@@ -130,6 +148,9 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         println!("  ✅ Environment variables: all set");
     } else {
         println!("  ❌ Missing env vars: {}", missing_env.join(", "));
+        if let Some(first) = missing_env_vars.first() {
+            println!("     → run: export {}=<your-key>", first);
+        }
         errors += 1;
     }
 
@@ -144,6 +165,7 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
         }
         _ => {
             println!("  ℹ️  Podman: not found (optional, for container deployment)");
+            println!("     → install: https://podman.io/getting-started/installation");
         }
     }
 
