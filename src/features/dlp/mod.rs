@@ -1,5 +1,7 @@
 //! Data Loss Prevention engine: PII redaction, secret scanning, prompt injection detection.
 
+/// BIC / SWIFT code detection and ISO 9362 format validation.
+pub mod bic;
 /// Built-in secret detection rules shipped with the engine.
 pub mod builtins;
 /// Canary token generation for watermarking redacted secrets.

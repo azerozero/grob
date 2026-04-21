@@ -1,15 +1,12 @@
+use super::bic::{self, BIC_REGEX};
 use super::cards::{self, CC_REGEX};
 use super::config::{PiiAction, PiiConfig};
 use super::iban::{self, IBAN_REGEX};
 use regex::Regex;
-use std::sync::LazyLock;
 
+pub use bic::bic_format_check;
 pub use cards::luhn_check;
 pub use iban::iban_mod97_check;
-
-// SAFETY: pattern is a compile-time constant; unwrap cannot fail.
-static BIC_REGEX: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b").unwrap());
 
 /// Type of PII detected.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -236,86 +233,6 @@ impl PiiScanner {
     }
 }
 
-/// Validates a BIC/SWIFT code format.
-///
-/// Checks 4-letter bank code, 2-letter ISO 3166 country code, 2-character
-/// alphanumeric location, and optional 3-character branch code.
-///
-/// # Examples
-///
-/// ```
-/// use grob::features::dlp::pii::bic_format_check;
-///
-/// // Valid 8-char BIC (BNP Paribas, France)
-/// assert!(bic_format_check("BNPAFRPP"));
-/// // Valid 11-char BIC with branch
-/// assert!(bic_format_check("BNPAFRPP123"));
-/// // Invalid: wrong length
-/// assert!(!bic_format_check("BNPA"));
-/// // Invalid: lowercase
-/// assert!(!bic_format_check("bnpafrpp"));
-/// ```
-pub fn bic_format_check(bic: &str) -> bool {
-    let len = bic.len();
-    if len != 8 && len != 11 {
-        return false;
-    }
-
-    // First 4: letters (bank code)
-    if !bic[..4].chars().all(|c| c.is_ascii_uppercase()) {
-        return false;
-    }
-
-    // Next 2: ISO 3166 country code
-    let country = &bic[4..6];
-    if !is_valid_country_code(country) {
-        return false;
-    }
-
-    // Next 2: location (alphanumeric)
-    if !bic[6..8]
-        .chars()
-        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
-    {
-        return false;
-    }
-
-    // Optional 3: branch (alphanumeric)
-    if len == 11
-        && !bic[8..11]
-            .chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
-    {
-        return false;
-    }
-
-    true
-}
-
-/// Validate ISO 3166-1 alpha-2 country code against a static table.
-fn is_valid_country_code(code: &str) -> bool {
-    const COUNTRY_CODES: &[&str] = &[
-        "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT", "AU", "AW", "AX",
-        "AZ", "BA", "BB", "BD", "BE", "BF", "BG", "BH", "BI", "BJ", "BL", "BM", "BN", "BO", "BQ",
-        "BR", "BS", "BT", "BV", "BW", "BY", "BZ", "CA", "CC", "CD", "CF", "CG", "CH", "CI", "CK",
-        "CL", "CM", "CN", "CO", "CR", "CU", "CV", "CW", "CX", "CY", "CZ", "DE", "DJ", "DK", "DM",
-        "DO", "DZ", "EC", "EE", "EG", "EH", "ER", "ES", "ET", "FI", "FJ", "FK", "FM", "FO", "FR",
-        "GA", "GB", "GD", "GE", "GF", "GG", "GH", "GI", "GL", "GM", "GN", "GP", "GQ", "GR", "GS",
-        "GT", "GU", "GW", "GY", "HK", "HM", "HN", "HR", "HT", "HU", "ID", "IE", "IL", "IM", "IN",
-        "IO", "IQ", "IR", "IS", "IT", "JE", "JM", "JO", "JP", "KE", "KG", "KH", "KI", "KM", "KN",
-        "KP", "KR", "KW", "KY", "KZ", "LA", "LB", "LC", "LI", "LK", "LR", "LS", "LT", "LU", "LV",
-        "LY", "MA", "MC", "MD", "ME", "MF", "MG", "MH", "MK", "ML", "MM", "MN", "MO", "MP", "MQ",
-        "MR", "MS", "MT", "MU", "MV", "MW", "MX", "MY", "MZ", "NA", "NC", "NE", "NF", "NG", "NI",
-        "NL", "NO", "NP", "NR", "NU", "NZ", "OM", "PA", "PE", "PF", "PG", "PH", "PK", "PL", "PM",
-        "PN", "PR", "PS", "PT", "PW", "PY", "QA", "RE", "RO", "RS", "RU", "RW", "SA", "SB", "SC",
-        "SD", "SE", "SG", "SH", "SI", "SJ", "SK", "SL", "SM", "SN", "SO", "SR", "SS", "ST", "SV",
-        "SX", "SY", "SZ", "TC", "TD", "TF", "TG", "TH", "TJ", "TK", "TL", "TM", "TN", "TO", "TR",
-        "TT", "TV", "TW", "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI",
-        "VN", "VU", "WF", "WS", "XK", "YE", "YT", "ZA", "ZM", "ZW",
-    ];
-    COUNTRY_CODES.contains(&code)
-}
-
 /// Generates a syntactically valid fake PII value (canary) for transparent replacement.
 /// The fake value has the same length and format as the original but different digits.
 fn generate_pii_canary(pii_type: &PiiType, original: &str) -> String {
@@ -326,7 +243,7 @@ fn generate_pii_canary(pii_type: &PiiType, original: &str) -> String {
     match pii_type {
         PiiType::CreditCard => cards::generate_canary_cc(original, id),
         PiiType::Iban => iban::generate_canary_iban(original, id),
-        PiiType::Bic => format!("GROB{}{}", &original[4..6], &original[6..]),
+        PiiType::Bic => bic::generate_canary_bic(original),
     }
 }
 
@@ -342,29 +259,6 @@ mod tests {
             action: PiiAction::Redact,
         })
         .unwrap()
-    }
-
-    // ── BIC ───────────────────────────────────────────────────
-
-    #[test]
-    fn test_bic_valid_8() {
-        assert!(bic_format_check("DEUTDEFF")); // Deutsche Bank Frankfurt
-    }
-
-    #[test]
-    fn test_bic_valid_11() {
-        assert!(bic_format_check("BNPAFRPP75A")); // BNP Paribas Paris
-    }
-
-    #[test]
-    fn test_bic_invalid_country() {
-        assert!(!bic_format_check("DEUTXXFF")); // XX is not a valid country
-    }
-
-    #[test]
-    fn test_bic_invalid_length() {
-        assert!(!bic_format_check("DEUTDE")); // too short
-        assert!(!bic_format_check("DEUTDEFFAAAA")); // too long (12)
     }
 
     // ── Pre-filter ────────────────────────────────────────────
@@ -648,51 +542,6 @@ mod tests {
         assert!(scanner.might_contain_pii("1234 56789"));
     }
 
-    // -- bic_format_check : validations structurelles --
-
-    /// Tue : L257 != 8 && != 11 (accept only 8 or 11).
-    #[test]
-    fn test_kill_mutant_257_bic_length_strict() {
-        assert!(!bic_format_check("DEUTD")); // 5 chars
-        assert!(!bic_format_check("DEUTDEFF1")); // 9 chars
-        assert!(!bic_format_check("DEUTDEFF12")); // 10 chars
-        assert!(bic_format_check("DEUTDEFF")); // 8 exact
-        assert!(bic_format_check("BNPAFRPP75A")); // 11 exact
-    }
-
-    /// Tue : L262 !...all(uppercase) first 4 bank code.
-    #[test]
-    fn test_kill_mutant_262_bic_bank_code_uppercase_only() {
-        assert!(!bic_format_check("dEUTDEFF")); // lowercase first char
-        assert!(!bic_format_check("DEuTDEFF")); // lowercase third char
-        assert!(!bic_format_check("D3UTDEFF")); // digit in bank code
-    }
-
-    /// Tue : L268 is_valid_country_code negation.
-    #[test]
-    fn test_kill_mutant_268_bic_country_validation() {
-        assert!(!bic_format_check("DEUTXXFF")); // XX invalid country
-        assert!(!bic_format_check("DEUTQQFF")); // QQ invalid
-        assert!(bic_format_check("DEUTDEFF")); // DE valid
-        assert!(bic_format_check("BNPAFRPP")); // FR valid
-    }
-
-    /// Tue : L273-278 location alphanumeric check.
-    #[test]
-    fn test_kill_mutant_273_bic_location_alphanum() {
-        assert!(!bic_format_check("DEUTDE!!")); // special chars in location
-        assert!(bic_format_check("DEUTDE5F")); // digit in location ok
-        assert!(bic_format_check("DEUTDEFF")); // letters in location ok
-    }
-
-    /// Tue : L281-287 branch alphanumeric check (11-char BIC).
-    #[test]
-    fn test_kill_mutant_281_bic_branch_alphanum() {
-        assert!(!bic_format_check("DEUTDEFF!!!")); // special chars in branch
-        assert!(bic_format_check("DEUTDEFF123")); // digits in branch ok
-        assert!(bic_format_check("DEUTDEFFABC")); // letters in branch ok
-    }
-
     // -- redact : mode Log vs Redact vs Canary, overlap detection --
 
     /// Tue : L168 == -> != (PiiAction::Log check inverted).
@@ -774,18 +623,5 @@ mod tests {
         assert_eq!(format!("{}", PiiType::CreditCard), "credit_card");
         assert_eq!(format!("{}", PiiType::Iban), "iban");
         assert_eq!(format!("{}", PiiType::Bic), "bic");
-    }
-
-    // -- is_valid_country_code --
-
-    /// Tue : L293 replace -> true/false (country code validation).
-    #[test]
-    fn test_kill_mutant_293_country_code_validation() {
-        assert!(is_valid_country_code("FR"));
-        assert!(is_valid_country_code("DE"));
-        assert!(is_valid_country_code("US"));
-        assert!(!is_valid_country_code("XX"));
-        assert!(!is_valid_country_code("QQ"));
-        assert!(!is_valid_country_code(""));
     }
 }
