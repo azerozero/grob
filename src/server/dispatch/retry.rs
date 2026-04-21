@@ -15,13 +15,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use super::{telemetry, DispatchContext, DispatchResult};
-use super::super::{
-    is_auth_revoked_error, is_retryable, retry_delay, MAX_RETRIES,
-};
+use super::super::{is_auth_revoked_error, is_retryable, retry_delay, MAX_RETRIES};
 use super::telemetry::{
     calculate_and_record_metrics, record_success_telemetry, store_response_cache,
 };
+use super::{telemetry, DispatchContext, DispatchResult};
 
 /// Internal signal from the per-attempt dispatch back to the outer provider loop.
 pub(super) enum ProviderLoopAction {
@@ -153,8 +151,7 @@ pub(super) async fn dispatch_streaming(
                 .await;
             ctx.record_endpoint_success(&mapping.provider, &mapping.actual_model);
 
-            let stream =
-                wrap_stream_with_middleware(ctx, stream_response.stream, tap_request_body);
+            let stream = wrap_stream_with_middleware(ctx, stream_response.stream, tap_request_body);
 
             let upstream_headers: Vec<(String, String)> =
                 stream_response.headers.into_iter().collect();
@@ -247,8 +244,7 @@ pub(super) async fn dispatch_non_streaming(
                     calculate_and_record_metrics(ctx, &outcome, attempt.is_subscription).await;
                 record_success_telemetry(ctx, &outcome, cost_usd).await;
                 let cached_bytes =
-                    store_response_cache(ctx, attempt.mapping, attempt.cache_key, &response)
-                        .await;
+                    store_response_cache(ctx, attempt.mapping, attempt.cache_key, &response).await;
 
                 // Emit RequestEnd event for `grob watch`.
                 ctx.state

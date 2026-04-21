@@ -19,16 +19,16 @@
 //! offers a backward-compat path for unmapped models. A final audit entry
 //! is written before returning `AppError::ProviderError`.
 
-use super::{AuditEntry, DispatchContext, DispatchResult};
-use super::resolver::{resolve_provider, try_direct_provider_lookup};
-use super::retry::{
-    dispatch_non_streaming, dispatch_streaming, try_rotate_and_retry,
-    ProviderAttempt, ProviderLoopAction,
-};
 use super::super::{
     check_budget, format_route_type, inject_continuation_text, is_provider_subscription,
     should_inject_continuation, AppError,
 };
+use super::resolver::{resolve_provider, try_direct_provider_lookup};
+use super::retry::{
+    dispatch_non_streaming, dispatch_streaming, try_rotate_and_retry, ProviderAttempt,
+    ProviderLoopAction,
+};
+use super::{AuditEntry, DispatchContext, DispatchResult};
 use crate::models::RouteType;
 use tracing::info;
 

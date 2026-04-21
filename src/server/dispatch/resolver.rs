@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use super::{DispatchContext, DispatchResult};
 use super::super::AppError;
+use super::{DispatchContext, DispatchResult};
 use tracing::info;
 
 /// Returns the provider for a mapping, or `None` if it must be skipped.
