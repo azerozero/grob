@@ -9,6 +9,7 @@ use anyhow::Result;
 
 mod detect;
 mod input;
+mod migrate;
 mod output;
 mod screens;
 mod types;
@@ -17,9 +18,10 @@ mod writer;
 pub use types::SetupFlags;
 
 use detect::{
-    check_schema_drift, env_overrides, parse_compliance, prefill_from_config, providers_from_preset,
+    detect_schema_drift, env_overrides, parse_compliance, prefill_from_config,
+    providers_from_preset,
 };
-use input::prompt_choice;
+use input::{confirm, prompt_choice};
 use output::{
     chain_auto_flow, chain_doctor, display_recap, print_exports, print_status, print_usage,
     setup_custom,
@@ -51,9 +53,9 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
     };
     let existing_budget = prefill.as_ref().and_then(|(_, _, b)| *b);
 
-    // Schema drift detection on existing config
+    // Schema drift detection on existing config (plus auto-migration prompt).
     if config_path.exists() {
-        check_schema_drift(config_path);
+        run_schema_drift_migration(config_path, flags);
     }
 
     // --edit <section>: jump directly to a single section
@@ -197,6 +199,78 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
     chain_doctor(config_path).await;
 
     Ok(true)
+}
+
+/// Detects schema drift and prompts to auto-migrate the config.
+///
+/// In `--yes` / `--dry-run` modes the drift is reported but no migration
+/// runs (dry-run should never touch disk, `--yes` stays non-interactive).
+fn run_schema_drift_migration(config_path: &Path, flags: &SetupFlags) {
+    let report = detect_schema_drift(config_path);
+    if report.is_empty() {
+        return;
+    }
+
+    println!();
+    println!("  Schema drift detected in {}:", config_path.display());
+    for (key, hint) in &report.deprecated {
+        println!("    [deprecated] '{}': {}", key, hint);
+    }
+    for key in &report.unknown {
+        println!("    [unknown] '{}': not a recognized section.", key);
+    }
+
+    if flags.dry_run {
+        println!("  Dry run — not migrating.");
+        return;
+    }
+    if flags.yes {
+        println!("  --yes mode: skipping interactive migration prompt.");
+        return;
+    }
+
+    println!();
+    if !confirm("  Migrate now? [Y/n] ") {
+        println!("  Keeping config as-is.");
+        return;
+    }
+
+    let content = match std::fs::read_to_string(config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("  ❌ Failed to read config: {}", e);
+            return;
+        }
+    };
+    let mut value: toml::Value = match toml::from_str(&content) {
+        Ok(v) => v,
+        Err(e) => {
+            println!("  ❌ Failed to parse config: {}", e);
+            return;
+        }
+    };
+
+    let applied = migrate::apply_migrations(&mut value, &report);
+    if applied.is_empty() {
+        println!("  No supported auto-migration for the detected drift — edit manually.");
+        return;
+    }
+
+    match migrate::write_migrated(config_path, &value) {
+        Ok(()) => {
+            println!("  ✅ Migrations applied:");
+            for line in &applied {
+                println!("    - {}", line);
+            }
+            println!(
+                "  Backup saved to {}",
+                config_path.with_extension("toml.backup").display()
+            );
+        }
+        Err(e) => {
+            println!("  ❌ Migration failed: {}", e);
+        }
+    }
 }
 
 /// Runs the wizard on a single section (--edit flag).
