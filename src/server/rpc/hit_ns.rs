@@ -38,7 +38,7 @@ pub async fn list_policies(
     Ok(policies)
 }
 
-/// Creates or updates a named HIT policy.
+/// Upserts a named HIT policy in memory; the change survives only until the next config reload.
 pub async fn set_policy(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
@@ -56,7 +56,7 @@ pub async fn set_policy(
     }))
 }
 
-/// Reads a single policy by name.
+/// Returns the full policy JSON (including HIT overrides) for the given policy name.
 pub async fn get_policy(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
