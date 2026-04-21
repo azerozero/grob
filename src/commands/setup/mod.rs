@@ -33,7 +33,7 @@ use screens::tools::screen_tools;
 use types::{AuthOverride, BudgetChoice, Choices, Compliance, FallbackChoice, ToolInfo, TOOLS};
 use writer::{apply_auth_overrides, apply_compliance, apply_fallback, patch, write_config};
 
-/// Runs the interactive setup wizard.
+/// Runs the interactive first-run wizard that prompts for preset, providers, budget, compliance, and tools.
 ///
 /// Returns `true` if config was written, `false` if cancelled or dry-run.
 ///

@@ -20,7 +20,7 @@ pub(super) fn render_bar(proportion: f64, width: usize) -> String {
 
 // ── Scenario table ───────────────────────────────────────────────────────────
 
-/// Prints the column header for the scenario table.
+/// Prints the scenario table header (Scenario, P50, P95, P99/RPS, Overhead) and a separator line.
 pub(super) fn print_scenario_header(is_concurrent: bool, effective_concurrency: usize) {
     if is_concurrent {
         println!(
@@ -44,7 +44,7 @@ pub(super) fn print_scenario_header(is_concurrent: bool, effective_concurrency: 
     );
 }
 
-/// Prints one scenario row.
+/// Prints one benchmark scenario row (p50/p99 latency, overhead vs. baseline, and optional RPS).
 pub(super) fn print_scenario_row(
     name: &str,
     stats: &Stats,

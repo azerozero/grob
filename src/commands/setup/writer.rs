@@ -60,7 +60,7 @@ pub(in crate::commands::setup) fn patch(
     Ok(())
 }
 
-/// Applies auth overrides to the provider array in config.
+/// Overwrites each provider's `auth_type`, `oauth_provider`, and `api_key` from the wizard overrides.
 pub(in crate::commands::setup) fn apply_auth_overrides(
     config: &mut toml::Value,
     auth: &[AuthOverride],
@@ -94,7 +94,7 @@ pub(in crate::commands::setup) fn apply_auth_overrides(
     }
 }
 
-/// Applies the chosen fallback provider to config.
+/// Inserts or strips the user-selected fallback provider entry in the TOML config.
 pub(in crate::commands::setup) fn apply_fallback(
     config: &mut toml::Value,
     fallback: &FallbackChoice,
@@ -113,7 +113,7 @@ pub(in crate::commands::setup) fn apply_fallback(
     }
 }
 
-/// Removes an existing provider by name and inserts a fresh one.
+/// Replaces any existing provider of the given name with a minimal fallback entry (pass-through for openrouter).
 fn replace_fallback_provider(
     config: &mut toml::Value,
     name: &str,
@@ -136,7 +136,7 @@ fn replace_fallback_provider(
     providers.push(toml::Value::Table(t));
 }
 
-/// Applies compliance-related config patches.
+/// Applies compliance-related config patches and optionally overlays a signed EU/GDPR preset.
 ///
 /// Returns `true` when EU/GDPR compliance was applied via overlay (caller
 /// must skip further writes), `false` for all other variants.
@@ -178,7 +178,7 @@ pub(in crate::commands::setup) fn apply_compliance(
     Ok(false)
 }
 
-/// Writes the full config by applying a preset and every wizard choice.
+/// Writes the full config: backs up the old file, applies the chosen preset, then patches in every wizard override.
 pub(in crate::commands::setup) fn write_config(choices: &Choices, path: &Path) -> Result<()> {
     // Backup
     if path.exists() {

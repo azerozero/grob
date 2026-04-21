@@ -92,7 +92,7 @@ async fn wait_for_proxy_ready(proxy_url: &str) {
 
 // ── Entry point ─────────────────────────────────────────────────────────
 
-/// Runs the self-contained performance benchmark.
+/// Runs the self-contained benchmark against an in-process mock backend and prints latency percentiles.
 pub async fn cmd_bench(
     _config: &AppConfig,
     requests: usize,
@@ -458,7 +458,7 @@ async fn measure(
 
 // ── Escalation mode ─────────────────────────────────────────────────────
 
-/// Runs the escalation staircase benchmark.
+/// Runs the escalation staircase benchmark, adding one pipeline feature per step to measure its cost.
 async fn run_escalation(ctx: &BenchContext) -> Result<()> {
     // Escalation always uses medium payload (realistic Claude Code traffic).
     let psize = PayloadSize::Medium;

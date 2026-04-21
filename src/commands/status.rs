@@ -54,7 +54,7 @@ async fn resolve_running_state(host: &str, port: u16) -> (bool, String) {
     }
 }
 
-/// Prints status by querying the running server via RPC.
+/// Prints router, providers, models, and budget by querying the running server via RPC, with config fallback.
 async fn print_status_from_rpc(base_url: &str, config: &cli::AppConfig) {
     use super::rpc_client::try_rpc_call;
 
@@ -92,7 +92,7 @@ async fn print_status_from_rpc(base_url: &str, config: &cli::AppConfig) {
     }
 }
 
-/// Prints status from local config when server is not running.
+/// Prints router, providers, models, and spend from the on-disk config when the server is unreachable.
 fn print_status_from_config(config: &cli::AppConfig) {
     print_routing_from_config(config);
     println!();
