@@ -1,11 +1,60 @@
 #!/bin/sh
-# Grob installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
+#
+# Grob installer — POSIX sh compatible for curl|sh usage.
+#
+# Usage: see --help
+#
+# Note: this script intentionally targets POSIX sh (not bash) so it can
+# be piped through `curl ... | sh`. Bashisms (set -o pipefail, getopts
+# long-opts, [[ ]]) must not be used here.
 set -eu
 
+SCRIPT_NAME=$(basename "$0")
 BINARY_NAME="grob"
 REPO="azerozero/grob"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+
+usage() {
+    cat <<EOF
+${SCRIPT_NAME} - Grob installer
+
+Downloads the latest release binary from GitHub and installs it to
+\${INSTALL_DIR} (default: \$HOME/.local/bin).
+
+Usage: ${SCRIPT_NAME} [options]
+
+Options:
+  -h, --help       Show this help and exit
+  -v, --verbose    Enable verbose output (shell trace)
+
+Environment:
+  INSTALL_DIR      Install destination (default: \$HOME/.local/bin)
+  VERSION          Specific version tag to install (default: latest)
+
+Examples:
+  ${SCRIPT_NAME}
+  curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
+  INSTALL_DIR=/usr/local/bin ${SCRIPT_NAME}
+  VERSION=v0.36.0 ${SCRIPT_NAME}
+
+Exit codes:
+  0  success
+  1  error (unsupported platform, download failure, checksum mismatch)
+EOF
+}
+
+verbose=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h|--help) usage; exit 0 ;;
+        -v|--verbose) verbose=1; shift ;;
+        *) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+    esac
+done
+
+if [ "${verbose}" -eq 1 ]; then
+    set -x
+fi
 
 detect_target() {
     OS="$(uname -s)"

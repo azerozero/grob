@@ -1,29 +1,76 @@
 #!/usr/bin/env bash
-# cleancode-audit.sh — Static clean code analysis for Rust projects.
-# Generates a Markdown plan of violations to fix.
 #
-# Usage: ./scripts/cleancode-audit.sh [src_dir] [output_file]
-#   src_dir     — directory to scan (default: src/)
-#   output_file — markdown output (default: cleancode-plan.md)
+# Static clean code analysis for Rust projects. Generates a Markdown
+# plan of violations to fix.
 #
-# Rules covered (19):
-#   Structure:  file length, items after test module
-#   Functions:  function length, parameter count
-#   Naming:     magic numbers
-#   DRY:        (basic — repeated error patterns)
-#   Error:      unwrap, expect, panic/unreachable, swallowed errors, poisoned locks
-#   Idioms:     dead_code, clippy suppression, wildcard imports, &String/&Vec params
-#   Tests:      missing test modules
-#   Cognitive:  nesting depth
-#   Docs:       missing pub doc comments
-#   Markers:    TODO/FIXME/HACK
+# Usage: see --help
 
-# Note: not using set -e because grep returns exit 1 on no matches,
-# which is expected and frequent in an analysis script.
+# Note: deliberately not using `set -e` — grep returns exit 1 on no
+# matches, which is expected and frequent in an analysis script.
+# `set -o pipefail` is also avoided for the same reason.
 set -u
 
-SRC_DIR="${1:-src}"
-OUTPUT="${2:-cleancode-plan.md}"
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
+
+usage() {
+  cat <<EOF
+${SCRIPT_NAME} - Static clean code analysis for Rust projects
+
+Scans a Rust source tree and generates a Markdown plan listing clean
+code violations grouped by severity (critical, flag, info).
+
+Rules covered (19):
+  Structure:  file length, items after test module
+  Functions:  function length, parameter count
+  Naming:     magic numbers
+  DRY:        repeated error patterns
+  Error:      unwrap, expect, panic/unreachable, swallowed errors, poisoned locks
+  Idioms:     dead_code, clippy suppression, wildcard imports, &String/&Vec params
+  Tests:      missing test modules
+  Cognitive:  nesting depth
+  Docs:       missing pub doc comments
+  Markers:    TODO/FIXME/HACK
+
+Usage: ${SCRIPT_NAME} [options] [src_dir] [output_file]
+
+Arguments:
+  src_dir          Directory to scan (default: src)
+  output_file      Markdown output path (default: cleancode-plan.md)
+
+Options:
+  -h, --help       Show this help and exit
+  -v, --verbose    Enable verbose output (shell trace)
+
+Examples:
+  ${SCRIPT_NAME}
+  ${SCRIPT_NAME} src/providers
+  ${SCRIPT_NAME} src audit.md
+
+Exit codes:
+  0  success (plan written; violations may still exist)
+  1  argument parsing error
+EOF
+}
+
+verbose=0
+positional=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    -v|--verbose) verbose=1; shift ;;
+    --) shift; while [ $# -gt 0 ]; do positional+=("$1"); shift; done ;;
+    -*) echo "Unknown option: $1" >&2; usage >&2; exit 1 ;;
+    *) positional+=("$1"); shift ;;
+  esac
+done
+
+if [ "${verbose}" -eq 1 ]; then
+  set -x
+fi
+
+SRC_DIR="${positional[0]:-src}"
+OUTPUT="${positional[1]:-cleancode-plan.md}"
 
 # --- Thresholds ---
 FILE_LINES_FLAG=500

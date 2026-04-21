@@ -1,42 +1,97 @@
 #!/usr/bin/env bash
-# CodeQL security analysis for grob.
-# Usage: ./scripts/codeql-check.sh [--sarif results.sarif]
 #
-# Creates a fresh CodeQL database, runs security-extended queries,
-# and reports findings. Exit code 0 = no alerts, 1 = alerts found.
+# CodeQL security analysis for grob.
+#
+# Usage: see --help
 
 set -euo pipefail
 
-DB_DIR="${CODEQL_DB:-codeql-db}"
-OUTPUT="${1:---format=csv}"
-SARIF_FILE=""
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
 
-if [[ "${1:-}" == "--sarif" ]]; then
-    SARIF_FILE="${2:-results.sarif}"
-    OUTPUT="--format=sarif-latest --output=$SARIF_FILE"
-fi
+usage() {
+  cat <<EOF
+${SCRIPT_NAME} - CodeQL security analysis for grob
 
-echo "Creating CodeQL database..."
-codeql database create "$DB_DIR" \
+Creates a fresh CodeQL database, runs security-extended queries,
+and reports findings.
+
+Usage: ${SCRIPT_NAME} [options]
+       ${SCRIPT_NAME} --sarif [file]
+
+Options:
+  -h, --help            Show this help and exit
+  -v, --verbose         Enable verbose output (shell trace)
+  --sarif [file]        Emit SARIF output (default file: results.sarif)
+
+Environment:
+  CODEQL_DB             Database directory (default: codeql-db)
+
+Examples:
+  ${SCRIPT_NAME}
+  ${SCRIPT_NAME} --sarif
+  ${SCRIPT_NAME} --sarif custom.sarif
+
+Exit codes:
+  0  no alerts (or CSV run completed)
+  1  alerts found (SARIF mode) or error
+EOF
+}
+
+main() {
+  local verbose=0
+  local sarif_file=""
+  local output="--format=csv"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      -v|--verbose) verbose=1; shift ;;
+      --sarif)
+        shift
+        sarif_file="${1:-results.sarif}"
+        if [[ -n "${1:-}" && ! "$1" =~ ^-- ]]; then
+          shift
+        fi
+        output="--format=sarif-latest --output=${sarif_file}"
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  if [[ "${verbose}" -eq 1 ]]; then
+    set -x
+  fi
+
+  local db_dir="${CODEQL_DB:-codeql-db}"
+
+  echo "Creating CodeQL database..."
+  codeql database create "${db_dir}" \
     --language=rust \
     --source-root=. \
     --overwrite \
     --threads=0 \
     2>&1 | tail -3
 
-echo ""
-echo "Running security analysis..."
+  echo ""
+  echo "Running security analysis..."
 
-# shellcheck disable=SC2086
-RESULTS=$(codeql database analyze "$DB_DIR" \
+  local results
+  # shellcheck disable=SC2086
+  results=$(codeql database analyze "${db_dir}" \
     --threads=0 \
-    $OUTPUT \
+    ${output} \
     2>&1)
 
-echo "$RESULTS"
+  echo "${results}"
 
-if [[ -n "$SARIF_FILE" ]] && [[ -f "$SARIF_FILE" ]]; then
-    ALERT_COUNT=$(SARIF_FILE="$SARIF_FILE" python3 -c "
+  if [[ -n "${sarif_file}" ]] && [[ -f "${sarif_file}" ]]; then
+    local alert_count
+    alert_count=$(SARIF_FILE="${sarif_file}" python3 -c "
 import json, os
 with open(os.environ['SARIF_FILE']) as f:
     d = json.load(f)
@@ -44,9 +99,12 @@ with open(os.environ['SARIF_FILE']) as f:
     print(total)
 " 2>/dev/null || echo "?")
     echo ""
-    echo "Alerts found: $ALERT_COUNT"
-    echo "SARIF saved to: $SARIF_FILE"
-    if [[ "$ALERT_COUNT" != "0" ]] && [[ "$ALERT_COUNT" != "?" ]]; then
-        exit 1
+    echo "Alerts found: ${alert_count}"
+    echo "SARIF saved to: ${sarif_file}"
+    if [[ "${alert_count}" != "0" ]] && [[ "${alert_count}" != "?" ]]; then
+      exit 1
     fi
-fi
+  fi
+}
+
+main "$@"
