@@ -266,12 +266,19 @@ impl Router {
     /// Routes an incoming request to the appropriate model.
     ///
     /// Priority order (highest to lowest):
-    /// 1. WebSearch - tool-based detection (web_search tool present)
-    /// 2. Background - model name regex match (e.g., haiku) - checked early to save costs
-    /// 3. Subagent - GROB-SUBAGENT-MODEL tag in system prompt
-    /// 4. Prompt Rules - regex pattern matching on user prompt (after background for cost savings)
-    /// 5. Think - Plan Mode / reasoning enabled
-    /// 6. Default - auto-mapped or original model name
+    /// 1. WebSearch - tool-based detection (`web_search` tool present)
+    /// 2. Background - model name regex match (e.g., haiku), checked early to save costs
+    /// 3. Auto-map - regex-driven model-name rewrite (falls through to later steps)
+    /// 4. Subagent - GROB-SUBAGENT-MODEL tag in system prompt
+    /// 5. Prompt Rules - regex pattern matching on user prompt
+    /// 6. Think - Plan Mode / reasoning enabled
+    /// 7. Declarative tier match - `[[tiers.match]]` conditions (globs + keywords)
+    /// 8. Algorithmic complexity scoring - heuristic fallback when `[[scoring]]` is set
+    /// 9. Default - auto-mapped or original model name, with tier from steps 7-8
+    ///
+    /// Steps 3 (auto-map) mutates `request.model` but does not short-circuit;
+    /// steps 7-8 populate `complexity_tier` without choosing a model. All other
+    /// steps return early with the matched model.
     ///
     /// # Errors
     ///
@@ -352,8 +359,8 @@ impl Router {
             }
         }
 
-        // 8. Declarative tier match (checked FIRST, before algorithmic scorer)
-        // 9. Fallback: algorithmic complexity scoring
+        // 7. Declarative tier match (checked FIRST, before algorithmic scorer)
+        // 8. Fallback: algorithmic complexity scoring
         let tier = tier_match::evaluate_tier_matches(&self.tier_matchers, request).or_else(|| {
             self.scoring_config.as_ref().map(|cfg| {
                 let t = classify::classify_complexity(request, cfg);
