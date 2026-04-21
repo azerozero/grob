@@ -24,25 +24,38 @@ flowchart TB
         h3["OpenAI → Anthropic internal format"]
     end
 
-    subgraph router["Router"]
-        r1["1. WebSearch — web_search tool detected"]
-        r2["2. Background — model matches background_regex"]
-        r3["3. Auto-map regex — transform model name"]
-        r4["4. Subagent — GROB-SUBAGENT-MODEL tag"]
-        r5["5. Prompt rules — regex on user message"]
-        r6["6. Think — thinking/reasoning enabled"]
-        r7["7. Default model — fallback"]
-        rd["RouteDecision { model, route_type }"]
+    subgraph routing["routing/ (ADR-0018)"]
+        direction TB
+        subgraph classify["routing::classify (request classification)"]
+            r1["1. WebSearch — web_search tool detected"]
+            r2["2. Background — model matches background_regex"]
+            r3["3. Auto-map regex — transform model name"]
+            r4["4. Subagent — GROB-SUBAGENT-MODEL tag"]
+            r5["5. Prompt rules — regex on user message"]
+            r6["6. Think — thinking/reasoning enabled"]
+            r7["7. Declarative tier match — [[tiers.match]] globs + keywords"]
+            r8["8. Algorithmic scoring — heuristic complexity (fallback)"]
+            r9["9. Default model — fallback"]
+        end
+        rd["RouteDecision { model, route_type, complexity_tier }"]
+        cb1["routing::circuit_breaker<br/>RE-1a passive per-endpoint CB<br/>(max_fails + fail_duration)"]
+        hc["routing::health_check<br/>RE-1b active per-provider probe<br/>(health_uri, health_interval)"]
+        gate["ProviderRegistry::is_endpoint_healthy<br/>AND-gate: RE-1a ∧ RE-1b"]
+        cb1 --> gate
+        hc --> gate
     end
 
     subgraph dispatch["Provider Dispatch"]
-        cb{"Circuit Breaker"}
-        cb -->|Closed| call["Provider call<br/>(Anthropic, OpenAI, Gemini, ...)"]
-        cb -->|Open| skip["Skip → next provider"]
-        cb -->|HalfOpen| probe["Limited probe requests"]
-        call -->|success| rec_ok["record_success"]
+        direction TB
+        gate2{"Healthy endpoint?<br/>(RE-1a ∧ RE-1b)"}
+        gate2 -->|Yes| cbsec{"Global CB<br/>(security::circuit_breaker)"}
+        gate2 -->|No| skip1["Skip → next provider"]
+        cbsec -->|Closed| call["Provider call<br/>(Anthropic, OpenAI, Gemini, ...)"]
+        cbsec -->|Open| skip2["Skip → next provider"]
+        cbsec -->|HalfOpen| probe["Limited probe requests"]
+        call -->|success| rec_ok["record_success<br/>(endpoint + global)"]
         call -->|failure| rec_fail["record_failure → try next"]
-        note["Strategies: fallback (sequential) · fan_out (parallel)"]
+        note["Strategies: fallback (sequential) · fan_out (parallel) · tier fan-out"]
     end
 
     subgraph dlp["DLP (Data Loss Prevention)"]
@@ -62,8 +75,8 @@ flowchart TB
 
     client -->|"POST /v1/messages\nPOST /v1/chat/completions"| server
     server --> handler
-    handler --> router
-    router --> dispatch
+    handler --> routing
+    routing --> dispatch
     dispatch --> dlp
     dlp --> response
     response --> client
