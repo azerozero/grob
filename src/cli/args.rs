@@ -220,7 +220,8 @@ pub enum Commands {
         /// Preview changes without writing to disk
         #[arg(long)]
         dry_run: bool,
-        /// Reconfigure a single section (providers, budget, compliance, fallback)
+        /// Reconfigure a single section
+        /// (providers, auth, budget, compliance, fallback, endpoints, tools)
         #[arg(long, alias = "reconfigure", value_name = "SECTION")]
         edit: Option<String>,
     },

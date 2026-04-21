@@ -185,6 +185,9 @@ pub struct SetupFlags {
     pub yes: bool,
     /// Previews changes without writing to disk.
     pub dry_run: bool,
-    /// Restricts the wizard to a single section (providers, budget, compliance, fallback).
+    /// Restricts the wizard to a single section.
+    ///
+    /// Accepted values: `providers`, `auth`, `budget`, `compliance`,
+    /// `fallback`, `endpoints`, `tools`.
     pub edit_section: Option<String>,
 }

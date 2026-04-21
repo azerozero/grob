@@ -84,7 +84,9 @@ pub async fn run_setup_wizard(config_path: &Path, flags: &SetupFlags) -> Result<
         println!("  [2] Replace from scratch");
         println!("  [3] Cancel");
         println!();
-        println!("  Tip: use `grob setup --edit providers` to reconfigure a single section.");
+        println!(
+            "  Tip: `grob setup --edit <section>` (providers, auth, budget, compliance, fallback, endpoints, tools)"
+        );
         if prompt_choice(3) == 3 {
             return Ok(false);
         }
@@ -268,9 +270,26 @@ async fn run_edit_section(config_path: &Path, section: &str, flags: &SetupFlags)
                 }
             }
         }
+        "tools" => {
+            // Re-run the tool picker. Screen_tools infers the preset from the
+            // tool selection; we rewrite [presets].active so a subsequent
+            // `grob setup` re-runs pick up the new preset as default.
+            let (_tools, preset, _desc) = match screen_tools() {
+                Some(t) => t,
+                None => {
+                    println!("  No tools selected — leaving config unchanged.");
+                    return Ok(false);
+                }
+            };
+            patch(&mut config, "presets", &[("active", preset.clone().into())])?;
+            println!("  Preset switched to '{}'.", preset);
+            println!(
+                "  Note: provider list is tied to the preset — run `grob setup --edit providers` if credentials need updating."
+            );
+        }
         _ => {
             println!(
-                "  Unknown section '{}'. Available: providers, budget, compliance, fallback, endpoints",
+                "  Unknown section '{}'. Available: providers, auth, budget, compliance, fallback, endpoints, tools",
                 section
             );
             return Ok(false);
