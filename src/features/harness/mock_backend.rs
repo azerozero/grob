@@ -194,7 +194,7 @@ fn compute_fingerprint(body: &[u8]) -> String {
     hex::encode(hasher.finalize())[..16].to_string()
 }
 
-/// Builds the response index from tape entries.
+/// Indexes tape responses by request-body fingerprint so the mock backend can replay them by content.
 fn build_response_index(tape: &[TapeEntry]) -> HashMap<String, Vec<TapeResponse>> {
     let mut index: HashMap<String, Vec<TapeResponse>> = HashMap::new();
 
@@ -247,7 +247,7 @@ fn build_response(tr: &TapeResponse) -> Response<Body> {
         .unwrap_or_else(|_| error_response(500))
 }
 
-/// Returns a minimal JSON error response.
+/// Builds a minimal `{"type":"error","error":{...}}` response used when tape replay fails.
 fn error_response(status: u16) -> Response<Body> {
     let body = serde_json::json!({
         "type": "error",

@@ -78,7 +78,7 @@ fn verify_signature(public_key: &VerifyingKey, content: &[u8], signature_hex: &s
         .map_err(|e| anyhow::anyhow!("Signature verification failed: {}", e))
 }
 
-/// Verify a detached signature file.
+/// Reads a hex-encoded Ed25519 signature from `sig_path` and verifies it against `content`.
 fn verify_detached_signature(
     public_key: &VerifyingKey,
     content: &[u8],

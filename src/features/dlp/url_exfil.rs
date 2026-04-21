@@ -282,7 +282,7 @@ impl UrlExfilScanner {
     }
 }
 
-/// Check if a range overlaps with any existing range.
+/// Returns true when `new` shares any byte index with one of the previously recorded scan ranges.
 fn overlaps(ranges: &[(usize, usize)], new: (usize, usize)) -> bool {
     ranges.iter().any(|&(s, e)| new.0 < e && new.1 > s)
 }

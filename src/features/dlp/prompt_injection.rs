@@ -250,7 +250,7 @@ pub struct InjectionDetector {
     normalize_aggressive_cache: Cache<u64, String>,
 }
 
-/// Check if a language is enabled in config.
+/// Returns true if `code` is in the configured language list or the list contains the catch-all `"all"`.
 fn lang_enabled(languages: &[String], code: &str) -> bool {
     languages.iter().any(|l| l == "all" || l == code)
 }

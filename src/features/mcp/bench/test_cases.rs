@@ -33,7 +33,7 @@ pub struct BenchTestCase {
     pub expect_parallel: bool,
 }
 
-/// Returns the full set of bench test cases.
+/// Returns every built-in bench case covering tool selection, parameter validity, tool-choice respect, and parallel calls.
 pub fn all_test_cases() -> Vec<BenchTestCase> {
     vec![
         // ── tool_selection_accuracy ──
