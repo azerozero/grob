@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.28](https://github.com/azerozero/grob/compare/v0.36.27...v0.36.28) - 2026-04-21
+
+### Other
+
+- *(cli-config)* split cli/config.rs 1080 LOC en 10 sous-modules ([#11](https://github.com/azerozero/grob/pull/11)) ([#241](https://github.com/azerozero/grob/pull/241))
+
 ## [0.36.27](https://github.com/azerozero/grob/compare/v0.36.26...v0.36.27) - 2026-04-21
 
 ### Other
