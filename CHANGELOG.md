@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.30](https://github.com/azerozero/grob/compare/v0.36.29...v0.36.30) - 2026-04-21
+
+### Fixed
+
+- *(dispatch,router)* wire grob_hint + doc drift (#5 #6 #14) ([#245](https://github.com/azerozero/grob/pull/245))
+
 ## [0.36.29](https://github.com/azerozero/grob/compare/v0.36.28...v0.36.29) - 2026-04-21
 
 ### Other
