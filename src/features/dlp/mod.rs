@@ -4,6 +4,8 @@
 pub mod builtins;
 /// Canary token generation for watermarking redacted secrets.
 pub mod canary;
+/// Credit card detection and Luhn validation.
+pub mod cards;
 /// Configuration structs for all DLP subsystems.
 pub mod config;
 /// DFA-based secret scanner with prefix-gated matching.
