@@ -1,15 +1,21 @@
 //! Data Loss Prevention engine: PII redaction, secret scanning, prompt injection detection.
 
+/// BIC / SWIFT code detection and ISO 9362 format validation.
+pub mod bic;
 /// Built-in secret detection rules shipped with the engine.
 pub mod builtins;
 /// Canary token generation for watermarking redacted secrets.
 pub mod canary;
+/// Credit card detection and Luhn validation.
+pub mod cards;
 /// Configuration structs for all DLP subsystems.
 pub mod config;
 /// DFA-based secret scanner with prefix-gated matching.
 pub mod dfa;
 /// Hot-reloadable runtime config for domain lists and patterns.
 pub mod hot_config;
+/// IBAN detection and ISO 7064 mod-97 validation.
+pub mod iban;
 mod injection_patterns;
 /// Name anonymization with reversible pseudonym mapping.
 pub mod names;
