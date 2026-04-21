@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.31](https://github.com/azerozero/grob/compare/v0.36.30...v0.36.31) - 2026-04-21
+
+### Added
+
+- *(wizard)* --edit tools/endpoints sections ([#26](https://github.com/azerozero/grob/pull/26)) ([#255](https://github.com/azerozero/grob/pull/255))
+- *(wizard)* skip credential prompt when env var present ([#24](https://github.com/azerozero/grob/pull/24)) ([#254](https://github.com/azerozero/grob/pull/254))
+- *(doctor)* actionable fix hints on each check ([#23](https://github.com/azerozero/grob/pull/23)) ([#252](https://github.com/azerozero/grob/pull/252))
+- *(wizard)* schema drift auto-migration prompt ([#25](https://github.com/azerozero/grob/pull/25)) ([#251](https://github.com/azerozero/grob/pull/251))
+- *(mcp)* wizard config/doctor MCP surface per ADR-0011 ([#21](https://github.com/azerozero/grob/pull/21)) ([#249](https://github.com/azerozero/grob/pull/249))
+- *(wizard)* headless OAuth device-code RFC 8628 ([#22](https://github.com/azerozero/grob/pull/22)) ([#248](https://github.com/azerozero/grob/pull/248))
+
+### Other
+
+- non-tautological doc summaries across 5 domains ([#29](https://github.com/azerozero/grob/pull/29)) ([#250](https://github.com/azerozero/grob/pull/250))
+
 ## [0.36.30](https://github.com/azerozero/grob/compare/v0.36.29...v0.36.30) - 2026-04-21
 
 ### Fixed
