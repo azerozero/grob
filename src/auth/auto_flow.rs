@@ -8,6 +8,7 @@ use anyhow::Result;
 use secrecy::ExposeSecret;
 use std::io::{self, BufRead, Write};
 
+use crate::auth::device_code::{device_auth_url_for, headless_requested, DeviceCodeClient};
 use crate::auth::oauth::{OAuthClient, OAuthConfig};
 use crate::auth::token_store::TokenStore;
 use crate::providers::{AuthType, ProviderConfig};
@@ -220,6 +221,24 @@ async fn setup_oauth_interactive(
         }
     };
 
+    // Headless (RFC 8628) path — used when GROB_OAUTH_HEADLESS=1 is set.
+    // Falls back to the browser flow if the provider does not support it.
+    if headless_requested() && device_auth_url_for(config.provider_type()).is_some() {
+        return setup_oauth_device_code(
+            provider_name,
+            oauth_provider_id,
+            oauth_type,
+            config,
+            token_store,
+        )
+        .await;
+    } else if headless_requested() {
+        eprintln!(
+            "    ℹ️  GROB_OAUTH_HEADLESS set but {} does not implement RFC 8628 device flow; using browser flow.",
+            provider_name
+        );
+    }
+
     let client = OAuthClient::new(config, token_store.clone());
     let auth_url = client.authorization_url()?;
 
@@ -269,6 +288,67 @@ async fn setup_oauth_interactive(
             eprintln!("    ❌ Authentication failed: {}", e);
             eprintln!("    Run `grob connect` to try again");
             eprintln!();
+            Ok(false)
+        }
+    }
+}
+
+/// Headless OAuth via RFC 8628 device authorization grant.
+///
+/// Prints a `user_code` + `verification_uri` the user enters on another
+/// device, then polls the token endpoint until approval, denial, or expiry.
+async fn setup_oauth_device_code(
+    provider_name: &str,
+    oauth_provider_id: &str,
+    oauth_type: &str,
+    config: OAuthConfig,
+    token_store: &TokenStore,
+) -> Result<bool> {
+    eprintln!("    Headless OAuth (device code flow):");
+    let client = DeviceCodeClient::new(config, token_store.clone())?;
+
+    let auth = match client.start().await {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("    ❌ Device authorization failed: {}", e);
+            return Ok(false);
+        }
+    };
+
+    eprintln!();
+    eprintln!("    1. On another device, open:");
+    eprintln!("       {}", auth.verification_uri);
+    eprintln!("    2. Enter this code:");
+    eprintln!("       {}", auth.user_code);
+    if let Some(ref uri) = auth.verification_uri_complete {
+        eprintln!("    (Or open this pre-filled URL: {})", uri);
+    }
+    eprintln!();
+    eprintln!(
+        "    Polling every {}s (expires in {}s)...",
+        auth.poll_interval().as_secs(),
+        auth.expires_in
+    );
+
+    match client.poll_until_approved(&auth, oauth_provider_id).await {
+        Ok(mut token) => {
+            if oauth_type == "gemini" {
+                // Reuse the browser-flow helper to resolve the Cloud AI project ID.
+                let browser_client = OAuthClient::new(OAuthConfig::gemini(), token_store.clone());
+                if let Ok(pid) = browser_client
+                    .load_code_assist(token.access_token.expose_secret())
+                    .await
+                {
+                    token.project_id = Some(pid);
+                    token_store.save(token.clone())?;
+                }
+            }
+            eprintln!("    ✅ {} authenticated (headless)", provider_name);
+            eprintln!();
+            Ok(true)
+        }
+        Err(e) => {
+            eprintln!("    ❌ Device authorization failed: {}", e);
             Ok(false)
         }
     }

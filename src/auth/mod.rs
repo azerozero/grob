@@ -2,6 +2,8 @@
 
 /// Automatic credential setup at startup.
 pub mod auto_flow;
+/// RFC 8628 OAuth device authorization grant (headless flow).
+pub mod device_code;
 /// JWT validation and claims extraction.
 pub mod jwt;
 /// OAuth PKCE flows for Anthropic, OpenAI, and Gemini.
