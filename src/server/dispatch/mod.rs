@@ -5,6 +5,8 @@
 //! DLP scanning → cache lookup → routing → provider loop with fallback → audit → response.
 
 mod provider_loop;
+mod resolver;
+mod retry;
 mod telemetry;
 
 use crate::cli::ModelStrategy;
