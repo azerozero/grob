@@ -316,7 +316,7 @@ async fn fan_out_all(
     join_all(futures).await.into_iter().flatten().collect()
 }
 
-/// Extract text content from an Anthropic response.
+/// Concatenates the text of every `Text` content block in the response, newline-joined, for judge-model scoring.
 fn extract_text_from_response(response: &ProviderResponse) -> String {
     use crate::models::{ContentBlock, KnownContentBlock};
     response

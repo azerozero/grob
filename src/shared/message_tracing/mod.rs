@@ -348,7 +348,7 @@ fn rotated_path(base: &Path, index: usize, compressed: bool) -> PathBuf {
     parent.join(name)
 }
 
-/// Compresses a file to zstd format.
+/// Streams `src` through a zstd level-3 encoder into `dst`, preserving the source untouched until the caller unlinks it.
 fn compress_to_zstd(src: &Path, dst: &Path) -> std::io::Result<()> {
     let input = std::fs::File::open(src)?;
     let output = std::fs::File::create(dst)?;
@@ -358,7 +358,7 @@ fn compress_to_zstd(src: &Path, dst: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Expands ~ to home directory.
+/// Expands a leading `~/` against `home_dir()`; returns the original path verbatim when the prefix is absent.
 fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = crate::home_dir() {

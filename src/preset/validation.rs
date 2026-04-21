@@ -131,7 +131,7 @@ async fn validate_provider_mapping(
     }
 }
 
-/// Validate all router models by sending a minimal request to each provider mapping.
+/// Validates router models (default/think/background/websearch) by sending a minimal request to each provider mapping in parallel.
 pub async fn validate_config(
     config: &AppConfig,
     registry: &ProviderRegistry,
@@ -214,7 +214,7 @@ fn make_test_request(model: &str) -> CanonicalRequest {
     }
 }
 
-/// Print validation results to stdout.
+/// Prints a per-model health summary (checkmark, warning, or cross) and lists the failing provider mappings underneath.
 pub fn print_validation_results(results: &[ModelValidation]) {
     let all_ok = results.iter().all(|r| r.any_ok());
 

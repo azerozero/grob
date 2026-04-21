@@ -26,7 +26,7 @@ pub fn grob_home() -> Option<PathBuf> {
     }
 }
 
-/// Returns the user home directory.
+/// Returns the user home directory, honouring `GROB_HOME`'s parent as an override.
 ///
 /// Honours `GROB_HOME`'s parent when set; otherwise delegates to
 /// `dirs::home_dir()` (requires the `dirs` feature).

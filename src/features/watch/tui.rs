@@ -222,7 +222,7 @@ pub async fn run(base_url: &str) -> Result<()> {
     Ok(())
 }
 
-/// Renders the TUI layout.
+/// Splits the frame into providers, live stream, and alerts panels, then draws each panel in place.
 fn draw(app: &App, frame: &mut Frame) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -323,7 +323,7 @@ fn draw_alerts(app: &App, frame: &mut Frame, area: ratatui::layout::Rect) {
     frame.render_widget(para, area);
 }
 
-/// Renders a timestamp column for the event stream.
+/// Returns a dark-gray `HH:MM:SS` span for the leftmost column of each event stream row.
 fn timestamp_span(ts: &chrono::DateTime<chrono::Utc>) -> Span<'static> {
     Span::styled(
         format!("  {}  ", ts.format("%H:%M:%S")),
@@ -331,7 +331,7 @@ fn timestamp_span(ts: &chrono::DateTime<chrono::Utc>) -> Span<'static> {
     )
 }
 
-/// Formats a single event as a colored ListItem.
+/// Formats one [`WatchEvent`] variant into a color-coded `ListItem` for the live stream panel.
 fn format_event(event: &WatchEvent) -> ListItem<'static> {
     let line = match event {
         WatchEvent::RequestStart {

@@ -157,7 +157,7 @@ fn score_context_size(request: &CanonicalRequest) -> f32 {
     }
 }
 
-/// Converts character count to estimated token count.
+/// Approximates token count by dividing character count by 4 (BPE heuristic for English prose).
 #[inline]
 pub(crate) fn estimate_tokens_from_chars(chars: usize) -> usize {
     chars / 4
@@ -199,7 +199,7 @@ fn score_keywords(request: &CanonicalRequest) -> f32 {
     0.0
 }
 
-/// Extracts text from the last user message for keyword scanning.
+/// Returns the text of the most recent `user`-role message, flattening content blocks, or `None` if none has text.
 pub(crate) fn extract_last_user_text(request: &CanonicalRequest) -> Option<String> {
     let last_user = request.messages.iter().rev().find(|m| m.role == "user")?;
     match &last_user.content {

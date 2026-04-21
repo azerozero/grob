@@ -206,7 +206,7 @@ pub fn spawn_with_config(
     cancel
 }
 
-/// Runs a single refresh sweep over all tokens in the store.
+/// Iterates every stored token and triggers a refresh attempt for any that expire within `window`.
 pub(crate) async fn run_tick(store: &TokenStore, window: chrono::Duration) {
     let now = Utc::now();
     let tokens = store.all();
