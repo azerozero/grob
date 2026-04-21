@@ -7,7 +7,7 @@ pub const HEALTH_POLL_INTERVAL_MS: u64 = 100;
 /// Maximum number of health poll attempts before declaring failure.
 pub const HEALTH_POLL_MAX_ATTEMPTS: u32 = 50; // 50 * 100ms = 5s max
 
-/// Checks whether the Grob service at the given URL is healthy.
+/// Sends a 2-second GET to `{base_url}/health`; returns `true` only for a 2xx response.
 pub async fn is_grob_healthy(base_url: &str) -> bool {
     let url = format!("{}/health", base_url);
     match reqwest::Client::new()
@@ -87,7 +87,7 @@ pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Starts the Grob server in the foreground with signal handling.
+/// Starts the Grob server in the foreground, writing the PID file and handling SIGTERM for graceful shutdown.
 pub async fn start_foreground(
     config: crate::models::config::AppConfig,
     config_source: crate::cli::ConfigSource,

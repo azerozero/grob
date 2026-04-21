@@ -32,7 +32,7 @@ pub(super) fn clean_json_schema(value: &mut serde_json::Value) {
     }
 }
 
-/// Convert a single Anthropic content block to a Gemini part.
+/// Maps one Anthropic content block (text/image/thinking/tool_use/tool_result) to the corresponding Gemini `Part` variant.
 pub(super) fn convert_block(
     block: &ContentBlock,
     tool_id_to_name: &HashMap<String, String>,
@@ -84,7 +84,7 @@ pub(super) fn convert_block(
     }
 }
 
-/// Convert Anthropic tools to Gemini tool format.
+/// Maps Anthropic tool definitions to Gemini tools, surfacing `WebSearch` and `WebFetch` as native `google_search`/`url_context` entries.
 pub(super) fn convert_tools(tools: &[crate::models::Tool]) -> Vec<GeminiTool> {
     let mut gemini_tools = Vec::new();
     let mut function_declarations = Vec::new();
@@ -119,7 +119,7 @@ pub(super) fn convert_tools(tools: &[crate::models::Tool]) -> Vec<GeminiTool> {
     gemini_tools
 }
 
-/// Convert Anthropic tool_choice to Gemini tool_config.
+/// Maps Anthropic `tool_choice` (auto/any/tool) to a Gemini `tool_config` with mode and optional allowed-function names.
 pub(super) fn convert_tool_config(tc: &serde_json::Value) -> Option<GeminiToolConfig> {
     let tc_type = tc.get("type").and_then(|v| v.as_str()).unwrap_or("");
     let (mode, names) = match tc_type {

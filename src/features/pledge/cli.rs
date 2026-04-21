@@ -7,7 +7,7 @@
 use super::config::PledgeConfig;
 use super::profiles;
 
-/// Prints all available built-in pledge profiles.
+/// Prints the four built-in pledge profiles (read_only, execute, full, none) with their allowed tool sets.
 pub fn cmd_list_profiles() {
     let builtins = [
         &profiles::READ_ONLY,
@@ -29,7 +29,7 @@ pub fn cmd_list_profiles() {
     }
 }
 
-/// Prints current pledge configuration status.
+/// Prints whether pledge is enabled and lists every source/token-prefix rule bound to a profile.
 pub fn cmd_status(config: &PledgeConfig) {
     if !config.enabled {
         println!("  Pledge:  disabled (all tools pass through)");
@@ -68,7 +68,7 @@ pub fn validate_profile(name: &str) -> Result<(), String> {
     }
 }
 
-/// Formats a pledge set confirmation message.
+/// Formats the human-readable confirmation returned after activating a pledge profile, optionally scoped to a source.
 pub fn format_set_message(profile: &str, source: Option<&str>) -> String {
     match source {
         Some(s) => format!("Pledge profile '{profile}' activated for source '{s}'"),
@@ -76,7 +76,7 @@ pub fn format_set_message(profile: &str, source: Option<&str>) -> String {
     }
 }
 
-/// Formats a pledge clear confirmation message.
+/// Returns a one-line confirmation that pledge was cleared and the default profile is active again.
 pub fn format_clear_message() -> String {
     "Pledge cleared — default profile restored".to_string()
 }

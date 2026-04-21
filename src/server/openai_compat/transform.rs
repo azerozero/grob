@@ -130,7 +130,7 @@ fn convert_assistant_message(msg: OpenAIMessage) -> crate::models::Message {
     }
 }
 
-/// Convert OpenAI tools JSON to Anthropic Tool format.
+/// Extracts OpenAI `function` tool definitions and reshapes each as an Anthropic `Tool` (name, description, input schema).
 fn convert_tools(tools: &[serde_json::Value]) -> Vec<Tool> {
     tools
         .iter()
@@ -152,7 +152,7 @@ fn convert_tools(tools: &[serde_json::Value]) -> Vec<Tool> {
         .collect()
 }
 
-/// Convert OpenAI tool_choice to Anthropic format.
+/// Maps OpenAI `tool_choice` (`auto`/`none`/`required`/function-object) to the matching Anthropic shape.
 fn convert_tool_choice(tc: &serde_json::Value) -> Option<serde_json::Value> {
     if let Some(s) = tc.as_str() {
         match s {

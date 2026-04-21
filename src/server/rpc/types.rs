@@ -18,7 +18,7 @@ pub const ERR_INTERNAL: i32 = -32004;
 #[allow(dead_code)]
 pub const ERR_BUDGET_EXCEEDED: i32 = -32005;
 
-/// Builds a typed JSON-RPC error.
+/// Builds an owned JSON-RPC error object with the given numeric code and message.
 pub fn rpc_err(code: i32, msg: impl Into<String>) -> ErrorObjectOwned {
     ErrorObjectOwned::owned(code, msg.into(), None::<()>)
 }

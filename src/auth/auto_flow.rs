@@ -45,7 +45,7 @@ fn oauth_type_for_provider_id(oauth_provider_id: &str) -> Option<&'static str> {
     }
 }
 
-/// Build an OAuthConfig for a given oauth_type string.
+/// Builds the `OAuthConfig` preset for a known `oauth_type` (`max`, `openai-codex`, `gemini`); returns `None` for unknown types.
 fn oauth_config_for_type(oauth_type: &str) -> Option<OAuthConfig> {
     match oauth_type {
         "max" => Some(OAuthConfig::anthropic()),
@@ -55,7 +55,7 @@ fn oauth_config_for_type(oauth_type: &str) -> Option<OAuthConfig> {
     }
 }
 
-/// Checks all providers and returns their credential status.
+/// Classifies each enabled provider as `Ready`, `MissingOAuth`, or `MissingApiKey` based on token store and env vars.
 pub fn detect_credentials(
     providers: &[ProviderConfig],
     token_store: &TokenStore,
@@ -110,7 +110,7 @@ pub fn detect_credentials(
     statuses
 }
 
-/// Runs the interactive credential setup flow.
+/// Prompts for any missing OAuth tokens or API keys and persists them, skipping providers the user declines.
 ///
 /// Returns the number of providers that were successfully configured.
 /// Providers the user skips are left unconfigured (they will be

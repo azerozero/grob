@@ -1,7 +1,7 @@
 use crate::cli;
 use crate::shared::instance;
 
-/// Prints the configured router models and enabled providers.
+/// Prints router models and enabled providers, preferring live RPC data when the server is running.
 pub async fn cmd_model(config: &cli::AppConfig) {
     let host = &config.server.host;
     let port = config.server.port.value();
@@ -14,7 +14,7 @@ pub async fn cmd_model(config: &cli::AppConfig) {
     }
 }
 
-/// Prints model info by querying the running server via RPC.
+/// Prints router roles and provider/model mappings retrieved via `grob/model/*` RPC calls.
 async fn print_model_from_rpc(base_url: &str, config: &cli::AppConfig) {
     use super::rpc_client::try_rpc_call;
 

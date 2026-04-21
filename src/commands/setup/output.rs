@@ -247,7 +247,7 @@ pub(in crate::commands::setup) fn setup_custom(config_path: &Path) -> Result<boo
     Ok(true)
 }
 
-/// Prints the tool-specific invocation hints.
+/// Prints per-tool invocation hints ("How to use") for every tool the user selected in the wizard.
 pub(in crate::commands::setup) fn print_usage(choices: &Choices) {
     println!();
     println!("  How to use:");

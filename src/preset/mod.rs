@@ -204,7 +204,7 @@ fn collect_preset_requirements(preset: &toml::Value) -> (Vec<String>, bool, bool
     (env_vars, needs_oauth, needs_ollama)
 }
 
-/// Print the requirements section for a preset info display.
+/// Prints the "Requirements" block (OAuth, Ollama, env vars with set/unset status) shown by `grob preset info`.
 fn print_requirements_section(env_vars: &[String], needs_oauth: bool, needs_ollama: bool) {
     println!();
     println!("📋 Requirements:");

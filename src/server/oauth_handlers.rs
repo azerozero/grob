@@ -242,7 +242,7 @@ pub struct DeleteTokenRequest {
     pub provider_id: String,
 }
 
-/// Deletes an OAuth token for the specified provider.
+/// Removes the stored OAuth token for `provider_id` from the token store; subsequent requests will require re-authorization.
 pub async fn oauth_delete_token(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeleteTokenRequest>,

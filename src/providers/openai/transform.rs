@@ -162,7 +162,7 @@ fn extract_tool_results(blocks: &[ContentBlock]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Extract tool_use blocks as OpenAI tool calls.
+/// Filters Anthropic `tool_use` content blocks and reshapes them as OpenAI `tool_calls` entries with JSON-stringified arguments.
 fn extract_tool_calls(blocks: &[ContentBlock]) -> Vec<OpenAIToolCall> {
     blocks
         .iter()
@@ -388,7 +388,7 @@ pub(crate) fn parse_sse_response(sse_text: &str) -> Result<Vec<ContentBlock>, Pr
     })
 }
 
-/// Extract a content block from a Codex output item.
+/// Maps a Codex `output[]` item (`reasoning` or `message`) to the corresponding Anthropic thinking or text block.
 fn extract_codex_output_block(item: &serde_json::Value) -> Option<ContentBlock> {
     let output_type = item.get("type").and_then(|v| v.as_str())?;
     let text = item

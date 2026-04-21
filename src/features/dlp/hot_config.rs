@@ -59,7 +59,7 @@ impl DomainMatcher {
         }
     }
 
-    /// Check if a hostname matches this domain pattern.
+    /// Returns true when the hostname matches the pattern under the configured mode (exact, suffix, or glob), case-insensitive.
     pub fn matches(&self, hostname: &str) -> bool {
         let hostname = hostname.to_lowercase();
         let pattern = self.raw.to_lowercase();
@@ -97,7 +97,7 @@ pub fn is_domain_suspicious(
     false
 }
 
-/// Build the initial hot config from inline config domain lists.
+/// Compiles the initial hot config (matchers + patterns) from inline TOML lists so the detector can start before any signed overlay is loaded.
 pub fn build_initial_hot_config(
     whitelist_domains: &[String],
     blacklist_domains: &[String],

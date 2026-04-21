@@ -7,7 +7,7 @@ use crate::cli::AcmeConfig;
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 
-/// Resolves the certificate cache directory.
+/// Resolves and creates the ACME certificate cache directory, defaulting to `~/.grob/certs/` when unset.
 ///
 /// Defaults to `~/.grob/certs/` if not specified.
 ///

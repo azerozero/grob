@@ -25,7 +25,7 @@ pub struct KeyInfo {
     pub revoked: bool,
 }
 
-/// Creates a new virtual API key.
+/// Creates a new virtual API key, persists its hash in `GrobStore`, and returns the plaintext secret.
 pub async fn create(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
@@ -89,7 +89,7 @@ pub async fn list(
         .collect())
 }
 
-/// Revokes a virtual API key.
+/// Revokes a virtual API key by id, marking it unusable for future dispatch.
 pub async fn revoke(
     state: &Arc<AppState>,
     caller: &CallerIdentity,

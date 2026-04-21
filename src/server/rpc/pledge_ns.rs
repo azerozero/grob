@@ -36,7 +36,7 @@ pub async fn set(
     })
 }
 
-/// Clears the active pledge, restoring defaults.
+/// Clears the active pledge, reverting all sources to the default profile.
 pub async fn clear(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
@@ -52,7 +52,7 @@ pub async fn clear(
     })
 }
 
-/// Returns the current pledge status.
+/// Returns the active pledge configuration, default profile, and per-rule bindings.
 pub async fn status(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
