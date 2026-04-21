@@ -44,12 +44,38 @@ jobs:
         with:
           shared-key: nightly-${{ matrix.toolchain }}-${{ matrix.os }}
           save-if: true
+      # NOTE: Windows cannot build `tikv-jemalloc-sys` (MSVC toolchain +
+      # autoconf mismatch). Mirror ci.yml and skip `jemalloc` + `unix-signals`
+      # features on Windows. Other OSes keep the full feature matrix so we
+      # still catch real nightly/beta regressions.
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cargo clippy --all-targets --no-default-features \
+              --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs \
+              -- -D warnings
+          else
+            cargo clippy --all-targets --all-features -- -D warnings
+          fi
       - name: Tests
-        run: cargo test --lib --bins
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cargo test --lib --bins --no-default-features \
+              --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs
+          else
+            cargo test --lib --bins
+          fi
       - name: Doc tests
-        run: cargo test --doc
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cargo test --doc --no-default-features \
+              --features dlp,oauth,tap,compliance,mcp,watch,policies,socket-opts,dirs
+          else
+            cargo test --doc
+          fi
 
   # Open (or reuse) a tracking issue when the BETA matrix fails. Nightly
   # failures stay silent (they are allowed to break). Avoids spamming: the
