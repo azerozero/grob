@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.27](https://github.com/azerozero/grob/compare/v0.36.26...v0.36.27) - 2026-04-21
+
+### Other
+
+- *(dispatch)* cargo fmt on resolver/retry/provider_loop imports
+- *(dispatch)* split provider_loop 808 LoC into resolver + retry + orchestration (T-SP-3 #9)
+- *(nightly)* skip jemalloc + unix-signals features on Windows
+
 ## [0.36.26](https://github.com/azerozero/grob/compare/v0.36.25...v0.36.26) - 2026-04-20
 
 ### Other
