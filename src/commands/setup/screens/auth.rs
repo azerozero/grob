@@ -4,6 +4,34 @@ use crate::commands::setup::detect::{auth_for, discover_credentials};
 use crate::commands::setup::input::{prompt_choice, prompt_key_for_provider};
 use crate::commands::setup::types::AuthOverride;
 
+/// Env var opt-out: set `GROB_SETUP_NO_ENV_SKIP=1` to keep the legacy
+/// interactive prompt when an env var is already present. Defaults to
+/// the GH_TOKEN-style auto-skip: detected key wins silently.
+fn env_skip_enabled() -> bool {
+    !matches!(
+        std::env::var("GROB_SETUP_NO_ENV_SKIP")
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("1") | Some("true") | Some("yes")
+    )
+}
+
+/// Emits an `AuthOverride` that defers to the detected env var.
+fn auto_accept_env(out: &mut Vec<AuthOverride>, name: &str, env_var: &str) {
+    println!(
+        "    ${} detected — using it (set GROB_SETUP_NO_ENV_SKIP=1 to override)",
+        env_var
+    );
+    out.push(AuthOverride {
+        provider: name.to_string(),
+        use_oauth: false,
+        oauth_id: String::new(),
+        entered_key: None,
+        env_var: env_var.to_string(),
+    });
+}
+
 /// Prompts the user to pick an auth strategy for each provider.
 pub(in crate::commands::setup) fn screen_auth(providers: &[String]) -> Vec<AuthOverride> {
     if providers.is_empty() {
@@ -47,8 +75,12 @@ pub(in crate::commands::setup) fn screen_auth(providers: &[String]) -> Vec<AuthO
     out
 }
 
-/// Env var detected + OAuth available: 3 choices.
+/// Env var detected + OAuth available: 3 choices (or auto-skip in GH_TOKEN mode).
 fn auth_env_with_oauth(out: &mut Vec<AuthOverride>, name: &str, oauth_id: &str, env_var: &str) {
+    if env_skip_enabled() {
+        auto_accept_env(out, name, env_var);
+        return;
+    }
     println!("    ${} detected in environment", env_var);
     println!("    [1] Use environment variable (recommended)");
     println!("    [2] OAuth (subscription)");
@@ -87,8 +119,12 @@ fn auth_env_with_oauth(out: &mut Vec<AuthOverride>, name: &str, oauth_id: &str, 
     }
 }
 
-/// Env var detected, no OAuth: use env or enter key.
+/// Env var detected, no OAuth: use env or enter key (auto-skip in GH_TOKEN mode).
 fn auth_env_no_oauth(out: &mut Vec<AuthOverride>, name: &str, env_var: &str) {
+    if env_skip_enabled() {
+        auto_accept_env(out, name, env_var);
+        return;
+    }
     println!("    ${} detected in environment", env_var);
     println!("    [1] Use environment variable (recommended)");
     println!("    [2] Enter a different API key");
@@ -159,5 +195,45 @@ fn auth_key_only(out: &mut Vec<AuthOverride>, name: &str, env_var: &str) {
             "    Set it before running grob: export {}=<your-key>",
             env_var
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Guards the default GH_TOKEN-style skip behavior.
+    #[test]
+    fn env_skip_default_is_enabled() {
+        std::env::remove_var("GROB_SETUP_NO_ENV_SKIP");
+        assert!(env_skip_enabled());
+    }
+
+    /// `GROB_SETUP_NO_ENV_SKIP=1` must restore the legacy interactive prompt.
+    #[test]
+    fn env_skip_disabled_by_env_var() {
+        std::env::set_var("GROB_SETUP_NO_ENV_SKIP", "1");
+        assert!(!env_skip_enabled());
+        std::env::remove_var("GROB_SETUP_NO_ENV_SKIP");
+    }
+
+    /// Values other than 1/true/yes are ignored.
+    #[test]
+    fn env_skip_ignores_garbage() {
+        std::env::set_var("GROB_SETUP_NO_ENV_SKIP", "maybe");
+        assert!(env_skip_enabled());
+        std::env::remove_var("GROB_SETUP_NO_ENV_SKIP");
+    }
+
+    /// Auto-accept emits exactly one override pointing at the env var.
+    #[test]
+    fn auto_accept_produces_single_env_override() {
+        let mut out = Vec::new();
+        auto_accept_env(&mut out, "anthropic", "ANTHROPIC_API_KEY");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].provider, "anthropic");
+        assert_eq!(out[0].env_var, "ANTHROPIC_API_KEY");
+        assert!(!out[0].use_oauth);
+        assert!(out[0].entered_key.is_none());
     }
 }
