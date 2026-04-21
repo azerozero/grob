@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.29](https://github.com/azerozero/grob/compare/v0.36.28...v0.36.29) - 2026-04-21
+
+### Other
+
+- *(dlp)* split pii.rs into cards/iban/bic (T-SP-4 #10) ([#243](https://github.com/azerozero/grob/pull/243))
+
 ## [0.36.28](https://github.com/azerozero/grob/compare/v0.36.27...v0.36.28) - 2026-04-21
 
 ### Other
