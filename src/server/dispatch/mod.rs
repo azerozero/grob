@@ -246,15 +246,10 @@ pub(crate) async fn dispatch(
     request: &mut CanonicalRequest,
 ) -> Result<DispatchResult, AppError> {
     // ── Step 0: Resolve complexity hint ──
+    // Resolved up-front (borrows `request` immutably) but applied post-routing
+    // so the client-declared tier overrides the algorithmic scorer.
     #[cfg(feature = "mcp")]
-    {
-        let grob_hint = resolve_grob_hint(ctx, request);
-        if let Some(ref hint) = grob_hint {
-            tracing::debug!(hint = %hint, "dispatch: grob_hint resolved");
-        }
-        // NOTE: `grob_hint` will be consumed by T-P1 scoring heuristics.
-        let _ = grob_hint;
-    }
+    let grob_hint = resolve_grob_hint(ctx, request);
 
     // ── Step 1: DLP input scanning ──
     scan_dlp_input(ctx, request)?;
@@ -291,11 +286,31 @@ pub(crate) async fn dispatch(
         });
 
     // ── Step 3: Route ──
-    let decision = ctx
+    #[cfg_attr(not(feature = "mcp"), allow(unused_mut))]
+    let mut decision = ctx
         .inner
         .router
         .route(request)
         .map_err(|e| AppError::RoutingError(e.to_string()))?;
+
+    // ── Step 3.5: Apply client-declared complexity hint ──
+    // The hint (header / body metadata / MCP one-shot) overrides whatever tier
+    // the algorithmic scorer produced, so a client that knows its task is
+    // trivial can opt out of `[[tiers]]` fan-out for this request.
+    #[cfg(feature = "mcp")]
+    if let Some(hint) = grob_hint {
+        let tier = match hint {
+            ComplexityHint::Trivial => crate::routing::classify::ComplexityTier::Trivial,
+            ComplexityHint::Medium => crate::routing::classify::ComplexityTier::Medium,
+            ComplexityHint::Complex => crate::routing::classify::ComplexityTier::Complex,
+        };
+        tracing::debug!(
+            hint = %hint,
+            previous_tier = ?decision.complexity_tier,
+            "dispatch: grob_hint overrides complexity tier"
+        );
+        decision.complexity_tier = Some(tier);
+    }
 
     // ── Step 4: Resolve provider mappings ──
     let sorted_mappings = resolve_provider_mappings(ctx.inner, ctx.headers, &decision)?;
