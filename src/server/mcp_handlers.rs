@@ -48,6 +48,9 @@ pub async fn handle_mcp_rpc(
         "grob_pledge" => {
             handle_control_tool(&state, "grob/pledge", req.params, req.id.clone()).await
         }
+        "wizard_get_config" => handle_wizard_get_config(&state, req.params, req.id.clone()).await,
+        "wizard_set_section" => handle_wizard_set_section(&state, req.params, req.id.clone()).await,
+        "wizard_run_doctor" => handle_wizard_run_doctor(&state, req.id.clone()).await,
         "tools/list" => match methods::handle_tools_list(mcp, req.id.clone()).await {
             Ok(mut resp) => {
                 inject_builtin_tools(&mut resp);
@@ -282,6 +285,49 @@ fn inject_builtin_tools(resp: &mut JsonRpcResponse) {
                     }
                 },
                 "required": ["action"]
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "wizard_get_config",
+            "description": "Read the current config (all known sections or just one) as JSON. No secrets are returned.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "section": {
+                        "type": "string",
+                        "enum": ["router", "budget", "dlp", "cache"],
+                        "description": "Optional section filter; omit to return all safe sections."
+                    }
+                },
+                "required": []
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "wizard_set_section",
+            "description": "Apply one or more key/value updates to a config section and trigger hot-reload. Same safety policy as grob_configure.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "section": {
+                        "type": "string",
+                        "enum": ["router", "budget", "cache"],
+                        "description": "Config section to update (DLP is read-only)."
+                    },
+                    "values": {
+                        "type": "object",
+                        "description": "Map of key → new value to apply."
+                    }
+                },
+                "required": ["section", "values"]
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "wizard_run_doctor",
+            "description": "Runs programmatic health checks against the running grob (providers, models, storage, credentials). Returns JSON with per-check status and an overall severity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
             }
         }));
         tools.push(serde_json::json!({
@@ -527,6 +573,180 @@ pub async fn handle_configure(
     }
 }
 
+// ── Wizard MCP surface (ADR-0011) ──────────────────────────────────────────
+
+/// Parses the `section` parameter (or returns `None` when absent).
+fn parse_section(value: Option<&serde_json::Value>) -> Result<Option<ConfigSection>, String> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(v) => serde_json::from_value::<ConfigSection>(v.clone())
+            .map(Some)
+            .map_err(|e| e.to_string()),
+    }
+}
+
+/// Handles `wizard_get_config` — returns the safe view of one or every section.
+pub async fn handle_wizard_get_config(
+    state: &Arc<AppState>,
+    params: serde_json::Value,
+    id: serde_json::Value,
+) -> Result<JsonRpcResponse, JsonRpcError> {
+    let section = parse_section(params.get("section"))
+        .map_err(|e| JsonRpcError::invalid_params(id.clone(), &e))?;
+
+    let snapshot = state.snapshot();
+    let config = &snapshot.config;
+
+    let result = match section {
+        Some(s) => {
+            serde_json::json!({
+                "section": s.to_string(),
+                "config": read_config_section(config, &s),
+            })
+        }
+        None => serde_json::json!({
+            "router": read_config_section(config, &ConfigSection::Router),
+            "budget": read_config_section(config, &ConfigSection::Budget),
+            "dlp": read_config_section(config, &ConfigSection::Dlp),
+            "cache": read_config_section(config, &ConfigSection::Cache),
+        }),
+    };
+
+    tracing::info!("MCP: wizard_get_config");
+    Ok(JsonRpcResponse::ok(id, result))
+}
+
+/// Handles `wizard_set_section` — applies a batch of key/value updates to a section.
+pub async fn handle_wizard_set_section(
+    state: &Arc<AppState>,
+    params: serde_json::Value,
+    id: serde_json::Value,
+) -> Result<JsonRpcResponse, JsonRpcError> {
+    let section: ConfigSection = serde_json::from_value(
+        params
+            .get("section")
+            .cloned()
+            .ok_or_else(|| JsonRpcError::invalid_params(id.clone(), "missing 'section'"))?,
+    )
+    .map_err(|e| JsonRpcError::invalid_params(id.clone(), &e.to_string()))?;
+
+    let values = params
+        .get("values")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| JsonRpcError::invalid_params(id.clone(), "'values' must be an object"))?
+        .clone();
+
+    if values.is_empty() {
+        return Err(JsonRpcError::invalid_params(
+            id,
+            "'values' must contain at least one key",
+        ));
+    }
+
+    let mut new_config = state.snapshot().config.clone();
+    let mut applied = Vec::with_capacity(values.len());
+
+    for (key, value) in &values {
+        if is_key_denied(&section, key) {
+            return Err(JsonRpcError::invalid_params(
+                id,
+                &format!(
+                    "denied: {}.{} cannot be modified via wizard surface",
+                    section, key
+                ),
+            ));
+        }
+        apply_config_update(&mut new_config, &section, key, value)
+            .map_err(|e| JsonRpcError::invalid_params(id.clone(), &e))?;
+        applied.push(key.clone());
+    }
+
+    super::config_guard::persist_and_reload(state, &new_config)
+        .await
+        .map_err(|e| JsonRpcError::internal(id.clone(), &e.to_string()))?;
+
+    tracing::info!(
+        section = %section,
+        count = applied.len(),
+        "MCP: wizard_set_section applied + hot-reload"
+    );
+
+    Ok(JsonRpcResponse::ok(
+        id,
+        serde_json::json!({
+            "section": section.to_string(),
+            "applied": applied,
+            "status": "applied",
+        }),
+    ))
+}
+
+/// Handles `wizard_run_doctor` — programmatic doctor checks returning JSON.
+pub async fn handle_wizard_run_doctor(
+    state: &Arc<AppState>,
+    id: serde_json::Value,
+) -> Result<JsonRpcResponse, JsonRpcError> {
+    let snapshot = state.snapshot();
+    let config = &snapshot.config;
+
+    let providers = &config.providers;
+    let enabled = providers.iter().filter(|p| p.is_enabled()).count();
+    let with_creds = providers
+        .iter()
+        .filter(|p| p.is_enabled() && (p.api_key.is_some() || p.oauth_provider.is_some()))
+        .count();
+
+    let mut missing_env: Vec<String> = Vec::new();
+    for provider in providers {
+        if !provider.is_enabled() {
+            continue;
+        }
+        if let Some(ref key) = provider.api_key {
+            if let Some(var) = secrecy::ExposeSecret::expose_secret(key).strip_prefix('$') {
+                if std::env::var(var).is_err() {
+                    missing_env.push(format!("{}:{}", provider.name, var));
+                }
+            }
+        }
+    }
+
+    let checks = serde_json::json!({
+        "providers": {
+            "enabled": enabled,
+            "with_credentials": with_creds,
+            "status": if enabled == 0 { "error" }
+                      else if with_creds < enabled { "warning" }
+                      else { "ok" },
+        },
+        "models": {
+            "count": config.models.len(),
+            "status": if config.models.is_empty() { "error" } else { "ok" },
+        },
+        "missing_env_vars": missing_env,
+        "dlp_enabled": config.dlp.enabled,
+        "security_enabled": config.security.enabled,
+    });
+
+    let severity = if enabled == 0 || config.models.is_empty() || !missing_env.is_empty() {
+        "error"
+    } else if with_creds < enabled {
+        "warning"
+    } else {
+        "ok"
+    };
+
+    tracing::info!(severity, "MCP: wizard_run_doctor");
+
+    Ok(JsonRpcResponse::ok(
+        id,
+        serde_json::json!({
+            "version": env!("CARGO_PKG_VERSION"),
+            "severity": severity,
+            "checks": checks,
+        }),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -761,13 +981,17 @@ mod tests {
             JsonRpcResponse::ok(serde_json::json!(1), serde_json::json!({ "tools": [] }));
         inject_builtin_tools(&mut resp);
         let tools = resp.result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 6);
-        assert_eq!(tools[0]["name"], "grob_hint");
-        assert_eq!(tools[1]["name"], "grob_configure");
-        assert_eq!(tools[2]["name"], "grob_keys");
-        assert_eq!(tools[3]["name"], "grob_tools");
-        assert_eq!(tools[4]["name"], "grob_hit");
-        assert_eq!(tools[5]["name"], "grob_pledge");
+        let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
+        assert_eq!(tools.len(), 9);
+        assert_eq!(names[0], "grob_hint");
+        assert_eq!(names[1], "grob_configure");
+        assert_eq!(names[2], "grob_keys");
+        assert_eq!(names[3], "grob_tools");
+        assert_eq!(names[4], "grob_hit");
+        assert!(names.contains(&"wizard_get_config"));
+        assert!(names.contains(&"wizard_set_section"));
+        assert!(names.contains(&"wizard_run_doctor"));
+        assert!(names.contains(&"grob_pledge"));
     }
 
     #[test]
@@ -780,7 +1004,7 @@ mod tests {
         );
         inject_builtin_tools(&mut resp);
         let tools = resp.result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 10);
         assert_eq!(tools[0]["name"], "web_search");
         assert_eq!(tools[1]["name"], "grob_hint");
     }
@@ -808,6 +1032,29 @@ mod tests {
                 "schema must have required array"
             );
         }
+    }
+
+    #[test]
+    fn test_wizard_parse_section_none() {
+        assert!(parse_section(None).unwrap().is_none());
+        assert!(parse_section(Some(&serde_json::Value::Null))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn test_wizard_parse_section_router() {
+        let v = serde_json::json!("router");
+        assert_eq!(
+            parse_section(Some(&v)).unwrap(),
+            Some(ConfigSection::Router)
+        );
+    }
+
+    #[test]
+    fn test_wizard_parse_section_invalid() {
+        let v = serde_json::json!("nonsense");
+        assert!(parse_section(Some(&v)).is_err());
     }
 
     #[test]
