@@ -13,7 +13,25 @@ use std::collections::HashMap;
 
 // ── DLP Pipeline ──
 
-/// Sanitization pipeline for data loss prevention.
+/// Sanitizes requests and responses for data-loss prevention.
+///
+/// Concrete implementations scrub secrets, PII, and canary tokens from
+/// outgoing requests, reverse any anonymisation on streamed responses,
+/// and flag exfiltration attempts in URL payloads.
+///
+/// # Examples
+///
+/// A generic helper that uses any implementation to redact a response body:
+///
+/// ```no_run
+/// use grob::traits::DlpPipeline;
+/// use std::borrow::Cow;
+///
+/// fn redact<P: DlpPipeline>(pipeline: &P, response: &str) -> String {
+///     let sanitized: Cow<'_, str> = pipeline.sanitize_response_text(response);
+///     sanitized.into_owned()
+/// }
+/// ```
 #[cfg(feature = "dlp")]
 pub trait DlpPipeline: Send + Sync {
     /// Sanitizes an outgoing request (non-blocking, best-effort).
@@ -49,7 +67,26 @@ pub trait DlpPipeline: Send + Sync {
 
 // ── Request Router ──
 
-/// Routes requests to model names based on rules.
+/// Routes requests to concrete model names based on configured rules.
+///
+/// Implementations inspect a [`CanonicalRequest`] (prompt patterns, tier
+/// hints, explicit model aliases) and return a [`crate::models::RouteDecision`]
+/// identifying the backend model that should serve the request.
+///
+/// # Examples
+///
+/// A thin wrapper that delegates to any router implementation:
+///
+/// ```no_run
+/// use grob::traits::RequestRouter;
+/// use grob::models::{CanonicalRequest, RouteDecision};
+/// use anyhow::Result;
+///
+/// fn pick_model<R: RequestRouter>(router: &R, request: &mut CanonicalRequest) -> Result<String> {
+///     let decision: RouteDecision = router.route(request)?;
+///     Ok(decision.model_name)
+/// }
+/// ```
 pub trait RequestRouter: Send + Sync {
     /// Routes a request and returns a routing decision.
     ///

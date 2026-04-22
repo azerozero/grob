@@ -128,11 +128,36 @@ pub fn warn_if_cleartext(url: &str, provider_name: &str) {
     }
 }
 
-/// Core provider trait -- all LLM backends implement this.
+/// Sends chat requests to an LLM backend in Anthropic Messages format.
 ///
-/// Maintains Anthropic Messages API compatibility as the canonical
-/// internal format. Non-Anthropic providers translate to/from their
-/// native formats in their implementations.
+/// Every provider (Anthropic, OpenAI, Gemini, DeepSeek, Ollama, …) implements
+/// this trait. The canonical on-wire format is the Anthropic Messages API;
+/// non-Anthropic providers translate to and from their native formats inside
+/// their `send_message` / `send_message_stream` bodies.
+///
+/// # Errors
+///
+/// Methods return [`ProviderError`] when the upstream API rejects the request,
+/// the network fails, or translation between canonical and provider-native
+/// formats fails.
+///
+/// # Examples
+///
+/// A generic helper that forwards a request to any backend and returns the
+/// served model name:
+///
+/// ```no_run
+/// use grob::providers::LlmProvider;
+/// use grob::models::CanonicalRequest;
+///
+/// async fn served_model_name<P: LlmProvider>(
+///     provider: &P,
+///     request: CanonicalRequest,
+/// ) -> anyhow::Result<String> {
+///     let response = provider.send_message(request).await?;
+///     Ok(response.model)
+/// }
+/// ```
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     /// Sends a non-streaming message request to the provider.
