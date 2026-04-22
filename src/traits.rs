@@ -13,7 +13,25 @@ use std::collections::HashMap;
 
 // ── DLP Pipeline ──
 
-/// Sanitization pipeline for data loss prevention.
+/// Sanitizes requests and responses for data-loss prevention.
+///
+/// Concrete implementations scrub secrets, PII, and canary tokens from
+/// outgoing requests, reverse any anonymisation on streamed responses,
+/// and flag exfiltration attempts in URL payloads.
+///
+/// # Examples
+///
+/// A generic helper that uses any implementation to redact a response body:
+///
+/// ```no_run
+/// use grob::traits::DlpPipeline;
+/// use std::borrow::Cow;
+///
+/// fn redact<P: DlpPipeline>(pipeline: &P, response: &str) -> String {
+///     let sanitized: Cow<'_, str> = pipeline.sanitize_response_text(response);
+///     sanitized.into_owned()
+/// }
+/// ```
 #[cfg(feature = "dlp")]
 pub trait DlpPipeline: Send + Sync {
     /// Sanitizes an outgoing request (non-blocking, best-effort).
