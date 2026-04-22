@@ -67,7 +67,26 @@ pub trait DlpPipeline: Send + Sync {
 
 // ── Request Router ──
 
-/// Routes requests to model names based on rules.
+/// Routes requests to concrete model names based on configured rules.
+///
+/// Implementations inspect a [`CanonicalRequest`] (prompt patterns, tier
+/// hints, explicit model aliases) and return a [`crate::models::RouteDecision`]
+/// identifying the backend model that should serve the request.
+///
+/// # Examples
+///
+/// A thin wrapper that delegates to any router implementation:
+///
+/// ```no_run
+/// use grob::traits::RequestRouter;
+/// use grob::models::{CanonicalRequest, RouteDecision};
+/// use anyhow::Result;
+///
+/// fn pick_model<R: RequestRouter>(router: &R, request: &mut CanonicalRequest) -> Result<String> {
+///     let decision: RouteDecision = router.route(request)?;
+///     Ok(decision.model_name)
+/// }
+/// ```
 pub trait RequestRouter: Send + Sync {
     /// Routes a request and returns a routing decision.
     ///
