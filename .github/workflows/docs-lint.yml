@@ -1,0 +1,82 @@
+# Docs lint pipeline: markdownlint + lychee (broken-link check).
+#
+# Scoped to docs/**, README.md, and top-level *.md. Runs on push to main
+# and on PRs that touch docs so broken links and style regressions are
+# caught before merge. Rust doctests (`cargo test --doc`) already run in
+# the main CI pipeline (see ci.yml tests job).
+
+name: Docs Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "**.md"
+      - ".markdownlint.json"
+      - ".lycheeignore"
+      - ".github/workflows/docs-lint.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "**.md"
+      - ".markdownlint.json"
+      - ".lycheeignore"
+      - ".github/workflows/docs-lint.yml"
+
+concurrency:
+  group: docs-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  markdownlint:
+    name: markdownlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v6
+      - name: Run markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@v20
+        with:
+          globs: |
+            docs/**/*.md
+            README.md
+            CLAUDE.md
+          config: .markdownlint.json
+
+  lychee:
+    name: Broken link check (lychee)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v6
+      - name: Restore lychee cache
+        uses: actions/cache@v4
+        with:
+          path: .lycheecache
+          key: cache-lychee-${{ github.sha }}
+          restore-keys: cache-lychee-
+      - name: Run lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # --offline would skip network checks; we keep live checking
+          # but cache results to avoid hammering external hosts.
+          args: >-
+            --cache
+            --max-cache-age 1d
+            --no-progress
+            --exclude-mail
+            --accept 200,204,206,301,302,308,403,429
+            docs/**/*.md README.md CLAUDE.md
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
