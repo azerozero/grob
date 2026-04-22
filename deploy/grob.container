@@ -53,10 +53,13 @@ CPUQuota=100%
 PidsLimit=1024
 
 [Service]
-# NOTE: grob does not call sd_notify itself, so Type=simple is the correct
-# contract. The Quadlet HealthCmd above is what signals readiness to
-# systemd — no user-space sd_notify glue needed.
-Type=simple
+# NOTE: Type=exec over Type=simple — systemd waits for execve() to succeed
+# before considering the unit started, surfacing exec-time failures (missing
+# image, invalid args) as real start failures instead of immediate-exit loops.
+# Type=notify is wrong here: grob does not call sd_notify, so systemd would
+# wait for a notification that never arrives. Readiness is signaled by the
+# Quadlet HealthCmd above.
+Type=exec
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60
