@@ -152,8 +152,8 @@ Manage configuration presets.
 |------------|-------------|
 | `grob preset list` | Show available presets (built-in + installed) |
 | `grob preset info <name>` | Show providers, models, env vars, router config, and requirements |
-| `grob preset apply <name> [-r\|--reload]` | Apply a preset (backs up current config). With `--reload`, hot-reloads the running server. |
-| `grob preset export <name>` | Save current config as a reusable preset (strips `[server]`, replaces API keys with env var references) |
+| `grob preset apply <name> [-r\|--reload] [--dry-run]` | Apply a preset (backs up current config). With `--reload`, hot-reloads the running server. With `--dry-run`, previews changes without writing to disk. |
+| `grob preset export <name> [--env <ENV>]` | Save current config as a reusable preset (strips `[server]`, replaces API keys with env var references). With `--env`, saves as `{name}.{env}.toml` for per-environment presets. |
 | `grob preset install <source>` | Install presets from a git repo or local path |
 | `grob preset sync` | Sync presets from configured remote |
 
@@ -161,7 +161,9 @@ Manage configuration presets.
 grob preset list
 grob preset info perf
 grob preset apply medium --reload
+grob preset apply medium --dry-run          # Preview without writing
 grob preset export my-setup
+grob preset export my-setup --env qa        # Saves as my-setup.qa.toml
 grob preset install https://github.com/org/presets.git
 ```
 
@@ -310,9 +312,14 @@ grob record --output <tape.jsonl>
 
 Interactive credential setup for providers. Without arguments, checks all providers. With a provider name, sets up that specific provider only.
 
+| Flag | Description |
+|------|-------------|
+| `--force-reauth` | Discard existing OAuth tokens and initiate a fresh OAuth flow. Use when `grob connect` reports a revoked token. |
+
 ```bash
-grob connect              # Check all providers
-grob connect anthropic    # Set up Anthropic credentials
+grob connect                          # Check all providers
+grob connect anthropic                # Set up Anthropic credentials
+grob connect anthropic --force-reauth # Re-authenticate after token revocation
 ```
 
 ### `grob init`
@@ -344,6 +351,19 @@ Interactive first-run setup wizard (auto-triggered when no `config.toml` exists)
 4. Compliance mode (Standard, DLP only, GDPR, EU AI Act, Enterprise security, Local-only)
 5. Monthly budget cap
 6. Provider status validation
+
+| Flag | Description |
+|------|-------------|
+| `--yes` | Accept all defaults without prompting (non-interactive scripted setup) |
+| `--dry-run` | Preview changes without writing to disk |
+| `--edit <SECTION>` | Reconfigure a single section. Valid sections: `providers`, `auth`, `budget`, `compliance`, `fallback`, `endpoints`, `tools` |
+
+```bash
+grob setup                        # Full interactive wizard
+grob setup --yes                  # Accept all defaults (scripts/CI)
+grob setup --dry-run              # Preview without writing
+grob setup --edit budget          # Reconfigure just the budget section
+```
 
 ### `grob upgrade`
 
