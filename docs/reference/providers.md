@@ -74,7 +74,7 @@ Converts OpenAI SSE chunks to Anthropic SSE format using stateful `StreamTransfo
 - `delta.tool_calls` produces `content_block_start` (tool_use) + `input_json_delta`
 - `finish_reason` produces `content_block_stop` + `message_delta` + `message_stop`
 
-**Codex models**: Detected via model name containing "codex". Uses `/v1/responses` endpoint (or `/codex/responses` for OAuth). System prompt injected from `codex_instructions.md`.
+**Codex models**: Detected via model name containing "codex". Uses `/v1/responses` endpoint (or `/codex/responses` for OAuth). System prompt injected from [`codex-instructions.md`](codex-instructions.md).
 
 **OpenRouter**: Uses `openai` provider type with custom headers (`HTTP-Referer`, `X-Title`).
 
