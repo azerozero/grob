@@ -228,16 +228,26 @@ provider = "groq"
 
 # ── Cache (Phase P : exact + SimHash fuzzy) ──────────────────────
 #
-# 10k entries (~20 MiB) × 4h TTL = couvre une journée de Claude Code.
-# simhash_threshold = 4 favorise les hits sur paraphrases/whitespace
-# (default 3 est strict ; 4 capture mieux le boilerplate sans collisions).
+# Defaults justifiés par le code source :
+# - max_capacity=2000 entries (~4 MiB à 2 KiB avg) suffit pour une
+#   journée de tâches Claude Code déterministes.
+# - ttl_secs=3600 (1h) balance freshness vs hit rate. Au-delà,
+#   risque de servir des réponses stales après update provider.
+# - simhash_threshold=3 ≈ 5% Hamming radius sur 64 bits, capture les
+#   paraphrases sans collisions sur prompts courts.
+#
+# IMPORTANT : le cache hit principalement sur temperature=0
+# (background tasks, summaries, MCP tools/list, tests). Pour les
+# conversations user normales, le hit rate est ~0% car la clé inclut
+# l'history complète. Mesurer grob_cache_hits_total / total via
+# Prometheus avant de bumper.
 
 [cache]
 enabled = true
-max_capacity = 10000
-ttl_secs = 14400
+max_capacity = 2000
+ttl_secs = 3600
 max_entry_bytes = 4194304
-simhash_threshold = 4
+simhash_threshold = 3
 
 # ── Budget ───────────────────────────────────────────────────────
 
