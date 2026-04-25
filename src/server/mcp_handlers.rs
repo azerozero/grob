@@ -41,6 +41,7 @@ pub async fn handle_mcp_rpc(
         "tool_matrix/calibrate" => methods::handle_calibrate(mcp, req.params, req.id.clone()).await,
         "tool_matrix/report" => methods::handle_report(mcp, req.id.clone()).await,
         "grob_configure" => handle_configure(&state, req.params, req.id.clone()).await,
+        "grob_autotune" => handle_autotune(&state, req.params, req.id.clone()).await,
         "grob_hint" => handle_hint(&state, req.params, req.id.clone()).await,
         "grob_keys" => handle_control_tool(&state, "grob/keys", req.params, req.id.clone()).await,
         "grob_tools" => handle_control_tool(&state, "grob/tools", req.params, req.id.clone()).await,
@@ -216,6 +217,31 @@ fn inject_builtin_tools(resp: &mut JsonRpcResponse) {
                     "value": {}
                 },
                 "required": ["action", "section"]
+            }
+        }));
+        tools.push(serde_json::json!({
+            "name": "grob_autotune",
+            "description": "Inspect or batch-apply complexity classifier weight/threshold changes. action=suggest returns current values; action=apply takes a list of {key, value} patches and persists them via the grob_configure pipeline.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["suggest", "apply"]
+                    },
+                    "patches": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "number" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    }
+                },
+                "required": ["action"]
             }
         }));
         tools.push(serde_json::json!({
@@ -603,6 +629,104 @@ pub async fn handle_configure(
                 }),
             ))
         }
+    }
+}
+
+// ── grob_autotune ──────────────────────────────────────────────────────────
+
+/// Handles `grob_autotune` — exposes the classifier as a batchable tuning surface.
+///
+/// `action=suggest` returns the current weights and thresholds with a no-op
+/// proposed value (the MVP does not infer patches; future revisions will).
+/// `action=apply` accepts a list of `{key, value}` patches and persists them
+/// via the same pipeline as `grob_configure update section=classifier`.
+pub async fn handle_autotune(
+    state: &Arc<AppState>,
+    params: serde_json::Value,
+    id: serde_json::Value,
+) -> Result<JsonRpcResponse, JsonRpcError> {
+    use crate::routing::classify::autotune::{current_snapshot, AutotunePatch};
+
+    let action = params
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("suggest");
+
+    match action {
+        "suggest" => {
+            let snapshot = state.snapshot();
+            let cfg = snapshot.config.classifier.clone().unwrap_or_default();
+            let suggestions = current_snapshot(&cfg);
+
+            tracing::info!(count = suggestions.len(), "MCP: grob_autotune suggest");
+
+            Ok(JsonRpcResponse::ok(
+                id,
+                serde_json::json!({
+                    "action": "suggest",
+                    "suggestions": suggestions,
+                }),
+            ))
+        }
+        "apply" => {
+            let patches: Vec<AutotunePatch> = match params.get("patches") {
+                Some(v) => serde_json::from_value(v.clone()).map_err(|e| {
+                    JsonRpcError::invalid_params(id.clone(), &format!("invalid patches: {e}"))
+                })?,
+                None => {
+                    return Err(JsonRpcError::invalid_params(
+                        id,
+                        "action=apply requires a 'patches' array",
+                    ))
+                }
+            };
+
+            if patches.is_empty() {
+                return Err(JsonRpcError::invalid_params(
+                    id,
+                    "'patches' must contain at least one entry",
+                ));
+            }
+
+            let mut new_config = state.snapshot().config.clone();
+            for patch in &patches {
+                if is_key_denied(&ConfigSection::Classifier, &patch.key) {
+                    return Err(JsonRpcError::invalid_params(
+                        id,
+                        &format!("denied: classifier.{} cannot be modified", patch.key),
+                    ));
+                }
+                apply_config_update(
+                    &mut new_config,
+                    &ConfigSection::Classifier,
+                    &patch.key,
+                    &serde_json::json!(patch.value),
+                )
+                .map_err(|e| JsonRpcError::invalid_params(id.clone(), &e))?;
+            }
+
+            super::config_guard::persist_and_reload(state, &new_config)
+                .await
+                .map_err(|e| JsonRpcError::internal(id.clone(), &e.to_string()))?;
+
+            tracing::info!(
+                applied = patches.len(),
+                "MCP: grob_autotune apply + hot-reload"
+            );
+
+            Ok(JsonRpcResponse::ok(
+                id,
+                serde_json::json!({
+                    "action": "apply",
+                    "applied_count": patches.len(),
+                    "status": "applied",
+                }),
+            ))
+        }
+        other => Err(JsonRpcError::invalid_params(
+            id,
+            &format!("unknown action '{other}' (expected 'suggest' or 'apply')"),
+        )),
     }
 }
 
@@ -1071,12 +1195,13 @@ mod tests {
         inject_builtin_tools(&mut resp);
         let tools = resp.result["tools"].as_array().unwrap();
         let names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
-        assert_eq!(tools.len(), 9);
+        assert_eq!(tools.len(), 10);
         assert_eq!(names[0], "grob_hint");
         assert_eq!(names[1], "grob_configure");
-        assert_eq!(names[2], "grob_keys");
-        assert_eq!(names[3], "grob_tools");
-        assert_eq!(names[4], "grob_hit");
+        assert_eq!(names[2], "grob_autotune");
+        assert_eq!(names[3], "grob_keys");
+        assert_eq!(names[4], "grob_tools");
+        assert_eq!(names[5], "grob_hit");
         assert!(names.contains(&"wizard_get_config"));
         assert!(names.contains(&"wizard_set_section"));
         assert!(names.contains(&"wizard_run_doctor"));
@@ -1093,7 +1218,7 @@ mod tests {
         );
         inject_builtin_tools(&mut resp);
         let tools = resp.result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 10);
+        assert_eq!(tools.len(), 11);
         assert_eq!(tools[0]["name"], "web_search");
         assert_eq!(tools[1]["name"], "grob_hint");
     }
