@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.33](https://github.com/azerozero/grob/compare/v0.36.32...v0.36.33) - 2026-04-25
+
+### Fixed
+
+- *(cache)* make simhash hamming threshold configurable via TOML (T-P4-fix)
+
+### Other
+
+- Merge pull request #272 from azerozero/feat/grob-autotune
+- *(how-to)* document grob_hint, classifier tuning, and simhash cache (Phase P)
+- *(docs,ci)* point install script to raw GitHub + add lychee pre-commit hook
+- fix 12 broken internal links (relative-path drift)
+- *(docs-lint)* accept 303 See Other in lychee link checker
+
 ## [0.36.32](https://github.com/azerozero/grob/compare/v0.36.31...v0.36.32) - 2026-04-25
 
 ### Fixed
