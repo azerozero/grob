@@ -242,6 +242,8 @@ pub enum ConfigSection {
     Dlp,
     /// LLM response cache settings.
     Cache,
+    /// Complexity classifier scoring weights and tier thresholds.
+    Classifier,
 }
 
 impl std::fmt::Display for ConfigSection {
@@ -251,6 +253,7 @@ impl std::fmt::Display for ConfigSection {
             ConfigSection::Budget => f.write_str("budget"),
             ConfigSection::Dlp => f.write_str("dlp"),
             ConfigSection::Cache => f.write_str("cache"),
+            ConfigSection::Classifier => f.write_str("classifier"),
         }
     }
 }

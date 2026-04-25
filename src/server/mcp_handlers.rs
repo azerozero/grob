@@ -200,7 +200,7 @@ fn inject_builtin_tools(resp: &mut JsonRpcResponse) {
         }));
         tools.push(serde_json::json!({
             "name": "grob_configure",
-            "description": "Read or update safe configuration sections (router, budget, cache). Credentials and security settings are denied.",
+            "description": "Read or update safe configuration sections (router, budget, cache, classifier). Credentials and security settings are denied.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -210,7 +210,7 @@ fn inject_builtin_tools(resp: &mut JsonRpcResponse) {
                     },
                     "section": {
                         "type": "string",
-                        "enum": ["router", "budget", "dlp", "cache"]
+                        "enum": ["router", "budget", "dlp", "cache", "classifier"]
                     },
                     "key": { "type": "string" },
                     "value": {}
@@ -399,6 +399,22 @@ fn read_config_section(
             "ttl_secs": config.cache.ttl_secs,
             "max_entry_bytes": config.cache.max_entry_bytes,
         }),
+        ConfigSection::Classifier => {
+            let cfg = config.classifier.clone().unwrap_or_default();
+            serde_json::json!({
+                "weights": {
+                    "max_tokens": cfg.weights.max_tokens,
+                    "tools": cfg.weights.tools,
+                    "context_size": cfg.weights.context_size,
+                    "keywords": cfg.weights.keywords,
+                    "system_prompt": cfg.weights.system_prompt,
+                },
+                "thresholds": {
+                    "medium_threshold": cfg.thresholds.medium_threshold,
+                    "complex_threshold": cfg.thresholds.complex_threshold,
+                },
+            })
+        }
     }
 }
 
@@ -486,6 +502,23 @@ fn apply_config_update(
             }
             _ => return Err(format!("unknown cache key: {key}")),
         },
+        ConfigSection::Classifier => {
+            let cfg = config.classifier.get_or_insert_with(Default::default);
+            let v = value
+                .as_f64()
+                .ok_or_else(|| format!("expected number for classifier.{key}"))?
+                as f32;
+            match key {
+                "weights.max_tokens" => cfg.weights.max_tokens = v,
+                "weights.tools" => cfg.weights.tools = v,
+                "weights.context_size" => cfg.weights.context_size = v,
+                "weights.keywords" => cfg.weights.keywords = v,
+                "weights.system_prompt" => cfg.weights.system_prompt = v,
+                "thresholds.medium_threshold" => cfg.thresholds.medium_threshold = v,
+                "thresholds.complex_threshold" => cfg.thresholds.complex_threshold = v,
+                _ => return Err(format!("unknown classifier key: {key}")),
+            }
+        }
     }
     Ok(())
 }
@@ -609,6 +642,7 @@ pub async fn handle_wizard_get_config(
             "budget": read_config_section(config, &ConfigSection::Budget),
             "dlp": read_config_section(config, &ConfigSection::Dlp),
             "cache": read_config_section(config, &ConfigSection::Cache),
+            "classifier": read_config_section(config, &ConfigSection::Classifier),
         }),
     };
 
@@ -793,6 +827,61 @@ mod tests {
         let result = read_config_section(&config, &ConfigSection::Cache);
         assert_eq!(result["enabled"], false);
         assert_eq!(result["ttl_secs"], 3600);
+    }
+
+    #[test]
+    fn test_configure_read_classifier_defaults() {
+        let config = test_app_config();
+        let result = read_config_section(&config, &ConfigSection::Classifier);
+        assert_eq!(result["weights"]["tools"].as_f64().unwrap(), 1.0);
+        assert_eq!(result["weights"]["max_tokens"].as_f64().unwrap(), 1.0);
+        assert_eq!(
+            result["thresholds"]["medium_threshold"].as_f64().unwrap(),
+            2.0
+        );
+        assert_eq!(
+            result["thresholds"]["complex_threshold"].as_f64().unwrap(),
+            5.0
+        );
+    }
+
+    #[test]
+    fn test_configure_update_classifier_weight() {
+        let mut config = test_app_config();
+        apply_config_update(
+            &mut config,
+            &ConfigSection::Classifier,
+            "weights.tools",
+            &serde_json::json!(5.0),
+        )
+        .unwrap();
+        assert_eq!(config.classifier.unwrap().weights.tools, 5.0);
+    }
+
+    #[test]
+    fn test_configure_update_classifier_threshold() {
+        let mut config = test_app_config();
+        apply_config_update(
+            &mut config,
+            &ConfigSection::Classifier,
+            "thresholds.complex_threshold",
+            &serde_json::json!(7.5),
+        )
+        .unwrap();
+        assert_eq!(config.classifier.unwrap().thresholds.complex_threshold, 7.5);
+    }
+
+    #[test]
+    fn test_configure_update_classifier_unknown_key() {
+        let mut config = test_app_config();
+        let err = apply_config_update(
+            &mut config,
+            &ConfigSection::Classifier,
+            "weights.bogus",
+            &serde_json::json!(1.0),
+        )
+        .unwrap_err();
+        assert!(err.contains("unknown classifier key"));
     }
 
     #[test]
