@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.32](https://github.com/azerozero/grob/compare/v0.36.31...v0.36.32) - 2026-04-25
+
+### Fixed
+
+- *(ci,openai)* relocate codex_instructions to provider dir + drop lychee --exclude-mail
+
+### Other
+
+- *(deps)* bump rustls-webpki 0.103.12 -> 0.103.13 (RUSTSEC-2026-0104)
+- *(docs,tier0)* hygiene structurelle — ADR 0007 + codex move + CONTRIBUTING + SECURITY + RTM (#36 #37 #38 #39) ([#259](https://github.com/azerozero/grob/pull/259))
+- *(traits)* # Examples on 3 core public traits ([#28](https://github.com/azerozero/grob/pull/28)) ([#258](https://github.com/azerozero/grob/pull/258))
+- cli.md missing flags + prose lint jobs (#13 #27) ([#257](https://github.com/azerozero/grob/pull/257))
+- *(deploy)* switch grob.container to Type=exec ([#20](https://github.com/azerozero/grob/pull/20)) ([#256](https://github.com/azerozero/grob/pull/256))
+
 ## [0.36.31](https://github.com/azerozero/grob/compare/v0.36.30...v0.36.31) - 2026-04-21
 
 ### Added
