@@ -309,10 +309,14 @@ pub(crate) fn init_security(config: &AppConfig) -> anyhow::Result<SecurityServic
             config.cache.max_capacity,
             config.cache.ttl_secs,
             config.cache.max_entry_bytes,
+            config.cache.simhash_threshold,
         );
         info!(
-            "💾 Response cache enabled: max_capacity={}, ttl={}s, max_entry={}B",
-            config.cache.max_capacity, config.cache.ttl_secs, config.cache.max_entry_bytes
+            "💾 Response cache enabled: max_capacity={}, ttl={}s, max_entry={}B, simhash_threshold={}",
+            config.cache.max_capacity,
+            config.cache.ttl_secs,
+            config.cache.max_entry_bytes,
+            config.cache.simhash_threshold,
         );
         Some(Arc::new(cache))
     } else {

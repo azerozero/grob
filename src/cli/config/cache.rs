@@ -17,6 +17,9 @@ pub struct CacheConfig {
     /// Maximum single entry size in bytes (skip caching responses larger than this)
     #[serde(default = "default_cache_max_entry_bytes")]
     pub max_entry_bytes: usize,
+    /// Maximum Hamming distance for a SimHash fuzzy cache hit (0 = exact only).
+    #[serde(default = "default_simhash_threshold")]
+    pub simhash_threshold: u32,
 }
 
 impl Default for CacheConfig {
@@ -26,6 +29,7 @@ impl Default for CacheConfig {
             max_capacity: default_cache_max_capacity(),
             ttl_secs: default_cache_ttl(),
             max_entry_bytes: default_cache_max_entry_bytes(),
+            simhash_threshold: default_simhash_threshold(),
         }
     }
 }
@@ -46,4 +50,33 @@ fn default_cache_ttl() -> u64 {
 // (e.g., large code generation) have low cache hit probability anyway.
 fn default_cache_max_entry_bytes() -> usize {
     2 * 1024 * 1024
+}
+
+// NOTE: 3 bits over 64 = ~5% Hamming radius. Empirically catches paraphrases
+// while avoiding false positives between unrelated short prompts.
+fn default_simhash_threshold() -> u32 {
+    3
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_simhash_threshold_from_toml() {
+        let toml = "enabled = true\nsimhash_threshold = 5";
+        let cfg: CacheConfig = toml::from_str(toml).expect("parse cache config");
+        assert_eq!(cfg.simhash_threshold, 5);
+    }
+
+    #[test]
+    fn defaults_simhash_threshold_when_absent() {
+        let cfg: CacheConfig = toml::from_str("enabled = true").expect("parse cache config");
+        assert_eq!(cfg.simhash_threshold, 3);
+    }
+
+    #[test]
+    fn default_impl_uses_threshold_3() {
+        assert_eq!(CacheConfig::default().simhash_threshold, 3);
+    }
 }
