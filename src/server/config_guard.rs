@@ -48,6 +48,7 @@ pub fn is_key_denied(section: &ConfigSection, key: &str) -> bool {
         ConfigSection::Budget => "budget",
         ConfigSection::Dlp => "dlp",
         ConfigSection::Cache => "cache",
+        ConfigSection::Classifier => "classifier",
     };
     is_section_or_key_denied(section_str, key)
 }
