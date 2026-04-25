@@ -1,4 +1,5 @@
 use crate::auth::TokenStore;
+use crate::cli::ProviderConfig;
 use crate::features::dlp::session::DlpSessionManager;
 use crate::features::token_pricing::spend::SpendTracker;
 use crate::features::token_pricing::SharedPricingTable;
@@ -47,9 +48,11 @@ pub(crate) async fn init_core_services(
     #[cfg(not(feature = "oauth"))]
     let token_store = TokenStore::new_empty();
 
+    let resolved_providers = resolve_provider_secrets(&config.providers, &grob_store);
+
     let provider_registry = Arc::new(
         ProviderRegistry::from_configs_with_models(
-            &config.providers,
+            &resolved_providers,
             Some(token_store.clone()),
             &config.models,
             &config.server.timeouts,
@@ -90,6 +93,71 @@ pub(crate) async fn init_core_services(
     }
 
     Ok((grob_store, token_store, provider_registry))
+}
+
+/// Resolves `api_key` placeholders in provider configs.
+///
+/// Three modes are recognised on the raw string value:
+/// - `secret:<name>` → looked up in [`GrobStore::get_secret`] (encrypted store)
+/// - `$ENV_VAR`     → resolved from process env via `std::env::var`
+/// - other          → used as-is
+///
+/// Returns a cloned vector with `api_key` replaced. Unresolved placeholders
+/// are kept as-is so the existing fallback / warning paths still trigger.
+fn resolve_provider_secrets(
+    providers: &[ProviderConfig],
+    store: &crate::storage::GrobStore,
+) -> Vec<ProviderConfig> {
+    use secrecy::{ExposeSecret, SecretString};
+
+    providers
+        .iter()
+        .cloned()
+        .map(|mut p| {
+            let raw = p.api_key.as_ref().map(|s| s.expose_secret().to_string());
+            if let Some(raw) = raw {
+                if let Some(name) = raw.strip_prefix("secret:") {
+                    match store.get_secret(name) {
+                        Some(resolved) => {
+                            p.api_key = Some(resolved);
+                            tracing::info!(
+                                "🔐 Resolved api_key for provider '{}' from grob secret '{}'",
+                                p.name,
+                                name
+                            );
+                        }
+                        None => {
+                            tracing::warn!(
+                                "Provider '{}' references unknown secret '{}' (use `grob secrets add {}`)",
+                                p.name,
+                                name,
+                                name
+                            );
+                        }
+                    }
+                } else if let Some(var) = raw.strip_prefix('$') {
+                    match std::env::var(var) {
+                        Ok(v) => {
+                            p.api_key = Some(SecretString::new(v));
+                            tracing::info!(
+                                "🔓 Resolved api_key for provider '{}' from env var ${}",
+                                p.name,
+                                var
+                            );
+                        }
+                        Err(_) => {
+                            tracing::warn!(
+                                "Provider '{}' references env var ${} but it is not set",
+                                p.name,
+                                var
+                            );
+                        }
+                    }
+                }
+            }
+            p
+        })
+        .collect()
 }
 
 /// Initializes tracing, spend tracker, pricing table, and Prometheus.

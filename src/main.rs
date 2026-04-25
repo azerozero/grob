@@ -14,7 +14,7 @@ use tracing_subscriber::EnvFilter;
 
 use grob::cli;
 use grob::cli::args::{
-    detect_bare_trailing_cmd, Cli, Commands, KeyAction, LogsAction, PresetAction,
+    detect_bare_trailing_cmd, Cli, Commands, KeyAction, LogsAction, PresetAction, SecretsAction,
 };
 use grob::commands;
 
@@ -233,6 +233,14 @@ async fn main() -> anyhow::Result<()> {
             KeyAction::Revoke { id_or_prefix } => {
                 commands::key::cmd_key_revoke(&config, &id_or_prefix).await
             }
+        },
+        Commands::Secrets { action } => match action {
+            SecretsAction::Add { name } => commands::secrets::cmd_secrets_add(&name),
+            SecretsAction::List { json } => commands::secrets::cmd_secrets_list(json),
+            SecretsAction::Show { name, unsafe_show } => {
+                commands::secrets::cmd_secrets_show(&name, unsafe_show)
+            }
+            SecretsAction::Rm { name, force } => commands::secrets::cmd_secrets_rm(&name, force),
         },
         Commands::Rollback => {
             commands::config_rollback::cmd_config_rollback(&config, &config_source).await?;
