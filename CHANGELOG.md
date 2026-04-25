@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.34](https://github.com/azerozero/grob/compare/v0.36.33...v0.36.34) - 2026-04-25
+
+### Added
+
+- *(secrets)* AES-GCM encrypted upstream api_keys + grob secrets CLI
+
+### Fixed
+
+- *(profiles)* rename silently-ignored fields + wire Phase P in full-opti-v5
+
 ## [0.36.33](https://github.com/azerozero/grob/compare/v0.36.32...v0.36.33) - 2026-04-25
 
 ### Fixed
