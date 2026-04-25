@@ -32,7 +32,7 @@ All requests are translated to Grob's canonical format internally, routed throug
 
 ## Translation pipeline
 
-See [API Compatibility Reference — Responses pipeline](reference/api-compatibility.md#translation-pipeline-1) for the full diagram.
+See [API Compatibility Reference — Responses pipeline](api-compatibility.md#translation-pipeline-1) for the full diagram.
 
 For streaming, the `AnthropicToResponsesStream` state machine converts Anthropic SSE events into Responses API named-event SSE events on the fly.
 

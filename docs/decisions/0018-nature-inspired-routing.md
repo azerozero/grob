@@ -369,8 +369,8 @@ Compliance with this ADR will be verified by:
 
 ### Internal discussion threads
 
-- [Backlog PO — Phase RE (section complète)](../../../obsidian/grob/30%20-%20Roadmap/Backlog%20PO.md#phase-re) — source of the phase breakdown, effort estimates, and schema examples.
-- [Decisions Architecte — D-12 nature-inspired routing](../../../obsidian/grob/30%20-%20Roadmap/Decisions%20Architecte.md) — architect brief referencing this ADR.
+- Backlog PO — Phase RE (section complète) — internal Obsidian vault; source of the phase breakdown, effort estimates, and schema examples.
+- Decisions Architecte — D-12 nature-inspired routing — internal Obsidian vault; architect brief referencing this ADR.
 - Sprint S5 shared-state — T-R0 delivery, commis-3 assignment, 3/3 unanimity required on `docs/decisions/**`.
 
 ### Target schema examples
