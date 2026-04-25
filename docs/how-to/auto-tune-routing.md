@@ -104,8 +104,65 @@ all `1.0` with thresholds at `2.0` (medium) and `5.0` (complex):
 
 To make tool-heavy requests more likely to score as complex, raise the
 `tools` weight. To ignore keyword matching entirely, set its weight to
-`0.0`. These are configured in `[[tiers]]` scoring config (see the
-configuration reference).
+`0.0`.
+
+## Tune classifier weights via grob_configure
+
+The `[classifier]` section is exposed as a writable section of
+`grob_configure`, so you can adjust weights and thresholds at runtime
+without restarting the proxy. Hot-reload rebuilds the scorer
+atomically — in-flight requests continue on the old snapshot.
+
+### Read the current values
+
+```
+grob_configure action=read section=classifier
+```
+
+Returns:
+
+```json
+{
+  "weights": {
+    "max_tokens": 1.0, "tools": 1.0, "context_size": 1.0,
+    "keywords": 1.0, "system_prompt": 1.0
+  },
+  "thresholds": {
+    "medium_threshold": 2.0, "complex_threshold": 5.0
+  }
+}
+```
+
+### Update one key at a time
+
+```json
+{
+  "method": "grob_configure",
+  "params": {
+    "action": "update",
+    "section": "classifier",
+    "key": "weights.tools",
+    "value": 5.0
+  }
+}
+```
+
+Whitelisted keys:
+
+- `weights.max_tokens`, `weights.tools`, `weights.context_size`,
+  `weights.keywords`, `weights.system_prompt`
+- `thresholds.medium_threshold`, `thresholds.complex_threshold`
+
+Other keys are rejected with `unknown classifier key`. Credentials and
+DLP settings remain blocked by the central deny-list.
+
+### Bypass the scorer per request
+
+When a client already knows the right tier, override scoring entirely
+with [`grob_hint`](use-grob-hint.md) (header, body field, or MCP
+tool). The hint is consumed for one request only.
+
+## Iterate
 
 ## Iterate
 
@@ -121,5 +178,9 @@ disk space.
 
 ## Further reading
 
+- [Use grob_hint to override request complexity](use-grob-hint.md) — bypass
+  the scorer entirely when the client knows the tier.
+- [Configure the SimHash fuzzy response cache](configure-simhash-cache.md) — pair
+  classifier tuning with cache tuning for end-to-end speedup.
 - [Configuration reference](../reference/configuration.md) -- full list of config keys
 - [Observability reference](../reference/observability.md) -- Prometheus metrics and SSE stream
