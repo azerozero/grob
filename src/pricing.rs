@@ -132,6 +132,12 @@ pub static KNOWN_PRICING: &[ModelPricing] = &[
         input_per_million: 0.14,
         output_per_million: 0.14,
     },
+    // GLM-4.7-Flash (Z.ai, released 2026-01-19) — free tier per Z.ai pricing
+    ModelPricing {
+        model: "glm-4.7-flash",
+        input_per_million: 0.0,
+        output_per_million: 0.0,
+    },
     ModelPricing {
         model: "MiniMax-M2",
         input_per_million: 0.30,
@@ -141,6 +147,28 @@ pub static KNOWN_PRICING: &[ModelPricing] = &[
         model: "minimax-m2",
         input_per_million: 0.30,
         output_per_million: 1.20,
+    },
+    // MiniMax M2.5 (released 2026-02-12) — same input price as M2, same output
+    ModelPricing {
+        model: "MiniMax-M2.5",
+        input_per_million: 0.30,
+        output_per_million: 1.20,
+    },
+    ModelPricing {
+        model: "minimax-m2.5",
+        input_per_million: 0.30,
+        output_per_million: 1.20,
+    },
+    // M2.5-Lightning: identical capability, 2x throughput, 2x output cost
+    ModelPricing {
+        model: "MiniMax-M2.5-Lightning",
+        input_per_million: 0.30,
+        output_per_million: 2.40,
+    },
+    ModelPricing {
+        model: "minimax-m2.5-lightning",
+        input_per_million: 0.30,
+        output_per_million: 2.40,
     },
     ModelPricing {
         model: "kimi-k2",
@@ -162,6 +190,24 @@ pub static KNOWN_PRICING: &[ModelPricing] = &[
         model: "llama-3.1-8b",
         input_per_million: 0.05,
         output_per_million: 0.08,
+    },
+    // Llama 3.3 70B (Groq versatile endpoint)
+    ModelPricing {
+        model: "llama-3.3-70b-versatile",
+        input_per_million: 0.59,
+        output_per_million: 0.79,
+    },
+    // Inception Labs (diffusion LLM, fast)
+    ModelPricing {
+        model: "mercury-coder-small",
+        input_per_million: 0.25,
+        output_per_million: 1.25,
+    },
+    // Google Gemini
+    ModelPricing {
+        model: "gemini-2.5-pro",
+        input_per_million: 1.25,
+        output_per_million: 5.00,
     },
 ];
 
@@ -185,4 +231,58 @@ pub fn pricing(model: &str) -> Option<&'static ModelPricing> {
         let lower = model.to_lowercase();
         KNOWN_PRICING.iter().find(|p| lower.contains(p.model))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimax_m25_lookup() {
+        let p = pricing("MiniMax-M2.5").expect("M2.5 listed");
+        assert_eq!(p.input_per_million, 0.30);
+        assert_eq!(p.output_per_million, 1.20);
+    }
+
+    #[test]
+    fn minimax_m25_lightning_double_output_cost() {
+        let p = pricing("MiniMax-M2.5-Lightning").expect("Lightning listed");
+        assert_eq!(p.input_per_million, 0.30);
+        assert_eq!(p.output_per_million, 2.40);
+    }
+
+    #[test]
+    fn glm_47_flash_is_free_tier() {
+        let p = pricing("glm-4.7-flash").expect("glm-4.7-flash listed");
+        assert_eq!(p.input_per_million, 0.0);
+        assert_eq!(p.output_per_million, 0.0);
+    }
+
+    #[test]
+    fn llama_33_70b_versatile_uses_groq_pricing() {
+        let p = pricing("llama-3.3-70b-versatile").expect("listed");
+        assert_eq!(p.input_per_million, 0.59);
+        assert_eq!(p.output_per_million, 0.79);
+    }
+
+    #[test]
+    fn mercury_coder_small_listed() {
+        let p = pricing("mercury-coder-small").expect("listed");
+        assert_eq!(p.input_per_million, 0.25);
+        assert_eq!(p.output_per_million, 1.25);
+    }
+
+    #[test]
+    fn gemini_25_pro_listed() {
+        let p = pricing("gemini-2.5-pro").expect("listed");
+        assert_eq!(p.input_per_million, 1.25);
+        assert_eq!(p.output_per_million, 5.00);
+    }
+
+    #[test]
+    fn calculate_one_million_input() {
+        let p = pricing("MiniMax-M2.5").unwrap();
+        let cost = p.calculate(1_000_000, 0);
+        assert!((cost - 0.30).abs() < 1e-9);
+    }
 }
