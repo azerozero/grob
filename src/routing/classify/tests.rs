@@ -30,6 +30,7 @@ fn create_test_config() -> AppConfig {
         version: None,
         security: Default::default(),
         cache: Default::default(),
+        secrets: Default::default(),
         compliance: Default::default(),
         otel: Default::default(),
         log_export: Default::default(),

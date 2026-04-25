@@ -48,7 +48,10 @@ pub(crate) async fn init_core_services(
     #[cfg(not(feature = "oauth"))]
     let token_store = TokenStore::new_empty();
 
-    let resolved_providers = resolve_provider_secrets(&config.providers, &grob_store);
+    let secret_backend =
+        crate::storage::secrets::build_backend(&config.secrets, grob_store.clone());
+    info!("🔑 Secret backend: {}", secret_backend.label());
+    let resolved_providers = resolve_provider_secrets(&config.providers, secret_backend.as_ref());
 
     let provider_registry = Arc::new(
         ProviderRegistry::from_configs_with_models(
@@ -106,7 +109,7 @@ pub(crate) async fn init_core_services(
 /// are kept as-is so the existing fallback / warning paths still trigger.
 fn resolve_provider_secrets(
     providers: &[ProviderConfig],
-    store: &crate::storage::GrobStore,
+    backend: &dyn crate::storage::secrets::SecretBackend,
 ) -> Vec<ProviderConfig> {
     use secrecy::{ExposeSecret, SecretString};
 
@@ -117,21 +120,22 @@ fn resolve_provider_secrets(
             let raw = p.api_key.as_ref().map(|s| s.expose_secret().to_string());
             if let Some(raw) = raw {
                 if let Some(name) = raw.strip_prefix("secret:") {
-                    match store.get_secret(name) {
+                    match backend.get(name) {
                         Some(resolved) => {
                             p.api_key = Some(resolved);
                             tracing::info!(
-                                "🔐 Resolved api_key for provider '{}' from grob secret '{}'",
+                                "🔐 Resolved api_key for provider '{}' from {} backend (name='{}')",
                                 p.name,
+                                backend.label(),
                                 name
                             );
                         }
                         None => {
                             tracing::warn!(
-                                "Provider '{}' references unknown secret '{}' (use `grob secrets add {}`)",
+                                "Provider '{}' references unknown secret '{}' on backend '{}'",
                                 p.name,
                                 name,
-                                name
+                                backend.label()
                             );
                         }
                     }

@@ -17,6 +17,8 @@ pub(crate) mod encrypt;
 pub(crate) mod journal;
 /// Legacy storage detection and warning.
 pub mod migrate;
+/// Pluggable secret backends (local encrypted, env, file).
+pub mod secrets;
 
 use crate::auth::token_store::OAuthToken;
 use crate::auth::virtual_keys::VirtualKeyRecord;

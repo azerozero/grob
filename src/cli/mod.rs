@@ -15,8 +15,8 @@ pub use config::{
     ComplianceConfig, EnforcementMode, FanOutConfig, FanOutMode, FipsConfig,
     HealthCheckProviderConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig, PoolConfig,
     PoolStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule, ProviderConfig,
-    RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TierConfig, TierMatchCondition,
-    TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
+    RouterConfig, SecretsBackend, SecretsConfig, SecretsFileConfig, SecurityConfig, ServerConfig,
+    TeeConfig, TierConfig, TierMatchCondition, TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
