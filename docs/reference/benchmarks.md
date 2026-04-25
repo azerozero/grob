@@ -36,10 +36,10 @@ Overhead = P50 proxy − P50 direct baseline, same machine, same conditions.
 
 | Proxy | Instance | vCPU | P50 overhead | req/s | Routing | Auth | Rate limit | Cache | DLP | Source |
 |-------|----------|:----:|-------------:|------:|:-------:|:----:|:----------:|:-----:|:---:|--------|
-| **Grob** | t3.xlarge | 4 | **127 µs** | 17,700 | Yes | Yes | Yes | Yes | — | [grob-bench](https://github.com/azerozero/grob-bench) |
-| **Grob** | t3.xlarge | 4 | **161 µs** | 15,300 | Yes | Yes | Yes | Yes | Yes | [grob-bench](https://github.com/azerozero/grob-bench) |
-| **Grob** | c7g.xlarge | 4 | **67 µs** | 35,500 | Yes | Yes | Yes | Yes | — | [grob-bench](https://github.com/azerozero/grob-bench) |
-| **Grob** | c7g.xlarge | 4 | **90 µs** | 29,500 | Yes | Yes | Yes | Yes | Yes | [grob-bench](https://github.com/azerozero/grob-bench) |
+| **Grob** | t3.xlarge | 4 | **127 µs** | 17,700 | Yes | Yes | Yes | Yes | — | [`benches/`](../../benches/) |
+| **Grob** | t3.xlarge | 4 | **161 µs** | 15,300 | Yes | Yes | Yes | Yes | Yes | [`benches/`](../../benches/) |
+| **Grob** | c7g.xlarge | 4 | **67 µs** | 35,500 | Yes | Yes | Yes | Yes | — | [`benches/`](../../benches/) |
+| **Grob** | c7g.xlarge | 4 | **90 µs** | 29,500 | Yes | Yes | Yes | Yes | Yes | [`benches/`](../../benches/) |
 | Bifrost | t3.xlarge | 4 | 11 µs | — | — | — | — | — | — | [Maxim blog](https://www.getmaxim.ai/blog/bifrost-a-drop-in-llm-proxy-40x-faster-than-litellm/) |
 | TensorZero | c7i.xlarge | 4 | 370 µs | — | Yes | — | — | — | — | [TensorZero docs](https://www.tensorzero.com/docs/gateway/benchmarks) |
 | LiteLLM | 4c / 8 GB | 4 | ~5 ms | — | Yes | Yes | Yes | — | — | [LiteLLM docs](https://docs.litellm.ai/docs/benchmarks) |

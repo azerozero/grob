@@ -192,5 +192,5 @@ let response = reqwest::Client::new()
 
 ## Related
 
-- [OpenCode Anthropic Auth](https://github.com/sst/opencode-anthropic-auth) - Inspiration for this implementation
+- [OpenCode](https://github.com/sst/opencode) - Inspiration for this implementation
 - [Anthropic OAuth Docs](https://docs.anthropic.com/claude/reference/oauth)

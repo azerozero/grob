@@ -359,7 +359,7 @@ Compliance with this ADR will be verified by:
 
 ### External references
 
-- Matt Klein, [Envoy's architectural model](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/intro/arch_overview) — clusters (topology) vs listeners/filters (policy).
+- Matt Klein, [Envoy's architectural model](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/intro/intro) — clusters (topology) vs listeners/filters (policy).
 - Matt Holt, [Caddy `reverse_proxy` directive](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) — the ergonomic benchmark for this ADR. Every example we ship should be benchmarked against Caddy's equivalent in lines of config.
 - Jeffrey Dean & Luiz André Barroso, [The Tail at Scale](https://research.google/pubs/pub40801/), *Communications of the ACM*, Vol. 56, No. 2, 2013 — the canonical reference for hedged requests.
 - Daniel J. Russo, Benjamin Van Roy, Abbas Kazerouni, Ian Osband & Zheng Wen, [A Tutorial on Thompson Sampling](https://arxiv.org/abs/1707.02038), *Foundations and Trends in Machine Learning*, 2018 — Thompson sampling reference.
