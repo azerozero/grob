@@ -6,6 +6,8 @@
 //! parent alongside the nature-inspired primitives (circuit breaker, health
 //! check) introduced by ADR-0018.
 
+/// Offline auto-tuning helper for the complexity classifier.
+pub mod autotune;
 /// Stateless complexity classifier for tier-based provider selection.
 // NOTE: `classify` inside `classify/` is intentional — the outer module hosts
 // the full classification engine (router, inference, rules, tier_match), and
