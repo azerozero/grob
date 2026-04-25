@@ -180,6 +180,10 @@ name = "routing"
 harness = false
 
 [[bench]]
+name = "classify"
+harness = false
+
+[[bench]]
 name = "hotpath"
 harness = false
 

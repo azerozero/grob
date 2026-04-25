@@ -25,7 +25,7 @@ pub(crate) mod tier_match;
 // Re-export the stateless complexity classifier's public types so callers can
 // reach them as `routing::classify::ComplexityTier` instead of the more
 // awkward `routing::classify::classify::ComplexityTier`.
-pub use classify::{ComplexityTier, ScoringConfig, ScoringWeights};
+pub use classify::{classify_complexity, ComplexityTier, ScoringConfig, ScoringWeights};
 
 use crate::models::config::AppConfig;
 use crate::models::{CanonicalRequest, RouteDecision, RouteType};
