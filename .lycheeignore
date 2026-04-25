@@ -2,4 +2,3 @@
 ^https?://[^/]+\.example\.(com|org|net)(/.*)?$
 ^https?://grob-(qa|prod|dev|staging)\.example\.com(/.*)?$
 ^https?://.*\.internal(/.*)?$
-^https?://grob\.sh(/.*)?$
