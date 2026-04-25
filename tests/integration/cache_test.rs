@@ -30,7 +30,7 @@ fn test_request(model: &str, text: &str) -> CanonicalRequest {
 
 #[tokio::test]
 async fn test_cache_miss_then_hit() {
-    let cache = ResponseCache::new(100, 60, 1_000_000);
+    let cache = ResponseCache::new(100, 60, 1_000_000, 3);
     let request = test_request("claude-3-5-sonnet", "Hello");
 
     let key =
@@ -60,7 +60,7 @@ async fn test_cache_miss_then_hit() {
 
 #[tokio::test]
 async fn test_cache_different_tenants_independent() {
-    let cache = ResponseCache::new(100, 60, 1_000_000);
+    let cache = ResponseCache::new(100, 60, 1_000_000, 3);
     let request = test_request("claude-3-5-sonnet", "Hello");
 
     let key_a =
@@ -92,7 +92,7 @@ async fn test_cache_different_tenants_independent() {
 
 #[tokio::test]
 async fn test_cache_different_prompts_independent() {
-    let _cache = ResponseCache::new(100, 60, 1_000_000);
+    let _cache = ResponseCache::new(100, 60, 1_000_000, 3);
     let req1 = test_request("claude-3-5-sonnet", "Hello");
     let req2 = test_request("claude-3-5-sonnet", "Goodbye");
 
@@ -109,7 +109,7 @@ async fn test_cache_different_prompts_independent() {
 
 #[tokio::test]
 async fn test_cache_invalidate_all() {
-    let cache = ResponseCache::new(100, 60, 1_000_000);
+    let cache = ResponseCache::new(100, 60, 1_000_000, 3);
     let request = test_request("claude-3-5-sonnet", "Hello");
     let key =
         ResponseCache::compute_key_from_request("tenant", &request).expect("should compute key");
@@ -141,7 +141,7 @@ async fn test_cache_invalidate_all() {
 
 #[tokio::test]
 async fn test_cache_hit_miss_counters() {
-    let cache = ResponseCache::new(100, 60, 1_000_000);
+    let cache = ResponseCache::new(100, 60, 1_000_000, 3);
 
     let request = test_request("claude-3-5-sonnet", "Hello");
     let key =

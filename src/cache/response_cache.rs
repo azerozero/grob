@@ -52,7 +52,12 @@ pub struct ResponseCache {
 
 impl ResponseCache {
     /// Create a new response cache from config.
-    pub fn new(max_capacity: u64, ttl_secs: u64, max_entry_bytes: usize) -> Self {
+    pub fn new(
+        max_capacity: u64,
+        ttl_secs: u64,
+        max_entry_bytes: usize,
+        simhash_threshold: u32,
+    ) -> Self {
         let evictions = std::sync::Arc::new(AtomicU64::new(0));
         let evictions_clone = evictions.clone();
 
@@ -66,7 +71,7 @@ impl ResponseCache {
 
         Self {
             inner: cache,
-            simhash: SimHashCache::new(max_capacity, ttl_secs),
+            simhash: SimHashCache::with_threshold(simhash_threshold, max_capacity, ttl_secs),
             max_entry_bytes,
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
@@ -409,7 +414,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_put_get() {
-        let cache = ResponseCache::new(100, 60, 1024 * 1024);
+        let cache = ResponseCache::new(100, 60, 1024 * 1024, 3);
         let key = "test-key".to_string();
         let resp = CachedResponse {
             body: b"hello".to_vec(),
@@ -425,7 +430,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_miss() {
-        let cache = ResponseCache::new(100, 60, 1024 * 1024);
+        let cache = ResponseCache::new(100, 60, 1024 * 1024, 3);
         assert!(cache.get("nonexistent").await.is_none());
         let stats = cache.stats();
         assert_eq!(stats.misses, 1);
@@ -433,7 +438,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cache_skip_too_large() {
-        let cache = ResponseCache::new(100, 60, 10); // 10 byte limit
+        let cache = ResponseCache::new(100, 60, 10, 3); // 10 byte limit
         let key = "big".to_string();
         let resp = CachedResponse {
             body: vec![0u8; 100],
@@ -481,7 +486,7 @@ mod tests {
     fn test_invalidate_all() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
-            let cache = ResponseCache::new(100, 60, 1024 * 1024);
+            let cache = ResponseCache::new(100, 60, 1024 * 1024, 3);
             let resp = CachedResponse {
                 body: b"data".to_vec(),
                 content_type: "application/json".to_string(),
