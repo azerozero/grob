@@ -29,7 +29,7 @@ max_files = 5
 default = "claude-sonnet-4-6"
 think = "claude-opus-4-6"
 background = "background-model"
-web_search = "claude-sonnet-4-6"
+websearch = "claude-sonnet-4-6"
 
 # ── Classifier (seuils du scorer heuristique) ───────────────────
 
@@ -226,18 +226,24 @@ actual_model = "llama-3.1-8b-instant"
 priority = 2
 provider = "groq"
 
-# ── Cache ────────────────────────────────────────────────────────
+# ── Cache (Phase P : exact + SimHash fuzzy) ──────────────────────
+#
+# 10k entries (~20 MiB) × 4h TTL = couvre une journée de Claude Code.
+# simhash_threshold = 4 favorise les hits sur paraphrases/whitespace
+# (default 3 est strict ; 4 capture mieux le boilerplate sans collisions).
 
 [cache]
 enabled = true
-ttl_seconds = 3600
-max_entries = 1000
+max_capacity = 10000
+ttl_secs = 14400
+max_entry_bytes = 4194304
+simhash_threshold = 4
 
 # ── Budget ───────────────────────────────────────────────────────
 
 [budget]
 monthly_limit_usd = 100.0
-warning_threshold_percent = 80
+warn_at_percent = 80
 
 # ── DLP ──────────────────────────────────────────────────────────
 
@@ -247,6 +253,11 @@ scan_input = true
 scan_output = true
 
 # ── Security ─────────────────────────────────────────────────────
+#
+# 2 req/s avec burst 30 ≈ 120 req/min soutenu, mais tolère des
+# salves (parallel tool calls Claude Code peut envoyer 5-10 reqs
+# en même temps).
 
 [security]
-rate_limit_rpm = 120
+rate_limit_rps = 2
+rate_limit_burst = 30
