@@ -42,6 +42,18 @@ entry = "cargo clippy --all-targets -- -D warnings"
 types = ["rust"]
 pass_filenames = false
 
+# Lychee (offline) — catches relative-path drift in markdown links
+# without hitting the network. The CI Docs Lint job runs the online
+# variant; this hook just prevents the obvious internal regressions.
+[[repos.hooks]]
+id = "lychee-offline"
+name = "lychee (offline link check)"
+language = "system"
+entry = "sh"
+args = ["-c", "lychee --offline --no-progress --include-fragments docs/**/*.md README.md CLAUDE.md"]
+types = ["markdown"]
+pass_filenames = false
+
 # Tests — expensive, runs only on pre-push
 [[repos.hooks]]
 id = "cargo-test"

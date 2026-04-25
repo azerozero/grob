@@ -15,7 +15,7 @@ Choose one of three methods:
 **Option A: Install script (recommended)**
 
 ```bash
-curl -fsSL https://grob.sh | sh
+curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
 ```
 
 **Option B: Homebrew (macOS / Linux)**

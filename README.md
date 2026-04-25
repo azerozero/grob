@@ -54,7 +54,7 @@ brew install azerozero/tap/grob
 
 **Without Homebrew** (Linux / CI):
 ```bash
-curl -fsSL https://grob.sh | sh
+curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
 ```
 
 Then:
