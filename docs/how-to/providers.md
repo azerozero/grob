@@ -53,7 +53,7 @@ oauth_provider = "anthropic-max"
 
 On first `grob start`, a browser window opens for OAuth login. Tokens are stored as encrypted files in `~/.grob/tokens/` (AES-256-GCM) and refreshed automatically.
 
-See [OAuth Setup](how-to/oauth-setup.md) for details.
+See [OAuth Setup](oauth-setup.md) for details.
 
 ---
 
@@ -171,7 +171,7 @@ ollama pull qwen2.5-coder:7b
 
 ## Gemini
 
-See [Gemini Integration](how-to/gemini-integration.md) for full details including Vertex AI.
+See [Gemini Integration](gemini-integration.md) for full details including Vertex AI.
 
 ### API key
 

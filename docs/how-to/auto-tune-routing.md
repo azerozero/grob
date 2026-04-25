@@ -123,4 +123,3 @@ disk space.
 
 - [Configuration reference](../reference/configuration.md) -- full list of config keys
 - [Observability reference](../reference/observability.md) -- Prometheus metrics and SSE stream
-- [Complexity scoring](../explanation/complexity-scoring.md) -- how the heuristic works

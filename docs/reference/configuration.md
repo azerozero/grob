@@ -341,7 +341,7 @@ poll_interval = "1h"
 verify_signature = false
 ```
 
-DLP scanning uses prefix-gated DFA matching with Aho-Corasick pre-filtering for O(n) performance. 25 built-in rules cover AWS keys, API tokens, private keys, database URIs, and more. See the [DLP Reference](reference/dlp.md) for the complete configuration guide.
+DLP scanning uses prefix-gated DFA matching with Aho-Corasick pre-filtering for O(n) performance. 25 built-in rules cover AWS keys, API tokens, private keys, database URIs, and more. See the [DLP Reference](dlp.md) for the complete configuration guide.
 
 ## Tap (Webhook Events)
 
@@ -379,7 +379,7 @@ escalation_threshold = "high"      # Minimum risk level to escalate: low, medium
 escalation_webhook = ""            # Webhook URL for risk escalation notifications
 ```
 
-The `eu-ai-act` preset enables all compliance features. See [ADR-0005](decisions/0005-anthropic-native-provider-trait.md) for the Anthropic-native design that enables transparent model attribution.
+The `eu-ai-act` preset enables all compliance features. See [ADR-0005](../decisions/0005-anthropic-native-provider-trait.md) for the Anthropic-native design that enables transparent model attribution.
 
 ## MCP (Tool Matrix)
 

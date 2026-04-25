@@ -32,7 +32,7 @@ All requests are translated to Grob's canonical format internally, routed throug
 
 ## Translation pipeline
 
-See [API Compatibility Reference — OpenAI pipeline](reference/api-compatibility.md#translation-pipeline) for the full diagram.
+See [API Compatibility Reference — OpenAI pipeline](api-compatibility.md#translation-pipeline) for the full diagram.
 
 For streaming, the `AnthropicToOpenAIStream` state machine converts Anthropic SSE events into OpenAI-format `chat.completion.chunk` events on the fly.
 
