@@ -35,6 +35,7 @@ fn make_router() -> Router {
         tap: Default::default(),
         security: Default::default(),
         cache: Default::default(),
+        secrets: Default::default(),
         compliance: Default::default(),
         tool_layer: Default::default(),
         #[cfg(feature = "mcp")]

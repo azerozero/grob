@@ -30,6 +30,7 @@ mod tests {
             tap: Default::default(),
             security: Default::default(),
             cache: Default::default(),
+            secrets: Default::default(),
             compliance: Default::default(),
             version: None,
             user: Default::default(),

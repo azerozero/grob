@@ -126,10 +126,100 @@ printf '%s' "$GEMINI_API_KEY"    | grob secrets add gemini
 
 Restart `grob` and confirm the resolution lines in the logs.
 
+## Choose a backend (`[secrets]`)
+
+Three backends ship today, selected via the top-level `[secrets]` section:
+
+```toml
+[secrets]
+backend = "local_encrypted"   # default — ~/.grob/secrets/<name>.enc (AES-GCM)
+# backend = "env"             # std::env::var(NAME) — for 12-factor apps
+# backend = "file"            # cleartext file at <path>/<name> — Vault/K8s mount
+
+[secrets.file]
+path = "/etc/grob/secrets"     # only read when backend = "file"
+```
+
+Whatever the backend, the placeholder syntax in `[[providers]]` stays the
+same: `api_key = "secret:<name>"`. Only the resolution layer changes.
+
+### `env` backend
+
+`secret:minimax-api-key` resolves to `std::env::var("MINIMAX_API_KEY")`.
+The lookup name is uppercased and dashes become underscores. Nothing is
+encrypted at rest — use this only when the env is itself secured (CI
+vault, systemd `LoadCredential=`, container runtime injection).
+
+### `file` backend (Vault Agent / Kubernetes Secret)
+
+`secret:minimax` reads the cleartext value from `<path>/minimax`.
+Path-traversal names (`../`, `/`, leading dot) are rejected. A trailing
+`\n` is stripped (common when written by `echo` or Vault).
+
+#### Vault Agent on Kubernetes (recommended pattern)
+
+Annotate the pod so Vault Agent renders templates into a shared volume:
+
+```yaml
+metadata:
+  annotations:
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/agent-inject-secret-minimax: "secret/data/grob/minimax"
+    vault.hashicorp.com/agent-inject-template-minimax: |
+      {{- with secret "secret/data/grob/minimax" -}}
+      {{ .Data.data.value }}
+      {{- end -}}
+    vault.hashicorp.com/agent-inject-secret-groq:    "secret/data/grob/groq"
+    vault.hashicorp.com/role: "grob"
+```
+
+Configure grob to read from the injected directory:
+
+```toml
+[secrets]
+backend = "file"
+[secrets.file]
+path = "/vault/secrets"
+```
+
+Vault Agent handles lease renewal, reload notifications, and rotation —
+grob never sees the Vault address, token, or AppRole. To pick up rotated
+secrets without restart, configure Vault Agent's `template.exec` to send
+SIGHUP (or wire a sidecar that re-issues `grob restart`).
+
+#### Kubernetes Secret directly
+
+Mount a Secret as a volume and point the file backend at it:
+
+```yaml
+volumeMounts:
+  - name: grob-secrets
+    mountPath: /etc/grob/secrets
+    readOnly: true
+volumes:
+  - name: grob-secrets
+    secret:
+      secretName: grob-provider-keys
+      items:
+        - { key: minimax,    path: minimax }
+        - { key: groq,       path: groq }
+        - { key: openrouter, path: openrouter }
+```
+
+```toml
+[secrets]
+backend = "file"
+[secrets.file]
+path = "/etc/grob/secrets"
+```
+
+Trade-off: rotating the Kubernetes Secret needs a pod restart (or `kubectl
+rollout restart`). Use the Vault Agent path above for live rotation.
+
 ## What is **not** here yet (tracked)
 
 - **Master key backup/restore CLI**: `grob secrets export-key --to <file> --password <prompt>` and `import-key`. Today the master key is a raw file — back it up manually.
-- **Pluggable backend** (Vault, Kubernetes Secret, AWS Secrets Manager). Coming via the `SecretBackend` trait — see [PR #276](https://github.com/azerozero/grob/pull/276) (Vault Agent strategy will work via a `File` backend reading from a mounted directory).
+- **Native Vault backend** (direct API calls, dynamic refresh without restart). The File backend covers 95 % of cases via Vault Agent — open an issue if you need the native path.
 
 ## Trade-offs
 

@@ -67,6 +67,9 @@ pub struct AppConfig {
     /// LLM response cache configuration
     #[serde(default)]
     pub cache: CacheConfig,
+    /// Secrets backend selection (local_encrypted | env | file)
+    #[serde(default)]
+    pub secrets: crate::cli::SecretsConfig,
     /// EU AI Act compliance configuration
     #[serde(default)]
     pub compliance: ComplianceConfig,

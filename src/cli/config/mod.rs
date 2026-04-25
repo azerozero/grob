@@ -25,6 +25,7 @@ pub mod harness;
 pub mod providers;
 pub mod reliability;
 pub mod routing;
+pub mod secrets;
 pub mod security;
 pub mod server;
 pub mod telemetry;
@@ -40,6 +41,7 @@ pub use routing::{
     FanOutConfig, FanOutMode, ModelConfig, ModelMapping, ModelStrategy, ProjectConfig,
     ProjectRouterOverlay, PromptRule, RouterConfig, TierConfig, TierMatchCondition,
 };
+pub use secrets::{SecretsBackend, SecretsConfig, SecretsFileConfig};
 pub use security::{ComplianceConfig, EnforcementMode, FipsConfig, SecurityConfig, TeeConfig};
 pub use server::{AcmeConfig, ServerConfig, TimeoutConfig, TlsConfig};
 pub use telemetry::{OtelConfig, TracingConfig};
