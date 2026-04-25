@@ -41,6 +41,8 @@ pub mod restart;
 pub mod rpc_client;
 /// Starts the server in foreground (non-daemonized) mode.
 pub mod run;
+/// Encrypted upstream provider secrets (add, list, show, rm).
+pub mod secrets;
 /// Interactive first-run setup wizard.
 pub mod setup;
 /// Installs shell completion scripts to standard locations.

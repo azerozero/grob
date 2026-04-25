@@ -234,6 +234,12 @@ pub enum Commands {
         #[command(subcommand)]
         action: KeyAction,
     },
+    /// Manage encrypted upstream provider secrets (add, list, show, rm)
+    Secrets {
+        /// Secrets management subcommand
+        #[command(subcommand)]
+        action: SecretsAction,
+    },
     /// Manage trace logs (decrypt encrypted traces)
     Logs {
         /// Logs subcommand
@@ -366,6 +372,38 @@ pub enum KeyAction {
     Revoke {
         /// Key UUID or prefix to revoke
         id_or_prefix: String,
+    },
+}
+
+/// Subcommands for managing encrypted upstream provider secrets.
+#[derive(Subcommand)]
+pub enum SecretsAction {
+    /// Add a secret. Reads the value from stdin (one line).
+    Add {
+        /// Secret name (referenced as `secret:<name>` in provider config)
+        name: String,
+    },
+    /// List secret names (no values).
+    List {
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show a secret. Redacted by default.
+    Show {
+        /// Secret name
+        name: String,
+        /// Reveal the full value (use with caution)
+        #[arg(long)]
+        unsafe_show: bool,
+    },
+    /// Remove a secret.
+    Rm {
+        /// Secret name
+        name: String,
+        /// Skip confirmation prompt
+        #[arg(short, long)]
+        force: bool,
     },
 }
 

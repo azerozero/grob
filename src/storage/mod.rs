@@ -229,6 +229,75 @@ impl GrobStore {
         Self::list_enc_files(&tokens_dir)
     }
 
+    // ── Generic secrets storage (for upstream provider api_keys) ────────
+
+    fn secret_path(&self, name: &str) -> PathBuf {
+        self.base_dir
+            .join("secrets")
+            .join(format!("{}.enc", sanitize_filename(name)))
+    }
+
+    fn ensure_secrets_dir(&self) -> Result<()> {
+        let dir = self.base_dir.join("secrets");
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("failed to create secrets dir: {}", dir.display()))
+    }
+
+    /// Stores a named secret encrypted with AES-256-GCM.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if encryption or the atomic file write fails.
+    pub fn set_secret(&self, name: &str, value: &str) -> Result<()> {
+        self.ensure_secrets_dir()?;
+        let encrypted = self.cipher.encrypt(value.as_bytes())?;
+        atomic::write_atomic(&self.secret_path(name), &encrypted)?;
+        Ok(())
+    }
+
+    /// Reads a named secret. Returns `None` if absent.
+    pub fn get_secret(&self, name: &str) -> Option<secrecy::SecretString> {
+        let path = self.secret_path(name);
+        let encrypted = std::fs::read(&path).ok()?;
+        let decrypted = self.cipher.decrypt_or_plaintext(&encrypted);
+        let s = String::from_utf8(decrypted).ok()?;
+        Some(secrecy::SecretString::new(s))
+    }
+
+    /// Lists secret names (no values).
+    pub fn list_secrets(&self) -> Vec<String> {
+        let dir = self.base_dir.join("secrets");
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => return vec![],
+        };
+        let mut names = vec![];
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let s = name.to_string_lossy();
+            if let Some(stripped) = s.strip_suffix(".enc") {
+                names.push(stripped.to_string());
+            }
+        }
+        names.sort();
+        names
+    }
+
+    /// Removes a named secret. Returns `Ok(false)` if it did not exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file exists but cannot be removed.
+    pub fn remove_secret(&self, name: &str) -> Result<bool> {
+        let path = self.secret_path(name);
+        if !path.exists() {
+            return Ok(false);
+        }
+        std::fs::remove_file(&path)
+            .with_context(|| format!("failed to remove secret: {}", path.display()))?;
+        Ok(true)
+    }
+
     /// Gets all OAuth tokens (decrypts each from AES-256-GCM).
     pub fn all_oauth_tokens(&self) -> std::collections::HashMap<String, OAuthToken> {
         let mut map = std::collections::HashMap::new();
@@ -395,7 +464,7 @@ fn sanitize_filename(s: &str) -> String {
 mod tests {
     use super::*;
     use chrono::Utc;
-    use secrecy::SecretString;
+    use secrecy::{ExposeSecret, SecretString};
 
     #[test]
     fn test_open_and_spend_cycle() {
@@ -613,5 +682,58 @@ mod tests {
         assert_eq!(sanitize_filename("claude-max"), "claude-max");
         assert_eq!(sanitize_filename("tenant/evil"), "tenant_evil");
         assert_eq!(sanitize_filename("a:b"), "a_b");
+    }
+
+    #[test]
+    fn test_secret_roundtrip() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        store.set_secret("minimax", "sk-minimax-test-123").unwrap();
+
+        let got = store.get_secret("minimax").unwrap();
+        assert_eq!(got.expose_secret(), "sk-minimax-test-123");
+    }
+
+    #[test]
+    fn test_secret_list_does_not_leak_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        store.set_secret("minimax", "sk-secret-value").unwrap();
+        store.set_secret("groq", "gsk-other-secret").unwrap();
+
+        let names = store.list_secrets();
+        assert_eq!(names, vec!["groq", "minimax"]);
+        for n in &names {
+            assert!(!n.contains("sk-"), "list must not leak values");
+        }
+    }
+
+    #[test]
+    fn test_secret_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        store.set_secret("ephemeral", "x").unwrap();
+        assert!(store.get_secret("ephemeral").is_some());
+
+        let removed = store.remove_secret("ephemeral").unwrap();
+        assert!(removed);
+        assert!(store.get_secret("ephemeral").is_none());
+
+        let again = store.remove_secret("ephemeral").unwrap();
+        assert!(!again, "remove on absent must return Ok(false)");
+    }
+
+    #[test]
+    fn test_secret_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        store.set_secret("rotating", "v1").unwrap();
+        store.set_secret("rotating", "v2").unwrap();
+
+        assert_eq!(store.get_secret("rotating").unwrap().expose_secret(), "v2");
     }
 }
