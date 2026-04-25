@@ -54,7 +54,7 @@ own translation module (`src/server/openai_compat/`,
 the Anthropic-native shape consumed by the dispatch pipeline, and converts
 the Anthropic response (or stream of events) back into the matching wire
 format. Codex-specific behavior — notably injecting the official Codex
-system prompt from `docs/reference/codex-instructions.md` — lives in the
+system prompt from `src/providers/openai/codex_instructions.md` — lives in the
 OpenAI provider path (`src/providers/openai/`), not in the compat layer,
 so it applies regardless of which surface the client used.
 

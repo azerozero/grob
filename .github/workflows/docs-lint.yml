@@ -74,7 +74,6 @@ jobs:
             --cache
             --max-cache-age 1d
             --no-progress
-            --exclude-mail
             --accept 200,204,206,301,302,308,403,429
             docs/**/*.md README.md CLAUDE.md
           fail: true

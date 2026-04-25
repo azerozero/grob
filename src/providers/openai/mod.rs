@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use types::*;
 
 /// Official Codex instructions from OpenAI
-const CODEX_INSTRUCTIONS: &str = include_str!("../../../docs/reference/codex-instructions.md");
+const CODEX_INSTRUCTIONS: &str = include_str!("./codex_instructions.md");
 
 /// OpenAI provider implementation
 pub struct OpenAIProvider {
