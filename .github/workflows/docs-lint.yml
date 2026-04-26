@@ -50,6 +50,35 @@ jobs:
             CLAUDE.md
           config: .markdownlint.json
 
+  no-hardcoded-version:
+    name: No hardcoded version strings in docs
+    # Single source of truth for the version is Cargo.toml. Docs that embed
+    # `vX.Y.Z` drift on every release; this guard fails loudly when one slips
+    # in. To document a version-specific behaviour, link to the CHANGELOG
+    # entry instead.
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v6
+      - name: Scan for hardcoded versions
+        run: |
+          set -euo pipefail
+          # Allow specific historical references (CHANGELOG, ADRs that
+          # legitimately quote a version, dci-report archive). Reject
+          # anything else under docs/ that matches the v0.X.Y pattern.
+          if grep -REn 'v?0\.[0-9]+\.[0-9]+' docs/ \
+              --include='*.md' \
+              --exclude-dir=archive \
+            | grep -vE '(CHANGELOG|examples/|reference/dci-report|decisions/0007|decisions/0011|decisions/0014|decisions/0017|decisions/0018|decisions/0006|decisions/0010|decisions/0009)'; then
+            echo
+            echo "::error::Hardcoded version string detected in docs/."
+            echo "Single source of truth is Cargo.toml. Reference Cargo.toml or the CHANGELOG instead."
+            exit 1
+          fi
+
   lychee:
     name: Broken link check (lychee)
     runs-on: ubuntu-latest

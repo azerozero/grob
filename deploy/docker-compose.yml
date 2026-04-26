@@ -8,13 +8,16 @@
 
 services:
   grob:
-    image: ghcr.io/azerozero/grob:latest
+    # Pin to a minor tag to avoid surprise upgrades; bump explicitly.
+    # Use `:latest` only in development.
+    image: ghcr.io/azerozero/grob:0.36
     build:
       context: ..
       dockerfile: Containerfile
 
+    # Default grob port is 13456 (IPv6 ::1 on host, 0.0.0.0 in container).
     ports:
-      - "8080:8080"
+      - "13456:13456"
 
     # ── Security hardening ──
     read_only: true
