@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.40](https://github.com/azerozero/grob/compare/v0.36.39...v0.36.40) - 2026-04-26
+
+### Fixed
+
+- *(routing)* auto-map respects explicit [[models]] entries
+
 ## [0.36.39](https://github.com/azerozero/grob/compare/v0.36.38...v0.36.39) - 2026-04-26
 
 ### Other
