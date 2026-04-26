@@ -107,6 +107,77 @@ pub fn build_backend(cfg: &SecretsConfig, store: Arc<GrobStore>) -> Arc<dyn Secr
     }
 }
 
+/// Resolves `api_key` placeholders in provider configs.
+///
+/// Three modes are recognised on the raw string value:
+/// - `secret:<name>` → looked up in the supplied [`SecretBackend`]
+/// - `$ENV_VAR`     → resolved from process env via `std::env::var`
+/// - other          → used as-is
+///
+/// Returns a cloned vector with `api_key` replaced. Unresolved placeholders
+/// are kept as-is so the existing fallback / warning paths still trigger.
+///
+/// The single source of truth for this resolution: both the running server
+/// (`server::init`) and the `validate` CLI command go through this function
+/// so a `secret:` reference behaves identically in production and at the
+/// validation surface.
+pub fn resolve_provider_secrets(
+    providers: &[crate::cli::ProviderConfig],
+    backend: &dyn SecretBackend,
+) -> Vec<crate::cli::ProviderConfig> {
+    use secrecy::ExposeSecret;
+
+    providers
+        .iter()
+        .cloned()
+        .map(|mut p| {
+            let raw = p.api_key.as_ref().map(|s| s.expose_secret().to_string());
+            if let Some(raw) = raw {
+                if let Some(name) = raw.strip_prefix("secret:") {
+                    match backend.get(name) {
+                        Some(resolved) => {
+                            p.api_key = Some(resolved);
+                            tracing::info!(
+                                "🔐 Resolved api_key for provider '{}' from {} backend (name='{}')",
+                                p.name,
+                                backend.label(),
+                                name
+                            );
+                        }
+                        None => {
+                            tracing::warn!(
+                                "Provider '{}' references unknown secret '{}' on backend '{}'",
+                                p.name,
+                                name,
+                                backend.label()
+                            );
+                        }
+                    }
+                } else if let Some(var) = raw.strip_prefix('$') {
+                    match std::env::var(var) {
+                        Ok(v) => {
+                            p.api_key = Some(SecretString::new(v));
+                            tracing::info!(
+                                "🔓 Resolved api_key for provider '{}' from env var ${}",
+                                p.name,
+                                var
+                            );
+                        }
+                        Err(_) => {
+                            tracing::warn!(
+                                "Provider '{}' references unset env var ${}",
+                                p.name,
+                                var
+                            );
+                        }
+                    }
+                }
+            }
+            p
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,11 +185,110 @@ mod tests {
 
     // NOTE: env_backend with set_var would require `unsafe` (deny'd at lib level).
     // We only test the absent path here; the present path is exercised end-to-end
-    // by `init.rs::resolve_provider_secrets` through the existing $VAR pathway.
+    // by `resolve_provider_secrets` through the existing $VAR pathway.
     #[test]
     fn env_backend_returns_none_when_missing() {
         let b = EnvBackend;
         assert!(b.get("definitely-not-set-1234-grob").is_none());
+    }
+
+    /// Stub backend for testing `resolve_provider_secrets` without touching
+    /// disk or env. Returns the supplied value for the configured name only.
+    struct StubBackend {
+        name: &'static str,
+        value: &'static str,
+    }
+    impl SecretBackend for StubBackend {
+        fn get(&self, name: &str) -> Option<SecretString> {
+            if name == self.name {
+                Some(SecretString::new(self.value.into()))
+            } else {
+                None
+            }
+        }
+        fn label(&self) -> &'static str {
+            "stub"
+        }
+    }
+
+    fn make_provider(name: &str, api_key: Option<&str>) -> crate::cli::ProviderConfig {
+        crate::cli::ProviderConfig {
+            name: name.into(),
+            provider_type: "openai".into(),
+            auth_type: crate::cli::AuthType::ApiKey,
+            api_key: api_key.map(|s| SecretString::new(s.into())),
+            oauth_provider: None,
+            project_id: None,
+            location: None,
+            base_url: None,
+            headers: None,
+            models: vec![],
+            enabled: Some(true),
+            budget_usd: None,
+            region: None,
+            pass_through: None,
+            tls_cert: None,
+            tls_key: None,
+            tls_ca: None,
+            pool: None,
+            circuit_breaker: None,
+            health_check: None,
+        }
+    }
+
+    #[test]
+    fn resolve_secret_prefix_replaces_api_key() {
+        let p = make_provider("openrouter", Some("secret:openrouter"));
+        let backend = StubBackend {
+            name: "openrouter",
+            value: "sk-or-v1-real-key",
+        };
+        let out = resolve_provider_secrets(&[p], &backend);
+        assert_eq!(
+            out[0].api_key.as_ref().unwrap().expose_secret(),
+            "sk-or-v1-real-key"
+        );
+    }
+
+    #[test]
+    fn resolve_secret_unknown_name_keeps_placeholder() {
+        // Unresolved placeholders survive — caller's fallback chain handles
+        // the resulting 401, the warning is emitted via tracing.
+        let p = make_provider("openrouter", Some("secret:nonexistent"));
+        let backend = StubBackend {
+            name: "other",
+            value: "irrelevant",
+        };
+        let out = resolve_provider_secrets(&[p], &backend);
+        assert_eq!(
+            out[0].api_key.as_ref().unwrap().expose_secret(),
+            "secret:nonexistent"
+        );
+    }
+
+    #[test]
+    fn resolve_plain_string_is_passthrough() {
+        let p = make_provider("openrouter", Some("sk-literal-key"));
+        let backend = StubBackend {
+            name: "openrouter",
+            value: "should-not-be-used",
+        };
+        let out = resolve_provider_secrets(&[p], &backend);
+        assert_eq!(
+            out[0].api_key.as_ref().unwrap().expose_secret(),
+            "sk-literal-key"
+        );
+    }
+
+    #[test]
+    fn resolve_missing_api_key_is_noop() {
+        let p = make_provider("anthropic", None);
+        let backend = StubBackend {
+            name: "x",
+            value: "y",
+        };
+        let out = resolve_provider_secrets(&[p], &backend);
+        assert!(out[0].api_key.is_none());
     }
 
     #[test]
