@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.37](https://github.com/azerozero/grob/compare/v0.36.36...v0.36.37) - 2026-04-26
+
+### Fixed
+
+- *(connect)* trigger OAuth browser flow directly from grob connect
+
 ## [0.36.36](https://github.com/azerozero/grob/compare/v0.36.35...v0.36.36) - 2026-04-26
 
 ### Fixed
