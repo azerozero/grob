@@ -217,11 +217,19 @@ pub fn setup_credentials_interactive(config_path: &Path) -> Result<()> {
 }
 
 /// Prompt the user for a single missing credential. Returns true if config was modified.
+///
+/// OAuth providers cannot be handled here — the PKCE flow is async and
+/// needs a tokio runtime + browser callback server. The caller
+/// (`cmd_connect`) detects OAuth statuses up-front and routes them through
+/// `auth::auto_flow::run_interactive_flow` instead. This function only
+/// gets a status whose detail does NOT contain "OAuth".
 fn prompt_for_credential(status: &CredentialStatus, config: &mut toml::Value) -> Result<bool> {
     if status.detail.contains("OAuth") {
+        // Defensive: should be filtered out by cmd_connect; preserve a clear
+        // pointer to the right entry point if it ever slips through.
         println!(
-            "  {} — OAuth will be set up on first `grob start`",
-            status.provider_name
+            "  {} — OAuth detected; run `grob connect {}` (without --force-reauth) to launch the browser flow.",
+            status.provider_name, status.provider_name
         );
         return Ok(false);
     }
