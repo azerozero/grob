@@ -6,9 +6,14 @@ use super::types::{rpc_err, Role, ERR_INTERNAL, ERR_NOT_FOUND};
 use crate::features::policies::config::PolicyConfig;
 #[cfg(feature = "policies")]
 use crate::features::policies::context::RequestContext;
+#[cfg(feature = "policies")]
 use crate::providers::ProviderRegistry;
+#[cfg(feature = "policies")]
 use crate::routing::classify::Router;
-use crate::server::{AppState, ReloadableState};
+use crate::server::AppState;
+#[cfg(feature = "policies")]
+use crate::server::ReloadableState;
+#[cfg(feature = "policies")]
 use jsonrpsee::types::error::INVALID_PARAMS_CODE;
 use jsonrpsee::types::ErrorObjectOwned;
 use serde::{Deserialize, Serialize};
@@ -131,6 +136,7 @@ pub async fn set_policy(
 /// it. The `ReloadableState::new` constructor recompiles the policy
 /// matcher from `config.policies`, so HIT policy changes are visible
 /// immediately after the swap.
+#[cfg(feature = "policies")]
 fn swap_state(
     state: &Arc<AppState>,
     new_config: crate::models::config::AppConfig,
