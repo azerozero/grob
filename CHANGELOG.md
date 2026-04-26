@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.38](https://github.com/azerozero/grob/compare/v0.36.37...v0.36.38) - 2026-04-26
+
+### Added
+
+- *(rpc)* impl tools/enable + tools/disable with in-memory mutation ([#228](https://github.com/azerozero/grob/pull/228))
+
 ## [0.36.37](https://github.com/azerozero/grob/compare/v0.36.36...v0.36.37) - 2026-04-26
 
 ### Fixed
