@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.35](https://github.com/azerozero/grob/compare/v0.36.34...v0.36.35) - 2026-04-26
+
+### Other
+
+- *(infra,ci)* pin container images and guard against version drift
+- SDK examples, freshness fixes, and orphan-page links
+- *(slices)* per-slice README charters and slice manifest
+- *(mcp)* split mcp_handlers.rs into per-domain modules
+
 ## [0.36.34](https://github.com/azerozero/grob/compare/v0.36.33...v0.36.34) - 2026-04-25
 
 ### Added
