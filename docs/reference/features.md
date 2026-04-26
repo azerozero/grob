@@ -1,6 +1,6 @@
 # Feature Matrix
 
-Exhaustive list of grob capabilities, extracted from the codebase (v0.36.22).
+Exhaustive list of grob capabilities, extracted from the codebase. The current version is in [`Cargo.toml`](../../Cargo.toml).
 
 ## Core Proxy
 

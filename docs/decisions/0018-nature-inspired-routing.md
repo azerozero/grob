@@ -351,7 +351,7 @@ Compliance with this ADR will be verified by:
 
 ### Internal references
 
-- [ADR-0003 — Regex routing engine](0003-regex-routing-engine.md) — the current routing model that this ADR supersedes for the endpoint-selection layer. The regex task-type classification in `src/router/mod.rs` is orthogonal and stays.
+- [ADR-0003 — Regex routing engine](0003-regex-routing-engine.md) — the current routing model that this ADR supersedes for the endpoint-selection layer. The regex task-type classification in `src/routing/classify/mod.rs` is orthogonal and stays.
 - [ADR-0013 — Storage on atomic files + append-only journal](0013-storage-files-no-redb.md) — persistence substrate for EMA stats and CB state.
 - [ADR-0014 — Mesh networking WireGuard KISS](0014-mesh-wireguard-kiss.md) — the single-binary / no-sidecar constraint that forces an in-process routing layer.
 - [ADR-0016 — Decision Tokens](0016-decision-tokens-transparent-routing.md) — routing decisions emit tokens; the new schema does not change token format.

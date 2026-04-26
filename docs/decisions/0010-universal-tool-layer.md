@@ -17,7 +17,7 @@ LLM providers disagree on tool support in incompatible ways:
 - **Gemini** uses `tools.functionDeclarations` with a third variant.
 - **DeepSeek, Ollama, Mistral** inherit OpenAI's schema but some older models ignore tool blocks entirely.
 
-An agent framework calling Grob expects tools to "just work" regardless of the target model. Without a translation layer, a caller must know which provider it is hitting, and either:
+An agent framework calling Grob expects tool calls to function uniformly regardless of the target model. Without a translation layer, a caller must know which provider it is hitting, and either:
 
 1. send a provider-specific payload (leaking topology to clients), or
 2. omit tools and lose functionality on capable models.

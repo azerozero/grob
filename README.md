@@ -377,6 +377,8 @@ cargo bench --bench hotpath
 | [OAuth Setup](docs/how-to/oauth-setup.md) | Anthropic Max, Gemini Pro |
 | [Benchmarks](docs/reference/benchmarks.md) | AWS results, competitor comparison |
 | [Provider Setup](docs/how-to/providers.md) | Per-provider guides |
+| [Python SDK Examples](docs/examples/sdk-python.md) | Call Grob from `anthropic` and `openai` Python SDKs |
+| [Node SDK Examples](docs/examples/sdk-node.md) | Call Grob from `@anthropic-ai/sdk` and `openai` Node SDKs |
 
 ## Contributing
 

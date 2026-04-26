@@ -35,4 +35,4 @@ Chosen option: "Regex-based pattern matching", because it offers the best balanc
 
 ### Confirmation
 
-Routing rules are defined in `src/router/mod.rs` and configured via `[[routing.rules]]` TOML sections. Each rule specifies a regex pattern and target task type.
+Routing rules live in [`src/routing/classify/mod.rs`](../../src/routing/classify/mod.rs) (the engine was renamed from `src/router/` to `src/routing/` in v0.34; the legacy path is retired). Rules are configured via `[[router.prompt_rules]]` TOML sections. Each rule specifies a regex pattern and a target model.
