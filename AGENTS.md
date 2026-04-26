@@ -4,7 +4,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 ## Stack
 
-- **Language**: Rust 2021 edition (~44K LOC, ~543 public items, 100% doc coverage)
+- **Language**: Rust 2021 edition (~67K LOC, ~800 public items, 100% doc coverage)
 - **Runtime**: Tokio async
 - **HTTP framework**: Axum 0.7 with Tower middleware
 - **HTTP client**: reqwest 0.12 (HTTP/2, rustls)
@@ -42,7 +42,7 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 
 - **Config is static at runtime**: Loaded once from TOML into `Arc`. `/api/config/reload` swaps config atomically without restart. In-flight requests continue on old snapshot.
 - **Trait-driven dispatch**: 7+ traits in `src/traits.rs` (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, Tracer, AuditWriter, EventTap, ProviderAvailability) enable testing via mock implementations.
-- **Feature flags**: `dlp`, `oauth`, `tap`, `compliance`, `mcp` -- all default-on. `harness` is opt-in (compile with `--features harness`). Disable features at compile time for smaller binaries.
+- **Feature flags**: defaults are `dlp`, `oauth`, `tap`, `compliance`, `mcp`, `watch`, `policies`, `socket-opts`, `dirs`, `jemalloc`, `unix-signals` (see `[features].default` in `Cargo.toml`). `harness` is opt-in (compile with `--features harness`). Disable features at compile time for smaller binaries.
 - **Error types**: `ProviderError` (thiserror) for provider failures, `AppError` for HTTP responses, `anyhow` for CLI/startup.
 - **Streaming-first**: SSE streaming is the primary path. DLP scanning is chunk-based, not buffered.
 - **Environment variable expansion**: API keys in TOML support `$ENV_VAR` syntax resolved at startup.
@@ -53,13 +53,14 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 ## Git Flow
 
 ```
-feature/* or fix/* ──► PR ──► develop ──► (release-plz PR) ──► main ──► tag v*
+feature/* or fix/* ──► PR ──► main ──► (release-plz PR) ──► main ──► tag v*
 ```
 
-- **Never commit or push directly to `main`**. Only release-plz merges into `main`.
-- **Never create a PR with `develop` as the head targeting `main`**. This risks `develop` being deleted by GitHub's auto-delete-head-branch. Only release-plz creates PRs to `main` via temporary `release-plz-*` branches.
-- **Both `main` and `develop` are protected** (GitHub rulesets: no deletion, no force push).
-- **Always work on a feature branch** from `develop`: `feature/<topic>` or `fix/<topic>`.
+- **Never commit or push directly to `main`**. All changes go through feature branches + PRs.
+- `main` is the only long-lived branch (GitHub Flow). release-plz watches `main` and opens a Release PR when releasable commits land.
+- **`main` is protected** (GitHub ruleset: no deletion, no force push, PR required).
+- **Always work on a feature branch** from `main`: `feat/<topic>` or `fix/<topic>`.
+- **Always enable auto-merge** after creating a PR: `gh pr merge <num> --auto --merge`.
 - **Conventional commits**: `feat:`, `fix:`, `refactor:`, `perf:` trigger version bumps via release-plz. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes.
 - **Pre-commit hooks** via [prek](https://github.com/j178/prek): run `prek install` after cloning. Hooks run `cargo fmt`, `clippy`, `gitleaks` on commit and tests, audit, deny on push.
 

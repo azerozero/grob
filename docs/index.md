@@ -38,6 +38,8 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Configure DLP | [How to Configure DLP](how-to/dlp.md) |
 | Configure options | [How to Configure Grob](how-to/configure.md) |
 | Deploy in a container | [How to Deploy Grob](how-to/deploy.md) |
+| Call Grob from Python | [Python SDK Examples](examples/sdk-python.md) |
+| Call Grob from Node.js | [Node SDK Examples](examples/sdk-node.md) |
 | Fix common problems | [Troubleshooting](how-to/troubleshooting.md) |
 | Contribute | [How to Contribute](how-to/contribute.md) |
 
@@ -72,6 +74,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Topic | Document |
 |-------|----------|
 | Architecture | [Architecture Overview](explanation/architecture.md) |
+| Slice manifest (per-module charters) | [Slice Manifest](slices/MANIFEST.md) |
 | Security model | [Security Model](explanation/security.md) |
 | Policy engine | [Policy Engine](explanation/policies.md) |
 | Design philosophy | [Design Principles](explanation/design-principles.md) |
@@ -88,6 +91,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | [0004](decisions/0004-persistent-spend-tracking.md) | Persistent spend tracking |
 | [0005](decisions/0005-anthropic-native-provider-trait.md) | Anthropic-native provider trait |
 | [0006](decisions/0006-policy-engine-encrypted-audit-hit-gateway.md) | Policy engine, encrypted audit, HIT gateway |
+| [0007](decisions/0007-openai-compat-dual-surface.md) | OpenAI-compat dual surface |
 | [0008](decisions/0008-wizard-lifecycle.md) | Wizard lifecycle |
 | [0009](decisions/0009-pledge-structural-tool-filtering.md) | Pledge structural tool filtering |
 | [0010](decisions/0010-universal-tool-layer.md) | Universal tool layer |
@@ -100,6 +104,23 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | [0017](decisions/0017-sokolsky-log-backend.md) | Sokolsky log backend |
 | [0018](decisions/0018-nature-inspired-routing.md) | Nature-inspired routing (RE-1a/RE-1b) |
 
+### Examples
+
+| Topic | File |
+|-------|------|
+| Default config | [`examples/default.toml`](examples/default.toml) |
+| Anthropic Claude Max via OAuth | [`examples/claude-max-oauth.toml`](examples/claude-max-oauth.toml) |
+| DeepSeek-only setup | [`examples/deepseek.toml`](examples/deepseek.toml) |
+| Multi-provider mix with fallbacks | [`examples/mixed.toml`](examples/mixed.toml) |
+| Model declaration patterns | [`examples/models.toml`](examples/models.toml) |
+| Local Ollama backend | [`examples/ollama.toml`](examples/ollama.toml) |
+
+### Diagrams
+
+| Topic | File |
+|-------|------|
+| CI/CD release flow (PERT) | [`diagrams/ci-cd-pert.md`](diagrams/ci-cd-pert.md) |
+
 ## Version
 
-Current release: **v0.36.22** -- see [CHANGELOG](../CHANGELOG.md) for history.
+Current release: see [`Cargo.toml`](../Cargo.toml) `[package].version` and [CHANGELOG](../CHANGELOG.md) for the history. The `release-plz` workflow tags every releasable commit on `main`.

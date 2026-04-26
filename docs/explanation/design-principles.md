@@ -19,7 +19,7 @@ Our goal is to minimize the complexity developers face when using multiple AI pr
 - Error messages clearly communicate "what went wrong" and "how to fix it".
 
 ### Performance as UX
-- ~5MB memory, <1ms routing overhead is not just performance metrics -- it's user experience.
+- ~5MB memory and <1ms routing overhead are not only performance metrics — they are user experience.
 - Fast responses build trust, lightweight resource usage simplifies deployment.
 
 ---

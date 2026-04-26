@@ -116,7 +116,7 @@ Grob ships the **client** side: the trait, the stdout / file / sokolsky implemen
 
 - Production deployment requires running a `sokolsky-collector` daemon — one more moving part.
 - N-of-N means a single failing witness blocks progress (fail-closed). This is a deliberate safety choice but has operational impact: witnesses must be watched.
-- mTLS rotation on the hot path is non-trivial. T-SOK-7 covers the basics; corner cases will surface in production.
+- mTLS rotation on the hot path has subtle failure modes. T-SOK-7 covers the baseline; corner cases will surface in production.
 
 ### Neutral / to watch
 

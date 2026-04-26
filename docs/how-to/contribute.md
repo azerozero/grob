@@ -9,7 +9,7 @@
 ## Development workflow
 
 1. Fork the repository and clone your fork
-2. Create a branch from `develop` (not `main`)
+2. Create a feature branch from `main` (`feat/<topic>` or `fix/<topic>`)
 3. Make your changes
 4. Run the checks:
 
@@ -20,7 +20,7 @@ cargo nextest run
 cargo test --doc
 ```
 
-5. Open a pull request against `develop`
+5. Open a pull request against `main`. Enable auto-merge: `gh pr merge <num> --auto --merge`.
 
 ## Code style
 
@@ -28,7 +28,14 @@ cargo test --doc
 - Doc comments on all public items (see CLAUDE.md for conventions)
 - Comments explain **why**, not what
 - File size target: 200-500 lines. If a file exceeds 500 lines, check if it has a single responsibility.
-- Feature flags: use `#[cfg(feature = "...")]` for optional features (dlp, oauth, tap, compliance)
+- Feature flags: use `#[cfg(feature = "...")]` for optional features (full default list in `Cargo.toml`).
+
+## Documentation style
+
+- Single source of truth for the project version is [`Cargo.toml`](../../Cargo.toml). Do **not** hardcode `vX.Y.Z` in docs — link to `Cargo.toml` or the [CHANGELOG](../../CHANGELOG.md) entry instead. The `docs-lint` workflow enforces this with a grep-based guard.
+- Each `docs/` page belongs to exactly one Diátaxis category (`tutorials/`, `how-to/`, `reference/`, `explanation/`, `decisions/`). Do not mix types in a single file.
+- Avoid condescending words ("just", "easy", "simple", "trivial", "obviously") — they imply the reader is slow.
+- Architecture rationale goes in an ADR (`docs/decisions/NNNN-*.md`, MADR 4.0). API contracts go in `///` doc comments. The "why" of a single line goes in a `//` inline comment.
 
 ## Testing
 
