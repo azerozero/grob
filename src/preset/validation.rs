@@ -7,6 +7,7 @@ use crate::auth::TokenStore;
 use crate::models::config::AppConfig;
 use crate::models::{CanonicalRequest, Message, MessageContent};
 use crate::providers::ProviderRegistry;
+use crate::storage::GrobStore;
 
 /// Result of validating a single provider/model mapping
 #[derive(Debug)]
@@ -51,17 +52,34 @@ impl ModelValidation {
 
 /// Builds a provider registry from config (for CLI validation path).
 ///
+/// Resolves `secret:<name>` and `$ENV_VAR` placeholders in `[[providers]]
+/// api_key` before constructing the registry, so `grob validate` exercises
+/// the same authentication path as the running server. Without this,
+/// `secret:` references would be sent verbatim as bearer tokens and every
+/// provider would fail with 401.
+///
 /// # Errors
 ///
-/// Returns an error if the token store cannot be initialized or the
-/// provider registry cannot be built from the config.
+/// Returns an error if the token store, encrypted store, or provider
+/// registry cannot be built from the config.
 pub fn build_registry(config: &AppConfig) -> Result<(Arc<ProviderRegistry>, TokenStore)> {
     let token_store = TokenStore::at_default_path()
         .map_err(|e| anyhow::anyhow!("Failed to init token store: {}", e))?;
 
+    let grob_store = Arc::new(
+        GrobStore::open(&GrobStore::default_path())
+            .map_err(|e| anyhow::anyhow!("Failed to open encrypted store: {}", e))?,
+    );
+    let secret_backend =
+        crate::storage::secrets::build_backend(&config.secrets, grob_store.clone());
+    let resolved_providers = crate::storage::secrets::resolve_provider_secrets(
+        &config.providers,
+        secret_backend.as_ref(),
+    );
+
     let registry = Arc::new(
         ProviderRegistry::from_configs_with_models(
-            &config.providers,
+            &resolved_providers,
             Some(token_store.clone()),
             &config.models,
             &config.server.timeouts,
