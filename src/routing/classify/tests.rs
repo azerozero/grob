@@ -201,6 +201,50 @@ fn test_auto_map_custom_regex() {
 }
 
 #[test]
+fn test_auto_map_skips_explicit_virtual_model() {
+    // Regression: a request that matches the auto_map regex must NOT be
+    // rewritten to `router.default` when the user has an explicit
+    // `[[models]]` entry with the same name. Without this guard the
+    // virtual entry's fallback chain would be bypassed entirely and the
+    // virtual name would leak to a pass-through provider downstream.
+    use crate::cli::ModelConfig;
+
+    let mut config = create_test_config();
+    // Add a virtual model entry with the same name as the incoming model.
+    config.models.push(ModelConfig {
+        name: "claude-sonnet-4-6".to_string(),
+        mappings: vec![],
+        budget_usd: None,
+        strategy: Default::default(),
+        fan_out: None,
+        deprecated: None,
+    });
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-sonnet-4-6".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::Default);
+    // Must use the explicit virtual name, NOT the auto-mapped default.
+    assert_eq!(decision.model_name, "claude-sonnet-4-6");
+}
+
+#[test]
+fn test_auto_map_still_rewrites_unmapped_claude() {
+    // Counter-test: when the user has no `[[models]]` entry for the
+    // incoming claude-* name, auto-map continues to rewrite as before.
+    let config = create_test_config();
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-some-unmapped-variant".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.model_name, "default.model");
+}
+
+#[test]
 fn test_no_auto_map_non_matching() {
     let config = create_test_config();
     let router = Router::new(config);

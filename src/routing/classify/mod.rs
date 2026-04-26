@@ -312,14 +312,32 @@ impl Router {
             }
         }
 
-        // 3. Auto-mapping (model name transformation, after background check)
+        // 3. Auto-mapping (model name transformation, after background check).
+        //
+        // If the user has an explicit `[[models]]` entry whose name matches
+        // the incoming request model, that entry takes precedence — auto-map
+        // is a "catch-all rewrite for unconfigured models", not a forced
+        // override. Without this guard, a request for `claude-sonnet-4-6`
+        // would be rewritten to `router.default` even when the user defined
+        // a virtual `claude-sonnet-4-6` model with its own fallback chain;
+        // the chain would never run and pass-through would leak the virtual
+        // name "default-model" to the upstream provider.
         if let Some(ref mapper) = self.auto_mapper {
             if mapper.is_match(&request.model) {
-                info!(
-                    "Auto-mapped model '{}' → '{}'",
-                    request.model, self.config.router.default
-                );
-                request.model.clone_from(&self.config.router.default);
+                let has_explicit_virtual =
+                    self.config.models.iter().any(|m| m.name == request.model);
+                if has_explicit_virtual {
+                    info!(
+                        "Auto-map skipped for '{}' — explicit [[models]] entry takes precedence",
+                        request.model
+                    );
+                } else {
+                    info!(
+                        "Auto-mapped model '{}' → '{}'",
+                        request.model, self.config.router.default
+                    );
+                    request.model.clone_from(&self.config.router.default);
+                }
             }
         }
 
