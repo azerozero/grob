@@ -98,6 +98,13 @@ pub async fn persist_and_reload(
 }
 
 /// Rebuilds [`ReloadableState`] from a validated config and atomically swaps it.
+///
+/// Resolves `secret:<name>` and `$ENV_VAR` placeholders in `[[providers]]
+/// api_key` before constructing the new registry. Without this step, a hot
+/// reload that touches a provider declared with `api_key = "secret:foo"`
+/// would push the literal placeholder back into the registry and every
+/// upstream call would fail with 401 until the daemon is fully restarted.
+/// Same code path as `server::init` and `preset::build_registry`.
 fn reload_state(
     state: &Arc<super::AppState>,
     config: crate::models::config::AppConfig,
@@ -105,8 +112,15 @@ fn reload_state(
 ) -> Result<(), super::AppError> {
     let new_router = crate::routing::classify::Router::new(config.clone());
 
-    let new_registry = crate::providers::ProviderRegistry::from_configs_with_models(
+    let secret_backend =
+        crate::storage::secrets::build_backend(&config.secrets, state.grob_store.clone());
+    let resolved_providers = crate::storage::secrets::resolve_provider_secrets(
         &config.providers,
+        secret_backend.as_ref(),
+    );
+
+    let new_registry = crate::providers::ProviderRegistry::from_configs_with_models(
+        &resolved_providers,
         Some(state.token_store.clone()),
         &config.models,
         &config.server.timeouts,

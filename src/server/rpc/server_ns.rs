@@ -60,8 +60,18 @@ pub async fn reload_config(
 
     let new_router = Router::new(new_config.clone());
 
-    let new_registry = ProviderRegistry::from_configs_with_models(
+    // Resolve `secret:<name>` and `$ENV_VAR` placeholders so the JSON-RPC
+    // reload path sees the same authenticated registry as `grob start`,
+    // `validate`, and the HTTP `/api/config/reload` endpoint.
+    let secret_backend =
+        crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
+    let resolved_providers = crate::storage::secrets::resolve_provider_secrets(
         &new_config.providers,
+        secret_backend.as_ref(),
+    );
+
+    let new_registry = ProviderRegistry::from_configs_with_models(
+        &resolved_providers,
         Some(state.token_store.clone()),
         &new_config.models,
         &new_config.server.timeouts,
