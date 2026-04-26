@@ -72,14 +72,11 @@ pub fn build_registry(config: &AppConfig) -> Result<(Arc<ProviderRegistry>, Toke
     );
     let secret_backend =
         crate::storage::secrets::build_backend(&config.secrets, grob_store.clone());
-    let resolved_providers = crate::storage::secrets::resolve_provider_secrets(
-        &config.providers,
-        secret_backend.as_ref(),
-    );
 
     let registry = Arc::new(
         ProviderRegistry::from_configs_with_models(
-            &resolved_providers,
+            &config.providers,
+            secret_backend.as_ref(),
             Some(token_store.clone()),
             &config.models,
             &config.server.timeouts,
