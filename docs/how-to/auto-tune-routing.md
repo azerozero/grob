@@ -164,8 +164,6 @@ tool). The hint is consumed for one request only.
 
 ## Iterate
 
-## Iterate
-
 1. Collect traces for a representative period (a few hours to a day).
 2. Run the `jq` analysis to find misrouted or slow requests.
 3. Adjust one parameter at a time via `grob_configure`.

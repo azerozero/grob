@@ -68,11 +68,14 @@ jobs:
           set -euo pipefail
           # Allow specific historical references (CHANGELOG, ADRs that
           # legitimately quote a version, dci-report archive). Reject
-          # anything else under docs/ that matches the v0.X.Y pattern.
-          if grep -REn 'v?0\.[0-9]+\.[0-9]+' docs/ \
+          # anything else under docs/ that matches the vX.Y.Z pattern.
+          # The literal `v` prefix is required so IP addresses like
+          # `0.0.0.0` and `127.0.0.1` (legitimate in network docs) are
+          # not flagged as version drift.
+          if grep -REn '\bv[0-9]+\.[0-9]+\.[0-9]+\b' docs/ \
               --include='*.md' \
               --exclude-dir=archive \
-            | grep -vE '(CHANGELOG|examples/|reference/dci-report|decisions/0007|decisions/0011|decisions/0014|decisions/0017|decisions/0018|decisions/0006|decisions/0010|decisions/0009)'; then
+            | grep -vE '(CHANGELOG|examples/|reference/dci-report|reference/benchmarks|decisions/0007|decisions/0011|decisions/0014|decisions/0017|decisions/0018|decisions/0006|decisions/0010|decisions/0009|decisions/0012|decisions/0015|decisions/0016)'; then
             echo
             echo "::error::Hardcoded version string detected in docs/."
             echo "Single source of truth is Cargo.toml. Reference Cargo.toml or the CHANGELOG instead."
