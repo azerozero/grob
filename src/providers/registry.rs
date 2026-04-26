@@ -311,13 +311,35 @@ impl ProviderRegistry {
         }
     }
 
-    /// Load providers from configuration with model mappings
+    /// Load providers from configuration with model mappings.
+    ///
+    /// Resolves `secret:<name>` and `$ENV_VAR` placeholders in each
+    /// provider's `api_key` through the supplied [`SecretBackend`] before
+    /// building the underlying client. This is the single entry point used
+    /// by `server::init`, the CLI `validate` command, and every hot-reload
+    /// path; making the backend a required parameter prevents the recurring
+    /// class of bug where a caller forgot the resolution step and the
+    /// literal placeholder ended up as the bearer token (PR #280, PR #284).
+    ///
+    /// Callers that have no secrets to resolve — typically tests using
+    /// literal keys — can pass [`storage::secrets::EnvBackend`], which is
+    /// stateless and a no-op for non-`secret:` / non-`$` strings.
+    ///
+    /// # Errors
+    ///
+    /// Returns a `ProviderError` when any provider's underlying client
+    /// cannot be built or when an OAuth-typed provider is missing its
+    /// `oauth_provider` reference.
     pub fn from_configs_with_models(
         configs: &[ProviderConfig],
+        secret_backend: &dyn crate::storage::secrets::SecretBackend,
         token_store: Option<TokenStore>,
         models: &[ModelConfig],
         timeouts: &TimeoutConfig,
     ) -> Result<Self, ProviderError> {
+        let resolved = crate::storage::secrets::resolve_provider_secrets(configs, secret_backend);
+        let configs = &resolved;
+
         let mut registry = Self::new();
         let build_ctx = ProviderBuildContext {
             token_store,
@@ -655,9 +677,13 @@ mod tests {
             },
         ];
 
-        // Actually test the method we implemented
+        // Test fixtures use literal API keys (no `secret:` / `$` prefix),
+        // so any backend is a no-op here. Use `EnvBackend` because it is
+        // stateless and avoids creating a temporary `GrobStore`.
+        let backend = crate::storage::secrets::EnvBackend;
         let registry = ProviderRegistry::from_configs_with_models(
             &providers,
+            &backend,
             None, // token_store
             &models,
             &TimeoutConfig::default(),
@@ -668,5 +694,88 @@ mod tests {
         assert!(registry.list_models().contains(&"model-1".to_string()));
         assert!(registry.list_models().contains(&"model-2".to_string()));
         assert_eq!(registry.list_providers().len(), 2);
+    }
+
+    #[test]
+    fn from_configs_routes_resolution_through_backend() {
+        // Regression guard for the class of bug fixed by PR #280, #284, and
+        // this refactor. Three reload paths previously bypassed the secret
+        // resolution step and shipped the literal `secret:openrouter` as
+        // the upstream bearer token. Now `from_configs_with_models`
+        // requires a `&dyn SecretBackend` and applies resolution
+        // internally — any future caller that compiles also resolves.
+        //
+        // The `LlmProvider` trait does not expose the resolved api_key for
+        // inspection (security: zeroize on drop, secrecy crate). We therefore
+        // verify the integration by counting how many times the backend's
+        // `get` is invoked: exactly once for our single `secret:`-prefixed
+        // provider. A future caller forgetting to call this function would
+        // surface as a zero-call counter even before reaching production.
+        use crate::providers::AuthType;
+        use crate::storage::secrets::SecretBackend;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountingBackend {
+            calls: AtomicUsize,
+        }
+        impl SecretBackend for CountingBackend {
+            fn get(&self, name: &str) -> Option<SecretString> {
+                self.calls.fetch_add(1, Ordering::SeqCst);
+                if name == "openrouter" {
+                    Some(SecretString::new("sk-resolved-real-key".into()))
+                } else {
+                    None
+                }
+            }
+            fn label(&self) -> &'static str {
+                "counting"
+            }
+        }
+
+        let backend = CountingBackend {
+            calls: AtomicUsize::new(0),
+        };
+        let providers = vec![ProviderConfig {
+            name: "openrouter".to_string(),
+            provider_type: "openrouter".to_string(),
+            auth_type: AuthType::ApiKey,
+            api_key: Some(SecretString::new("secret:openrouter".to_string())),
+            base_url: None,
+            models: vec![],
+            enabled: Some(true),
+            oauth_provider: None,
+            project_id: None,
+            location: None,
+            headers: None,
+            budget_usd: None,
+            region: None,
+            pass_through: Some(true),
+            tls_cert: None,
+            tls_key: None,
+            tls_ca: None,
+            pool: None,
+            circuit_breaker: None,
+            health_check: None,
+        }];
+
+        let registry = ProviderRegistry::from_configs_with_models(
+            &providers,
+            &backend,
+            None,
+            &[],
+            &TimeoutConfig::default(),
+        )
+        .expect("registry build");
+
+        assert_eq!(
+            backend.calls.load(Ordering::SeqCst),
+            1,
+            "secret: prefix must trigger exactly one backend lookup; \
+             zero would mean the resolution step was skipped"
+        );
+        assert!(
+            registry.provider("openrouter").is_some(),
+            "registry must contain the resolved provider"
+        );
     }
 }

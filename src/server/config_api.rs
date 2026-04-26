@@ -223,18 +223,15 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
     // 2. Build new router (compiles regexes)
     let new_router = Router::new(new_config.clone());
 
-    // 3. Build new provider registry. Resolve `secret:<name>` and
-    //    `$ENV_VAR` placeholders before passing the providers in, so a
-    //    hot reload behaves the same as `grob start` and CLI `validate`.
-    //    Same code path as `server::init` and `preset::build_registry`.
+    // 3. Build new provider registry (reuse existing token_store).
+    //    `from_configs_with_models` resolves `secret:<name>` and
+    //    `$ENV_VAR` placeholders internally via the supplied backend, so
+    //    a hot reload behaves the same as `grob start` and CLI `validate`.
     let secret_backend =
         crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
-    let resolved_providers = crate::storage::secrets::resolve_provider_secrets(
+    let new_registry = match ProviderRegistry::from_configs_with_models(
         &new_config.providers,
         secret_backend.as_ref(),
-    );
-    let new_registry = match ProviderRegistry::from_configs_with_models(
-        &resolved_providers,
         Some(state.token_store.clone()),
         &new_config.models,
         &new_config.server.timeouts,

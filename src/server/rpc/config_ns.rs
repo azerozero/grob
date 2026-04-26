@@ -65,8 +65,11 @@ pub async fn set(
     // `config_guard::persist_and_reload`: persistence to disk is a non-goal
     // for #228 (in-memory mutation only).
     let new_router = Router::new(new_config.clone());
+    let secret_backend =
+        crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
     let new_registry = ProviderRegistry::from_configs_with_models(
         &new_config.providers,
+        secret_backend.as_ref(),
         Some(state.token_store.clone()),
         &new_config.models,
         &new_config.server.timeouts,
