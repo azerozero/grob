@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.36](https://github.com/azerozero/grob/compare/v0.36.35...v0.36.36) - 2026-04-26
+
+### Fixed
+
+- *(validate)* resolve secret: and $ENV placeholders before testing providers
+
 ## [0.36.35](https://github.com/azerozero/grob/compare/v0.36.34...v0.36.35) - 2026-04-26
 
 ### Other
