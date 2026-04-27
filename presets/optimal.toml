@@ -1,0 +1,456 @@
+# Preset: optimal - Best price/perf/quality ratio
+# Speed-first multi-provider routing validated by real benchmarks.
+# Requires: Anthropic OAuth Max + OPENROUTER_API_KEY + GROQ_API_KEY (others optional)
+#
+# ── Strategy ──────────────────────────────────────────────────────
+#
+#   Trivial / background  → Groq gpt-oss-20b (LPU, 960 t/s mesuré)
+#   Default               → DeepSeek V4-Flash (81% SWE-V, $0.14/$0.28, 1M ctx)
+#   Think                 → Claude Opus 4.7 (87.6% SWE-V, OAuth Max free)
+#   Search                → Claude Sonnet 4.6 (tool-use solide, OAuth free)
+#   Long context (>150k)  → DeepSeek V4-Pro / OpenRouter (1M+ ctx providers)
+#   Rust / k8s / Terraform → Anthropic only (qualité unsafe/HCL/YAML)
+#
+# Anthropic Max quota requires Claude Code identity (system prompt
+# "You are Claude Code, Anthropic's official CLI for Claude." +
+# beta header `claude-code-20250219`, both injected automatically by grob).
+#
+# ── Bench data (2026-04-26, 200-token output payload) ─────────────
+#
+#   Groq openai/gpt-oss-20b      960 t/s eff, 364ms RTT  ← speed king
+#   Groq openai/gpt-oss-120b     472 t/s eff, 643ms RTT  ← qualité 120B
+#   Groq llama-3.1-8b-instant    793 t/s, 377ms          ← legacy fallback
+#   Mercury 2 (Inception Labs)   155 t/s eff, 1250ms     ← reasoning overhead
+#   DeepSeek V4-Flash (OR)       ~83 t/s, 743ms          ← qualité 80% SWE
+#
+# ── Cost estimate (8h/day, 22d/month) ─────────────────────────────
+#
+#   Anthropic Max ($200/month) covers Opus + Sonnet + Haiku via OAuth.
+#   Groq has a generous free tier; gpt-oss-20b/120b under daily quota.
+#   DeepSeek V4-Flash $0.14/$0.28 per Mtok — negligible at typical use.
+#
+#   With agent (~3M tok/day input, ~1M output):
+#     Anthropic Max alone        : $200/month flat
+#     + DeepSeek V4-Flash bursts : ~$5-15/month (only on Max 429)
+#     + Groq trivial tier        : free tier or ~$2-5/month overflow
+#     Total                      : ~$210-220/month
+#
+#   Without Max (API direct, no Claude Code recognition):
+#     Sonnet 4.6 direct          : ~$2000-3000/month
+#     With this preset's fallback chain → ~$50-100/month savings
+#
+# ── Optional providers ────────────────────────────────────────────
+#
+#   xAI / Grok : enabled = false by default. To activate :
+#     printf 'xai-...' | grob secrets add xai
+#     (then set enabled = true and uncomment the xai mappings below)
+#     grok-4-fast       $0.20/$0.50  2M ctx  ← cheap big-context workhorse
+#     grok-code-fast-1  $0.20/$1.50  256K    ← coding-specific
+#     grok-4            $3.00/$15.00 256K    ← heavy reasoning
+#
+#   Mercury 2 : kept as last-resort fallback. Note that accounts created
+#     after 2026-02-24 only have access to mercury-2 / mercury-edit /
+#     mercury-edit-2 (legacy mercury-coder-* are gated). Mercury 2 has
+#     reasoning_tokens overhead so the 1109 t/s vendor claim drops to
+#     ~155 t/s effective in practice.
+#
+#   DeepSeek direct API : optional alternative to OpenRouter pass-through.
+#     OpenRouter adds ~10% markup but is more reliable (OR has fallback
+#     across multiple DeepSeek hosts).
+
+# ── Providers ────────────────────────────────────────────────────
+
+# 1. Anthropic OAuth (Max sub : Opus 4.7 + Sonnet 4.6 + Haiku 4.5 free)
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+auth_type = "oauth"
+oauth_provider = "anthropic-max"
+enabled = true
+models = ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
+
+# Passive circuit breaker (ADR-0018 RE-1a) — survives weekly 429s
+[providers.circuit_breaker]
+max_fails = 3
+fail_duration = "60s"
+
+# 2. OpenRouter — universal fallback + access to V4 / Mercury / Kimi
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+api_key = "$OPENROUTER_API_KEY"
+enabled = true
+pass_through = true
+models = []
+
+# 3. DeepSeek direct API (optional, faster than OR for V4)
+[[providers]]
+name = "deepseek"
+provider_type = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "$DEEPSEEK_API_KEY"
+enabled = true
+models = [
+  "deepseek-chat",
+  "deepseek-reasoner",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+]
+
+# 4. Groq (LPU ultra low latency, primary for trivial+background)
+[[providers]]
+name = "groq"
+provider_type = "openai"
+base_url = "https://api.groq.com/openai/v1"
+api_key = "$GROQ_API_KEY"
+enabled = true
+models = [
+  "openai/gpt-oss-20b",
+  "openai/gpt-oss-120b",
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+]
+
+# 5. Mercury 2 (Inception Labs, diffusion LLM) — fallback only
+# Format: OpenAI Chat Completions. Post-2026-02-24 accounts must use
+# mercury-2 / mercury-edit / mercury-edit-2 (older names gated).
+[[providers]]
+name = "mercury"
+provider_type = "openai"
+base_url = "https://api.inceptionlabs.ai/v1"
+api_key = "$MERCURY_API_KEY"
+enabled = true
+models = ["mercury-2", "mercury-edit", "mercury-edit-2"]
+
+# 6. xAI / Grok — DISABLED by default. Activate after `grob secrets add xai`.
+[[providers]]
+name = "xai"
+provider_type = "openai"
+base_url = "https://api.x.ai/v1"
+api_key = "$XAI_API_KEY"
+enabled = false
+models = ["grok-4-fast", "grok-code-fast-1", "grok-4"]
+
+# ── Router ───────────────────────────────────────────────────────
+
+[router]
+default = "default-model"
+think = "think-model"
+background = "background-model"
+websearch = "search-model"
+auto_map_regex = "^claude-"
+background_regex = "(?i)claude.*haiku"
+
+# Architecture / design / security review → think (Opus 4.7)
+[[router.prompt_rules]]
+pattern = "(?i)(architect|design.*system|plan.*implement|security.*review|threat.*model)"
+model = "think-model"
+
+# Quick edits / formatting / commits → trivial (Groq gpt-oss-20b)
+[[router.prompt_rules]]
+pattern = "(?i)(format|lint|rename|typo|commit|push|autocomplete)"
+model = "trivial-model"
+
+# ── Classifier (complexity scorer) ───────────────────────────────
+
+[classifier.weights]
+max_tokens = 1.0
+tools = 1.0
+context_size = 1.0
+keywords = 1.5
+system_prompt = 1.0
+
+[classifier.thresholds]
+medium_threshold = 2.0
+complex_threshold = 5.0
+
+# ── Tiers (evaluated BEFORE the scorer) ──────────────────────────
+
+# Trivial: short edits < 500 tokens out → speed-first
+# Order : Groq (LPU) p1 → Anthropic Haiku (free Max) → OR → Mercury fallback
+[[tiers]]
+name = "trivial"
+providers = ["groq", "anthropic", "openrouter", "mercury"]
+[tiers.match]
+max_tokens_below = 500
+
+# Rust → Anthropic only (quality on unsafe, lifetimes, trait impls)
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+keywords = [
+  "unsafe",
+  "lifetime",
+  "Pin<",
+  "trait impl",
+  "borrow checker",
+  "PhantomData",
+  "#[derive",
+]
+file_patterns = ["*.rs"]
+
+# Terraform / OpenTofu → Anthropic (LLMs hallucinate HCL)
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+keywords = ["terraform", "opentofu", "module", "resource", "data source"]
+file_patterns = ["*.tf", "*.tfvars", "*.tofu"]
+
+# Kubernetes / Helm → Anthropic
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+file_patterns = ["*.yaml", "*.yml"]
+keywords = ["kubectl", "helm", "deployment", "ingress", "configmap"]
+
+# CI/CD YAML → Anthropic
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+file_patterns = [".github/workflows/*.yml", ".gitlab-ci.yml"]
+
+# Big context (> 50 messages) → DeepSeek V4-Pro (1M ctx, KV 10% of V3.2)
+[[tiers]]
+name = "complex"
+providers = ["openrouter"]
+[tiers.match]
+min_messages = 50
+
+# Output > 16K → Anthropic only (Mercury/Groq cap at 8K)
+[[tiers]]
+name = "complex"
+providers = ["anthropic"]
+[tiers.match]
+max_tokens_above = 16000
+
+# Input > 150k tokens → 1M+ ctx providers only (V4-Pro, Qwen via OR)
+[[tiers]]
+name = "complex"
+providers = ["openrouter", "deepseek"]
+[tiers.match]
+min_input_tokens = 150000
+
+# Input > 30k tokens → exclude Mercury 2 (32k ctx) and Groq Llama 8B
+[[tiers]]
+name = "medium"
+providers = ["anthropic", "openrouter", "deepseek"]
+[tiers.match]
+min_input_tokens = 30000
+
+# ── Models (virtual → provider mapping) ──────────────────────────
+
+# DEFAULT: DeepSeek V4-Flash (81% SWE-V, 1M ctx, $0.14/$0.28)
+# Fallbacks: V3.2 → Groq gpt-oss-120b → Sonnet 4.6 OAuth
+[[models]]
+name = "default-model"
+[[models.mappings]]
+priority = 1
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v4-flash"
+# Activate after `grob secrets add xai`:
+# [[models.mappings]]
+# priority = 2
+# provider = "xai"
+# actual_model = "grok-code-fast-1"
+[[models.mappings]]
+priority = 3
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v3.2"
+[[models.mappings]]
+priority = 4
+provider = "groq"
+actual_model = "openai/gpt-oss-120b"
+[[models.mappings]]
+priority = 5
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+
+# THINK: Claude Opus 4.7 (87.6% SWE-V, 1549 LMArena coding)
+# Fallbacks: V4-Pro (80.6% SWE-V) → GPT-5.5 → Sonnet 4.6
+[[models]]
+name = "think-model"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "claude-opus-4-7"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v4-pro"
+# Activate after `grob secrets add xai`:
+# [[models.mappings]]
+# priority = 3
+# provider = "xai"
+# actual_model = "grok-4"
+[[models.mappings]]
+priority = 4
+provider = "openrouter"
+actual_model = "openai/gpt-5.5"
+[[models.mappings]]
+priority = 5
+provider = "openrouter"
+actual_model = "anthropic/claude-sonnet-4.6"
+[[models.mappings]]
+priority = 6
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+
+# BACKGROUND: Groq gpt-oss-20b (960 t/s) → Anthropic Haiku → OR Haiku → Mercury
+[[models]]
+name = "background-model"
+[[models.mappings]]
+priority = 1
+provider = "groq"
+actual_model = "openai/gpt-oss-20b"
+[[models.mappings]]
+priority = 2
+provider = "anthropic"
+actual_model = "claude-haiku-4-5"
+# Activate after `grob secrets add xai`:
+# [[models.mappings]]
+# priority = 3
+# provider = "xai"
+# actual_model = "grok-4-fast"
+[[models.mappings]]
+priority = 4
+provider = "openrouter"
+actual_model = "anthropic/claude-haiku-4.5"
+[[models.mappings]]
+priority = 5
+provider = "mercury"
+actual_model = "mercury-2"
+
+# TRIVIAL: Groq gpt-oss-20b → Haiku 4.5 → Mercury 2
+[[models]]
+name = "trivial-model"
+[[models.mappings]]
+priority = 1
+provider = "groq"
+actual_model = "openai/gpt-oss-20b"
+[[models.mappings]]
+priority = 2
+provider = "anthropic"
+actual_model = "claude-haiku-4-5"
+# Activate after `grob secrets add xai`:
+# [[models.mappings]]
+# priority = 3
+# provider = "xai"
+# actual_model = "grok-4-fast"
+[[models.mappings]]
+priority = 4
+provider = "mercury"
+actual_model = "mercury-2"
+
+# SEARCH: Sonnet 4.6 (tool-use solide, OAuth free) → OR Sonnet → Gemini fallback
+[[models]]
+name = "search-model"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "anthropic/claude-sonnet-4.6"
+[[models.mappings]]
+priority = 3
+provider = "openrouter"
+actual_model = "google/gemini-3.1-pro-preview"
+
+# Aliases auto-map: claude-* via OAuth direct + V4 fallback
+
+[[models]]
+name = "claude-opus-4-7"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "claude-opus-4-7"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "anthropic/claude-opus-4.7"
+[[models.mappings]]
+priority = 3
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v4-pro"
+
+# Speed-first: V4-Flash transparent → Sonnet OAuth backup → OR Sonnet last
+[[models]]
+name = "claude-sonnet-4-6"
+[[models.mappings]]
+priority = 1
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v4-flash"
+[[models.mappings]]
+priority = 2
+provider = "anthropic"
+actual_model = "claude-sonnet-4-6"
+[[models.mappings]]
+priority = 3
+provider = "openrouter"
+actual_model = "anthropic/claude-sonnet-4.6"
+
+# Haiku: Anthropic OAuth p1 (separate quota from Sonnet/Opus, rarely saturates)
+# Groq gpt-oss-20b p2 (3x faster backup, 20B quality), OR Haiku, Mercury last.
+[[models]]
+name = "claude-haiku-4-5"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "claude-haiku-4-5"
+[[models.mappings]]
+priority = 2
+provider = "groq"
+actual_model = "openai/gpt-oss-20b"
+# Activate after `grob secrets add xai`:
+# [[models.mappings]]
+# priority = 3
+# provider = "xai"
+# actual_model = "grok-4-fast"
+[[models.mappings]]
+priority = 4
+provider = "openrouter"
+actual_model = "anthropic/claude-haiku-4.5"
+[[models.mappings]]
+priority = 5
+provider = "mercury"
+actual_model = "mercury-2"
+
+# ── Cache (Phase P: exact + SimHash fuzzy) ───────────────────────
+#
+# Hit principal sur temperature=0 : background, summaries, MCP tools/list, tests.
+# Pour conversations user normales hit ~0% car la clé inclut l'history.
+
+[cache]
+enabled = true
+max_capacity = 2000
+ttl_secs = 3600
+max_entry_bytes = 4194304
+simhash_threshold = 3
+
+# ── Budget ───────────────────────────────────────────────────────
+
+[budget]
+monthly_limit_usd = 100.0
+warn_at_percent = 80
+
+# ── DLP ──────────────────────────────────────────────────────────
+
+[dlp]
+enabled = true
+scan_input = true
+scan_output = true
+
+# ── Security ─────────────────────────────────────────────────────
+#
+# Solo dev = local single-user server. Sized very large to never throttle
+# Claude Code + parallel agents + MCP tools. Real 429s come from upstream
+# providers, not from our server.
+
+[security]
+rate_limit_rps = 1000
+rate_limit_burst = 2000
