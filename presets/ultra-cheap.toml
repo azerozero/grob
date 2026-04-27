@@ -1,10 +1,9 @@
 # Preset: ultra-cheap - €0-2/month target via stacked free tiers
 #
 # Routes through 4 ongoing free tiers (Groq + Cerebras + Z.ai GLM +
-# OpenRouter :free) plus 3 signup-bonus / trial sources (DeepSeek 5M,
-# Inception Mercury 10M, MiniMax trial through 2026-11-07) before
-# any paid spillover. Provider country not constrained — use eu-eco
-# if you need EU sovereignty.
+# OpenRouter :free) plus 2 signup-bonus sources (DeepSeek 5M, Inception
+# Mercury 10M) before any paid spillover. Provider country not
+# constrained — use eu-eco if you need EU sovereignty.
 #
 # Verified free tier limits (April 2026):
 #   Groq        : 30 RPM, 1 000 RPD, 6K TPM (15K for Gemma 2 9B).
@@ -23,8 +22,6 @@
 #                 Direct API: api.deepseek.com.
 #   Inception   : 10M tokens free at signup, 30-day expiry.
 #                 Mercury 2 / Mercury Edit (diffusion LLMs).
-#   MiniMax     : Trial period free until 2026-11-07.
-#                 MiniMax-M2.5 / M2.
 #
 # Sources verified 2026-04-27 :
 #   https://console.groq.com/docs/rate-limits
@@ -33,7 +30,6 @@
 #   https://openrouter.ai/docs/api/reference/limits
 #   https://api-docs.deepseek.com/quick_start/pricing
 #   https://docs.inceptionlabs.ai/get-started/get-started
-#   https://platform.minimax.io/docs/guides/quickstart-preparation
 #
 # ── Required + recommended accounts ──────────────────────────────
 #
@@ -67,9 +63,6 @@
 #                         10M tokens free at signup (30-day expiry).
 #                         Mercury 2 = ultra-fast diffusion LLM, great
 #                         for trivial/edits at 1000+ t/s.
-#   MINIMAX_API_KEY     — free signup at platform.minimax.io
-#                         TRIAL free through 2026-11-07.
-#                         MiniMax-M2.5 = 80.2% SWE-V at $0.30/$1.20.
 #
 # OPTIONAL (opt-in, see caveats)
 #   GEMINI_API_KEY      — Google AI Studio free tier exists (Flash
@@ -90,7 +83,6 @@
 #                           → Groq gpt-oss-20b → OR glm-4.5-air :free
 #   Default               → Z.ai GLM-4.7-Flash (ongoing free coder)
 #                           → Groq Llama 3.3 70B (free, 131K ctx)
-#                           → MiniMax-M2.5 (trial free until 2026-11-07)
 #                           → OR DeepSeek V3 :free
 #                           → DeepSeek V4 Flash direct (5M signup)
 #                           → Grok 4.1 Fast paid ($0.20/$0.50)
@@ -103,7 +95,6 @@
 #                           → Groq Llama 3.3 70B
 #   Long context (>100K)  → Grok 4.1 Fast (2M ctx)
 #                           → DeepSeek V4 Flash (131K direct or via OR)
-#                           → MiniMax-M2.5 (131K)
 #
 # ── Cost estimate (solo dev) ─────────────────────────────────────
 #
@@ -224,21 +215,7 @@ models = [
   "mercury-edit-2",
 ]
 
-# 7. MiniMax — TRIAL free through 2026-11-07. Direct API at
-# api.minimax.io. MiniMax-M2.5 = 80.2% SWE-V, Apache 2.0 base,
-# strong agentic reasoning.
-[[providers]]
-name = "minimax"
-provider_type = "openai"
-base_url = "https://api.minimaxi.com/v1"
-api_key = "$MINIMAX_API_KEY"
-enabled = true
-models = [
-  "MiniMax-M2.5",
-  "MiniMax-M2",
-]
-
-# 4. xAI Grok 4.1 Fast — cheapest paid web search + long context.
+# 7. xAI Grok 4.1 Fast — cheapest paid web search + long context.
 # 2M context, $0.20/$0.50 per Mtok, native server-side `web_search`
 # tool ($2.50-$5 per 1000 calls extra). Knowledge cutoff Nov 2024 —
 # keep web_search enabled to stay current.
@@ -306,7 +283,7 @@ max_tokens_below = 500
 # Cerebras / Mercury / Z.ai excluded from this tier (smaller ctx).
 [[tiers]]
 name = "complex"
-providers = ["xai", "openrouter", "deepseek", "minimax"]
+providers = ["xai", "openrouter", "deepseek"]
 [tiers.match]
 min_input_tokens = 100000
 
@@ -315,16 +292,16 @@ min_input_tokens = 100000
 # Z.ai included (131K ctx on GLM-4.7-Flash).
 [[tiers]]
 name = "medium"
-providers = ["zai", "groq", "openrouter", "deepseek", "minimax", "xai"]
+providers = ["zai", "groq", "openrouter", "deepseek", "xai"]
 [tiers.match]
 min_input_tokens = 7000
 
 # ── Models ───────────────────────────────────────────────────────
 
 # DEFAULT : Z.ai GLM-4.7-Flash (ongoing free, 30B-A3B coder) →
-# Groq Llama 3.3 70B (free, 131K ctx) → MiniMax-M2.5 (trial free) →
-# OR DeepSeek V3 :free → DeepSeek V4 Flash direct (5M signup, then
-# $0.14/$0.28) → Grok 4.1 Fast paid
+# Groq Llama 3.3 70B (free, 131K ctx) → OR DeepSeek V3 :free →
+# DeepSeek V4 Flash direct (5M signup, then $0.14/$0.28) →
+# OR DeepSeek V4 Flash → Grok 4.1 Fast paid
 [[models]]
 name = "default-model"
 [[models.mappings]]
@@ -337,22 +314,18 @@ provider = "groq"
 actual_model = "llama-3.3-70b-versatile"
 [[models.mappings]]
 priority = 3
-provider = "minimax"
-actual_model = "MiniMax-M2.5"
-[[models.mappings]]
-priority = 4
 provider = "openrouter"
 actual_model = "deepseek/deepseek-chat-v3:free"
 [[models.mappings]]
-priority = 5
+priority = 4
 provider = "deepseek"
 actual_model = "deepseek-v4-flash"
 [[models.mappings]]
-priority = 6
+priority = 5
 provider = "openrouter"
 actual_model = "deepseek/deepseek-v4-flash"
 [[models.mappings]]
-priority = 7
+priority = 6
 provider = "xai"
 actual_model = "grok-4-1-fast-non-reasoning"
 
