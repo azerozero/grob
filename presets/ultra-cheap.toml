@@ -1,46 +1,73 @@
-# Preset: ultra-cheap - €2/month target, free tiers + cheapest paid
+# Preset: ultra-cheap - €0-5/month target via free tiers + cheapest paid
 #
-# For users who want zero-friction LLM access without breaking the
-# bank. Routes through free tiers first (Groq LPU), falls back to
-# ultra-cheap paid (DeepSeek V3.2, Llama-3.1-8B on Nebius) only when
-# free tiers rate-limit. No premium models, no Opus, no 405B.
+# Smart routing for solo devs and small teams who want zero-friction
+# LLM access without breaking the bank. Routes through Groq's free
+# tier first (gpt-oss-20b/120b on LPU hardware, 960/472 t/s measured),
+# falls back to ultra-cheap paid (DeepSeek V4 Flash, Grok 4.1 Fast)
+# only when free quotas saturate. Provider country is intentionally
+# not constrained — pick whatever is cheapest. For strict-EU
+# sovereignty, use eu-eco instead.
 #
-# Provider country is intentionally not constrained — pick whatever is
-# cheapest. If you need strict-EU sovereignty, use eu-eco instead.
-#
-# Requires: GROQ_API_KEY (free signup at console.groq.com)
-# Optional but recommended for fallback:
-#   OPENROUTER_API_KEY (DeepSeek V3.2 at $0.30/$0.45 per Mtok)
-#   NEBIUS_API_KEY (Llama-3.1-8B at $0.02/$0.06 per Mtok — cheapest)
+# Required: GROQ_API_KEY (free signup at console.groq.com)
+# Recommended for spillover:
+#   OPENROUTER_API_KEY  — DeepSeek V4 Flash + GLM-4.5 Air :free
+#   XAI_API_KEY         — Grok 4.1 Fast for web search + long context
+# Optional last-resort:
+#   NEBIUS_API_KEY      — Llama-3.1-8B at $0.02/$0.06 per Mtok
 #
 # ── Strategy ──────────────────────────────────────────────────────
 #
 #   Trivial / background  → Groq gpt-oss-20b (free tier, 960 t/s)
-#   Default               → Groq gpt-oss-120b (free tier, 472 t/s)
-#   Think                 → Groq gpt-oss-120b (configurable reasoning)
-#   Search / tools        → Groq gpt-oss-120b (strong tool use)
+#   Default               → Groq gpt-oss-120b (free, 472 t/s)
+#                           ↘ DeepSeek V4 Flash spillover ($0.14/$0.28)
+#   Think                 → DeepSeek R1 (reasoning, $0.55/$2.19)
+#                           ↘ Groq gpt-oss-120b free (configurable thinking)
+#   Web search / tools    → Grok 4.1 Fast (2M ctx, native web_search tool)
+#                           ↘ Groq gpt-oss-120b (free, no native search)
+#   Long context (>100k)  → Grok 4.1 Fast (2M ctx, $0.20/$0.50)
+#                           ↘ DeepSeek V4 Flash (131k native, OR pass-through)
 #
-# All four slots target Groq free tier first. When Groq rate-limits
-# (14 400 req/day, 30 req/min, 7 000 t/min on free), grob fails over
-# to OpenRouter DeepSeek V3.2 or Nebius Llama-3.1-8B (a few cents).
+# ── Why these picks (April 2026) ─────────────────────────────────
 #
-# ── Cost estimate ─────────────────────────────────────────────────
+#   DeepSeek V4 Flash @ $0.14/$0.28 = cheapest decent code model paid;
+#   ~80% SWE-V on Verified, comfortable for general dev work.
 #
-#   Light usage (1M tok/day, ~30 req/h)         : €0/month (Groq free covers all)
-#   Moderate usage (3M tok/day, ~100 req/h)     : €1-3/month (Groq + V3.2 spillover)
-#   Heavy usage (8M+ tok/day, agentic frenzy)   : €5-15/month (Groq throttles, V3.2 takes over)
+#   DeepSeek R1 @ $0.55/$2.19 = best reasoning per $ on the market;
+#   slow (~5x Sonnet) but the cheapest path to genuine deep think.
 #
-#   Hitting €2/month consistently means ~90% of requests served by
-#   Groq free, ~10% by paid V3.2. The ratio depends on your workflow
-#   timing — Groq's 30 req/min ceiling is the practical bottleneck.
+#   Grok 4.1 Fast @ $0.20/$0.50 with 2M context = 33% cheaper than
+#   Gemini 2.5 Flash, has native server-side `web_search` tool, and
+#   2M context absorbs almost any agentic workflow input. Knowledge
+#   cutoff Nov 2024 — keep web_search enabled to stay current.
+#
+#   Groq gpt-oss-20b/120b free tier (14 400 req/day, 30 req/min,
+#   7 000 t/min) covers ~90% of solo dev usage at zero marginal cost.
+#
+# ── Cost estimate (solo dev) ─────────────────────────────────────
+#
+#   Light usage (~1M tok/day, 30 req/h)         : €0/month
+#                                                  (Groq free tier covers all)
+#   Moderate usage (~3M tok/day, 100 req/h)     : €1-3/month
+#                                                  (Groq + V4 Flash spillover)
+#   Heavy usage (~8M tok/day, agentic frenzy)   : €5-15/month
+#                                                  (Groq throttles at 30 req/min,
+#                                                   V4 Flash + Grok take over)
+#
+# ── Cost estimate (10 devs with grob cache mutualization) ────────
+#
+#   Conservative (75% L3 cache hit, no L2 normalization)  : ~€20/dev/month
+#   Optimal      (90% L3 cache hit + tool normalization)  : ~€10/dev/month
+#
+#   Driver: prompt prefix mutualization across team (grob's L3 Redis
+#   cache is tenant-shared, surviving even with separate provider keys).
 
 # ── Providers ────────────────────────────────────────────────────
 
-# Groq — primary. Free tier covers most solo-dev usage.
-# Bench (2026-04-26, 200-tok output):
-#   gpt-oss-20b   = 960 t/s eff, 364ms RTT
-#   gpt-oss-120b  = 472 t/s eff, 643ms RTT
-#   llama-3.1-8b  = 793 t/s     , 377ms (legacy fallback)
+# 1. Groq — primary. LPU inference at 472-960 t/s, free tier covers
+# most solo-dev usage. Bench (2026-04-26, 200-tok output payload):
+#   gpt-oss-20b   = 960 t/s eff, 364ms RTT  ← speed king
+#   gpt-oss-120b  = 472 t/s eff, 643ms RTT  ← quality + tool use
+#   llama-3.1-8b  = 793 t/s,     377ms     ← legacy fallback
 [[providers]]
 name = "groq"
 provider_type = "openai"
@@ -51,10 +78,26 @@ models = [
   "openai/gpt-oss-20b",
   "openai/gpt-oss-120b",
   "llama-3.1-8b-instant",
+  "llama-3.3-70b-versatile",
 ]
 
-# OpenRouter — paid fallback when Groq rate-limits.
-# DeepSeek V3.2 at $0.30/$0.45 per Mtok = practically free.
+# 2. xAI Grok — Grok 4.1 Fast for web search + long context.
+# 2M context window, $0.20/$0.50 per Mtok, native web_search tool
+# at $2.50-$5 per 1000 calls extra. Knowledge cutoff Nov 2024 →
+# keep web_search enabled to stay current.
+[[providers]]
+name = "xai"
+provider_type = "openai"
+base_url = "https://api.x.ai/v1"
+api_key = "$XAI_API_KEY"
+enabled = true
+models = [
+  "grok-4-1-fast-non-reasoning",
+  "grok-4-1-fast-reasoning",
+]
+
+# 3. OpenRouter — paid spillover for DeepSeek V4 Flash + R1, plus
+# free tier for GLM-4.5 Air (background fallback).
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"
@@ -63,17 +106,17 @@ enabled = true
 pass_through = true
 models = []
 
-# Nebius — last-resort cheapest paid (Llama-3.1-8B at $0.02/$0.06).
+# 4. Nebius — last-resort cheapest paid (Llama-3.1-8B at $0.02/$0.06).
+# Disabled by default; enable if you want a price floor on paid calls.
 [[providers]]
 name = "nebius"
 provider_type = "openai"
 base_url = "https://api.studio.nebius.ai/v1"
 api_key = "$NEBIUS_API_KEY"
-enabled = true
+enabled = false
 models = [
   "meta-llama/Meta-Llama-3.1-8B-Instruct",
   "google/gemma-2-2b-it",
-  "Qwen/Qwen3-30B-A3B-Instruct-2507",
 ]
 
 # ── Router ───────────────────────────────────────────────────────
@@ -88,17 +131,25 @@ background_regex = "(?i)claude.*haiku"
 
 # ── Tiers ────────────────────────────────────────────────────────
 
-# Trivial : tiny edits → Groq free tier (cheapest possible)
+# Trivial : tiny edits → Groq free tier (cheapest possible, 960 t/s)
 [[tiers]]
 name = "trivial"
-providers = ["groq", "nebius"]
+providers = ["groq", "openrouter"]
 [tiers.match]
 max_tokens_below = 500
 
+# Long input (>100k tokens) → Grok 4.1 Fast (2M ctx) priority,
+# OpenRouter as fallback (DeepSeek V4 Flash native 131k via pass-through).
+[[tiers]]
+name = "complex"
+providers = ["xai", "openrouter"]
+[tiers.match]
+min_input_tokens = 100000
+
 # ── Models ───────────────────────────────────────────────────────
 
-# DEFAULT : Groq gpt-oss-120b free → DeepSeek V3.2 paid spillover
-# → Llama-3.1-8B Nebius (last resort, $0.02/$0.06)
+# DEFAULT : Groq gpt-oss-120b free → DeepSeek V4 Flash spillover
+# → Grok 4.1 Fast (2M ctx + native search) → Llama-8B Nebius cheap
 [[models]]
 name = "default-model"
 [[models.mappings]]
@@ -108,33 +159,35 @@ actual_model = "openai/gpt-oss-120b"
 [[models.mappings]]
 priority = 2
 provider = "openrouter"
-actual_model = "deepseek/deepseek-v3.2"
+actual_model = "deepseek/deepseek-v4-flash"
 [[models.mappings]]
 priority = 3
-provider = "nebius"
-actual_model = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+provider = "xai"
+actual_model = "grok-4-1-fast-non-reasoning"
 [[models.mappings]]
 priority = 4
 provider = "nebius"
 actual_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
-# THINK : Groq gpt-oss-120b (configurable reasoning) → DeepSeek V3.2 paid
+# THINK : DeepSeek R1 paid (best reasoning per $) → Groq gpt-oss-120b
+# free (configurable reasoning effort) → Grok 4.1 Fast reasoning
 [[models]]
 name = "think-model"
 [[models.mappings]]
 priority = 1
+provider = "openrouter"
+actual_model = "deepseek/deepseek-r1"
+[[models.mappings]]
+priority = 2
 provider = "groq"
 actual_model = "openai/gpt-oss-120b"
 [[models.mappings]]
-priority = 2
-provider = "openrouter"
-actual_model = "deepseek/deepseek-v3.2"
-[[models.mappings]]
 priority = 3
-provider = "nebius"
-actual_model = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+provider = "xai"
+actual_model = "grok-4-1-fast-reasoning"
 
-# BACKGROUND : Groq gpt-oss-20b free → Llama 8B Nebius cheap
+# BACKGROUND : Groq gpt-oss-20b free → GLM-4.5 Air :free OR fallback
+# → Llama-8B Nebius (last resort cheap)
 [[models]]
 name = "background-model"
 [[models.mappings]]
@@ -143,14 +196,18 @@ provider = "groq"
 actual_model = "openai/gpt-oss-20b"
 [[models.mappings]]
 priority = 2
+provider = "openrouter"
+actual_model = "z-ai/glm-4.5-air:free"
+[[models.mappings]]
+priority = 3
 provider = "groq"
 actual_model = "llama-3.1-8b-instant"
 [[models.mappings]]
-priority = 3
+priority = 4
 provider = "nebius"
 actual_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
-# TRIVIAL : Groq gpt-oss-20b → Gemma-2-2b Nebius (extreme cheap)
+# TRIVIAL : Groq gpt-oss-20b → llama-3.1-8b free (instant) → Gemma-2-2b cheap
 [[models]]
 name = "trivial-model"
 [[models.mappings]]
@@ -159,24 +216,30 @@ provider = "groq"
 actual_model = "openai/gpt-oss-20b"
 [[models.mappings]]
 priority = 2
-provider = "nebius"
-actual_model = "google/gemma-2-2b-it"
-[[models.mappings]]
-priority = 3
 provider = "groq"
 actual_model = "llama-3.1-8b-instant"
+[[models.mappings]]
+priority = 3
+provider = "nebius"
+actual_model = "google/gemma-2-2b-it"
 
-# SEARCH : Groq gpt-oss-120b (strong tool use) → DeepSeek V3.2
+# SEARCH / web : Grok 4.1 Fast (2M ctx + native web_search server tool)
+# → Groq gpt-oss-120b (free, no native search but tool-use solid)
+# → DeepSeek V4 Flash via OR (cheap fallback)
 [[models]]
 name = "search-model"
 [[models.mappings]]
 priority = 1
+provider = "xai"
+actual_model = "grok-4-1-fast-non-reasoning"
+[[models.mappings]]
+priority = 2
 provider = "groq"
 actual_model = "openai/gpt-oss-120b"
 [[models.mappings]]
-priority = 2
+priority = 3
 provider = "openrouter"
-actual_model = "deepseek/deepseek-v3.2"
+actual_model = "deepseek/deepseek-v4-flash"
 
 # ── Cache ────────────────────────────────────────────────────────
 
