@@ -1,3 +1,6 @@
+[meta]
+description = "Pure Anthropic OAuth (Pro/Max) — auto-map claude-* to native"
+
 # Preset: perf - Pure Anthropic OAuth, zero fallbacks
 #
 # For users with an Anthropic Pro ($20/month) or Max ($200/month)

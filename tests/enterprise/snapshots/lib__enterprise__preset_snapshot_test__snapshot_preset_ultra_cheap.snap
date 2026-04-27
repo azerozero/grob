@@ -1,0 +1,15 @@
+---
+source: tests/enterprise/preset_snapshot_test.rs
+assertion_line: 152
+expression: snapshot
+---
+[
+    "default_simple: model=default-model type=default matched=none",
+    "default_non_claude: model=gpt-5.2 type=default matched=none",
+    "thinking_enabled: model=think-model type=think matched=none",
+    "websearch_tool: model=search-model type=web-search matched=none",
+    "background_haiku: model=background-model type=background matched=none",
+    "prompt_rule_refactor: model=default-model type=default matched=none",
+    "prompt_rule_lint: model=default-model type=default matched=none",
+    "prompt_rule_architect: model=default-model type=default matched=none",
+]

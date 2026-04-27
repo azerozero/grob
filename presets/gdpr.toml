@@ -1,3 +1,6 @@
+[meta]
+description = "EU-only GDPR compliant — Mistral, Scaleway, OVH (region=eu)"
+
 # Preset: gdpr - EU-only GDPR compliant
 # Routes only through EU-hosted providers (Mistral, Scaleway, OVH)
 # Requires: MISTRAL_API_KEY (+ optionally SCALEWAY_API_KEY, OVH_API_KEY)

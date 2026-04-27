@@ -16,15 +16,14 @@ pub use validation::{
 };
 
 use anyhow::{Context, Result};
+use include_dir::{include_dir, Dir};
 use std::path::{Path, PathBuf};
 
-const BUILTIN_PERF: &str = include_str!("../../presets/perf.toml");
-const BUILTIN_MEDIUM: &str = include_str!("../../presets/medium.toml");
-const BUILTIN_LOCAL: &str = include_str!("../../presets/local.toml");
-const BUILTIN_CHEAP: &str = include_str!("../../presets/cheap.toml");
-const BUILTIN_FAST: &str = include_str!("../../presets/fast.toml");
-const BUILTIN_GDPR: &str = include_str!("../../presets/gdpr.toml");
-const BUILTIN_EU_AI_ACT: &str = include_str!("../../presets/eu-ai-act.toml");
+/// Builtin presets are auto-discovered from the `presets/` directory at
+/// compile time. Adding/removing a preset = touch its `.toml` only; no
+/// Rust code change needed. Each preset's description comes from its
+/// `[meta] description = "..."` section.
+static BUILTIN_PRESETS: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/presets");
 
 /// Metadata for a builtin or installed preset.
 #[derive(Debug)]
@@ -52,79 +51,79 @@ pub fn preset_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Reads the `[meta] description` field from a preset TOML body.
+/// Falls back to a generic label when the field is absent or unparseable.
+fn parse_description(body: &str, fallback: &str) -> String {
+    toml::from_str::<toml::Value>(body)
+        .ok()
+        .and_then(|v| {
+            v.get("meta")
+                .and_then(|m| m.get("description"))
+                .and_then(|d| d.as_str())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| fallback.to_string())
+}
+
 /// Lists all available presets (builtins + installed).
+///
+/// Builtins are auto-discovered from the embedded `presets/` directory.
+/// Installed presets in `~/.grob/presets/` shadow builtins of the same
+/// name (allowing local overrides).
 ///
 /// # Errors
 ///
 /// Returns an error if the presets directory cannot be read.
 pub fn list_presets() -> Result<Vec<PresetInfo>> {
-    let mut presets = vec![
-        PresetInfo {
-            name: "perf".to_string(),
-            description: "Performance max — Anthropic + OpenAI + Gemini, top models".to_string(),
-            is_builtin: true,
-        },
-        PresetInfo {
-            name: "medium".to_string(),
-            description: "Best quality/price — Anthropic thinking + OpenRouter defaults"
-                .to_string(),
-            is_builtin: true,
-        },
-        PresetInfo {
-            name: "local".to_string(),
-            description: "Ollama local + Anthropic thinking — private, zero API cost for defaults"
-                .to_string(),
-            is_builtin: true,
-        },
-        PresetInfo {
-            name: "cheap".to_string(),
-            description: "Budget max — GLM-5 + DeepSeek + Gemini Flash, $0-5/month".to_string(),
-            is_builtin: true,
-        },
-        PresetInfo {
-            name: "fast".to_string(),
-            description: "Premium rapide — Opus + GPT-5.2 + Gemini Pro, qualite max sans limite"
-                .to_string(),
-            is_builtin: true,
-        },
-        PresetInfo {
-            name: "gdpr".to_string(),
-            description: "EU-only GDPR compliant — Mistral, Scaleway, OVH (region=eu)".to_string(),
-            is_builtin: true,
-        },
-        PresetInfo {
-            name: "eu-ai-act".to_string(),
-            description:
-                "EU AI Act compliant — EU providers + transparency headers + risk classification"
-                    .to_string(),
-            is_builtin: true,
-        },
-    ];
+    let mut presets: Vec<PresetInfo> = Vec::new();
 
-    // Scan installed presets directory
+    // Builtins: scan the embedded directory for *.toml files.
+    // Skip `index.toml` (it's a sync manifest, not a preset).
+    for file in BUILTIN_PRESETS.files() {
+        let path = file.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+        if stem.is_empty() || stem == "index" {
+            continue;
+        }
+        let body = file.contents_utf8().unwrap_or("");
+        let description = parse_description(body, "Builtin preset");
+        presets.push(PresetInfo {
+            name: stem.to_string(),
+            description,
+            is_builtin: true,
+        });
+    }
+
+    // Installed presets: scan ~/.grob/presets/ for *.toml files. Shadow
+    // builtins of the same name (local override semantics).
     let dir = preset_dir()?;
     if dir.exists() {
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("toml") {
-                let name = path
-                    .file_stem()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string();
-
-                // Skip if it shadows a builtin
-                if presets.iter().any(|p| p.name == name) {
-                    continue;
-                }
-
-                presets.push(PresetInfo {
-                    name,
-                    description: "Installed preset".to_string(),
-                    is_builtin: false,
-                });
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
             }
+            let name = path
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            if presets.iter().any(|p| p.name == name) {
+                continue;
+            }
+            let description = std::fs::read_to_string(&path)
+                .ok()
+                .map(|b| parse_description(&b, "Installed preset"))
+                .unwrap_or_else(|| "Installed preset".to_string());
+            presets.push(PresetInfo {
+                name,
+                description,
+                is_builtin: false,
+            });
         }
     }
 
@@ -133,24 +132,23 @@ pub fn list_presets() -> Result<Vec<PresetInfo>> {
 
 /// Gets preset content by name (builtin or installed file).
 ///
+/// Builtins are read from the embedded directory; installed presets
+/// from `~/.grob/presets/`. Builtins win on name collision.
+///
 /// # Errors
 ///
 /// Returns an error if the preset name is not recognized as a
 /// builtin and no installed file exists for it.
 pub fn preset_content(name: &str) -> Result<String> {
-    // Check builtins first
-    match name {
-        "perf" => return Ok(BUILTIN_PERF.to_string()),
-        "medium" => return Ok(BUILTIN_MEDIUM.to_string()),
-        "local" => return Ok(BUILTIN_LOCAL.to_string()),
-        "cheap" => return Ok(BUILTIN_CHEAP.to_string()),
-        "fast" => return Ok(BUILTIN_FAST.to_string()),
-        "gdpr" => return Ok(BUILTIN_GDPR.to_string()),
-        "eu-ai-act" => return Ok(BUILTIN_EU_AI_ACT.to_string()),
-        _ => {}
+    // Builtins first (embedded at compile time).
+    let builtin_path = format!("{}.toml", name);
+    if let Some(file) = BUILTIN_PRESETS.get_file(&builtin_path) {
+        if let Some(body) = file.contents_utf8() {
+            return Ok(body.to_string());
+        }
     }
 
-    // Check installed presets
+    // Fallback: ~/.grob/presets/<name>.toml.
     let dir = preset_dir()?;
     let path = dir.join(format!("{}.toml", name));
     if path.exists() {
@@ -662,10 +660,10 @@ mod tests {
         }
         let names: Vec<&str> = presets.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"perf"));
-        assert!(names.contains(&"medium"));
-        assert!(names.contains(&"local"));
-        assert!(names.contains(&"cheap"));
-        assert!(names.contains(&"fast"));
+        assert!(names.contains(&"ultra-cheap"));
+        assert!(names.contains(&"eu-eco"));
+        assert!(names.contains(&"eu-pro"));
+        assert!(names.contains(&"eu-max"));
     }
 
     #[test]
@@ -674,14 +672,15 @@ mod tests {
         assert!(content.contains("[router]"));
         assert!(content.contains("[[providers]]"));
 
-        let content = preset_content("medium").unwrap();
+        let content = preset_content("ultra-cheap").unwrap();
         assert!(content.contains("[router]"));
+        assert!(content.contains("groq"));
 
-        let content = preset_content("cheap").unwrap();
-        assert!(content.contains("deepseek"));
+        let content = preset_content("eu-pro").unwrap();
+        assert!(content.contains("nebius"));
 
-        let content = preset_content("fast").unwrap();
-        assert!(content.contains("anthropic"));
+        let content = preset_content("eu-max").unwrap();
+        assert!(content.contains("scaleway"));
     }
 
     #[test]
@@ -691,18 +690,24 @@ mod tests {
 
     #[test]
     fn test_builtin_presets_parse_as_valid_toml() {
-        for (name, content) in [
-            ("perf", BUILTIN_PERF),
-            ("medium", BUILTIN_MEDIUM),
-            ("local", BUILTIN_LOCAL),
-            ("cheap", BUILTIN_CHEAP),
-            ("fast", BUILTIN_FAST),
-        ] {
+        // Iterate the embedded directory directly — every shipped preset
+        // (except the index manifest) must be valid TOML with the three
+        // required top-level sections.
+        for file in BUILTIN_PRESETS.files() {
+            let path = file.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let stem = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+            if stem == "index" || stem.is_empty() {
+                continue;
+            }
+            let content = file.contents_utf8().unwrap_or("");
             let parsed: Result<toml::Value, _> = toml::from_str(content);
             assert!(
                 parsed.is_ok(),
                 "Preset '{}' failed to parse as TOML: {:?}",
-                name,
+                stem,
                 parsed.err()
             );
 
@@ -710,17 +715,24 @@ mod tests {
             assert!(
                 table.get("router").is_some(),
                 "Preset '{}' missing [router]",
-                name
+                stem
             );
             assert!(
                 table.get("providers").is_some(),
                 "Preset '{}' missing [[providers]]",
-                name
+                stem
             );
+            // [[models]] is optional — presets that rely entirely on
+            // auto_map_regex (e.g. `perf`) don't need explicit virtual
+            // model definitions.
             assert!(
-                table.get("models").is_some(),
-                "Preset '{}' missing [[models]]",
-                name
+                table
+                    .get("meta")
+                    .and_then(|m| m.get("description"))
+                    .and_then(|d| d.as_str())
+                    .is_some(),
+                "Preset '{}' missing [meta] description",
+                stem
             );
         }
     }

@@ -149,10 +149,10 @@ macro_rules! preset_snapshot_test {
 }
 
 preset_snapshot_test!(snapshot_preset_perf, "perf");
-preset_snapshot_test!(snapshot_preset_medium, "medium");
-preset_snapshot_test!(snapshot_preset_local, "local");
-preset_snapshot_test!(snapshot_preset_cheap, "cheap");
-preset_snapshot_test!(snapshot_preset_fast, "fast");
+preset_snapshot_test!(snapshot_preset_ultra_cheap, "ultra-cheap");
+preset_snapshot_test!(snapshot_preset_eu_eco, "eu-eco");
+preset_snapshot_test!(snapshot_preset_eu_pro, "eu-pro");
+preset_snapshot_test!(snapshot_preset_eu_max, "eu-max");
 preset_snapshot_test!(snapshot_preset_gdpr, "gdpr");
 preset_snapshot_test!(snapshot_preset_eu_ai_act, "eu-ai-act");
 
@@ -162,10 +162,10 @@ preset_snapshot_test!(snapshot_preset_eu_ai_act, "eu-ai-act");
 fn snapshot_all_presets_have_default_route() {
     let presets = [
         "perf",
-        "medium",
-        "local",
-        "cheap",
-        "fast",
+        "ultra-cheap",
+        "eu-eco",
+        "eu-pro",
+        "eu-max",
         "gdpr",
         "eu-ai-act",
     ];
@@ -190,7 +190,7 @@ fn snapshot_all_presets_have_default_route() {
 
 #[test]
 fn snapshot_thinking_routes_differ_from_default() {
-    let presets = ["perf", "medium", "local", "cheap", "fast"];
+    let presets = ["perf", "ultra-cheap", "eu-eco", "eu-pro", "eu-max"];
     let mut results: Vec<String> = Vec::new();
 
     for preset_name in &presets {

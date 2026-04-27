@@ -1,3 +1,6 @@
+[meta]
+description = "EUR0-2/month — stacked free tiers (Groq + Cerebras + Z.ai + OpenRouter :free)"
+
 # Preset: ultra-cheap - €0-2/month target via stacked free tiers
 #
 # Routes through 4 ongoing free tiers (Groq + Cerebras + Z.ai GLM +
