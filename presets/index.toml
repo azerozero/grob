@@ -1,1 +1,1 @@
-files = ["perf.toml", "medium.toml", "local.toml", "cheap.toml", "fast.toml", "optimal.toml", "eu-eco.toml", "eu-pro.toml", "eu-max.toml"]
+files = ["perf.toml", "ultra-cheap.toml", "eu-eco.toml", "eu-pro.toml", "eu-max.toml"]
