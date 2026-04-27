@@ -1,0 +1,382 @@
+# Preset: eu - Strict EU sovereign routing, closest-to-Opus quality
+# Pro tier — designed for users who need GDPR-strict EU data residency
+# without giving up reasoning quality. Uses Scaleway (FR), Nebius
+# (eu-north1, FI), and xAI's regional EU endpoint as the routing fabric.
+# Requires: SCALEWAY_API_KEY + NEBIUS_API_KEY (XAI_API_KEY optional)
+#
+# ── Strategy ──────────────────────────────────────────────────────
+#
+#   Trivial / background  → Nebius Gemma-2-2b / Llama-3.1-8B (eu-north1)
+#   Default               → Nebius Qwen3-Next-80B-A3B-Thinking ($0.15/$1.20)
+#   Code (Rust/k8s/etc.)  → Scaleway Qwen3.5-397B-A17B (FR, ChatCode)
+#   Think                 → Nebius Hermes-4-405B (verified CoT, eu-north1)
+#   Search / tools        → Scaleway gpt-oss-120b (FR, configurable reasoning)
+#   Long context (>150k)  → xAI Grok 4.1 Fast (eu-west-1, 2M ctx)
+#   Vision                → Scaleway mistral-small-3.2-24b (FR)
+#
+# No Anthropic / OpenAI / Google direct (US providers). No DeepSeek
+# (CN/US datacenters via OpenRouter). All traffic strictly EU-routed.
+#
+# ── Quality bet ──────────────────────────────────────────────────
+#
+#   Closest-to-Opus 4.7 (87.6% SWE-V) achievable in EU as of April 2026:
+#     Hermes-4-405B  — 405B verified-CoT reasoning, EU-north1 (Nebius)
+#     Qwen3.5-397B   — 397B MoE coding-specific, FR (Scaleway ChatCode)
+#     Qwen3-Next-80B-Thinking — thinking-optimized, 85 t/s, EU-north1
+#
+#   Estimated SWE-V parity: ~82-85% (vs Opus 4.7 at 87.6%). Trade-off
+#   is ~3-5 points lower benchmark for full EU sovereignty + GDPR
+#   at-rest + no transatlantic data transfer.
+#
+# ── Cost estimate (4M tokens/day, 22 days/month) ─────────────────
+#
+#   default  Qwen3-Next-80B-Thinking : $0.15×3 + $1.20×1   ≈ $36/month
+#   think    Hermes-4-405B (20% mix) : $1.00×0.6 + $3.00×0.2 ≈ $26/month
+#   code     Qwen3.5-397B (30% mix)  : €0.60×0.9 + €3.60×0.3 ≈ €35/month
+#   trivial  Gemma-2-2b / Llama-8B   : marginal, < €2/month
+#                                              Total ≈ €60-80/month
+#
+#   Lighter usage (modest agent): ~€25-35/month achievable.
+#
+# ── Provider URLs ────────────────────────────────────────────────
+#
+#   Scaleway:  https://api.scaleway.ai/<PROJECT_ID>/v1
+#              (replace <PROJECT_ID> in the [[providers]] block)
+#   Nebius:    https://api.studio.nebius.ai/v1
+#   xAI EU:    https://eu-west-1.api.x.ai/v1  (fail-closed if EU unavailable)
+#
+# Sources:
+#   - docs.x.ai/developers/regions  (xAI regional endpoints)
+#   - scaleway.com/en/generative-apis  (FR sovereign datacenters)
+#   - nebius.ai/services/token-factory  (eu-north1 in Finland)
+
+# ── Providers ────────────────────────────────────────────────────
+
+# 1. Scaleway Generative APIs (FR datacenters, EU-souverain)
+[[providers]]
+name = "scaleway"
+provider_type = "openai"
+base_url = "https://api.scaleway.ai/v1"
+api_key = "$SCALEWAY_API_KEY"
+enabled = true
+models = [
+  "qwen3.5-397b-a17b",
+  "gpt-oss-120b",
+  "qwen3-coder-30b-a3b-instruct",
+  "devstral-2-123b-instruct-2512",
+  "mistral-small-3.2-24b-instruct-2506",
+  "pixtral-12b-2409",
+]
+
+# 2. Nebius Token Factory (eu-north1, Finland)
+[[providers]]
+name = "nebius"
+provider_type = "openai"
+base_url = "https://api.studio.nebius.ai/v1"
+api_key = "$NEBIUS_API_KEY"
+enabled = true
+models = [
+  "Qwen/Qwen3-Next-80B-A3B-Thinking",
+  "NousResearch/Hermes-4-405B",
+  "NousResearch/Hermes-4-70B",
+  "Qwen/Qwen3-235B-A22B-Instruct-2507",
+  "Qwen/Qwen3-30B-A3B-Instruct-2507",
+  "Qwen/Qwen3-32B",
+  "google/gemma-3-27b-it",
+  "google/gemma-2-2b-it",
+  "meta-llama/Llama-3.3-70B-Instruct",
+  "meta-llama/Meta-Llama-3.1-8B-Instruct",
+  "Qwen/Qwen2.5-VL-72B-Instruct",
+  "PrimeIntellect/INTELLECT-3",
+]
+
+# 3. xAI Grok regional EU endpoint
+# Fail-closed: if xAI cannot serve in EU the request fails (no silent
+# US fallback). In-flight EU only — at-rest unspecified by xAI.
+[[providers]]
+name = "xai_eu"
+provider_type = "openai"
+base_url = "https://eu-west-1.api.x.ai/v1"
+api_key = "$XAI_API_KEY"
+enabled = true
+models = [
+  "grok-4-1-fast-reasoning",
+  "grok-4-1-fast-non-reasoning",
+  "grok-4.20-0309-reasoning",
+  "grok-4.20-0309-non-reasoning",
+]
+
+# ── Router ───────────────────────────────────────────────────────
+
+[router]
+default = "default-model"
+think = "think-model"
+background = "background-model"
+websearch = "search-model"
+
+# Architecture / design / security review → think (Hermes-4-405B)
+[[router.prompt_rules]]
+pattern = "(?i)(architect|design.*system|plan.*implement|security.*review|threat.*model)"
+model = "think-model"
+
+# Quick edits / formatting / commits → trivial (Gemma-2-2b)
+[[router.prompt_rules]]
+pattern = "(?i)(format|lint|rename|typo|commit|push|autocomplete)"
+model = "trivial-model"
+
+# ── Classifier (complexity scorer) ───────────────────────────────
+
+[classifier.weights]
+max_tokens = 1.0
+tools = 1.0
+context_size = 1.0
+keywords = 1.5
+system_prompt = 1.0
+
+[classifier.thresholds]
+medium_threshold = 2.0
+complex_threshold = 5.0
+
+# ── Tiers (evaluated BEFORE the scorer) ──────────────────────────
+
+# Trivial : short edits < 500 tokens out → Nebius cheap+fast
+[[tiers]]
+name = "trivial"
+providers = ["nebius", "scaleway", "xai_eu"]
+[tiers.match]
+max_tokens_below = 500
+
+# Rust → Scaleway Qwen3.5-397B-A17B (ChatCode endpoint, 397B MoE)
+[[tiers]]
+name = "complex"
+providers = ["scaleway", "nebius"]
+[tiers.match]
+keywords = [
+  "unsafe",
+  "lifetime",
+  "Pin<",
+  "trait impl",
+  "borrow checker",
+  "PhantomData",
+  "#[derive",
+]
+file_patterns = ["*.rs"]
+
+# Terraform / OpenTofu → Scaleway code-tuned models
+[[tiers]]
+name = "complex"
+providers = ["scaleway", "nebius"]
+[tiers.match]
+keywords = ["terraform", "opentofu", "module", "resource", "data source"]
+file_patterns = ["*.tf", "*.tfvars", "*.tofu"]
+
+# Kubernetes / Helm → Scaleway Qwen3.5-397B
+[[tiers]]
+name = "complex"
+providers = ["scaleway", "nebius"]
+[tiers.match]
+file_patterns = ["*.yaml", "*.yml"]
+keywords = ["kubectl", "helm", "deployment", "ingress", "configmap"]
+
+# CI/CD YAML → Scaleway
+[[tiers]]
+name = "complex"
+providers = ["scaleway", "nebius"]
+[tiers.match]
+file_patterns = [".github/workflows/*.yml", ".gitlab-ci.yml"]
+
+# Big history (> 50 messages) → Nebius Qwen3-235B (long ctx capable)
+[[tiers]]
+name = "complex"
+providers = ["nebius", "xai_eu"]
+[tiers.match]
+min_messages = 50
+
+# Output > 16K → Nebius Hermes-4-405B (large output friendly)
+[[tiers]]
+name = "complex"
+providers = ["nebius", "scaleway"]
+[tiers.match]
+max_tokens_above = 16000
+
+# Input > 150k tokens → xAI Grok 4.1 Fast (2M ctx) priority
+[[tiers]]
+name = "complex"
+providers = ["xai_eu", "nebius"]
+[tiers.match]
+min_input_tokens = 150000
+
+# Input > 30k tokens → exclude tiny models, prefer 80B+
+[[tiers]]
+name = "medium"
+providers = ["nebius", "scaleway", "xai_eu"]
+[tiers.match]
+min_input_tokens = 30000
+
+# ── Models (virtual → provider mapping) ──────────────────────────
+
+# DEFAULT : Qwen3-Next-80B-A3B-Thinking ($0.15/$1.20, 85 t/s, eu-north1)
+# Ratio prix/perf imbattable, native thinking. Fallback gpt-oss-120b
+# Scaleway pour tool-use, Qwen3-235B Nebius pour gros contextes.
+[[models]]
+name = "default-model"
+[[models.mappings]]
+priority = 1
+provider = "nebius"
+actual_model = "Qwen/Qwen3-Next-80B-A3B-Thinking"
+[[models.mappings]]
+priority = 2
+provider = "scaleway"
+actual_model = "gpt-oss-120b"
+[[models.mappings]]
+priority = 3
+provider = "nebius"
+actual_model = "Qwen/Qwen3-235B-A22B-Instruct-2507"
+[[models.mappings]]
+priority = 4
+provider = "xai_eu"
+actual_model = "grok-4-1-fast-non-reasoning"
+
+# THINK : Hermes-4-405B (verified CoT, 405B params, eu-north1)
+# C'est le modèle EU le plus proche d'Opus 4.7 en raisonnement profond.
+# Lent (20 t/s) mais qualité maximale ; fallback Qwen3.5-397B Scaleway
+# (80 t/s) si Hermes saturé, puis Grok 4.20 reasoning EU.
+[[models]]
+name = "think-model"
+[[models.mappings]]
+priority = 1
+provider = "nebius"
+actual_model = "NousResearch/Hermes-4-405B"
+[[models.mappings]]
+priority = 2
+provider = "scaleway"
+actual_model = "qwen3.5-397b-a17b"
+[[models.mappings]]
+priority = 3
+provider = "xai_eu"
+actual_model = "grok-4.20-0309-reasoning"
+[[models.mappings]]
+priority = 4
+provider = "nebius"
+actual_model = "Qwen/Qwen3-Next-80B-A3B-Thinking"
+[[models.mappings]]
+priority = 5
+provider = "nebius"
+actual_model = "NousResearch/Hermes-4-70B"
+
+# BACKGROUND : Llama-3.1-8B Nebius ($0.02/$0.06, 30 t/s) — quasi gratuit
+[[models]]
+name = "background-model"
+[[models.mappings]]
+priority = 1
+provider = "nebius"
+actual_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+[[models.mappings]]
+priority = 2
+provider = "nebius"
+actual_model = "google/gemma-2-2b-it"
+[[models.mappings]]
+priority = 3
+provider = "nebius"
+actual_model = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+[[models.mappings]]
+priority = 4
+provider = "scaleway"
+actual_model = "mistral-small-3.2-24b-instruct-2506"
+
+# TRIVIAL : Gemma-2-2b Nebius (80 t/s) → Llama-8B Nebius → Mistral-small Scaleway
+[[models]]
+name = "trivial-model"
+[[models.mappings]]
+priority = 1
+provider = "nebius"
+actual_model = "google/gemma-2-2b-it"
+[[models.mappings]]
+priority = 2
+provider = "nebius"
+actual_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+[[models.mappings]]
+priority = 3
+provider = "scaleway"
+actual_model = "mistral-small-3.2-24b-instruct-2506"
+
+# CODE : Qwen3.5-397B-A17B (Scaleway ChatCode) — roi du code open EU
+# devstral-2-123b (Mistral FR coding-specific, Aperçu) en backup national
+[[models]]
+name = "code-model"
+[[models.mappings]]
+priority = 1
+provider = "scaleway"
+actual_model = "qwen3.5-397b-a17b"
+[[models.mappings]]
+priority = 2
+provider = "scaleway"
+actual_model = "devstral-2-123b-instruct-2512"
+[[models.mappings]]
+priority = 3
+provider = "scaleway"
+actual_model = "qwen3-coder-30b-a3b-instruct"
+[[models.mappings]]
+priority = 4
+provider = "nebius"
+actual_model = "NousResearch/Hermes-4-405B"
+
+# SEARCH / tools : gpt-oss-120b Scaleway (configurable reasoning + tool use)
+[[models]]
+name = "search-model"
+[[models.mappings]]
+priority = 1
+provider = "scaleway"
+actual_model = "gpt-oss-120b"
+[[models.mappings]]
+priority = 2
+provider = "nebius"
+actual_model = "Qwen/Qwen3-Next-80B-A3B-Thinking"
+[[models.mappings]]
+priority = 3
+provider = "xai_eu"
+actual_model = "grok-4-1-fast-reasoning"
+
+# VISION : Mistral FR small (€0.15/€0.35) → Pixtral Scaleway → Qwen2.5-VL
+[[models]]
+name = "vision-model"
+[[models.mappings]]
+priority = 1
+provider = "scaleway"
+actual_model = "mistral-small-3.2-24b-instruct-2506"
+[[models.mappings]]
+priority = 2
+provider = "scaleway"
+actual_model = "pixtral-12b-2409"
+[[models.mappings]]
+priority = 3
+provider = "nebius"
+actual_model = "Qwen/Qwen2.5-VL-72B-Instruct"
+
+# ── Cache ────────────────────────────────────────────────────────
+
+[cache]
+enabled = true
+max_capacity = 2000
+ttl_secs = 3600
+max_entry_bytes = 4194304
+simhash_threshold = 3
+
+# ── Budget ───────────────────────────────────────────────────────
+
+[budget]
+monthly_limit_usd = 80.0
+warn_at_percent = 80
+
+# ── DLP ──────────────────────────────────────────────────────────
+
+[dlp]
+enabled = true
+scan_input = true
+scan_output = true
+
+# ── Security ─────────────────────────────────────────────────────
+
+[security]
+rate_limit_rps = 1000
+rate_limit_burst = 2000
