@@ -1,8 +1,18 @@
-# Preset: eu - Strict EU sovereign routing, closest-to-Opus quality
+# Preset: eu-pro - Strict EU sovereign routing, closest-to-Opus quality
 # Pro tier — designed for users who need GDPR-strict EU data residency
 # without giving up reasoning quality. Uses Scaleway (FR), Nebius
 # (eu-north1, FI), and xAI's regional EU endpoint as the routing fabric.
-# Requires: SCALEWAY_API_KEY + NEBIUS_API_KEY (XAI_API_KEY optional)
+# Requires: SCALEWAY_API_KEY + NEBIUS_API_KEY
+#
+# Note: xAI Grok is intentionally excluded — its eu-west-1 endpoint
+# guarantees in-flight EU only, but at-rest residency is unspecified
+# by xAI ("contact sales"). For strict-EU sovereign routing we stay
+# on Scaleway (FR datacenters) and Nebius eu-north1 (Helsinki) only.
+#
+# Sister presets (same providers, different cost/quality balance):
+#   eu-eco — €15-25/month, ~75-78% SWE-V (skips 405B/397B heavyweights)
+#   eu-pro — €40-60/month, ~82-85% SWE-V (this file, balanced)
+#   eu-max — €80-100/month, ~85-87% SWE-V (preemptive 405B everywhere)
 #
 # ── Strategy ──────────────────────────────────────────────────────
 #
@@ -90,22 +100,6 @@ models = [
   "PrimeIntellect/INTELLECT-3",
 ]
 
-# 3. xAI Grok regional EU endpoint
-# Fail-closed: if xAI cannot serve in EU the request fails (no silent
-# US fallback). In-flight EU only — at-rest unspecified by xAI.
-[[providers]]
-name = "xai_eu"
-provider_type = "openai"
-base_url = "https://eu-west-1.api.x.ai/v1"
-api_key = "$XAI_API_KEY"
-enabled = true
-models = [
-  "grok-4-1-fast-reasoning",
-  "grok-4-1-fast-non-reasoning",
-  "grok-4.20-0309-reasoning",
-  "grok-4.20-0309-non-reasoning",
-]
-
 # ── Router ───────────────────────────────────────────────────────
 
 [router]
@@ -142,7 +136,7 @@ complex_threshold = 5.0
 # Trivial : short edits < 500 tokens out → Nebius cheap+fast
 [[tiers]]
 name = "trivial"
-providers = ["nebius", "scaleway", "xai_eu"]
+providers = ["nebius", "scaleway"]
 [tiers.match]
 max_tokens_below = 500
 
@@ -188,7 +182,7 @@ file_patterns = [".github/workflows/*.yml", ".gitlab-ci.yml"]
 # Big history (> 50 messages) → Nebius Qwen3-235B (long ctx capable)
 [[tiers]]
 name = "complex"
-providers = ["nebius", "xai_eu"]
+providers = ["nebius", "scaleway"]
 [tiers.match]
 min_messages = 50
 
@@ -199,17 +193,18 @@ providers = ["nebius", "scaleway"]
 [tiers.match]
 max_tokens_above = 16000
 
-# Input > 150k tokens → xAI Grok 4.1 Fast (2M ctx) priority
+# Input > 150k tokens → Scaleway devstral-2 (256k) / Qwen3.5-397B,
+# Nebius Qwen3-235B (extensible 256k via YaRN)
 [[tiers]]
 name = "complex"
-providers = ["xai_eu", "nebius"]
+providers = ["scaleway", "nebius"]
 [tiers.match]
 min_input_tokens = 150000
 
 # Input > 30k tokens → exclude tiny models, prefer 80B+
 [[tiers]]
 name = "medium"
-providers = ["nebius", "scaleway", "xai_eu"]
+providers = ["nebius", "scaleway"]
 [tiers.match]
 min_input_tokens = 30000
 
@@ -232,15 +227,11 @@ actual_model = "gpt-oss-120b"
 priority = 3
 provider = "nebius"
 actual_model = "Qwen/Qwen3-235B-A22B-Instruct-2507"
-[[models.mappings]]
-priority = 4
-provider = "xai_eu"
-actual_model = "grok-4-1-fast-non-reasoning"
 
 # THINK : Hermes-4-405B (verified CoT, 405B params, eu-north1)
 # C'est le modèle EU le plus proche d'Opus 4.7 en raisonnement profond.
 # Lent (20 t/s) mais qualité maximale ; fallback Qwen3.5-397B Scaleway
-# (80 t/s) si Hermes saturé, puis Grok 4.20 reasoning EU.
+# (80 t/s) si Hermes saturé, puis Qwen3-Next-80B-Thinking en speed backup.
 [[models]]
 name = "think-model"
 [[models.mappings]]
@@ -253,10 +244,6 @@ provider = "scaleway"
 actual_model = "qwen3.5-397b-a17b"
 [[models.mappings]]
 priority = 3
-provider = "xai_eu"
-actual_model = "grok-4.20-0309-reasoning"
-[[models.mappings]]
-priority = 4
 provider = "nebius"
 actual_model = "Qwen/Qwen3-Next-80B-A3B-Thinking"
 [[models.mappings]]
@@ -334,8 +321,8 @@ provider = "nebius"
 actual_model = "Qwen/Qwen3-Next-80B-A3B-Thinking"
 [[models.mappings]]
 priority = 3
-provider = "xai_eu"
-actual_model = "grok-4-1-fast-reasoning"
+provider = "scaleway"
+actual_model = "qwen3.5-397b-a17b"
 
 # VISION : Mistral FR small (€0.15/€0.35) → Pixtral Scaleway → Qwen2.5-VL
 [[models]]
