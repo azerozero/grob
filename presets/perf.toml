@@ -1,119 +1,84 @@
-# Preset: perf - Performance max
-# Anthropic OAuth for all primary models, OpenRouter fallbacks
-# Requires: Anthropic OAuth + OPENROUTER_API_KEY
+# Preset: perf - Pure Anthropic OAuth, zero fallbacks
 #
-# ── Cout estime (8h/jour, 22j/mois) ──────────────────────
+# For users with an Anthropic Pro ($20/month) or Max ($200/month)
+# subscription who want grob's UX (auto-map, secret store, tracing,
+# watch, MCP integration) without any cross-provider routing.
+# Every claude-* model name routes directly to Anthropic OAuth.
 #
-#   Ce preset (Pro $20/mois, Opus + Sonnet inclus):
-#     Sans agent : ~€20/mois  (tout inclus, Opus rate-limite → Sonnet fallback)
-#     Avec agent : ~€20/mois + €10-30 fallback OpenRouter
+# Requires: Anthropic OAuth (Pro or Max)
 #
-#   Avec Max $200/mois (rate limits Opus plus eleves):
-#     Sans agent : ~€200/mois
-#     Avec agent : ~€200/mois + €10-30 fallback OpenRouter
+# When to choose this preset:
+#   - You already pay Anthropic Pro/Max and trust their quota
+#   - You want maximum simplicity (one provider, one identity)
+#   - You don't care about EU sovereignty (US data centers OK)
+#   - You don't need fallback to DeepSeek/Groq/OR when Anthropic 429s
 #
-#   Sans abonnement (API key Anthropic directe):
-#     Sans agent : ~€200-300/mois (Sonnet $3/$15 par M tokens)
-#     Avec agent : ~€2000-3000/mois
+# When NOT to choose this preset:
+#   - You want speed-first multi-provider routing → see other presets
+#     in this directory (ultra-cheap, eu-eco/pro/max)
+#   - You need fallback insurance against Anthropic outages
+#   - You want strict-EU sovereignty → see eu-pro
 #
-#   Via OpenRouter (credit initial €20):
-#     Sans agent : ~€220-350/mois  (markup 10-15%)
-#     Avec agent : ~€2200-3500/mois
+# ── How auto-map works ───────────────────────────────────────────
 #
-#   Comparaison OpenAI seul (GPT-4o $2.50/$10 par M tokens):
-#     Sans agent : ~€90/mois
-#     Avec agent : ~€900/mois
+# Claude Code (or any client) sends `claude-opus-4-7` /
+# `claude-sonnet-4-6` / `claude-haiku-4-5`. The auto_map_regex
+# pattern catches anything starting with `claude-` and routes it
+# straight to the Anthropic OAuth provider — no virtual model
+# definitions needed, no priority chains, no fallbacks. Pure
+# pass-through with grob's logging and telemetry.
 #
-#   Alternative locale:
-#     Mac Mini M4 Pro 48GB  : €1800 → €52/mois sur 3 ans + elec
-#     Mac Studio M4 Max 128GB: €5000 → €144/mois sur 3 ans + elec
-#     Electricite (FR €0.25/kWh): €2-5/mois
-#     Apres amortissement : €2-5/mois (elec seule)
-#     Limitation : modeles locaux 32B ≈ GPT-4o, pas Opus
+# Anthropic's special "Claude Code" rate limits apply only when
+# the request includes the system prompt
+# `"You are Claude Code, Anthropic's official CLI for Claude."`
+# and the `claude-code-20250219` beta header. Both are injected
+# automatically when Claude Code talks to grob via `grob exec`.
 
-# --- Providers ---
+# ── Provider ─────────────────────────────────────────────────────
 
-# Anthropic via OAuth (Pro $20/mois = Opus + Sonnet, Max $200/mois = limites plus hautes)
+# Anthropic OAuth — covers Opus 4.7, Sonnet 4.6, Haiku 4.5.
+# Use `oauth_provider = "anthropic-pro"` for Pro $20/month accounts,
+# or `"anthropic-max"` for Max $200/month accounts (higher rate limits).
 [[providers]]
 name = "anthropic"
 provider_type = "anthropic"
 auth_type = "oauth"
 oauth_provider = "anthropic-max"
 enabled = true
-models = []
+models = ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5"]
 
-# OpenRouter (fallback + pass-through for unconfigured models)
-[[providers]]
-name = "openrouter"
-provider_type = "openrouter"
-api_key = "$OPENROUTER_API_KEY"
-enabled = true
-pass_through = true
-models = []
+# ── Router ───────────────────────────────────────────────────────
 
-# --- Models ---
-
-# Think - claude-opus-4-6 (best reasoning)
-[[models]]
-name = "claude-opus-thinking"
-
-[[models.mappings]]
-provider = "anthropic"
-actual_model = "claude-opus-4-6"
-priority = 1
-
-[[models.mappings]]
-provider = "anthropic"
-actual_model = "claude-sonnet-4-6"
-priority = 2
-
-# Default - claude-sonnet-4-6 (fast + smart)
-[[models]]
-name = "default"
-
-[[models.mappings]]
-provider = "anthropic"
-actual_model = "claude-sonnet-4-6"
-priority = 1
-
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "openai/gpt-4o"
-priority = 2
-
-# Background - claude-sonnet-4-6 with gemini fallback
-[[models]]
-name = "background"
-
-[[models.mappings]]
-provider = "anthropic"
-actual_model = "claude-sonnet-4-6"
-priority = 1
-
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "google/gemini-2.5-flash"
-priority = 2
-
-# WebSearch - claude-sonnet-4-6 with gpt-4o fallback
-[[models]]
-name = "websearch"
-
-[[models.mappings]]
-provider = "anthropic"
-actual_model = "claude-sonnet-4-6"
-priority = 1
-
-[[models.mappings]]
-provider = "openrouter"
-actual_model = "openai/gpt-4o"
-priority = 2
-
-# --- Router ---
 [router]
-default = "default"
-think = "claude-opus-thinking"
-background = "background"
-websearch = "websearch"
+default = "claude-sonnet-4-6"
+think = "claude-opus-4-7"
+background = "claude-haiku-4-5"
+websearch = "claude-sonnet-4-6"
 auto_map_regex = "^claude-"
-background_regex = "(?i)claude.*haiku"
+
+# ── Cache ────────────────────────────────────────────────────────
+
+[cache]
+enabled = true
+max_capacity = 1000
+ttl_secs = 3600
+max_entry_bytes = 4194304
+
+# ── Budget ───────────────────────────────────────────────────────
+
+[budget]
+monthly_limit_usd = 250.0
+warn_at_percent = 80
+
+# ── DLP ──────────────────────────────────────────────────────────
+
+[dlp]
+enabled = true
+scan_input = true
+scan_output = true
+
+# ── Security ─────────────────────────────────────────────────────
+
+[security]
+rate_limit_rps = 1000
+rate_limit_burst = 2000

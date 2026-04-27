@@ -1,0 +1,207 @@
+# Preset: ultra-cheap - €2/month target, free tiers + cheapest paid
+#
+# For users who want zero-friction LLM access without breaking the
+# bank. Routes through free tiers first (Groq LPU), falls back to
+# ultra-cheap paid (DeepSeek V3.2, Llama-3.1-8B on Nebius) only when
+# free tiers rate-limit. No premium models, no Opus, no 405B.
+#
+# Provider country is intentionally not constrained — pick whatever is
+# cheapest. If you need strict-EU sovereignty, use eu-eco instead.
+#
+# Requires: GROQ_API_KEY (free signup at console.groq.com)
+# Optional but recommended for fallback:
+#   OPENROUTER_API_KEY (DeepSeek V3.2 at $0.30/$0.45 per Mtok)
+#   NEBIUS_API_KEY (Llama-3.1-8B at $0.02/$0.06 per Mtok — cheapest)
+#
+# ── Strategy ──────────────────────────────────────────────────────
+#
+#   Trivial / background  → Groq gpt-oss-20b (free tier, 960 t/s)
+#   Default               → Groq gpt-oss-120b (free tier, 472 t/s)
+#   Think                 → Groq gpt-oss-120b (configurable reasoning)
+#   Search / tools        → Groq gpt-oss-120b (strong tool use)
+#
+# All four slots target Groq free tier first. When Groq rate-limits
+# (14 400 req/day, 30 req/min, 7 000 t/min on free), grob fails over
+# to OpenRouter DeepSeek V3.2 or Nebius Llama-3.1-8B (a few cents).
+#
+# ── Cost estimate ─────────────────────────────────────────────────
+#
+#   Light usage (1M tok/day, ~30 req/h)         : €0/month (Groq free covers all)
+#   Moderate usage (3M tok/day, ~100 req/h)     : €1-3/month (Groq + V3.2 spillover)
+#   Heavy usage (8M+ tok/day, agentic frenzy)   : €5-15/month (Groq throttles, V3.2 takes over)
+#
+#   Hitting €2/month consistently means ~90% of requests served by
+#   Groq free, ~10% by paid V3.2. The ratio depends on your workflow
+#   timing — Groq's 30 req/min ceiling is the practical bottleneck.
+
+# ── Providers ────────────────────────────────────────────────────
+
+# Groq — primary. Free tier covers most solo-dev usage.
+# Bench (2026-04-26, 200-tok output):
+#   gpt-oss-20b   = 960 t/s eff, 364ms RTT
+#   gpt-oss-120b  = 472 t/s eff, 643ms RTT
+#   llama-3.1-8b  = 793 t/s     , 377ms (legacy fallback)
+[[providers]]
+name = "groq"
+provider_type = "openai"
+base_url = "https://api.groq.com/openai/v1"
+api_key = "$GROQ_API_KEY"
+enabled = true
+models = [
+  "openai/gpt-oss-20b",
+  "openai/gpt-oss-120b",
+  "llama-3.1-8b-instant",
+]
+
+# OpenRouter — paid fallback when Groq rate-limits.
+# DeepSeek V3.2 at $0.30/$0.45 per Mtok = practically free.
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+api_key = "$OPENROUTER_API_KEY"
+enabled = true
+pass_through = true
+models = []
+
+# Nebius — last-resort cheapest paid (Llama-3.1-8B at $0.02/$0.06).
+[[providers]]
+name = "nebius"
+provider_type = "openai"
+base_url = "https://api.studio.nebius.ai/v1"
+api_key = "$NEBIUS_API_KEY"
+enabled = true
+models = [
+  "meta-llama/Meta-Llama-3.1-8B-Instruct",
+  "google/gemma-2-2b-it",
+  "Qwen/Qwen3-30B-A3B-Instruct-2507",
+]
+
+# ── Router ───────────────────────────────────────────────────────
+
+[router]
+default = "default-model"
+think = "think-model"
+background = "background-model"
+websearch = "search-model"
+auto_map_regex = "^claude-"
+background_regex = "(?i)claude.*haiku"
+
+# ── Tiers ────────────────────────────────────────────────────────
+
+# Trivial : tiny edits → Groq free tier (cheapest possible)
+[[tiers]]
+name = "trivial"
+providers = ["groq", "nebius"]
+[tiers.match]
+max_tokens_below = 500
+
+# ── Models ───────────────────────────────────────────────────────
+
+# DEFAULT : Groq gpt-oss-120b free → DeepSeek V3.2 paid spillover
+# → Llama-3.1-8B Nebius (last resort, $0.02/$0.06)
+[[models]]
+name = "default-model"
+[[models.mappings]]
+priority = 1
+provider = "groq"
+actual_model = "openai/gpt-oss-120b"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v3.2"
+[[models.mappings]]
+priority = 3
+provider = "nebius"
+actual_model = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+[[models.mappings]]
+priority = 4
+provider = "nebius"
+actual_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+# THINK : Groq gpt-oss-120b (configurable reasoning) → DeepSeek V3.2 paid
+[[models]]
+name = "think-model"
+[[models.mappings]]
+priority = 1
+provider = "groq"
+actual_model = "openai/gpt-oss-120b"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v3.2"
+[[models.mappings]]
+priority = 3
+provider = "nebius"
+actual_model = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+
+# BACKGROUND : Groq gpt-oss-20b free → Llama 8B Nebius cheap
+[[models]]
+name = "background-model"
+[[models.mappings]]
+priority = 1
+provider = "groq"
+actual_model = "openai/gpt-oss-20b"
+[[models.mappings]]
+priority = 2
+provider = "groq"
+actual_model = "llama-3.1-8b-instant"
+[[models.mappings]]
+priority = 3
+provider = "nebius"
+actual_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+# TRIVIAL : Groq gpt-oss-20b → Gemma-2-2b Nebius (extreme cheap)
+[[models]]
+name = "trivial-model"
+[[models.mappings]]
+priority = 1
+provider = "groq"
+actual_model = "openai/gpt-oss-20b"
+[[models.mappings]]
+priority = 2
+provider = "nebius"
+actual_model = "google/gemma-2-2b-it"
+[[models.mappings]]
+priority = 3
+provider = "groq"
+actual_model = "llama-3.1-8b-instant"
+
+# SEARCH : Groq gpt-oss-120b (strong tool use) → DeepSeek V3.2
+[[models]]
+name = "search-model"
+[[models.mappings]]
+priority = 1
+provider = "groq"
+actual_model = "openai/gpt-oss-120b"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "deepseek/deepseek-v3.2"
+
+# ── Cache ────────────────────────────────────────────────────────
+
+[cache]
+enabled = true
+max_capacity = 2000
+ttl_secs = 3600
+max_entry_bytes = 4194304
+simhash_threshold = 3
+
+# ── Budget ───────────────────────────────────────────────────────
+
+[budget]
+monthly_limit_usd = 5.0
+warn_at_percent = 80
+
+# ── DLP ──────────────────────────────────────────────────────────
+
+[dlp]
+enabled = true
+scan_input = true
+scan_output = true
+
+# ── Security ─────────────────────────────────────────────────────
+
+[security]
+rate_limit_rps = 1000
+rate_limit_burst = 2000
