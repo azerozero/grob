@@ -1,35 +1,48 @@
 # Preset: ultra-cheap - €0-2/month target via stacked free tiers
 #
-# Routes through 3 free tiers (Groq + Cerebras + OpenRouter :free)
-# before any paid spillover, and adds Grok 4.1 Fast (cheapest paid)
-# only for web search and long context. Provider country is
-# intentionally not constrained — use eu-eco if you need EU
-# sovereignty.
+# Routes through 4 ongoing free tiers (Groq + Cerebras + Z.ai GLM +
+# OpenRouter :free) plus 2 signup-bonus sources (DeepSeek 5M, Inception
+# Mercury 10M) before any paid spillover. Provider country not
+# constrained — use eu-eco if you need EU sovereignty.
 #
 # Verified free tier limits (April 2026):
-#   Groq      : 30 RPM, 1 000 RPD, 6K TPM (15K for Gemma 2 9B). Llama
-#               3.3 70B / 3.1 8B, gpt-oss, Qwen, Whisper. No training.
-#   Cerebras  : 30 RPM, 1M tokens/day, 60-100K TPM, **8K context cap**
-#               on free tier. Qwen 3 235B / Llama 4 Scout / Llama
-#               3.1 8B/70B. No training.
-#   OpenRouter: 50 RPD base / 1 000 RPD after lifetime $10 deposit, 20
-#               RPM on `:free` variants. DeepSeek R1 / V3, GLM, Qwen,
-#               Gemma 3.
+#   Groq        : 30 RPM, 1 000 RPD, 6K TPM (15K for Gemma 2 9B).
+#                 Llama 3.3 70B / 3.1 8B, gpt-oss, Qwen, Whisper.
+#                 No training.
+#   Cerebras    : 30 RPM, 1M tokens/day, 60-100K TPM, **8K context
+#                 cap on free tier**. Qwen 3 235B / Llama 4 Scout /
+#                 Llama 3.1 8B-70B. No training.
+#   Z.ai GLM    : ONGOING free for GLM-4.7-Flash and GLM-4.5-Flash
+#                 (no expiry, throttled, ~1M tok/day reported).
+#                 30B-A3B coding-tuned MoE released January 2026.
+#   OpenRouter  : 50 RPD base / 1 000 RPD after lifetime $10
+#                 deposit, 20 RPM on `:free` variants.
+#                 DeepSeek R1 / V3 / V3.2 / GLM / Qwen / Gemma 3.
+#   DeepSeek    : 5M tokens free at signup, 30-day expiry.
+#                 Direct API: api.deepseek.com.
+#   Inception   : 10M tokens free at signup, 30-day expiry.
+#                 Mercury 2 / Mercury Edit (diffusion LLMs).
 #
 # Sources verified 2026-04-27 :
 #   https://console.groq.com/docs/rate-limits
 #   https://inference-docs.cerebras.ai/support/rate-limits
+#   https://docs.z.ai/devpack/overview
 #   https://openrouter.ai/docs/api/reference/limits
+#   https://api-docs.deepseek.com/quick_start/pricing
+#   https://docs.inceptionlabs.ai/get-started/get-started
 #
 # ── Required + recommended accounts ──────────────────────────────
 #
-# REQUIRED (one of these to start)
+# REQUIRED (minimum to start)
 #   GROQ_API_KEY        — free signup at console.groq.com
-#                         (covers ~70% of solo dev usage at zero cost)
+#                         (covers ~50% of solo dev usage at zero cost)
 #
-# STRONGLY RECOMMENDED for free-tier maximization
+# STRONGLY RECOMMENDED for max free-tier coverage (still €0/month)
 #   CEREBRAS_API_KEY    — free signup at cloud.cerebras.ai
 #                         (1M tok/day free, fastest inference, 8K ctx cap)
+#   ZAI_API_KEY         — free signup at z.ai/manage-apikey
+#                         (GLM-4.7-Flash + GLM-4.5-Flash ongoing free,
+#                         frontier 30B-A3B coding model)
 #   OPENROUTER_API_KEY  — paid signup at openrouter.ai/keys; deposit
 #                         $10 lifetime to lift base 50 RPD → 1 000 RPD
 #                         on :free models AND get pay-as-you-go for
@@ -39,6 +52,17 @@
 #   XAI_API_KEY         — paid only at console.x.ai (no free tier)
 #                         Grok 4.1 Fast = $0.20/$0.50 per Mtok with
 #                         2M context and native web_search server tool
+#
+# RECOMMENDED for first-month free boost (signup credits)
+#   DEEPSEEK_API_KEY    — free signup at platform.deepseek.com
+#                         5M tokens free at signup (30-day expiry).
+#                         After bonus burns: pay-as-you-go ($0.14/$0.28
+#                         V4 Flash, $0.55/$2.19 R1) — cheaper direct
+#                         than via OpenRouter pass-through.
+#   MERCURY_API_KEY     — free signup at platform.inceptionlabs.ai
+#                         10M tokens free at signup (30-day expiry).
+#                         Mercury 2 = ultra-fast diffusion LLM, great
+#                         for trivial/edits at 1000+ t/s.
 #
 # OPTIONAL (opt-in, see caveats)
 #   GEMINI_API_KEY      — Google AI Studio free tier exists (Flash
@@ -51,20 +75,26 @@
 #
 # ── Strategy ──────────────────────────────────────────────────────
 #
-#   Trivial / background  → Cerebras Llama 3.1 8B (1M tok/day free)
-#                           → Groq Llama 3.1 8B (30 RPM, 1K RPD)
-#                           → OpenRouter glm-4.5-air :free
-#   Default               → Groq Llama 3.3 70B (free, 131K ctx)
+#   Trivial               → Mercury 2 (10M signup, ~1000 t/s diffusion)
+#                           → Cerebras Llama 3.1 8B (1M tok/day free)
+#                           → Groq gpt-oss-20b (free, 960 t/s)
+#   Background            → Cerebras Llama 3.1 8B (1M tok/day free)
+#                           → Z.ai GLM-4.5-Flash (ongoing free)
+#                           → Groq gpt-oss-20b → OR glm-4.5-air :free
+#   Default               → Z.ai GLM-4.7-Flash (ongoing free coder)
+#                           → Groq Llama 3.3 70B (free, 131K ctx)
 #                           → OR DeepSeek V3 :free
-#                           → DeepSeek V4 Flash paid ($0.14/$0.28)
+#                           → DeepSeek V4 Flash direct (5M signup)
 #                           → Grok 4.1 Fast paid ($0.20/$0.50)
 #   Think                 → OR DeepSeek R1 :free
-#                           → DeepSeek R1 paid ($0.55/$2.19)
-#                           → Groq Llama 3.3 70B (effort-configurable)
+#                           → Z.ai GLM-4.7-Flash (free, configurable thinking)
+#                           → DeepSeek R1 direct (5M signup)
+#                           → OR DeepSeek R1 paid → Groq → Grok
 #   Search / web          → Grok 4.1 Fast (native web_search tool)
-#                           → Groq Llama 3.3 70B (no native search)
+#                           → Z.ai GLM-4.7-Flash (free, solid tool use)
+#                           → Groq Llama 3.3 70B
 #   Long context (>100K)  → Grok 4.1 Fast (2M ctx)
-#                           → DeepSeek V4 Flash (131K via OR)
+#                           → DeepSeek V4 Flash (131K direct or via OR)
 #
 # ── Cost estimate (solo dev) ─────────────────────────────────────
 #
@@ -126,8 +156,24 @@ models = [
   "llama-4-scout-17b-16e-instruct",
 ]
 
-# 3. OpenRouter — third free tier (`:free` variants) plus paid
-# spillover for DeepSeek V4 Flash / R1 when free tiers throttle.
+# 3. Z.ai — ONGOING FREE for GLM-4.7-Flash and GLM-4.5-Flash. The
+# only Chinese frontier coder with a real recurring free tier (no
+# trial, no signup credits, just rate-limited free for life).
+# GLM-4.7-Flash = 30B-A3B MoE coding model released January 2026.
+[[providers]]
+name = "zai"
+provider_type = "openai"
+base_url = "https://api.z.ai/api/paas/v4"
+api_key = "$ZAI_API_KEY"
+enabled = true
+models = [
+  "glm-4.7-flash",
+  "glm-4.5-flash",
+  "glm-4.5-air",
+]
+
+# 4. OpenRouter — fourth free tier (`:free` variants) plus paid
+# spillover for DeepSeek V4 Flash / R1 when other free tiers throttle.
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"
@@ -135,6 +181,39 @@ api_key = "$OPENROUTER_API_KEY"
 enabled = true
 pass_through = true
 models = []
+
+# 5. DeepSeek direct — 5M tokens free at signup, 30-day expiry.
+# After bonus: pay-as-you-go ($0.14/$0.28 V4 Flash, $0.55/$2.19 R1).
+# Cheaper direct than via OpenRouter pass-through (no OR markup).
+[[providers]]
+name = "deepseek"
+provider_type = "openai"
+base_url = "https://api.deepseek.com/v1"
+api_key = "$DEEPSEEK_API_KEY"
+enabled = true
+models = [
+  "deepseek-chat",
+  "deepseek-reasoner",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+]
+
+# 6. Inception Labs Mercury — 10M tokens free at signup, 30-day expiry.
+# Mercury 2 = diffusion LLM, ~1000 t/s vendor claim (~155 t/s eff
+# observed due to reasoning overhead). Best for trivial edits.
+# Post-2026-02-24 accounts: only mercury-2 / mercury-edit / mercury-edit-2
+# are accessible (legacy mercury-coder-* are gated).
+[[providers]]
+name = "mercury"
+provider_type = "openai"
+base_url = "https://api.inceptionlabs.ai/v1"
+api_key = "$MERCURY_API_KEY"
+enabled = true
+models = [
+  "mercury-2",
+  "mercury-edit",
+  "mercury-edit-2",
+]
 
 # 4. xAI Grok 4.1 Fast — cheapest paid web search + long context.
 # 2M context, $0.20/$0.50 per Mtok, native server-side `web_search`
@@ -192,55 +271,63 @@ background_regex = "(?i)claude.*haiku"
 
 # ── Tiers ────────────────────────────────────────────────────────
 
-# Trivial : tiny edits → Cerebras free (1M tok/day) priority
+# Trivial : tiny edits → Mercury (diffusion, 1000 t/s) + Cerebras (1M
+# tok/day) + Groq prioritized over the free chains.
 [[tiers]]
 name = "trivial"
-providers = ["cerebras", "groq", "openrouter"]
+providers = ["mercury", "cerebras", "groq", "openrouter"]
 [tiers.match]
 max_tokens_below = 500
 
 # Long input (>100K) → xAI Grok 4.1 Fast (2M ctx) only.
-# Cerebras explicitly excluded from this tier (8K cap).
+# Cerebras / Mercury / Z.ai excluded from this tier (smaller ctx).
 [[tiers]]
 name = "complex"
-providers = ["xai", "openrouter"]
+providers = ["xai", "openrouter", "deepseek"]
 [tiers.match]
 min_input_tokens = 100000
 
 # Medium input (>7K) → exclude Cerebras (8K cap leaves no room
-# for output). Stay on Groq/OR/xAI which all handle 128K+.
+# for output) and Mercury (32K but reasoning overhead).
+# Z.ai included (131K ctx on GLM-4.7-Flash).
 [[tiers]]
 name = "medium"
-providers = ["groq", "openrouter", "xai"]
+providers = ["zai", "groq", "openrouter", "deepseek", "xai"]
 [tiers.match]
 min_input_tokens = 7000
 
 # ── Models ───────────────────────────────────────────────────────
 
-# DEFAULT : Groq Llama 3.3 70B free → OR DeepSeek V3 :free
-# → DeepSeek V4 Flash paid → Grok 4.1 Fast paid
+# DEFAULT : Z.ai GLM-4.7-Flash (ongoing free, 30B-A3B coder) →
+# Groq Llama 3.3 70B (free, 131K ctx) → OR DeepSeek V3 :free →
+# DeepSeek V4 Flash direct (5M signup, then $0.14/$0.28) →
+# OR DeepSeek V4 Flash → Grok 4.1 Fast paid
 [[models]]
 name = "default-model"
 [[models.mappings]]
 priority = 1
+provider = "zai"
+actual_model = "glm-4.7-flash"
+[[models.mappings]]
+priority = 2
 provider = "groq"
 actual_model = "llama-3.3-70b-versatile"
 [[models.mappings]]
-priority = 2
+priority = 3
 provider = "openrouter"
 actual_model = "deepseek/deepseek-chat-v3:free"
 [[models.mappings]]
-priority = 3
+priority = 4
+provider = "deepseek"
+actual_model = "deepseek-v4-flash"
+[[models.mappings]]
+priority = 5
 provider = "openrouter"
 actual_model = "deepseek/deepseek-v4-flash"
 [[models.mappings]]
-priority = 4
+priority = 6
 provider = "xai"
 actual_model = "grok-4-1-fast-non-reasoning"
-[[models.mappings]]
-priority = 5
-provider = "nebius"
-actual_model = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 
 # THINK : OR DeepSeek R1 :free → DeepSeek R1 paid → Groq Llama 70B
 [[models]]
@@ -251,18 +338,27 @@ provider = "openrouter"
 actual_model = "deepseek/deepseek-r1:free"
 [[models.mappings]]
 priority = 2
+provider = "zai"
+actual_model = "glm-4.7-flash"
+[[models.mappings]]
+priority = 3
+provider = "deepseek"
+actual_model = "deepseek-reasoner"
+[[models.mappings]]
+priority = 4
 provider = "openrouter"
 actual_model = "deepseek/deepseek-r1"
 [[models.mappings]]
-priority = 3
+priority = 5
 provider = "groq"
 actual_model = "llama-3.3-70b-versatile"
 [[models.mappings]]
-priority = 4
+priority = 6
 provider = "xai"
 actual_model = "grok-4-1-fast-reasoning"
 
-# BACKGROUND : Cerebras Llama 8B free (1M tok/day) → Groq → OR :free
+# BACKGROUND : Cerebras Llama 8B (1M tok/day) → Z.ai GLM-4.5-Flash
+# (ongoing free) → Groq gpt-oss-20b → OR glm-4.5-air :free
 [[models]]
 name = "background-model"
 [[models.mappings]]
@@ -271,36 +367,45 @@ provider = "cerebras"
 actual_model = "llama3.1-8b"
 [[models.mappings]]
 priority = 2
-provider = "groq"
-actual_model = "openai/gpt-oss-20b"
+provider = "zai"
+actual_model = "glm-4.5-flash"
 [[models.mappings]]
 priority = 3
 provider = "groq"
-actual_model = "llama-3.1-8b-instant"
+actual_model = "openai/gpt-oss-20b"
 [[models.mappings]]
 priority = 4
+provider = "groq"
+actual_model = "llama-3.1-8b-instant"
+[[models.mappings]]
+priority = 5
 provider = "openrouter"
 actual_model = "z-ai/glm-4.5-air:free"
 
-# TRIVIAL : Cerebras Llama 8B → Groq gpt-oss-20b (960 t/s) → Llama 8B
+# TRIVIAL : Mercury 2 (diffusion ~1000 t/s, 10M signup tokens) →
+# Cerebras Llama 8B (1M tok/day) → Groq gpt-oss-20b (960 t/s)
 [[models]]
 name = "trivial-model"
 [[models.mappings]]
 priority = 1
+provider = "mercury"
+actual_model = "mercury-2"
+[[models.mappings]]
+priority = 2
 provider = "cerebras"
 actual_model = "llama3.1-8b"
 [[models.mappings]]
-priority = 2
+priority = 3
 provider = "groq"
 actual_model = "openai/gpt-oss-20b"
 [[models.mappings]]
-priority = 3
+priority = 4
 provider = "groq"
 actual_model = "llama-3.1-8b-instant"
 
-# SEARCH / web : Grok 4.1 Fast (native web_search tool, 2M ctx)
-# → Groq Llama 70B (no native search but solid tool use)
-# → OR DeepSeek V4 Flash paid
+# SEARCH / web : Grok 4.1 Fast (native web_search tool, 2M ctx) →
+# Z.ai GLM-4.7-Flash (free, solid tool use) → Groq Llama 70B → OR
+# DeepSeek V4 Flash paid
 [[models]]
 name = "search-model"
 [[models.mappings]]
@@ -309,12 +414,16 @@ provider = "xai"
 actual_model = "grok-4-1-fast-non-reasoning"
 [[models.mappings]]
 priority = 2
+provider = "zai"
+actual_model = "glm-4.7-flash"
+[[models.mappings]]
+priority = 3
 provider = "groq"
 actual_model = "llama-3.3-70b-versatile"
 [[models.mappings]]
-priority = 3
-provider = "openrouter"
-actual_model = "deepseek/deepseek-v4-flash"
+priority = 4
+provider = "deepseek"
+actual_model = "deepseek-v4-flash"
 
 # ── Cache ────────────────────────────────────────────────────────
 
