@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Lifecycle roadmap (no code yet — design only)
+
+- ADR-0008 promoted from `proposed` to `accepted` (2026-04-28). Unblocks chantiers A-1 (ControlEngine) and A-2 (CLI thin).
+
 ## [0.36.41](https://github.com/azerozero/grob/compare/v0.36.40...v0.36.41) - 2026-04-28
 
 ### Added
