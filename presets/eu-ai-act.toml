@@ -1,3 +1,6 @@
+[meta]
+description = "EU AI Act compliant — EU providers + transparency headers + risk classification"
+
 # Preset: eu-ai-act - EU AI Act compliant
 # EU-only providers with full compliance features enabled
 # Requires: MISTRAL_API_KEY (+ optionally SCALEWAY_API_KEY)

@@ -1,3 +1,6 @@
+[meta]
+description = "Strict-EU sovereign, balanced — Hermes-4-405B + Qwen3.5-397B, ~82% SWE-V"
+
 # Preset: eu-pro - Strict EU sovereign routing, closest-to-Opus quality
 # Pro tier — designed for users who need GDPR-strict EU data residency
 # without giving up reasoning quality. Uses Scaleway (FR), Nebius

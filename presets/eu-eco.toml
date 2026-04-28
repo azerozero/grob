@@ -1,3 +1,6 @@
+[meta]
+description = "Strict-EU sovereign, budget — Scaleway FR + Nebius eu-north1, ~75% SWE-V"
+
 # Preset: eu-eco - Strict EU sovereign routing, budget tier
 # Eco tier — designed for cost-conscious users who need GDPR-strict EU
 # data residency on a tight budget. Skips the 405B / 397B heavyweights

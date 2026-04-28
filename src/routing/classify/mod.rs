@@ -19,6 +19,8 @@ pub mod classify;
 pub mod inference;
 /// Message content extraction for routing decisions.
 mod message;
+/// Model-name canonicalizer (date suffix, `-latest`, dotted versions, …).
+pub mod model_name;
 /// Regex compilation and capture-group utilities.
 mod rules;
 /// Declarative tier matcher for `[tiers.match]` conditions.
@@ -268,6 +270,11 @@ impl Router {
     /// Routes an incoming request to the appropriate model.
     ///
     /// Priority order (highest to lowest):
+    /// 0. Canonicalization - cosmetic variations of model IDs (date suffix,
+    ///    `-latest`, dotted versions, Anthropic family/version reorder) are
+    ///    collapsed to a single canonical key before any subsequent step
+    ///    so that `[[models]]` lookups, prompt-rule regexes, and the
+    ///    auto-mapper all see the same string.
     /// 1. WebSearch - tool-based detection (`web_search` tool present)
     /// 2. Background - model name regex match (e.g., haiku), checked early to save costs
     /// 3. Auto-map - regex-driven model-name rewrite (falls through to later steps)
@@ -278,7 +285,7 @@ impl Router {
     /// 8. Algorithmic complexity scoring - heuristic fallback when `[[scoring]]` is set
     /// 9. Default - auto-mapped or original model name, with tier from steps 7-8
     ///
-    /// Steps 3 (auto-map) mutates `request.model` but does not short-circuit;
+    /// Steps 0 and 3 (auto-map) mutate `request.model` but do not short-circuit;
     /// steps 7-8 populate `complexity_tier` without choosing a model. All other
     /// steps return early with the matched model.
     ///
@@ -286,6 +293,18 @@ impl Router {
     ///
     /// Returns an error if a configured prompt-rule regex fails to compile.
     pub fn route(&self, request: &mut CanonicalRequest) -> Result<RouteDecision> {
+        // 0. Canonicalize the model name. Idempotent and zero-alloc on
+        //    already-canonical inputs, so configs that already use the
+        //    canonical IDs (`gpt-4o`, `claude-sonnet-4-5`, …) pay nothing.
+        let canonical = model_name::canonicalize_model_name(&request.model);
+        if canonical.as_ref() != request.model.as_str() {
+            debug!(
+                "🪞 Canonicalised model '{}' → '{}'",
+                request.model, canonical
+            );
+            request.model = canonical.into_owned();
+        }
+
         // 1. WebSearch (HIGHEST PRIORITY - tool-based detection, no model name needed)
         if let Some(ref websearch_model) = self.config.router.websearch {
             if self.has_web_search_tool(request) {

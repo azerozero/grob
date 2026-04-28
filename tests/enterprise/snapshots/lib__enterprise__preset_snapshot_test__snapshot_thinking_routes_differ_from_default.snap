@@ -1,11 +1,12 @@
 ---
 source: tests/enterprise/preset_snapshot_test.rs
+assertion_line: 216
 expression: results
 ---
 [
-    "perf: default=default think=claude-opus-thinking differs=true",
-    "medium: default=default think=claude-opus-thinking differs=true",
-    "local: default=default think=claude-opus-thinking differs=true",
-    "cheap: default=default-model think=think-model differs=true",
-    "fast: default=default-model think=think-model differs=true",
+    "perf: default=claude-sonnet-4-6 think=claude-opus-4-7 differs=true",
+    "ultra-cheap: default=default-model think=think-model differs=true",
+    "eu-eco: default=default-model think=think-model differs=true",
+    "eu-pro: default=default-model think=think-model differs=true",
+    "eu-max: default=default-model think=think-model differs=true",
 ]

@@ -1,0 +1,224 @@
+---
+source: src/commands/setup/writer.rs
+expression: rendered
+---
+[budget]
+monthly_limit_usd = 5.0
+warn_at_percent = 80
+
+[cache]
+enabled = true
+max_capacity = 2000
+max_entry_bytes = 4194304
+simhash_threshold = 3
+ttl_secs = 3600
+
+[dlp]
+enabled = true
+scan_input = true
+scan_output = true
+
+[meta]
+description = "EUR0-2/month — stacked free tiers (Groq + Cerebras + Z.ai + OpenRouter :free)"
+
+[[models]]
+name = "default-model"
+
+[[models.mappings]]
+actual_model = "glm-4.7-flash"
+priority = 1
+provider = "zai"
+
+[[models.mappings]]
+actual_model = "llama-3.3-70b-versatile"
+priority = 2
+provider = "groq"
+
+[[models.mappings]]
+actual_model = "grok-4-1-fast-non-reasoning"
+priority = 5
+provider = "xai"
+
+[[models]]
+name = "think-model"
+
+[[models.mappings]]
+actual_model = "glm-4.7-flash"
+priority = 2
+provider = "zai"
+
+[[models.mappings]]
+actual_model = "llama-3.3-70b-versatile"
+priority = 4
+provider = "groq"
+
+[[models.mappings]]
+actual_model = "grok-4-1-fast-reasoning"
+priority = 5
+provider = "xai"
+
+[[models]]
+name = "background-model"
+
+[[models.mappings]]
+actual_model = "llama3.1-8b"
+priority = 1
+provider = "cerebras"
+
+[[models.mappings]]
+actual_model = "glm-4.5-flash"
+priority = 2
+provider = "zai"
+
+[[models.mappings]]
+actual_model = "openai/gpt-oss-20b"
+priority = 3
+provider = "groq"
+
+[[models.mappings]]
+actual_model = "llama-3.1-8b-instant"
+priority = 4
+provider = "groq"
+
+[[models]]
+name = "trivial-model"
+
+[[models.mappings]]
+actual_model = "llama3.1-8b"
+priority = 1
+provider = "cerebras"
+
+[[models.mappings]]
+actual_model = "openai/gpt-oss-20b"
+priority = 2
+provider = "groq"
+
+[[models.mappings]]
+actual_model = "llama-3.1-8b-instant"
+priority = 3
+provider = "groq"
+
+[[models]]
+name = "search-model"
+
+[[models.mappings]]
+actual_model = "grok-4-1-fast-non-reasoning"
+priority = 1
+provider = "xai"
+
+[[models.mappings]]
+actual_model = "glm-4.7-flash"
+priority = 2
+provider = "zai"
+
+[[models.mappings]]
+actual_model = "llama-3.3-70b-versatile"
+priority = 3
+provider = "groq"
+
+[[providers]]
+api_key = "$GROQ_API_KEY"
+base_url = "https://api.groq.com/openai/v1"
+enabled = true
+models = [
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+]
+name = "groq"
+provider_type = "openai"
+
+[[providers]]
+api_key = "$CEREBRAS_API_KEY"
+base_url = "https://api.cerebras.ai/v1"
+enabled = true
+models = [
+    "llama3.1-8b",
+    "llama-3.3-70b",
+    "qwen-3-32b",
+    "qwen-3-235b-a22b-instruct",
+    "llama-4-scout-17b-16e-instruct",
+]
+name = "cerebras"
+provider_type = "openai"
+
+[[providers]]
+api_key = "$ZAI_API_KEY"
+base_url = "https://api.z.ai/api/paas/v4"
+enabled = true
+models = [
+    "glm-4.7-flash",
+    "glm-4.5-flash",
+    "glm-4.5-air",
+]
+name = "zai"
+provider_type = "openai"
+
+[[providers]]
+api_key = "$XAI_API_KEY"
+base_url = "https://api.x.ai/v1"
+enabled = true
+models = [
+    "grok-4-1-fast-non-reasoning",
+    "grok-4-1-fast-reasoning",
+]
+name = "xai"
+provider_type = "openai"
+
+[[providers]]
+api_key = "$NEBIUS_API_KEY"
+base_url = "https://api.studio.nebius.ai/v1"
+enabled = false
+models = [
+    "meta-llama/Meta-Llama-3.1-8B-Instruct",
+    "google/gemma-2-2b-it",
+]
+name = "nebius"
+provider_type = "openai"
+
+[router]
+auto_map_regex = "^claude-"
+background = "background-model"
+background_regex = "(?i)claude.*haiku"
+default = "default-model"
+think = "think-model"
+websearch = "search-model"
+
+[security]
+rate_limit_burst = 2000
+rate_limit_rps = 1000
+
+[[tiers]]
+name = "trivial"
+providers = [
+    "cerebras",
+    "groq",
+    "openrouter",
+]
+
+[tiers.match]
+max_tokens_below = 500
+
+[[tiers]]
+name = "complex"
+providers = [
+    "xai",
+    "openrouter",
+]
+
+[tiers.match]
+min_input_tokens = 100000
+
+[[tiers]]
+name = "medium"
+providers = [
+    "zai",
+    "groq",
+    "openrouter",
+    "xai",
+]
+
+[tiers.match]
+min_input_tokens = 7000

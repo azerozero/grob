@@ -1,14 +1,15 @@
 ---
 source: tests/enterprise/preset_snapshot_test.rs
+assertion_line: 151
 expression: snapshot
 ---
 [
-    "default_simple: model=default type=default matched=none",
-    "default_non_claude: model=gpt-5.2 type=default matched=none",
-    "thinking_enabled: model=claude-opus-thinking type=think matched=none",
-    "websearch_tool: model=websearch type=web-search matched=none",
-    "background_haiku: model=background type=background matched=none",
-    "prompt_rule_refactor: model=default type=default matched=none",
-    "prompt_rule_lint: model=default type=default matched=none",
-    "prompt_rule_architect: model=default type=default matched=none",
+    "default_simple: model=claude-sonnet-4-6 type=default matched=none",
+    "default_non_claude: model=gpt-5-2 type=default matched=none",
+    "thinking_enabled: model=claude-opus-4-7 type=think matched=none",
+    "websearch_tool: model=claude-sonnet-4-6 type=web-search matched=none",
+    "background_haiku: model=claude-haiku-4-5 type=background matched=none",
+    "prompt_rule_refactor: model=claude-sonnet-4-6 type=default matched=none",
+    "prompt_rule_lint: model=claude-sonnet-4-6 type=default matched=none",
+    "prompt_rule_architect: model=claude-sonnet-4-6 type=default matched=none",
 ]

@@ -102,6 +102,9 @@ age = { version = "0.11", features = ["armor"] }
 # Caching (high-performance concurrent cache with TTL)
 moka = { version = "0.12", features = ["future", "sync"] }
 
+# Embedded preset directory (auto-discovers presets/*.toml at compile time)
+include_dir = "0.7"
+
 # JWT Auth
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
 

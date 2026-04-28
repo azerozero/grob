@@ -187,13 +187,10 @@ pub(in crate::commands::setup) fn write_config(choices: &Choices, path: &Path) -
         println!("  Backup: {}", backup.display());
     }
 
-    // For local-only, swap the entire preset
-    let preset = if matches!(choices.compliance, Compliance::LocalOnly) {
-        "local"
-    } else {
-        &choices.preset
-    };
-    crate::preset::apply_preset(preset, path)?;
+    // The previous `local` preset (Ollama-only) was retired; LocalOnly
+    // compliance now keeps the user-chosen preset and just enables
+    // security + dlp downstream via apply_compliance().
+    crate::preset::apply_preset(&choices.preset, path)?;
 
     // Read back and apply all overrides in memory
     let content = std::fs::read_to_string(path)?;
@@ -252,20 +249,28 @@ mod tests {
     /// charge ET les `[[models.mappings]]` qui le referencent. Sans ce
     /// nettoyage, un warning fantome `$OPENROUTER_API_KEY not set` tombe au
     /// prochain demarrage meme si l'utilisateur a dit non au fallback.
+    ///
+    /// Test against `ultra-cheap` since it ships openrouter as a real
+    /// fallback (perf is now pure Anthropic OAuth, no openrouter).
     #[test]
     fn test_w2_strip_fallback_removes_openrouter_and_mappings() {
-        let preset = crate::preset::preset_content("perf").expect("perf preset loads");
-        let mut config: toml::Value = toml::from_str(&preset).expect("perf preset parses");
+        let preset =
+            crate::preset::preset_content("ultra-cheap").expect("ultra-cheap preset loads");
+        let mut config: toml::Value = toml::from_str(&preset).expect("ultra-cheap preset parses");
 
         // Sanity avant strip : openrouter doit bien etre present.
-        let providers_before = config
+        let has_openrouter_before = config
             .get("providers")
             .and_then(|p| p.as_array())
-            .unwrap()
-            .len();
+            .map(|providers| {
+                providers
+                    .iter()
+                    .any(|p| p.get("name").and_then(|n| n.as_str()) == Some("openrouter"))
+            })
+            .unwrap_or(false);
         assert!(
-            providers_before >= 2,
-            "perf preset should ship openrouter alongside anthropic"
+            has_openrouter_before,
+            "ultra-cheap preset should ship openrouter as a fallback provider"
         );
 
         strip_fallback(&mut config, &["openrouter", "gemini"]);
@@ -303,7 +308,7 @@ mod tests {
 
         // Snapshot du resultat serialise pour capter toute regression.
         let rendered = toml::to_string_pretty(&config).expect("serialize back");
-        insta::assert_snapshot!("w2_perf_preset_without_fallback", rendered);
+        insta::assert_snapshot!("w2_ultra_cheap_preset_without_fallback", rendered);
     }
 
     /// W-3 : le patch TOML applique par `write_config` pour un budget custom
