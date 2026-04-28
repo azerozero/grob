@@ -158,6 +158,7 @@ Central registry mapping provider names to `Arc<dyn LlmProvider>` instances and 
 | `openrouter` | `OpenAIProvider` | `https://openrouter.ai/api/v1` |
 | `anthropic` | `AnthropicCompatibleProvider` | `https://api.anthropic.com` |
 | `z.ai` | `AnthropicCompatibleProvider` | `https://api.z.ai/api/anthropic` |
+| `openai` (with `base_url = api.z.ai/api/paas/v4`) | `OpenAIProvider` | (config-supplied) |
 | `minimax` | `AnthropicCompatibleProvider` | `https://api.minimax.io/anthropic` |
 | `zenmux` | `AnthropicCompatibleProvider` | `https://zenmux.ai/api/anthropic` |
 | `kimi-coding` | `AnthropicCompatibleProvider` | `https://api.kimi.com/coding` |
