@@ -12,3 +12,4 @@ mod scenario_budget_test;
 mod scenario_dlp_bypass_test;
 mod scenario_failover_test;
 mod snapshot_error_test;
+mod translation_test;

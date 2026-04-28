@@ -4,6 +4,71 @@ mod streaming;
 mod transform;
 pub(crate) mod types;
 
+/// Test-only entry points for the OpenAI request/response translation layer.
+///
+/// Exposes the otherwise `pub(crate)` provider transforms as JSON-returning
+/// helpers so integration tests in `tests/enterprise/translation_test.rs` can
+/// pin the wire format without coupling to the internal type aliases.
+///
+/// Although unconditionally compiled (so the integration test suite under
+/// `tests/` can reach it without enabling extra features), every entry point
+/// re-encodes its input through `serde_json::Value`, so production callers
+/// have no incentive to use it over the typed transform API.
+#[doc(hidden)]
+pub mod test_api {
+    use super::transform;
+    use crate::models::CanonicalRequest;
+    use crate::providers::ProviderResponse;
+
+    /// Outbound: translates a canonical (Anthropic-shaped) request to the
+    /// OpenAI Chat Completions wire format and returns it as a JSON [`Value`].
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` containing the underlying provider error message if the
+    /// transformation or JSON serialization step fails.
+    ///
+    /// [`Value`]: serde_json::Value
+    pub fn anthropic_to_openai_request(
+        request: &CanonicalRequest,
+    ) -> Result<serde_json::Value, String> {
+        let openai_req = transform::transform_request(request).map_err(|e| e.to_string())?;
+        serde_json::to_value(&openai_req).map_err(|e| e.to_string())
+    }
+
+    /// Inbound: translates an OpenAI Chat Completions response (raw JSON) into
+    /// the canonical [`ProviderResponse`] (Anthropic-shaped) used by the
+    /// dispatch pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` if the input JSON cannot be parsed as a valid OpenAI
+    /// Chat Completions response shape.
+    pub fn openai_response_to_anthropic(
+        openai_json: serde_json::Value,
+    ) -> Result<ProviderResponse, String> {
+        let openai_resp: super::types::OpenAIResponse =
+            serde_json::from_value(openai_json).map_err(|e| e.to_string())?;
+        Ok(transform::transform_response(openai_resp))
+    }
+
+    /// Outbound: translates a canonical request to the OpenAI Responses API
+    /// wire format (used by Codex CLI / ChatGPT OAuth path).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err` containing the underlying provider error message if the
+    /// transformation or JSON serialization step fails.
+    pub fn anthropic_to_responses_request(
+        request: &CanonicalRequest,
+        instructions: &str,
+    ) -> Result<serde_json::Value, String> {
+        let resp_req = transform::transform_to_responses_request(request, instructions)
+            .map_err(|e| e.to_string())?;
+        serde_json::to_value(&resp_req).map_err(|e| e.to_string())
+    }
+}
+
 use super::{
     base::ProviderBase, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse, Usage,
 };
