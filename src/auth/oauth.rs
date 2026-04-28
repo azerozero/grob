@@ -119,6 +119,32 @@ impl OAuthConfig {
             OAuthProviderType::Anthropic
         }
     }
+
+    /// Rewrites a `localhost`/`127.0.0.1`/`[::1]` `redirect_uri` to use `port`.
+    ///
+    /// Leaves non-loopback redirect URIs untouched (e.g. Anthropic's
+    /// `console.anthropic.com` callback). Used to keep the OAuth callback
+    /// `redirect_uri` in sync with the actual port chosen by the local
+    /// callback server when the configured port was busy.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let cfg = OAuthConfig::openai_codex().with_callback_port(1456);
+    /// assert!(cfg.redirect_uri.contains(":1456/"));
+    /// ```
+    #[must_use]
+    pub fn with_callback_port(mut self, port: u16) -> Self {
+        if !is_localhost_url(&self.redirect_uri) {
+            return self;
+        }
+        if let Ok(mut url) = url::Url::parse(&self.redirect_uri) {
+            // Ignore set_port errors (cannot-be-base URLs); fall through unchanged.
+            let _ = url.set_port(Some(port));
+            self.redirect_uri = url.to_string();
+        }
+        self
+    }
 }
 
 impl OAuthConfig {
@@ -618,5 +644,27 @@ mod tests {
         assert!(auth_url.url.contains("code_challenge="));
         assert!(auth_url.url.contains("code_challenge_method=S256"));
         assert!(auth_url.url.contains("scope="));
+    }
+
+    #[test]
+    fn test_with_callback_port_rewrites_openai_codex_localhost() {
+        let cfg = OAuthConfig::openai_codex().with_callback_port(1456);
+        assert_eq!(cfg.redirect_uri, "http://localhost:1456/auth/callback");
+    }
+
+    #[test]
+    fn test_with_callback_port_rewrites_gemini_localhost() {
+        let cfg = OAuthConfig::gemini().with_callback_port(13_460);
+        assert_eq!(
+            cfg.redirect_uri,
+            "http://localhost:13460/api/oauth/callback"
+        );
+    }
+
+    #[test]
+    fn test_with_callback_port_leaves_remote_redirect_alone() {
+        let original = OAuthConfig::anthropic().redirect_uri.clone();
+        let cfg = OAuthConfig::anthropic().with_callback_port(9999);
+        assert_eq!(cfg.redirect_uri, original);
     }
 }

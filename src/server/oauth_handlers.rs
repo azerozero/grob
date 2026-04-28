@@ -80,17 +80,35 @@ pub struct TokenInfo {
     pub needs_refresh: bool,
 }
 
+/// Returns the actual OAuth callback port the local server bound to.
+///
+/// Falls back to the configured `oauth_callback_port` when the callback
+/// server has not yet recorded its actual port (e.g. before [`spawn_oauth_callback`]
+/// completes its first bind attempt).
+fn live_oauth_callback_port(state: &AppState) -> u16 {
+    let actual = state
+        .actual_oauth_callback_port
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if actual != 0 {
+        actual
+    } else {
+        state.snapshot().config.server.oauth_callback_port
+    }
+}
+
 /// Get authorization URL
 pub async fn oauth_authorize(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OAuthAuthorizeRequest>,
 ) -> Result<Json<OAuthAuthorizeResponse>, (StatusCode, String)> {
+    let callback_port = live_oauth_callback_port(&state);
+
     // Create OAuth config based on type
     let config = match req.oauth_type.as_str() {
         "max" => OAuthConfig::anthropic(),
         "console" => OAuthConfig::anthropic_console(),
-        "openai-codex" => OAuthConfig::openai_codex(),
-        "gemini" => OAuthConfig::gemini(),
+        "openai-codex" => OAuthConfig::openai_codex().with_callback_port(callback_port),
+        "gemini" => OAuthConfig::gemini().with_callback_port(callback_port),
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -134,11 +152,13 @@ pub async fn oauth_exchange(
         req.oauth_type
     );
 
+    let callback_port = live_oauth_callback_port(&state);
+
     // Determine OAuth config based on oauth_type if provided, otherwise fall back to provider_id
     let config = if let Some(ref oauth_type) = req.oauth_type {
         match oauth_type.as_str() {
-            "openai-codex" => OAuthConfig::openai_codex(),
-            "gemini" => OAuthConfig::gemini(),
+            "openai-codex" => OAuthConfig::openai_codex().with_callback_port(callback_port),
+            "gemini" => OAuthConfig::gemini().with_callback_port(callback_port),
             "console" => OAuthConfig::anthropic_console(),
             "max" => OAuthConfig::anthropic(),
             _ => {
@@ -152,7 +172,7 @@ pub async fn oauth_exchange(
         || req.provider_id.to_lowercase().contains("codex")
         || req.provider_id.to_lowercase().contains("chatgpt")
     {
-        OAuthConfig::openai_codex()
+        OAuthConfig::openai_codex().with_callback_port(callback_port)
     } else {
         OAuthConfig::anthropic()
     };
@@ -265,16 +285,18 @@ pub async fn oauth_refresh_token(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeleteTokenRequest>,
 ) -> Result<Json<OAuthExchangeResponse>, (StatusCode, String)> {
+    let callback_port = live_oauth_callback_port(&state);
+
     // Determine OAuth config based on provider_id
     let config = if req.provider_id.to_lowercase().contains("openai")
         || req.provider_id.to_lowercase().contains("codex")
         || req.provider_id.to_lowercase().contains("chatgpt")
     {
-        OAuthConfig::openai_codex()
+        OAuthConfig::openai_codex().with_callback_port(callback_port)
     } else if req.provider_id.to_lowercase().contains("gemini")
         || req.provider_id.to_lowercase().contains("google")
     {
-        OAuthConfig::gemini()
+        OAuthConfig::gemini().with_callback_port(callback_port)
     } else {
         OAuthConfig::anthropic()
     };
