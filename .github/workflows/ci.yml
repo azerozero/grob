@@ -433,11 +433,13 @@ jobs:
         shell: bash
 
   # =========================================================================
-  # Stage 2.5: Mutation testing (main push only, informational)
-  #   Sharded: 1 file per job for ~4x speedup (was ~45min sequential).
+  # Stage 2.5: Mutation testing (main push only, informational, full matrix)
+  #   Sharded: ~1 file per job to keep wall-clock per shard under 60 min.
+  #   Scope expanded 2026-04-26: + src/server/dispatch/ (3 shards),
+  #   + src/routing/classify/ (2 shards). See docs/explanation/.
   # =========================================================================
   mutants:
-    name: Mutation Testing (shard ${{ matrix.shard }}/${{ strategy.job-total }})
+    name: Mutation Testing (shard ${{ matrix.shard }})
     if: github.ref == 'refs/heads/main'
     needs: [test-ubuntu, test-other]
     runs-on: ubuntu-latest
@@ -453,8 +455,8 @@ jobs:
           - shard: "2"
             file: src/features/dlp/mod.rs
             mutants_shard: ""
-          # pii.rs depasse le budget 60min sur un seul job — split natif
-          # cargo-mutants `--shard K/N` sans toucher au code prod.
+          # pii.rs exceeds 60min budget on a single job — native split via
+          # cargo-mutants `--shard K/N`, no production code change.
           - shard: "3a"
             file: src/features/dlp/pii.rs
             mutants_shard: "0/2"
@@ -463,6 +465,30 @@ jobs:
             mutants_shard: "1/2"
           - shard: "4"
             file: src/features/dlp/dfa.rs
+            mutants_shard: ""
+          # Dispatch pipeline (T-CI-0e, 2026-04-26): mod.rs (575 LoC) and
+          # retry.rs (478 LoC) are the largest; split into 3 shards. The
+          # provider_loop.rs / resolver.rs / telemetry.rs siblings are
+          # bundled into shard 5c via two --file passes.
+          - shard: "5a"
+            file: src/server/dispatch/mod.rs
+            mutants_shard: "0/2"
+          - shard: "5b"
+            file: src/server/dispatch/mod.rs
+            mutants_shard: "1/2"
+          - shard: "5c"
+            file: src/server/dispatch/retry.rs
+            mutants_shard: ""
+          - shard: "5d"
+            file: src/server/dispatch/provider_loop.rs
+            mutants_shard: ""
+          # Classify engine (T-CI-0e, 2026-04-26): mod.rs (476 LoC) +
+          # classify.rs (512 LoC) split into 2 shards each by file.
+          - shard: "6a"
+            file: src/routing/classify/mod.rs
+            mutants_shard: ""
+          - shard: "6b"
+            file: src/routing/classify/classify.rs
             mutants_shard: ""
     steps:
       - uses: step-security/harden-runner@v2
@@ -493,6 +519,152 @@ jobs:
           name: mutants-results-shard-${{ matrix.shard }}-${{ github.sha }}
           path: mutants.out/
           if-no-files-found: ignore
+
+  # =========================================================================
+  # Stage 2.6: Mutation testing on PRs (diff-based sampling, 25 min cap)
+  #   Runs only on the files the PR touches, restricted to the curated
+  #   mutation-tested scope (router, dispatch, classify, dlp). Skips when
+  #   no Rust files in scope changed. Always informational — never blocks
+  #   the merge. The full matrix on `main` remains the source of truth.
+  # =========================================================================
+  mutants-pr:
+    name: Mutation Testing (PR diff)
+    if: github.event_name == 'pull_request'
+    needs: [test-ubuntu]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write  # post sticky comment with sampling summary
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v6
+        with:
+          # Need the merge-base to compute `BASE...HEAD` diff.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: mutants-pr
+          save-if: false  # never write the cache from PR runs
+      - name: Install cargo-mutants
+        run: cargo install cargo-mutants@24.11.2 --locked  # pinned — update manually
+      - name: Run mutation testing on changed files
+        id: mutate
+        env:
+          MUTATION_TIMEOUT_SECONDS: "1500"
+          MUTATION_PER_MUTANT_TIMEOUT: "120"
+        run: |
+          set +e
+          ./scripts/mutation-pr.sh "origin/${{ github.event.pull_request.base.ref }}"
+          rc=$?
+          set -e
+          # Exit codes: 0 clean, 1 missed mutants, 2 timed out, 3 nothing in scope.
+          # All are informational — never fail the job from this step.
+          echo "Mutation script exit: ${rc}"
+          exit 0
+      - name: Upload mutation testing results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mutants-pr-results-${{ github.sha }}
+          path: mutants.out/
+          if-no-files-found: ignore
+      - name: Write PR sampling summary to job summary
+        if: always()
+        env:
+          STATUS: ${{ steps.mutate.outputs.status || 'unknown' }}
+          DURATION: ${{ steps.mutate.outputs.duration_s || 'n/a' }}
+          TOTAL: ${{ steps.mutate.outputs.total || 'n/a' }}
+          CAUGHT: ${{ steps.mutate.outputs.caught || 'n/a' }}
+          MISSED: ${{ steps.mutate.outputs.missed || 'n/a' }}
+          TIMEOUT_N: ${{ steps.mutate.outputs.timeout || 'n/a' }}
+          UNVIABLE: ${{ steps.mutate.outputs.unviable || 'n/a' }}
+          ARTIFACT: mutants-pr-results-${{ github.sha }}
+        run: |
+          # Plain ASCII output — backticks elided to dodge shellcheck SC2016
+          # noise inside the actionlint pipeline.
+          {
+            echo "## Mutation testing (PR diff sample)"
+            echo
+            echo "Informational only — never blocks merge. Full matrix runs on main."
+            echo
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Status | ${STATUS} |"
+            echo "| Duration | ${DURATION} s |"
+            echo "| Total mutants | ${TOTAL} |"
+            echo "| Caught | ${CAUGHT} |"
+            echo "| Missed | ${MISSED} |"
+            echo "| Timeout | ${TIMEOUT_N} |"
+            echo "| Unviable | ${UNVIABLE} |"
+            echo
+            echo "Status legend: clean (no survivors), missed (inspect artifact),"
+            echo "timed-out (25 min cap reached), skipped-* (no in-scope diff)."
+            echo
+            echo "Artifact: ${ARTIFACT}."
+          } >>"${GITHUB_STEP_SUMMARY}"
+      - name: Comment PR with sampling summary
+        # Skip on forks (no token write access) and when nothing was sampled.
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository && steps.mutate.outputs.status != 'skipped-no-rust' && steps.mutate.outputs.status != 'skipped-out-of-scope'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          STATUS: ${{ steps.mutate.outputs.status || 'unknown' }}
+          DURATION: ${{ steps.mutate.outputs.duration_s || 'n/a' }}
+          TOTAL: ${{ steps.mutate.outputs.total || 'n/a' }}
+          CAUGHT: ${{ steps.mutate.outputs.caught || 'n/a' }}
+          MISSED: ${{ steps.mutate.outputs.missed || 'n/a' }}
+          TIMEOUT_N: ${{ steps.mutate.outputs.timeout || 'n/a' }}
+          UNVIABLE: ${{ steps.mutate.outputs.unviable || 'n/a' }}
+          ARTIFACT: mutants-pr-results-${{ github.sha }}
+        run: |
+          # Build the comment body via heredoc-style echos (no single-quoted
+          # printf format; shellcheck SC2016-friendly). The marker line is
+          # the discriminator we grep for to upsert prior comments.
+          MARKER="<!-- mutants-pr-summary -->"
+          BODY_FILE="$(mktemp)"
+          {
+            echo "${MARKER}"
+            echo "## Mutation testing (PR diff sample)"
+            echo
+            echo "Informational — never blocks merge. Full matrix runs on main."
+            echo
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Status | ${STATUS} |"
+            echo "| Duration | ${DURATION} s |"
+            echo "| Total | ${TOTAL} |"
+            echo "| Caught | ${CAUGHT} |"
+            echo "| Missed | ${MISSED} |"
+            echo "| Timeout | ${TIMEOUT_N} |"
+            echo "| Unviable | ${UNVIABLE} |"
+            echo
+            echo "Legend: clean (no survivors), missed (inspect artifact), timed-out (25 min cap reached)."
+            echo
+            echo "Artifact: ${ARTIFACT}."
+          } >"${BODY_FILE}"
+
+          # Look for an existing summary comment to update; otherwise post a
+          # new one. `gh issue comment` does not support upsert natively, so
+          # we list comments, filter by marker, and PATCH if found.
+          COMMENTS_URL="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
+          EXISTING_ID=$(gh api "${COMMENTS_URL}" --jq "[.[] | select(.body | startswith(\"${MARKER}\"))][0].id" || true)
+
+          if [ -n "${EXISTING_ID}" ] && [ "${EXISTING_ID}" != "null" ]; then
+            # PATCH a comment by ID — body comes from the file via jq -Rs,
+            # which slurps the whole file as a single JSON string for the
+            # request body envelope.
+            jq -Rs '{body: .}' "${BODY_FILE}" \
+              | gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_ID}" --input - >/dev/null
+            echo "Updated existing comment ${EXISTING_ID}."
+          else
+            gh pr comment "${PR_NUMBER}" --body-file "${BODY_FILE}"
+          fi
+          rm -f "${BODY_FILE}"
 
   # =========================================================================
   # Stage 3: Cross build (main push + tag push only, not PRs)
