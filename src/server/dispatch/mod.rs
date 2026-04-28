@@ -5,6 +5,7 @@
 //! DLP scanning → cache lookup → routing → provider loop with fallback → audit → response.
 
 mod provider_loop;
+mod rate_limit;
 mod resolver;
 mod retry;
 mod telemetry;

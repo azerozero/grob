@@ -116,6 +116,17 @@ pub struct ProviderConfig {
     /// signals agree.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_check: Option<HealthCheckProviderConfig>,
+
+    /// Per-provider retry budget before falling back to the next mapping.
+    ///
+    /// Different providers benefit from different retry counts: Anthropic
+    /// (smaller scale, frequent 429) defaults globally to 2; OpenAI and
+    /// OpenRouter / DeepSeek tolerate 3 thanks to better queueing /
+    /// occasional 5xx. Absent → use the global [`MAX_RETRIES`] default.
+    ///
+    /// [`MAX_RETRIES`]: crate::server::MAX_RETRIES
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
 }
 
 impl ProviderConfig {

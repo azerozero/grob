@@ -207,8 +207,16 @@ pub(crate) async fn update_config_json(
     })))
 }
 
-/// Reload configuration without restarting the server
+/// Reload configuration without restarting the server.
+///
+/// The handler **awaits** validation against the candidate provider registry
+/// before swapping the live config. A failure in any router model surfaces as
+/// a 4xx response and the in-flight `inner` snapshot is left untouched, so
+/// in-flight requests never see a half-validated config and a misconfigured
+/// reload cannot temporarily serve traffic.
 pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Response {
+    use axum::http::StatusCode;
+
     info!("🔄 Configuration reload requested via UI");
 
     // 1. Read and parse new config from source
@@ -216,7 +224,14 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
         Ok(c) => c,
         Err(e) => {
             error!("Failed to reload config: {}", e);
-            return Json(serde_json::json!({"status": "error", "message": format!("Failed to reload config: {}", e)})).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Failed to reload config: {}", e),
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -239,18 +254,53 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
         Ok(r) => Arc::new(r),
         Err(e) => {
             error!("Failed to init providers: {}", e);
-            return Json(serde_json::json!({"status": "error", "message": format!("Failed to init providers: {}", e)})).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "status": "error",
+                    "message": format!("Failed to init providers: {}", e),
+                })),
+            )
+                .into_response();
         }
     };
 
-    // 4. Create new reloadable state
+    // 4. Validate the candidate config BEFORE swapping. Awaiting here is
+    // intentional — if validation fails we must surface the error and keep
+    // the live snapshot intact, so in-flight requests never observe a
+    // half-validated config.
+    info!("🔍 Validating reloaded config...");
+    let validation = crate::preset::validate_config(&new_config, &new_registry).await;
+    crate::preset::log_validation_results(&validation);
+
+    if let Some(rejection) = reject_if_validation_broken(&validation) {
+        error!(
+            "Configuration reload rejected: validation failed for {}",
+            rejection.detail
+        );
+        return (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": format!(
+                    "Validation failed — config not reloaded. Models with no healthy provider: {}",
+                    rejection.detail,
+                ),
+                "broken_models": rejection.broken_models,
+            })),
+        )
+            .into_response();
+    }
+
+    // 5. Create new reloadable state and atomically swap (write lock held
+    // for microseconds). In-flight requests continue on the old snapshot
+    // because they hold an `Arc<ReloadableState>` from before the swap.
     let new_inner = Arc::new(ReloadableState::new(new_config, new_router, new_registry));
 
-    // 5. Atomic swap (write lock held for microseconds)
     let active = state
         .active_requests
         .load(std::sync::atomic::Ordering::Relaxed);
-    *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner.clone();
+    *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner;
 
     if active > 0 {
         info!(
@@ -261,13 +311,154 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
         info!("✅ Configuration reloaded successfully");
     }
 
-    // 6. Validate new config in background (non-blocking)
-    tokio::spawn(async move {
-        info!("🔍 Validating reloaded config...");
-        let results =
-            crate::preset::validate_config(&new_inner.config, &new_inner.provider_registry).await;
-        crate::preset::log_validation_results(&results);
-    });
+    Json(serde_json::json!({
+        "status": "success",
+        "message": "Configuration reloaded",
+        "active_requests": active,
+    }))
+    .into_response()
+}
 
-    Json(serde_json::json!({"status": "success", "message": "Configuration reloaded", "active_requests": active})).into_response()
+/// Internal carrier for a validation rejection — feeds the 4xx response body.
+///
+/// Extracted so the rejection logic can be unit-tested without standing up an
+/// `AppState` or a full `Router`.
+struct ValidationRejection {
+    detail: String,
+    broken_models: Vec<serde_json::Value>,
+}
+
+/// Returns `Some(rejection)` when at least one router model has zero healthy
+/// providers in the candidate registry; otherwise `None`.
+///
+/// The reload handler short-circuits on `Some(_)` and leaves the live config
+/// untouched, satisfying the "in-flight requests keep using the old snapshot"
+/// invariant.
+fn reject_if_validation_broken(
+    validation: &[crate::preset::ModelValidation],
+) -> Option<ValidationRejection> {
+    let broken: Vec<&crate::preset::ModelValidation> =
+        validation.iter().filter(|m| !m.any_ok()).collect();
+    if broken.is_empty() {
+        return None;
+    }
+    let detail = broken
+        .iter()
+        .map(|m| format!("{} [{}]", m.model_name, m.role))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let broken_models = broken
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "model": m.model_name,
+                "role": m.role,
+            })
+        })
+        .collect();
+    Some(ValidationRejection {
+        detail,
+        broken_models,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::preset::{MappingResult, ModelValidation};
+
+    fn ok_mapping() -> MappingResult {
+        MappingResult {
+            priority: 1,
+            provider: "p".into(),
+            actual_model: "m".into(),
+            ok: true,
+            detail: "OK (12ms)".into(),
+        }
+    }
+
+    fn broken_mapping(detail: &str) -> MappingResult {
+        MappingResult {
+            priority: 1,
+            provider: "p".into(),
+            actual_model: "m".into(),
+            ok: false,
+            detail: detail.into(),
+        }
+    }
+
+    #[test]
+    fn empty_validation_passes() {
+        // No router models declared → nothing to validate → no rejection.
+        // Preserves the prior "soft" reload contract for minimal configs.
+        assert!(reject_if_validation_broken(&[]).is_none());
+    }
+
+    #[test]
+    fn all_ok_validation_passes() {
+        let results = vec![ModelValidation {
+            model_name: "default".into(),
+            role: "default".into(),
+            mappings: vec![ok_mapping()],
+        }];
+        assert!(reject_if_validation_broken(&results).is_none());
+    }
+
+    #[test]
+    fn at_least_one_healthy_mapping_passes() {
+        // any_ok() — a single healthy mapping is enough; a fallback being
+        // rate-limited at reload time should not block the reload.
+        let results = vec![ModelValidation {
+            model_name: "default".into(),
+            role: "default".into(),
+            mappings: vec![ok_mapping(), broken_mapping("429 - rate limited")],
+        }];
+        assert!(reject_if_validation_broken(&results).is_none());
+    }
+
+    #[test]
+    fn rejects_when_any_router_model_has_zero_healthy_mappings() {
+        // Regression guard for the race the parent fix targets: a config where
+        // a router slot points at a model with no working provider must NOT
+        // be swapped in.
+        let results = vec![
+            ModelValidation {
+                model_name: "default".into(),
+                role: "default".into(),
+                mappings: vec![ok_mapping()],
+            },
+            ModelValidation {
+                model_name: "missing-think-model".into(),
+                role: "think".into(),
+                mappings: vec![broken_mapping("Model not found in [[models]]")],
+            },
+        ];
+        let rejection = reject_if_validation_broken(&results)
+            .expect("expected rejection for the broken router model");
+        assert!(rejection.detail.contains("missing-think-model [think]"));
+        assert_eq!(rejection.broken_models.len(), 1);
+        assert_eq!(rejection.broken_models[0]["model"], "missing-think-model");
+        assert_eq!(rejection.broken_models[0]["role"], "think");
+    }
+
+    #[test]
+    fn rejects_with_multiple_broken_models_in_detail() {
+        let results = vec![
+            ModelValidation {
+                model_name: "default".into(),
+                role: "default".into(),
+                mappings: vec![broken_mapping("connection refused")],
+            },
+            ModelValidation {
+                model_name: "think".into(),
+                role: "think".into(),
+                mappings: vec![broken_mapping("connection refused")],
+            },
+        ];
+        let rejection =
+            reject_if_validation_broken(&results).expect("expected rejection for broken models");
+        assert!(rejection.detail.contains("default [default]"));
+        assert!(rejection.detail.contains("think [think]"));
+        assert_eq!(rejection.broken_models.len(), 2);
+    }
 }

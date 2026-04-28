@@ -32,6 +32,7 @@ mod tests {
             circuit_breaker: None,
 
             health_check: None,
+            max_retries: None,
         };
 
         assert!(config.is_enabled());
@@ -62,6 +63,7 @@ mod tests {
             circuit_breaker: None,
 
             health_check: None,
+            max_retries: None,
         };
 
         assert!(!config.is_enabled());
