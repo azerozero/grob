@@ -28,6 +28,7 @@ pub enum AuthType {
 
 /// Provider configuration from TOML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProviderConfig {
     /// Unique provider name used in routing and logging.
     pub name: String,

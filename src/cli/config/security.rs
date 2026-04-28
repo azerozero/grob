@@ -8,6 +8,7 @@ use super::default_true;
 
 /// Security configuration (wired into middleware stack)
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecurityConfig {
     /// Master switch for security middleware
     #[serde(default = "default_true")]

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 /// Top-level DLP configuration, mapped from `[dlp]` in TOML.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct DlpConfig {
     /// Enables the DLP pipeline globally.
     #[serde(default)]

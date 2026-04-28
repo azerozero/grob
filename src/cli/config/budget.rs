@@ -6,6 +6,7 @@ use crate::cli::BudgetUsd;
 
 /// Budget configuration
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct BudgetConfig {
     /// Global monthly hard cap in USD (0 = unlimited)
     #[serde(default)]

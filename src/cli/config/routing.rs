@@ -9,6 +9,7 @@ use super::user::PresetConfig;
 
 /// Router configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct RouterConfig {
     /// Default model for unclassified requests
     pub default: String,
@@ -102,6 +103,7 @@ pub struct FanOutConfig {
 
 /// Model configuration with 1:N provider mappings
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelConfig {
     /// External model name (used in API requests)
     pub name: String,
@@ -203,6 +205,7 @@ pub struct TierMatchCondition {
 /// When the scoring heuristic classifies a request, the dispatch pipeline
 /// resolves providers from the matching tier instead of the default model mappings.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TierConfig {
     /// Tier name — must match a `ComplexityTier` variant (case-insensitive).
     pub name: String,
