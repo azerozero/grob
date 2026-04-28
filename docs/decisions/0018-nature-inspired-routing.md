@@ -1,10 +1,21 @@
 ---
-status: proposed
+status: accepted
 date: 2026-04-17
+accepted: 2026-04-28
 deciders: [azerozero, architect]
 consulted: [brigade-s5]
 informed: []
 ---
+
+> **Promotion note (2026-04-28)**: status flipped from `proposed` to `accepted`
+> after re-evaluation against two concrete user audiences: time-sensitive trading
+> bots (where fast failover and tail-latency reduction are operational requirements,
+> not nice-to-haves) and security-prevails customers (defense, banks, OIV) where
+> declarative auditable policies replace implicit priority-chain semantics.
+> ADR-0019, ADR-0020, and ADR-0022 land as `proposed` children of this accepted
+> parent. ADR-0021 (Thompson sampling) was rejected before drafting because
+> probabilistic exploration is incompatible with both audiences' demands for
+> predictable routing.
 
 # ADR-0018: Nature-Inspired Routing — Topology vs Policy, Caddy-KISS, Biomimetic Primitives
 
