@@ -101,7 +101,7 @@ Sequenced: A-1 blocks A-2 / A-3 / B-1 (structural refactor, conflict risk).
 
 ## Follow-ups and related ADRs
 
-- Extends [ADR-0008: Wizard Lifecycle Architecture](0008-wizard-lifecycle.md) — ADR-0008's state machine becomes a special case of the ControlEngine's action set.
+- Extends [ADR-0008: Wizard Lifecycle Architecture](0008-wizard-lifecycle.md) — ADR-0008's state machine becomes a special case of the ControlEngine's action set. ADR-0008 was promoted to `accepted` on 2026-04-28; this dependency is now satisfied and chantiers A-1/A-2 are unblocked.
 - [ADR-0009](0009-pledge-structural-tool-filtering.md), [ADR-0010](0010-universal-tool-layer.md) — modules that the engine orchestrates.
 - [ADR-0013](0013-storage-files-no-redb.md) — engine state persistence lands on the files backend.
 - Chantiers: A-1 (engine), A-2 (CLI thin), A-3 (MCP wizard extend) in the sprint menu.

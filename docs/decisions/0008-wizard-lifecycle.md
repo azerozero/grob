@@ -1,7 +1,20 @@
+---
+status: accepted
+date: 2026-04-03
+accepted: 2026-04-28
+---
+
+> **Promotion note (2026-04-28)**: Status flipped from `proposed` to `accepted`.
+> Trigger: ADR-0011 (ControlEngine + MCP-tools-first) is already `accepted` and
+> formally depends on this ADR — keeping ADR-0008 `proposed` was a status inversion.
+> Implementation work (chantier A-1: ControlEngine, A-2: CLI thin wrapper) is
+> unblocked. No code changes ship in this PR — implementation tracked separately.
+
 # ADR-0008: Wizard Lifecycle Architecture
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-04-03
+**Accepted:** 2026-04-28
 **Context:** The current `grob setup` wizard is a one-shot interactive flow that doesn't re-examine existing config, doesn't validate after generation, and has broken OAuth auto-start promises.
 
 ## Decision
