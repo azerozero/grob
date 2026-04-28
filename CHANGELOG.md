@@ -11,6 +11,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - ADR-0008 promoted from `proposed` to `accepted` (2026-04-28). Unblocks chantiers A-1 (ControlEngine) and A-2 (CLI thin).
 
+### Documentation
+
+- **ADR hygiene** — corrected zombie statuses on previously-`done` ADRs whose
+  implementations are deferred. ADR-0013 (storage refactor on atomic files +
+  JSONL) and ADR-0015 (indirect prompt injection coverage) revert from `done`
+  to `accepted`; both designs remain final and binding, but no production
+  code matches them yet (redb persistence still active in v0.36.x; A-6 output
+  scan deferred). Status notes inline in each ADR record the correction.
+- **ADR-0023 (proposed)** — Preset Naming and Composition Strategy. Formalises
+  the existing five-preset catalogue with a `[meta] tier` taxonomy
+  (`base`, `audience-specific`, `experimental`), the kebab-case naming
+  convention, and the rule that presets do not nest (compliance overlays are
+  a separate `kind = "overlay"` concept). No code changes yet — proposal only.
+- **ADR-0024 (proposed)** — Preset-as-Compliance-Template. Treats compliance
+  presets as packaged decisions bundling routing topology, policy choices,
+  ADR-0022 `[endpoints.compliance]` metadata, and `[meta] compliance_reviewed`
+  attestation. Documents customer-extension overlays (tighten only, never
+  loosen) and the certification-renewal lifecycle. No code changes yet —
+  proposal only.
+- **ADR-0025 (proposed)** — RPC Mutation Transactionality and In-Flight
+  Visibility. Pins down semantics for `config/set`, `pledge/set`, `tools/*`,
+  `policy/*` RPC mutations: in-flight requests see pre-mutation snapshots,
+  persistence is atomic with the in-memory swap, per-namespace mutex permits
+  parallel writes across namespaces, every mutation emits an
+  `AuditEvent::RpcMutation` with `before_hash` / `after_hash`. No code
+  changes yet — proposal only; resolves the open question on issue #228.
+- **ADR-0026 (proposed)** — Model Name Canonicalization Policy. Records the
+  fixed rule set landed in PR #307 (lowercase, strip `-latest`, strip 8-digit
+  date suffix, dot-to-dash version on a known prefix gate, Anthropic
+  family-version reorder), the idempotence guarantee, the operator escape
+  hatches (per-endpoint `actual_model` mapping or table patch), and the
+  2-minor-release deprecation window for renamed models. No code changes
+  yet — formalises the existing implementation.
+
 ## [0.36.41](https://github.com/azerozero/grob/compare/v0.36.40...v0.36.41) - 2026-04-28
 
 ### Added

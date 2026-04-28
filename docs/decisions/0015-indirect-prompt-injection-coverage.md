@@ -1,10 +1,17 @@
 ---
-status: done
+status: accepted
 date: 2026-04-09
 deciders: [azerozero, architect]
 consulted: []
 informed: []
 ---
+
+> **Status note (2026-04-28)**: status reverted from `done` to `accepted`.
+> A-6 (indirect prompt injection coverage) implementation is deferred — no
+> production code merges yet. The framework design described here is final and
+> binding for the next implementation pass; only the implementation flag has
+> been corrected to reflect that the symmetric output-side scan is not yet wired
+> into the dispatch pipeline.
 
 # ADR-0015: Indirect Prompt Injection Coverage — Scan Responses and `tool_result` Blocks
 
