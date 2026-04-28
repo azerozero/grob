@@ -241,6 +241,9 @@ async fn main() -> anyhow::Result<()> {
                 commands::secrets::cmd_secrets_show(&name, unsafe_show)
             }
             SecretsAction::Rm { name, force } => commands::secrets::cmd_secrets_rm(&name, force),
+            SecretsAction::Test { name, json } => {
+                commands::secrets::cmd_secrets_test(&config, name.as_deref(), json).await
+            }
         },
         Commands::Rollback => {
             commands::config_rollback::cmd_config_rollback(&config, &config_source).await?;

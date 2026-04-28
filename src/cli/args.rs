@@ -405,6 +405,19 @@ pub enum SecretsAction {
         #[arg(short, long)]
         force: bool,
     },
+    /// Test secret(s) by probing each referencing provider's models endpoint.
+    ///
+    /// Hits a low-cost endpoint (typically `GET /v1/models`) for every
+    /// provider that references the secret via `secret:<name>`. Reports
+    /// per-secret status: ok (2xx), invalid (401/403), or warn (network/5xx).
+    /// Exits non-zero if any secret is invalid; network failures only warn.
+    Test {
+        /// Secret name to test. Tests all stored secrets when omitted.
+        name: Option<String>,
+        /// Output as JSON for scripting.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Subcommands for managing configuration presets.
