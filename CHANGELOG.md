@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.42](https://github.com/azerozero/grob/compare/v0.36.41...v0.36.42) - 2026-04-28
+
+### Fixed
+
+- *(providers)* tool-use translation correctness (3 audit bugs)
+
+### Other
+
+- *(translation)* table-driven tests for Anthropic <-> OpenAI <-> Responses translation ([#334](https://github.com/azerozero/grob/pull/334))
+- *(security)* multi-tenant isolation integration tests ([#326](https://github.com/azerozero/grob/pull/326))
+- *(providers)* document Z.ai/GLM dual-endpoint model, no glm.rs needed
+
 ### Lifecycle roadmap (no code yet — design only)
 
 - ADR-0008 promoted from `proposed` to `accepted` (2026-04-28). Unblocks chantiers A-1 (ControlEngine) and A-2 (CLI thin).
