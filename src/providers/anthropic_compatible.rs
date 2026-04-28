@@ -87,7 +87,8 @@ fn log_rate_limits(headers: &HashMap<String, String>, provider: &str) {
 }
 
 use super::anthropic_sanitize::{
-    sanitize_tool_use_ids, strip_all_thinking_signatures, strip_non_anthropic_thinking,
+    restore_original_tool_ids, sanitize_tool_use_ids, strip_all_thinking_signatures,
+    strip_non_anthropic_thinking, OriginalToolIdMap,
 };
 
 /// Merges server-default beta features with client-provided ones, deduplicating.
@@ -275,17 +276,22 @@ impl AnthropicCompatibleProvider {
 
     /// Common setup for both send_message and send_message_stream:
     /// builds URL, sanitizes request for Anthropic backends, resolves auth.
+    ///
+    /// Returns a tuple of `(messages_url, auth_value, is_anthropic, id_map)`.
+    /// The `id_map` carries any rewrites applied by `sanitize_tool_use_ids`
+    /// so callers can restore the originals on the response.
     async fn prepare_anthropic_request(
         &self,
         request: &mut CanonicalRequest,
-    ) -> Result<(&str, String, bool), ProviderError> {
+    ) -> Result<(&str, String, bool, OriginalToolIdMap), ProviderError> {
         let is_anthropic = self.base.base_url.contains(ANTHROPIC_DOMAIN);
+        let mut id_map = OriginalToolIdMap::new();
         if is_anthropic {
-            sanitize_tool_use_ids(request);
+            sanitize_tool_use_ids(request, &mut id_map);
             strip_non_anthropic_thinking(request);
         }
         let auth_value = self.base.resolve_auth(OAuthConfig::anthropic).await?;
-        Ok((&self.messages_url, auth_value, is_anthropic))
+        Ok((&self.messages_url, auth_value, is_anthropic, id_map))
     }
 }
 
@@ -296,9 +302,10 @@ impl LlmProvider for AnthropicCompatibleProvider {
         request: CanonicalRequest,
     ) -> Result<ProviderResponse, ProviderError> {
         let mut request = request;
-        let (url, auth_value, is_anthropic) = self.prepare_anthropic_request(&mut request).await?;
+        let (url, auth_value, is_anthropic, id_map) =
+            self.prepare_anthropic_request(&mut request).await?;
 
-        let result = self.try_send_message(url, &auth_value, &request).await;
+        let mut result = self.try_send_message(url, &auth_value, &request).await;
 
         // Fallback: if signature error, strip all signed thinking blocks and retry
         if is_anthropic {
@@ -306,9 +313,16 @@ impl LlmProvider for AnthropicCompatibleProvider {
                 if message.contains("signature") {
                     tracing::warn!("🔄 Signature error from Anthropic: {}, stripping all signed thinking blocks and retrying", message);
                     strip_all_thinking_signatures(&mut request);
-                    return self.try_send_message(url, &auth_value, &request).await;
+                    result = self.try_send_message(url, &auth_value, &request).await;
                 }
             }
+        }
+
+        // Restore original tool IDs so downstream clients can map response IDs
+        // back to the IDs they sent (audit Bug #2). No-op when sanitization
+        // didn't rewrite anything.
+        if let Ok(ref mut response) = result {
+            restore_original_tool_ids(response, &id_map);
         }
 
         result
@@ -356,7 +370,16 @@ impl LlmProvider for AnthropicCompatibleProvider {
         use futures::stream::TryStreamExt;
 
         let mut request = request;
-        let (url, auth_value, is_anthropic) = self.prepare_anthropic_request(&mut request).await?;
+        let (url, auth_value, is_anthropic, id_map) =
+            self.prepare_anthropic_request(&mut request).await?;
+        // NOTE: Streaming responses pass through unchanged; tool ID
+        // restoration on streamed `content_block_start` events would require
+        // SSE event rewriting and is intentionally out of scope for the
+        // initial Bug #2 fix. The non-streaming path covers the common case
+        // (single response per call). Future work: see TODO at restore call
+        // site below.
+        // TODO: implement SSE-time ID rewrite using `id_map` for streaming.
+        let _ = id_map;
 
         // Try request, fallback: strip all signed thinking blocks on signature error
         let response = match self
