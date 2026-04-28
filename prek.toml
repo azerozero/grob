@@ -54,25 +54,10 @@ args = ["-c", "lychee --offline --no-progress --include-fragments docs/**/*.md R
 types = ["markdown"]
 pass_filenames = false
 
-# Tests — expensive, runs only on pre-push
-[[repos.hooks]]
-id = "cargo-test"
-name = "cargo test"
-language = "system"
-entry = "cargo nextest run --profile ci"
-types = ["rust"]
-pass_filenames = false
-stages = ["pre-push"]
-
-# Doc tests — not covered by nextest
-[[repos.hooks]]
-id = "cargo-doctest"
-name = "cargo doc tests"
-language = "system"
-entry = "cargo test --doc"
-types = ["rust"]
-pass_filenames = false
-stages = ["pre-push"]
+# NOTE: cargo-test and cargo-doctest were removed from pre-push to keep
+# the gate fast-fail. CI re-runs the full suite on every PR (see
+# `.github/workflows/ci.yml` `tests` job), so duplicating ~20 min of work
+# locally only delays the developer feedback loop without adding signal.
 
 # Cargo deny — license & advisory & dependency checks
 # Only runs when Cargo.toml/lock or Rust files change.

@@ -84,6 +84,7 @@ impl Default for ScoringThresholds {
 
 /// Scoring configuration combining weights and thresholds.
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ScoringConfig {
     /// Per-signal weights.
     pub weights: ScoringWeights,

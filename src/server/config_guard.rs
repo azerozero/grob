@@ -12,29 +12,76 @@ use std::sync::Arc;
 use tracing::info;
 
 /// Top-level TOML sections that are never writable via any config API.
-const DENIED_SECTIONS: &[&str] = &["providers", "dlp"];
+///
+/// Each entry is denied because hot-reloading it cannot be done safely
+/// at runtime — either the data is sensitive (and must travel through a
+/// dedicated secret API), or the code path that consumes it is set up
+/// once at process start and not re-initialised on `/api/config/reload`:
+///
+/// | Section     | Reason                                                                                  |
+/// |-------------|-----------------------------------------------------------------------------------------|
+/// | `providers` | Contains API keys; mutate via `grob connect` / secret backend, not the config API.      |
+/// | `dlp`       | Security policy must not be weakened by an authenticated control-plane caller.          |
+/// | `tee`       | TEE attestation runs at startup; flipping the mode mid-flight bypasses the gate.        |
+/// | `fips`      | FIPS mode is checked once on init; toggling at runtime gives a false sense of compliance. |
+///
+/// To change any of these the operator must edit `~/.grob/config.toml`
+/// and restart the daemon.
+const DENIED_SECTIONS: &[&str] = &["providers", "dlp", "tee", "fips"];
 
 /// Per-section keys that are never writable via any config API.
+///
+/// These are individual fields whose host section is otherwise editable,
+/// but the field itself is either credential material or wired into a
+/// non-reloadable subsystem:
+///
+/// | Section.Key        | Reason                                                                          |
+/// |--------------------|---------------------------------------------------------------------------------|
+/// | `router.api_key`   | Credential material — never round-trip through the config API.                  |
+/// | `budget.api_key`   | Same.                                                                           |
+/// | `cache.api_key`    | Same.                                                                           |
+/// | `server.tls`       | TLS listener is bound at startup; rebuilding it requires a daemon restart.      |
+/// | `secrets.backend`  | The secret backend is constructed once and shared via `Arc`; swapping it at     |
+/// |                    | runtime would orphan in-flight readers and change credential resolution semantics. |
 const DENIED_KEYS: &[(&str, &str)] = &[
     ("router", "api_key"),
     ("budget", "api_key"),
     ("cache", "api_key"),
+    ("server", "tls"),
+    ("secrets", "backend"),
 ];
 
 /// Checks whether a (section, key) pair is blocked by the deny-list.
 ///
-/// Returns `true` when the write must be rejected:
-/// - The entire `providers` section (contains API keys).
-/// - The entire `dlp` section (security must not be weakened).
-/// - Any `api_key` field in any section.
+/// Returns `true` when the write must be rejected. See [`DENIED_SECTIONS`]
+/// and [`DENIED_KEYS`] for the rationale behind every entry. A denied
+/// attempt is logged at INFO so the operator sees actionable guidance
+/// (restart instead of expecting a silent reload to take effect).
 pub fn is_section_or_key_denied(section: &str, key: &str) -> bool {
     if DENIED_SECTIONS.contains(&section) {
+        info!(
+            section = %section,
+            "config hot-reload: section is on the deny-list; restart the daemon to apply changes"
+        );
         return true;
     }
     if key == "api_key" {
+        info!(
+            section = %section,
+            key = %key,
+            "config hot-reload: api_key fields cannot be set via the config API; use `grob connect` or the secret backend"
+        );
         return true;
     }
-    DENIED_KEYS.iter().any(|(s, k)| *s == section && *k == key)
+    if DENIED_KEYS.iter().any(|(s, k)| *s == section && *k == key) {
+        info!(
+            section = %section,
+            key = %key,
+            "config hot-reload: key is on the deny-list; restart the daemon to apply changes"
+        );
+        return true;
+    }
+    false
 }
 
 /// Validates a key update against the deny-list using [`ConfigSection`].
@@ -178,6 +225,27 @@ mod tests {
         assert!(!is_section_or_key_denied("budget", "monthly_limit_usd"));
         assert!(!is_section_or_key_denied("cache", "enabled"));
         assert!(!is_section_or_key_denied("cache", "ttl_secs"));
+    }
+
+    #[test]
+    fn deny_static_init_sections() {
+        // tee and fips are checked once at startup; toggling them at runtime
+        // would bypass the gate without the operator realising.
+        assert!(is_section_or_key_denied("tee", "mode"));
+        assert!(is_section_or_key_denied("tee", "sealed_keys"));
+        assert!(is_section_or_key_denied("fips", "mode"));
+        assert!(is_section_or_key_denied("fips", "anything"));
+    }
+
+    #[test]
+    fn deny_static_init_keys() {
+        // The TLS listener and secret backend are constructed once on
+        // process start; both require a daemon restart to swap.
+        assert!(is_section_or_key_denied("server", "tls"));
+        assert!(is_section_or_key_denied("secrets", "backend"));
+        // Sibling keys in the same sections must remain editable.
+        assert!(!is_section_or_key_denied("server", "host"));
+        assert!(!is_section_or_key_denied("server", "port"));
     }
 
     #[cfg(feature = "mcp")]

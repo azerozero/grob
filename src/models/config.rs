@@ -25,6 +25,7 @@ use crate::features::tap::TapConfig;
 
 /// Application configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     /// Config schema version (for forward compatibility)
     #[serde(default, skip_serializing_if = "Option::is_none")]

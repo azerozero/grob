@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// LLM response cache configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CacheConfig {
     /// Enable response caching (only for temperature=0 requests)
     #[serde(default)]
