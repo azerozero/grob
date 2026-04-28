@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Routing roadmap (no code yet — design only)
+
+- **ADR-0018 promoted to `accepted`** (was `proposed` since 2026-04-17). Triggered by re-evaluation against two concrete user audiences: time-sensitive trading bots and security-prevails customers (defense, banks, OIV).
+- ADR-0019 — EMA stigmergy: opt-in adaptive endpoint health scoring; transparent to clients, fully observable. **All defaults configurable** in `[router.ema]`; default flip from `static` to `ema` is itself a config-schema default change, never silent.
+- ADR-0020 — Hedged requests: opt-in tail-latency reduction via speculative duplication; per-slot config. Adds `compliance_isolation` flag for security audiences (hedging restricted to endpoints sharing trust zone, jurisdiction, and meeting data-classification floor — fail-closed if either endpoint omits the compliance block). **Cancellation cost behavior is operator-declared** in `[hedge.providers.<name>]` after empirical verification; binary ships no speculative knowledge.
+- ADR-0022 — `[[endpoints]]` + `[[policies]]` schema rebuild. **10-version auto-migration window** (~12-18 calendar months) with deprecation warnings starting at the announcement release; legacy parser removed at the 10th minor release after announcement. New optional `[endpoints.compliance]` block with 6 structured fields (`trust_zone`, `jurisdiction`, `data_classification`, `certifications`, `provider_risk_score`, `sub_processors`). **Everything is operator-tunable** via config: `data_classification` levels, `required_fields` for strict-mode lint, policy precedence (`priority = N` opt-in), `trust_zone` taxonomy. Industry-naming guidance documented (AWS regions, SecNumCloud, FedRAMP, EU AI Act tiers) but not enforced.
+
+ADR-0021 (Thompson sampling) was rejected before drafting: probabilistic
+exploration is incompatible with both trading audit trails and security-prevails
+predictability requirements.
+
+ADRs 0019, 0020, 0022 land here as `status: proposed`. None ship code in this
+release. A separate `status: accepted` promotion PR gates each implementation.
+
 ## [0.36.40](https://github.com/azerozero/grob/compare/v0.36.39...v0.36.40) - 2026-04-26
 
 ### Fixed
