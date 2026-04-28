@@ -43,16 +43,31 @@ pub(super) struct ProviderAttempt<'a> {
     pub is_subscription: bool,
 }
 
+/// Returns `true` when a provider error reports a 429 rate-limit upstream.
+///
+/// Defers to the `RequestError::RateLimited` mapping rules so the
+/// classification logic lives in one place: a 429 status code OR a 401 with a
+/// `rate_limit_error` payload (Anthropic-style). Callers that need to know
+/// specifically whether they hit a 429 (e.g. to rotate a key pool) consult
+/// this helper rather than re-implement the matcher.
+pub(super) fn is_upstream_rate_limit(e: &crate::providers::error::ProviderError) -> bool {
+    use crate::providers::error::ProviderError;
+    match e {
+        ProviderError::ApiError { status: 429, .. } => true,
+        ProviderError::ApiError {
+            status: 401,
+            message,
+        } => super::super::budget::is_rate_limit_payload(message),
+        _ => false,
+    }
+}
+
 /// Emit shared provider-error metrics (rate-limit counter + error counter).
 fn emit_provider_error_metrics(
     mapping: &crate::cli::ModelMapping,
     e: &crate::providers::error::ProviderError,
 ) {
-    let is_rate_limit = matches!(
-        e,
-        crate::providers::error::ProviderError::ApiError { status: 429, .. }
-    );
-    if is_rate_limit {
+    if is_upstream_rate_limit(e) {
         warn!("Provider {} rate limited", mapping.provider);
         metrics::counter!(
             "grob_ratelimit_hits_total",
@@ -177,11 +192,7 @@ pub(super) async fn dispatch_streaming(
             if is_auth_revoked_error(&e) {
                 return Err(ProviderLoopAction::AuthRevoked(e.to_string()));
             }
-            let is_rate_limit = matches!(
-                e,
-                crate::providers::error::ProviderError::ApiError { status: 429, .. }
-            );
-            if is_rate_limit {
+            if is_upstream_rate_limit(&e) {
                 Err(ProviderLoopAction::RateLimited)
             } else {
                 Err(ProviderLoopAction::Continue)
@@ -297,11 +308,7 @@ pub(super) async fn dispatch_non_streaming(
 
                 if classify_and_handle_error(ctx, attempt.mapping, &e, retry) {
                     // On 429, try rotating to next pooled key before retrying.
-                    let is_rate_limit = matches!(
-                        e,
-                        crate::providers::error::ProviderError::ApiError { status: 429, .. }
-                    );
-                    if is_rate_limit && provider.rotate_key_pool() {
+                    if is_upstream_rate_limit(&e) && provider.rotate_key_pool() {
                         info!(
                             "Provider {} rate-limited, rotated to next pooled key",
                             attempt.mapping.provider
@@ -315,11 +322,7 @@ pub(super) async fn dispatch_non_streaming(
                 }
 
                 // Before giving up on this provider, try key rotation for 429.
-                let is_rate_limit = matches!(
-                    e,
-                    crate::providers::error::ProviderError::ApiError { status: 429, .. }
-                );
-                if is_rate_limit && provider.rotate_key_pool() {
+                if is_upstream_rate_limit(&e) && provider.rotate_key_pool() {
                     info!(
                         "Provider {} exhausted retries but rotated to next pooled key",
                         attempt.mapping.provider

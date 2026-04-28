@@ -1,4 +1,5 @@
 // Integration tests module
+mod audit_middleware_test;
 mod cache_test;
 mod compliance_test;
 mod dlp_test;

@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use super::super::AppError;
+use super::super::RequestError;
 use super::{DispatchContext, DispatchResult};
 use tracing::info;
 
@@ -101,7 +101,7 @@ pub(super) async fn try_direct_provider_lookup(
     ctx: &DispatchContext<'_>,
     request: &crate::models::CanonicalRequest,
     model_name: &str,
-) -> Result<Option<DispatchResult>, AppError> {
+) -> Result<Option<DispatchResult>, RequestError> {
     let Ok(provider) = ctx.inner.provider_registry.provider_for_model(model_name) else {
         return Ok(None);
     };
@@ -116,7 +116,7 @@ pub(super) async fn try_direct_provider_lookup(
     let mut response = provider
         .send_message(fallback_request)
         .await
-        .map_err(|e| AppError::ProviderError(e.to_string()))?;
+        .map_err(RequestError::from)?;
     response.model = original_model;
 
     Ok(Some(DispatchResult::Complete {

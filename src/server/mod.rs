@@ -37,7 +37,7 @@ pub(crate) use budget::{
     calculate_cost, check_budget, is_auth_revoked_error, is_provider_subscription, is_retryable,
     record_request_metrics, record_spend, retry_delay, RequestMetrics, MAX_RETRIES,
 };
-pub use error::AppError;
+pub use error::{ErrorVariantTag, RequestError};
 pub(crate) use helpers::{
     format_route_type, inject_continuation_text, resolve_provider_mappings,
     sanitize_provider_response_reported, should_inject_continuation,
@@ -49,9 +49,12 @@ pub(crate) use init::{
     init_provider_scorer, init_security, maybe_preset_sync, spawn_background_tasks,
 };
 pub(crate) use middleware::{
-    apply_transparency_headers, auth_middleware, extract_api_credential, extract_client_ip,
-    rate_limit_check_middleware, request_id_middleware, security_headers_response_middleware,
-    should_apply_transparency, RequestId,
+    apply_transparency_headers, audit_log_layer, auth_middleware, extract_api_credential,
+    extract_client_ip, rate_limit_check_middleware, request_id_middleware,
+    security_headers_response_middleware, should_apply_transparency,
+};
+pub use middleware::{
+    capture_audit_input, emit_request_processed, AuditMiddlewareCapture, AuditedAlready, RequestId,
 };
 
 use crate::auth::TokenStore;
@@ -400,6 +403,17 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
     let app = app.layer(RequestBodyLimitLayer::new(
         config.security.max_body_size.value(),
     ));
+
+    // Audit middleware: captures every request lifecycle, including those
+    // rejected by rate-limit / auth before reaching a handler. Layered
+    // INSIDE `request_id_middleware` (which is added afterwards and so wraps
+    // this one) so `RequestId` is set in extensions before the audit logic
+    // reads it.
+    let app = app.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        audit_log_layer,
+    ));
+
     let app = app.layer(axum::middleware::from_fn(request_id_middleware));
 
     // Tape recorder layer: outermost to capture raw HTTP before any transformation.

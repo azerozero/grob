@@ -1,0 +1,5 @@
+---
+source: tests/enterprise/snapshot_error_test.rs
+expression: snap
+---
+status=403 body={"error":{"type":"permission_error","message":"policy denies model 'claude-opus-4-7' for tenant 'public'"}}

@@ -10,9 +10,10 @@ use futures::stream::TryStreamExt;
 use std::sync::Arc;
 use tracing::{debug, error};
 
+use super::middleware::AuditedAlready;
 use super::{
     apply_transparency_headers, dispatch, extract_api_credential, extract_client_ip, openai_compat,
-    responses_compat, should_apply_transparency, AppError, AppState, RequestId,
+    responses_compat, should_apply_transparency, AppState, RequestError, RequestId,
 };
 
 /// Extracts tenant_id from VirtualKeyContext (preferred) or GrobClaims.
@@ -50,12 +51,12 @@ impl Drop for ActiveRequestGuard {
 fn build_json_response(
     body: Vec<u8>,
     transparency: Option<(&str, &str, &str)>,
-) -> Result<Response, AppError> {
+) -> Result<Response, RequestError> {
     let mut resp = Response::builder()
         .status(200)
         .header("content-type", "application/json")
         .body(Body::from(body))
-        .map_err(|e| AppError::ProviderError(format!("response builder: {}", e)))?;
+        .map_err(|e| RequestError::Internal(anyhow::anyhow!("response builder: {}", e)))?;
     if let Some((provider, actual_model, req_id)) = transparency {
         apply_transparency_headers(resp.headers_mut(), provider, actual_model, req_id);
     }
@@ -71,11 +72,11 @@ fn build_sse_response() -> axum::http::response::Builder {
         .header("Connection", "keep-alive")
 }
 
-/// Serializes a value to JSON bytes, returning an `AppError` on failure.
-fn serialize_response<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, AppError> {
+/// Serializes a value to JSON bytes, returning a `RequestError` on failure.
+fn serialize_response<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, RequestError> {
     serde_json::to_vec(value).map_err(|e| {
         error!("Failed to serialize response: {}", e);
-        AppError::ProviderError(format!("response serialization failed: {}", e))
+        RequestError::Internal(anyhow::anyhow!("response serialization failed: {}", e))
     })
 }
 
@@ -86,6 +87,18 @@ struct DispatchPrelude {
     tenant_id: Option<String>,
     peer_ip: String,
     transparency_enabled: bool,
+    /// Set by the dispatch path when it has emitted an audit entry — used
+    /// by the audit middleware to skip duplicate logging.
+    audited: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Marks the response with the [`AuditedAlready`] extension when dispatch
+/// has emitted its own audit entry, so the outer audit middleware skips a
+/// duplicate write.
+fn mark_audited_if_set(audited: &Arc<std::sync::atomic::AtomicBool>, response: &mut Response) {
+    if audited.load(std::sync::atomic::Ordering::Acquire) {
+        response.extensions_mut().insert(AuditedAlready);
+    }
 }
 
 /// Builds the shared pre-dispatch state common to all three handlers.
@@ -113,6 +126,7 @@ fn prepare_dispatch(
         tenant_id,
         peer_ip,
         transparency_enabled,
+        audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }
 }
 
@@ -137,7 +151,7 @@ fn finish_dispatch<S, C, F>(
     on_streaming: S,
     on_complete: C,
     on_fan_out: F,
-) -> Result<Response, AppError>
+) -> Result<Response, RequestError>
 where
     S: FnOnce(
         std::pin::Pin<
@@ -148,7 +162,7 @@ where
             >,
         >,
     ) -> Body,
-    C: FnOnce(crate::providers::ProviderResponse) -> Result<Vec<u8>, AppError>,
+    C: FnOnce(crate::providers::ProviderResponse) -> Result<Vec<u8>, RequestError>,
     F: FnOnce(crate::providers::ProviderResponse) -> Response,
 {
     match result {
@@ -179,7 +193,7 @@ where
 
             let response = response_builder
                 .body(body)
-                .map_err(|e| AppError::ProviderError(format!("response builder: {}", e)))?;
+                .map_err(|e| RequestError::Internal(anyhow::anyhow!("response builder: {}", e)))?;
             Ok(response)
         }
 
@@ -227,7 +241,7 @@ pub(crate) async fn handle_openai_chat_completions(
     axum::Extension(request_id): axum::Extension<RequestId>,
     headers: HeaderMap,
     Json(openai_request): Json<openai_compat::OpenAIRequest>,
-) -> Result<Response, AppError> {
+) -> Result<Response, RequestError> {
     let _guard = ActiveRequestGuard::new(&state);
     let model = openai_request.model.clone();
     let is_streaming = openai_request.stream == Some(true);
@@ -235,14 +249,17 @@ pub(crate) async fn handle_openai_chat_completions(
     let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
 
     // Transform OpenAI → Anthropic format
-    let mut request = openai_compat::transform_openai_to_canonical(openai_request)
-        .map_err(|e| AppError::ParseError(format!("Failed to transform OpenAI request: {}", e)))?;
+    let mut request =
+        openai_compat::transform_openai_to_canonical(openai_request).map_err(|e| {
+            RequestError::ParseError(format!("Failed to transform OpenAI request: {}", e))
+        })?;
     forward_beta_header(&mut request, &headers);
 
     let start_time = std::time::Instant::now();
     #[cfg(feature = "policies")]
     let resolved_policy =
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
+    let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -255,15 +272,23 @@ pub(crate) async fn handle_openai_chat_completions(
         start_time,
         headers: &headers,
         trace_id: None,
+        audited: audited_flag.clone(),
         #[cfg(feature = "policies")]
         resolved_policy,
     };
 
-    let result = dispatch::dispatch(&ctx, &mut request).await?;
+    let result = match dispatch::dispatch(&ctx, &mut request).await {
+        Ok(r) => r,
+        Err(e) => {
+            let mut response = e.into_response();
+            mark_audited_if_set(&audited_flag, &mut response);
+            return Ok(response);
+        }
+    };
     let model_for_stream = model.clone();
     let model_for_fanout = model.clone();
 
-    finish_dispatch(
+    let mut response = finish_dispatch(
         result,
         prelude.transparency_enabled,
         &request_id.0,
@@ -284,7 +309,9 @@ pub(crate) async fn handle_openai_chat_completions(
                 openai_compat::transform_canonical_to_openai(resp, model_for_fanout);
             Json(openai_response).into_response()
         },
-    )
+    )?;
+    mark_audited_if_set(&audited_flag, &mut response);
+    Ok(response)
 }
 
 /// Handle /v1/responses requests (OpenAI Responses API — used by Codex CLI)
@@ -296,7 +323,7 @@ pub(crate) async fn handle_responses(
     axum::Extension(request_id): axum::Extension<RequestId>,
     headers: HeaderMap,
     Json(responses_request): Json<responses_compat::ResponsesRequest>,
-) -> Result<Response, AppError> {
+) -> Result<Response, RequestError> {
     let _guard = ActiveRequestGuard::new(&state);
     let model = responses_request.model.clone();
     let is_streaming = responses_request.stream == Some(true);
@@ -306,7 +333,7 @@ pub(crate) async fn handle_responses(
     // Transform Responses → canonical format
     let mut request = responses_compat::transform_responses_to_canonical(responses_request)
         .map_err(|e| {
-            AppError::ParseError(format!("Failed to transform Responses request: {}", e))
+            RequestError::ParseError(format!("Failed to transform Responses request: {}", e))
         })?;
     forward_beta_header(&mut request, &headers);
 
@@ -314,6 +341,7 @@ pub(crate) async fn handle_responses(
     #[cfg(feature = "policies")]
     let resolved_policy =
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
+    let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -326,15 +354,23 @@ pub(crate) async fn handle_responses(
         start_time,
         headers: &headers,
         trace_id: None,
+        audited: audited_flag.clone(),
         #[cfg(feature = "policies")]
         resolved_policy,
     };
 
-    let result = dispatch::dispatch(&ctx, &mut request).await?;
+    let result = match dispatch::dispatch(&ctx, &mut request).await {
+        Ok(r) => r,
+        Err(e) => {
+            let mut response = e.into_response();
+            mark_audited_if_set(&audited_flag, &mut response);
+            return Ok(response);
+        }
+    };
     let model_for_stream = model.clone();
     let model_for_fanout = model.clone();
 
-    finish_dispatch(
+    let mut response = finish_dispatch(
         result,
         prelude.transparency_enabled,
         &request_id.0,
@@ -357,7 +393,9 @@ pub(crate) async fn handle_responses(
                 responses_compat::transform_canonical_to_responses(resp, model_for_fanout);
             Json(responses_response).into_response()
         },
-    )
+    )?;
+    mark_audited_if_set(&audited_flag, &mut response);
+    Ok(response)
 }
 
 /// Handle /v1/models endpoint (OpenAI-compatible)
@@ -391,7 +429,7 @@ pub(crate) async fn handle_messages(
     axum::Extension(request_id): axum::Extension<RequestId>,
     headers: HeaderMap,
     Json(request_json): Json<serde_json::Value>,
-) -> Result<Response, AppError> {
+) -> Result<Response, RequestError> {
     let _guard = ActiveRequestGuard::new(&state);
     let req_id = &request_id.0;
     let model: String = request_json
@@ -412,7 +450,7 @@ pub(crate) async fn handle_messages(
 
     let mut request: CanonicalRequest = serde_json::from_value(request_json).map_err(|e| {
         tracing::error!("❌ Failed to parse request: {}", e);
-        AppError::ParseError(format!("Invalid request format: {}", e))
+        RequestError::ParseError(format!("Invalid request format: {}", e))
     })?;
     forward_beta_header(&mut request, &headers);
 
@@ -422,6 +460,7 @@ pub(crate) async fn handle_messages(
     #[cfg(feature = "policies")]
     let resolved_policy =
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
+    let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
         state: &state,
         inner: &prelude.inner,
@@ -434,13 +473,21 @@ pub(crate) async fn handle_messages(
         start_time,
         headers: &headers,
         trace_id: Some(trace_id),
+        audited: audited_flag.clone(),
         #[cfg(feature = "policies")]
         resolved_policy,
     };
 
-    let result = dispatch::dispatch(&ctx, &mut request).await?;
+    let result = match dispatch::dispatch(&ctx, &mut request).await {
+        Ok(r) => r,
+        Err(e) => {
+            let mut response = e.into_response();
+            mark_audited_if_set(&audited_flag, &mut response);
+            return Ok(response);
+        }
+    };
 
-    finish_dispatch(
+    let mut response = finish_dispatch(
         result,
         prelude.transparency_enabled,
         req_id,
@@ -454,14 +501,16 @@ pub(crate) async fn handle_messages(
         },
         |resp| serialize_response(&resp),
         |resp| Json(resp).into_response(),
-    )
+    )?;
+    mark_audited_if_set(&audited_flag, &mut response);
+    Ok(response)
 }
 
 /// Handle /v1/messages/count_tokens requests
 pub(crate) async fn handle_count_tokens(
     State(state): State<Arc<AppState>>,
     Json(request_json): Json<serde_json::Value>,
-) -> Result<Response, AppError> {
+) -> Result<Response, RequestError> {
     let model = request_json
         .get("model")
         .and_then(|m| m.as_str())
@@ -491,7 +540,7 @@ pub(crate) async fn handle_count_tokens(
     let decision = inner
         .router
         .route(&mut routing_request)
-        .map_err(|e| AppError::RoutingError(e.to_string()))?;
+        .map_err(|e| RequestError::RoutingError(e.to_string()))?;
 
     debug!(
         "🧮 Routed count_tokens: {} → {} ({})",
@@ -500,8 +549,9 @@ pub(crate) async fn handle_count_tokens(
 
     // Deserialize the full count_tokens request (consumes the JSON value — no clone).
     use crate::models::CountTokensRequest;
-    let count_request: CountTokensRequest = serde_json::from_value(request_json)
-        .map_err(|e| AppError::ParseError(format!("Invalid count_tokens request format: {}", e)))?;
+    let count_request: CountTokensRequest = serde_json::from_value(request_json).map_err(|e| {
+        RequestError::ParseError(format!("Invalid count_tokens request format: {}", e))
+    })?;
 
     // Try model mappings with fallback (1:N mapping)
     if let Some(model_config) = inner.find_model(&decision.model_name) {
@@ -525,11 +575,15 @@ pub(crate) async fn handle_count_tokens(
             }
         }
 
-        Err(AppError::ProviderError(format!(
-            "All {} provider mappings failed for token counting: {}",
-            sorted_mappings.len(),
-            decision.model_name
-        )))
+        Err(RequestError::ProviderUpstream {
+            provider: "all".to_string(),
+            status: 502,
+            body: Some(format!(
+                "All {} provider mappings failed for token counting: {}",
+                sorted_mappings.len(),
+                decision.model_name
+            )),
+        })
     } else if let Ok(provider) = inner
         .provider_registry
         .provider_for_model(&decision.model_name)
@@ -539,10 +593,10 @@ pub(crate) async fn handle_count_tokens(
         let response = provider
             .count_tokens(req)
             .await
-            .map_err(|e| AppError::ProviderError(e.to_string()))?;
+            .map_err(RequestError::from)?;
         Ok(Json(response).into_response())
     } else {
-        Err(AppError::ProviderError(format!(
+        Err(RequestError::RoutingError(format!(
             "No model mapping or provider found for token counting: {}",
             decision.model_name
         )))
