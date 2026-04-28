@@ -5,7 +5,7 @@ expression: snapshot
 ---
 [
     "default_simple: model=claude-sonnet-4-6 type=default matched=none",
-    "default_non_claude: model=gpt-5.2 type=default matched=none",
+    "default_non_claude: model=gpt-5-2 type=default matched=none",
     "thinking_enabled: model=claude-opus-4-7 type=think matched=none",
     "websearch_tool: model=claude-sonnet-4-6 type=web-search matched=none",
     "background_haiku: model=claude-haiku-4-5 type=background matched=none",
