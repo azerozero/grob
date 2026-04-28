@@ -4,7 +4,7 @@ expression: snapshot
 ---
 [
     "default_simple: model=eu-default type=default matched=none",
-    "default_non_claude: model=gpt-5.2 type=default matched=none",
+    "default_non_claude: model=gpt-5-2 type=default matched=none",
     "thinking_enabled: model=eu-think type=think matched=none",
     "websearch_tool: model=eu-default type=default matched=none",
     "background_haiku: model=eu-background type=background matched=none",
