@@ -267,6 +267,11 @@ impl GrobStore {
     }
 
     /// Lists secret names (no values).
+    ///
+    /// Filters out intermediate rotation artifacts (`*.rotating`) so a
+    /// crashed rotation does not surface a phantom name. Archived values
+    /// from `--keep-old` rotations (`*.previous-<ts>`) are kept visible
+    /// so operators can retrieve them for rollback.
     pub fn list_secrets(&self) -> Vec<String> {
         let dir = self.base_dir.join("secrets");
         let entries = match std::fs::read_dir(&dir) {
@@ -278,6 +283,10 @@ impl GrobStore {
             let name = entry.file_name();
             let s = name.to_string_lossy();
             if let Some(stripped) = s.strip_suffix(".enc") {
+                // Hide in-flight rotation temp files.
+                if stripped.ends_with(".rotating") {
+                    continue;
+                }
                 names.push(stripped.to_string());
             }
         }
@@ -298,6 +307,103 @@ impl GrobStore {
         std::fs::remove_file(&path)
             .with_context(|| format!("failed to remove secret: {}", path.display()))?;
         Ok(true)
+    }
+
+    /// Atomically rotates a named secret to `new_value`.
+    ///
+    /// Procedure:
+    /// 1. Validates that `new_value` is non-empty.
+    /// 2. Writes the new ciphertext to a sibling `<name>.rotating.enc`.
+    /// 3. Reads the temp file back and decrypts it to verify integrity.
+    /// 4. If `keep_old` is true and the live secret exists, copies the
+    ///    current ciphertext to `<name>.previous-<unix_ts>.enc`.
+    /// 5. Atomically renames `<name>.rotating.enc` to `<name>.enc`.
+    ///
+    /// At no point are both the old and new live values accepted by
+    /// `get_secret(name)` — the swap is the single rename in step 5.
+    /// On any failure before that rename, the live secret is left
+    /// untouched and the temp file is best-effort removed.
+    ///
+    /// Returns the path of the archived previous value when `keep_old`
+    /// produced one, otherwise `None`.
+    ///
+    /// # Errors
+    ///
+    /// - `new_value` is empty.
+    /// - The named secret does not currently exist.
+    /// - Encryption, the atomic temp write, the verification decrypt,
+    ///   the optional archive copy, or the final rename fails.
+    pub fn rotate_secret(
+        &self,
+        name: &str,
+        new_value: &str,
+        keep_old: bool,
+    ) -> Result<Option<PathBuf>> {
+        if new_value.is_empty() {
+            anyhow::bail!("rotate: new value is empty");
+        }
+        let live_path = self.secret_path(name);
+        if !live_path.exists() {
+            anyhow::bail!(
+                "rotate: secret '{}' does not exist (use `secrets add` first)",
+                name
+            );
+        }
+
+        self.ensure_secrets_dir()?;
+        let rotating_name = format!("{name}.rotating");
+        let rotating_path = self.secret_path(&rotating_name);
+
+        // Best-effort cleanup of any stale temp file from a prior crash.
+        let _ = std::fs::remove_file(&rotating_path);
+
+        // Step 2: write new ciphertext to temp.
+        let encrypted = self.cipher.encrypt(new_value.as_bytes())?;
+        atomic::write_atomic(&rotating_path, &encrypted)?;
+
+        // Step 3: read back + decrypt to confirm integrity before swapping.
+        let verify = match std::fs::read(&rotating_path) {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = std::fs::remove_file(&rotating_path);
+                return Err(e).context("rotate: failed to read back temp file");
+            }
+        };
+        let decrypted = self.cipher.decrypt_or_plaintext(&verify);
+        if decrypted != new_value.as_bytes() {
+            let _ = std::fs::remove_file(&rotating_path);
+            anyhow::bail!("rotate: post-write verification mismatch (cipher/key issue?)");
+        }
+
+        // Step 4: optional archive of the previous live value.
+        let archive_path = if keep_old {
+            let ts = chrono::Utc::now().timestamp();
+            let archive_name = format!("{name}.previous-{ts}");
+            let path = self.secret_path(&archive_name);
+            if let Err(e) = std::fs::copy(&live_path, &path) {
+                let _ = std::fs::remove_file(&rotating_path);
+                return Err(e).with_context(|| {
+                    format!(
+                        "rotate: failed to archive previous value to {}",
+                        path.display()
+                    )
+                });
+            }
+            Some(path)
+        } else {
+            None
+        };
+
+        // Step 5: atomic rename. `rename(2)` overwrites atomically on POSIX
+        // and on Windows (since Rust 1.5+ uses `MoveFileExA` semantics).
+        if let Err(e) = std::fs::rename(&rotating_path, &live_path) {
+            let _ = std::fs::remove_file(&rotating_path);
+            return Err(e).with_context(|| {
+                format!("rotate: atomic rename to {} failed", live_path.display())
+            });
+        }
+
+        Ok(archive_path)
     }
 
     /// Gets all OAuth tokens (decrypts each from AES-256-GCM).
@@ -737,5 +843,90 @@ mod tests {
         store.set_secret("rotating", "v2").unwrap();
 
         assert_eq!(store.get_secret("rotating").unwrap().expose_secret(), "v2");
+    }
+
+    #[test]
+    fn test_secret_rotate_swaps_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        store.set_secret("api", "old-key").unwrap();
+        let archive = store.rotate_secret("api", "new-key", false).unwrap();
+        assert!(
+            archive.is_none(),
+            "default rotate must not produce an archive"
+        );
+        assert_eq!(store.get_secret("api").unwrap().expose_secret(), "new-key");
+    }
+
+    #[test]
+    fn test_secret_rotate_keep_old_archives_previous() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        store.set_secret("api", "old-key").unwrap();
+        let archive = store
+            .rotate_secret("api", "new-key", true)
+            .unwrap()
+            .expect("--keep-old must yield an archive path");
+        assert!(archive.exists(), "archived file must exist on disk");
+        assert!(
+            archive.to_string_lossy().contains(".previous-"),
+            "archive name must encode .previous-<ts>"
+        );
+
+        // Live value reflects the new secret; archive still decrypts to the old.
+        assert_eq!(store.get_secret("api").unwrap().expose_secret(), "new-key");
+        let archived_name = archive
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .expect("archive stem")
+            .to_string();
+        assert_eq!(
+            store.get_secret(&archived_name).unwrap().expose_secret(),
+            "old-key"
+        );
+    }
+
+    #[test]
+    fn test_secret_rotate_rejects_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        store.set_secret("api", "live-value").unwrap();
+        let err = store.rotate_secret("api", "", false).unwrap_err();
+        assert!(err.to_string().contains("empty"));
+        // Old value preserved.
+        assert_eq!(
+            store.get_secret("api").unwrap().expose_secret(),
+            "live-value"
+        );
+    }
+
+    #[test]
+    fn test_secret_rotate_unknown_name_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        let err = store
+            .rotate_secret("nonexistent", "value", false)
+            .unwrap_err();
+        assert!(err.to_string().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_secret_rotate_hides_temp_from_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+
+        store.set_secret("api", "v1").unwrap();
+        // Simulate a crashed rotation by leaving an `<name>.rotating.enc`
+        // behind. `list_secrets` must filter it out so callers do not
+        // see a phantom name.
+        let secrets_dir = dir.path().join("secrets");
+        std::fs::write(secrets_dir.join("api.rotating.enc"), b"junk").unwrap();
+
+        let names = store.list_secrets();
+        assert_eq!(names, vec!["api"]);
     }
 }

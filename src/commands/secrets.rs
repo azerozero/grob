@@ -107,6 +107,104 @@ pub fn cmd_secrets_show(name: &str, unsafe_show: bool) {
     }
 }
 
+/// Rotates a secret. Reads the new value from stdin (one line, trimmed).
+///
+/// Atomic: the previous value is preserved on any failure. With
+/// `keep_old`, the prior ciphertext is copied to
+/// `<name>.previous-<unix_ts>.enc` for rollback. A `CredentialRotated`
+/// audit event is emitted on success when an audit log is reachable.
+pub fn cmd_secrets_rotate(name: &str, keep_old: bool, reason: Option<&str>) {
+    if name.is_empty() {
+        eprintln!("error: secret name is required");
+        std::process::exit(2);
+    }
+    let store = match open_store() {
+        Some(s) => s,
+        None => return,
+    };
+
+    print!("Enter new value for '{name}' (one line, will be encrypted): ");
+    let _ = io::stdout().flush();
+
+    let mut value = String::new();
+    if io::stdin().lock().read_line(&mut value).is_err() {
+        eprintln!("error: failed to read value from stdin");
+        std::process::exit(1);
+    }
+    let value = value.trim_end_matches(['\n', '\r']);
+    if value.is_empty() {
+        eprintln!("error: empty replacement rejected; old value preserved");
+        std::process::exit(2);
+    }
+
+    let archive = match store.rotate_secret(name, value, keep_old) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    // NOTE: A `test_one(name)` reuse from `feat/credentials-test` is
+    // planned here once that PR lands; for now we rely on the
+    // post-write decrypt round-trip inside `rotate_secret`.
+
+    audit_rotation(name, reason);
+
+    if let Some(path) = archive {
+        println!(
+            "✅ Secret '{name}' rotated; previous value archived at {}",
+            path.display()
+        );
+    } else {
+        println!("✅ Secret '{name}' rotated");
+    }
+}
+
+/// Best-effort audit log entry for a successful rotation.
+///
+/// Opens the default audit log location (`~/.grob/audit/`) and writes a
+/// `CredentialRotated` event. Failure is logged to stderr but does not
+/// fail the rotation — the on-disk swap has already happened.
+fn audit_rotation(name: &str, reason: Option<&str>) {
+    use crate::security::audit_log::{AuditConfig, AuditEvent, AuditLog};
+    use crate::server::AuditEntryBuilder;
+
+    let audit_dir = match crate::grob_home() {
+        Some(home) => home.join("audit"),
+        None => {
+            eprintln!("warn: could not locate ~/.grob; skipping rotation audit entry");
+            return;
+        }
+    };
+
+    let cfg = AuditConfig {
+        log_dir: audit_dir.clone(),
+        sign_key_path: Some(audit_dir.join("audit_key.pem")),
+        ..Default::default()
+    };
+    let log = match AuditLog::new(cfg) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("warn: rotation succeeded but audit log unavailable: {e}");
+            return;
+        }
+    };
+
+    // Encode the rotated secret name and operator reason in
+    // `backend_routed`; the field is a free-form string and survives
+    // the JSONL hash chain unchanged.
+    let backend = match reason {
+        Some(r) => format!("secret:{name} (reason={r})"),
+        None => format!("secret:{name}"),
+    };
+    let entry =
+        AuditEntryBuilder::new("cli", AuditEvent::CredentialRotated, &backend, "local", 0).build();
+    if let Err(e) = log.write(entry) {
+        eprintln!("warn: rotation succeeded but audit write failed: {e}");
+    }
+}
+
 /// Removes a secret.
 pub fn cmd_secrets_rm(name: &str, force: bool) {
     let store = match open_store() {

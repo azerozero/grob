@@ -244,6 +244,11 @@ async fn main() -> anyhow::Result<()> {
             SecretsAction::Test { name, json } => {
                 commands::secrets::cmd_secrets_test(&config, name.as_deref(), json).await
             }
+            SecretsAction::Rotate {
+                name,
+                keep_old,
+                reason,
+            } => commands::secrets::cmd_secrets_rotate(&name, keep_old, reason.as_deref()),
         },
         Commands::Rollback => {
             commands::config_rollback::cmd_config_rollback(&config, &config_source).await?;

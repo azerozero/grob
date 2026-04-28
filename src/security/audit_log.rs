@@ -86,6 +86,8 @@ pub enum AuditEvent {
     HitApproval,
     /// TEE attestation report generated at startup.
     TeeAttestation,
+    /// Credential rotation (secret atomically replaced).
+    CredentialRotated,
 }
 
 /// Immutable audit log entry.

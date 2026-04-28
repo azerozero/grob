@@ -418,6 +418,21 @@ pub enum SecretsAction {
         #[arg(long)]
         json: bool,
     },
+    /// Rotate a secret. Reads the new value from stdin (one line).
+    ///
+    /// The replacement is atomic: on any failure the previous value is
+    /// preserved. Use `--keep-old` to archive the prior value as
+    /// `<name>.previous-<unix-ts>` for rollback.
+    Rotate {
+        /// Secret name to rotate
+        name: String,
+        /// Archive the previous value as `<name>.previous-<timestamp>`
+        #[arg(long)]
+        keep_old: bool,
+        /// Free-form audit reason recorded with the rotation
+        #[arg(long)]
+        reason: Option<String>,
+    },
 }
 
 /// Subcommands for managing configuration presets.
