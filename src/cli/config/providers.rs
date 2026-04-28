@@ -119,7 +119,16 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
-    /// Returns `true` if the provider is enabled (defaults to `true`).
+    /// Returns `true` if the provider is enabled.
+    ///
+    /// Semantics:
+    /// - `enabled = true`  → enabled.
+    /// - `enabled = false` → disabled.
+    /// - `enabled` absent  → enabled (sensible default for newly added blocks).
+    ///
+    /// Typo safety: `#[serde(deny_unknown_fields)]` on [`ProviderConfig`]
+    /// rejects misspelled keys (e.g. `enbaled`) at parse time, so an absent
+    /// `enabled` field genuinely means "not specified" rather than "typo'd".
     pub fn is_enabled(&self) -> bool {
         self.enabled.unwrap_or(true)
     }
