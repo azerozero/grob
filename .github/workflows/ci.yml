@@ -585,14 +585,16 @@ jobs:
           UNVIABLE: ${{ steps.mutate.outputs.unviable || 'n/a' }}
           ARTIFACT: mutants-pr-results-${{ github.sha }}
         run: |
+          # Plain ASCII output — backticks elided to dodge shellcheck SC2016
+          # noise inside the actionlint pipeline.
           {
             echo "## Mutation testing (PR diff sample)"
             echo
-            echo "Informational only — never blocks merge. Full matrix runs on \`main\`."
+            echo "Informational only — never blocks merge. Full matrix runs on main."
             echo
             echo "| Metric | Value |"
             echo "|--------|-------|"
-            echo "| Status | \`${STATUS}\` |"
+            echo "| Status | ${STATUS} |"
             echo "| Duration | ${DURATION} s |"
             echo "| Total mutants | ${TOTAL} |"
             echo "| Caught | ${CAUGHT} |"
@@ -600,10 +602,10 @@ jobs:
             echo "| Timeout | ${TIMEOUT_N} |"
             echo "| Unviable | ${UNVIABLE} |"
             echo
-            echo "Status legend: \`clean\` (no survivors), \`missed\` (inspect artifact),"
-            echo "\`timed-out\` (25 min cap reached), \`skipped-*\` (no in-scope diff)."
+            echo "Status legend: clean (no survivors), missed (inspect artifact),"
+            echo "timed-out (25 min cap reached), skipped-* (no in-scope diff)."
             echo
-            echo "Artifact: \`${ARTIFACT}\`."
+            echo "Artifact: ${ARTIFACT}."
           } >>"${GITHUB_STEP_SUMMARY}"
       - name: Comment PR with sampling summary
         # Skip on forks (no token write access) and when nothing was sampled.
