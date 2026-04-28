@@ -24,9 +24,17 @@ use crate::auth::token_store::OAuthToken;
 use crate::auth::virtual_keys::VirtualKeyRecord;
 use crate::features::token_pricing::spend::SpendData;
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+
+/// Default tenant id used when a request carries no tenant context.
+///
+/// Per-tenant budget enforcement requires every record/check call to be
+/// keyed on a tenant; legacy callers that have no tenant fall back to this
+/// reserved id so isolation logic still works without conditionals.
+pub const DEFAULT_TENANT: &str = "_default";
 
 /// Unified storage backend using atomic files and append-only journals.
 ///
@@ -36,10 +44,19 @@ use std::sync::Mutex;
 pub struct GrobStore {
     /// Root directory (e.g. `~/.grob`).
     base_dir: PathBuf,
-    /// Append-only spend journal.
+    /// Append-only spend journal (global, also receives tenant-tagged events
+    /// for backward compatibility with the legacy single-journal layout).
     journal: Mutex<journal::SpendJournal>,
-    /// Hot-path in-memory spend cache.
+    /// Per-tenant append-only spend journals: written to in addition to the
+    /// global journal so per-tenant budget recovery does not have to scan
+    /// every other tenant's events on startup.
+    tenant_journals: Mutex<HashMap<String, journal::SpendJournal>>,
+    /// Hot-path in-memory spend cache (global, kept for the legacy
+    /// `total()`/`provider_breakdown()` accessors and Prometheus exposition).
     spend_cache: Mutex<SpendData>,
+    /// Per-tenant in-memory spend caches keyed by tenant id. The
+    /// [`DEFAULT_TENANT`] entry is used for un-tagged requests.
+    tenant_caches: Mutex<HashMap<String, SpendData>>,
     /// Batch writes: fsync every N record_spend calls.
     save_counter: AtomicU32,
     /// AES-256-GCM cipher for encrypting tokens and keys at rest.
@@ -95,10 +112,16 @@ impl GrobStore {
             journal::SpendJournal::open(&base_dir).context("failed to open spend journal")?;
         let spend_cache = journal.replay_current();
 
+        // Replay per-tenant caches from the global journal so per-tenant
+        // budget enforcement survives a restart.
+        let tenant_caches = journal.replay_all_tenants();
+
         Ok(Self {
             base_dir,
             journal: Mutex::new(journal),
+            tenant_journals: Mutex::new(HashMap::new()),
             spend_cache: Mutex::new(spend_cache),
+            tenant_caches: Mutex::new(tenant_caches),
             save_counter: AtomicU32::new(0),
             cipher,
         })
@@ -111,7 +134,7 @@ impl GrobStore {
             .join("grob.db")
     }
 
-    /// Loads spend data (from cache for global, from journal for tenants).
+    /// Loads spend data (from cache for global, from per-tenant cache for tenants).
     pub(crate) fn load_spend(&self, tenant: Option<&str>) -> SpendData {
         if tenant.is_none() {
             return self
@@ -120,11 +143,30 @@ impl GrobStore {
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
         }
+        let tenant = tenant.unwrap_or("");
+        // Prefer the in-memory per-tenant cache; fall back to journal replay
+        // when the tenant has not yet been touched in this process (e.g. read
+        // before any record_spend call).
+        let caches = self.tenant_caches.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(data) = caches.get(tenant) {
+            return data.clone();
+        }
+        drop(caches);
         let journal = self.journal.lock().unwrap_or_else(|e| e.into_inner());
-        journal.replay_for_tenant(tenant.unwrap_or(""))
+        journal.replay_for_tenant(tenant)
     }
 
     /// Records spend for a request. Uses in-memory cache + batched fsync.
+    ///
+    /// The global in-memory cache and global journal continue to receive
+    /// every event so legacy `total()` / Prometheus / monthly export paths
+    /// keep working unchanged. When `tenant` is `Some`, the event is also
+    /// appended to a per-tenant journal under `spend/<tenant>/<month>.jsonl`
+    /// and the per-tenant in-memory cache is updated for budget checks.
+    ///
+    /// `tenant = None` is treated as the [`DEFAULT_TENANT`] for in-memory
+    /// per-tenant accounting, but the journal entry is written without a
+    /// `tenant` field to keep on-disk backward compatibility.
     pub(crate) fn record_spend(
         &self,
         tenant: Option<&str>,
@@ -134,7 +176,10 @@ impl GrobStore {
     ) {
         let ts = chrono::Utc::now().to_rfc3339();
 
-        // Update in-memory cache (global).
+        // Update in-memory global cache. Tenant-tagged events historically
+        // also accumulated here; that is now suppressed so a per-tenant
+        // overspend cannot trip the global budget. See ADR commentary in
+        // SpendTracker::record_tenant.
         if tenant.is_none() {
             let mut cache = self.spend_cache.lock().unwrap_or_else(|e| e.into_inner());
             let now = crate::features::token_pricing::spend::current_month();
@@ -150,9 +195,28 @@ impl GrobStore {
                 .or_default() += 1;
         }
 
-        // Append to journal.
+        // Update in-memory per-tenant cache. Untagged calls are bucketed
+        // under DEFAULT_TENANT so per-tenant budget logic is uniform.
+        let tenant_key = tenant.unwrap_or(DEFAULT_TENANT);
+        {
+            let mut caches = self.tenant_caches.lock().unwrap_or_else(|e| e.into_inner());
+            let now = crate::features::token_pricing::spend::current_month();
+            let entry = caches.entry(tenant_key.to_string()).or_default();
+            if entry.month != now {
+                *entry = SpendData::default();
+            }
+            entry.total += amount;
+            *entry.by_provider.entry(provider.to_string()).or_default() += amount;
+            *entry.by_model.entry(model.to_string()).or_default() += amount;
+            *entry
+                .by_provider_count
+                .entry(provider.to_string())
+                .or_default() += 1;
+        }
+
+        // Append to global journal (preserves legacy on-disk layout).
         let event = journal::SpendEvent {
-            ts,
+            ts: ts.clone(),
             kind: "spend".to_string(),
             provider: provider.to_string(),
             model: model.to_string(),
@@ -165,6 +229,35 @@ impl GrobStore {
             }
         }
 
+        // Append to the per-tenant journal at `spend/<tenant>/<month>.jsonl`
+        // when a tenant is supplied so per-tenant exports do not have to
+        // re-scan the entire global journal.
+        if let Some(t) = tenant {
+            // Tenant ids reach the filesystem here; sanitize the same way as
+            // OAuth provider ids so unusual ids cannot escape the spend dir.
+            let safe_tenant = sanitize_filename(t);
+            let mut tj = self
+                .tenant_journals
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            let journal_entry = tj.entry(safe_tenant.clone()).or_insert_with(|| {
+                let dir = self.base_dir.join("spend").join(&safe_tenant);
+                journal::SpendJournal::open_in(&dir)
+                    .unwrap_or_else(|e| panic!("open per-tenant spend journal: {e}"))
+            });
+            let tenant_event = journal::SpendEvent {
+                ts,
+                kind: "spend".to_string(),
+                provider: provider.to_string(),
+                model: model.to_string(),
+                cost_usd: amount,
+                tenant: Some(t.to_string()),
+            };
+            if let Err(e) = journal_entry.append(&tenant_event) {
+                tracing::warn!("failed to append per-tenant spend event: {e}");
+            }
+        }
+
         // Batch fsync every 10 calls.
         let count = self.save_counter.fetch_add(1, Ordering::Relaxed);
         if count.is_multiple_of(10) {
@@ -172,11 +265,18 @@ impl GrobStore {
         }
     }
 
-    /// Forces journal fsync to disk.
+    /// Forces journal fsync to disk (global + every per-tenant journal).
     pub(crate) fn flush_spend(&self) {
         if let Ok(mut j) = self.journal.lock() {
             if let Err(e) = j.fsync() {
                 tracing::warn!("failed to fsync spend journal: {e}");
+            }
+        }
+        if let Ok(mut tj) = self.tenant_journals.lock() {
+            for (tenant, journal) in tj.iter_mut() {
+                if let Err(e) = journal.fsync() {
+                    tracing::warn!("failed to fsync per-tenant spend journal '{tenant}': {e}");
+                }
             }
         }
     }

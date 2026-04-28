@@ -508,6 +508,66 @@ pub(crate) async fn audit_log_layer(
     response
 }
 
+/// Returns the tenant id derived from authentication context or headers.
+///
+/// Mirrors `handlers::extract_tenant_id` but uses request extensions /
+/// headers directly so middleware can short-circuit before the handler.
+fn middleware_tenant_id(request: &Request<Body>) -> Option<String> {
+    if let Some(vk) = request
+        .extensions()
+        .get::<crate::auth::virtual_keys::VirtualKeyContext>()
+    {
+        return Some(vk.tenant_id.clone());
+    }
+    if let Some(claims) = request.extensions().get::<crate::auth::GrobClaims>() {
+        return Some(claims.tenant_id().to_string());
+    }
+    request
+        .headers()
+        .get("x-tenant-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Enforces `[security] strict_tenant`.
+///
+/// When the flag is enabled, requests that fail to resolve a tenant id
+/// (no virtual-key binding, no JWT `tenant` claim, no `X-Tenant-ID`
+/// header) are rejected with HTTP 400 and a structured JSON body. Health
+/// and OAuth endpoints are exempt because they are dispatched before any
+/// tenant context exists.
+pub(crate) async fn tenant_required_middleware(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    if matches!(
+        path,
+        "/health" | "/live" | "/ready" | "/metrics" | "/auth/callback" | "/api/oauth/callback"
+    ) {
+        return next.run(request).await;
+    }
+
+    let inner = state.snapshot();
+    if !inner.config.security.strict_tenant {
+        return next.run(request).await;
+    }
+
+    if middleware_tenant_id(&request).is_some() {
+        return next.run(request).await;
+    }
+
+    let body = Json(serde_json::json!({
+        "error": {
+            "type": "missing_tenant",
+            "message": "X-Tenant-ID header or JWT tenant claim required when [security] strict_tenant=true"
+        }
+    }));
+    (StatusCode::BAD_REQUEST, body).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

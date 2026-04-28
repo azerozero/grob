@@ -16,15 +16,30 @@ use super::{
     responses_compat, should_apply_transparency, AppState, RequestError, RequestId,
 };
 
-/// Extracts tenant_id from VirtualKeyContext (preferred) or GrobClaims.
+/// Extracts tenant_id with this priority:
+///   1. VirtualKeyContext (operator-provisioned binding)
+///   2. JWT `tenant` claim
+///   3. `X-Tenant-ID` request header
+///
+/// JWT and VirtualKey paths cannot be overridden by the client header so a
+/// caller cannot impersonate another tenant in authenticated mode. The
+/// header path is only consulted when no authenticated tenant exists.
 fn extract_tenant_id(
     vk_ctx: &Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     claims: &Option<axum::Extension<crate::auth::GrobClaims>>,
+    headers: &HeaderMap,
 ) -> Option<String> {
-    vk_ctx
-        .as_ref()
-        .map(|vk| vk.tenant_id.clone())
-        .or_else(|| claims.as_ref().map(|c| c.tenant_id().to_string()))
+    if let Some(vk) = vk_ctx.as_ref() {
+        return Some(vk.tenant_id.clone());
+    }
+    if let Some(c) = claims.as_ref() {
+        return Some(c.tenant_id().to_string());
+    }
+    headers
+        .get("x-tenant-id")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Drop guard that decrements the active request counter
@@ -108,7 +123,7 @@ fn prepare_dispatch(
     vk_ctx: &Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     headers: &HeaderMap,
 ) -> DispatchPrelude {
-    let tenant_id = extract_tenant_id(vk_ctx, claims);
+    let tenant_id = extract_tenant_id(vk_ctx, claims, headers);
     let peer_ip = extract_client_ip(headers);
     let inner = state.snapshot();
     let session_key = tenant_id

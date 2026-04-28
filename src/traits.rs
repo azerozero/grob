@@ -140,6 +140,23 @@ pub trait SpendTracking: Send {
         model_limit: Option<f64>,
     ) -> std::result::Result<(), crate::features::token_pricing::spend::BudgetError>;
 
+    /// Checks per-tenant budget limits.
+    ///
+    /// Default implementation delegates to [`Self::check_budget`] so test
+    /// mocks remain a no-op; production [`SpendTracker`](crate::features::token_pricing::spend::SpendTracker)
+    /// overrides this to enforce per-tenant isolation.
+    fn check_tenant_budget(
+        &self,
+        _tenant: Option<&str>,
+        provider: &str,
+        model: &str,
+        tenant_limit: f64,
+        provider_limit: Option<f64>,
+        model_limit: Option<f64>,
+    ) -> std::result::Result<(), crate::features::token_pricing::spend::BudgetError> {
+        self.check_budget(provider, model, tenant_limit, provider_limit, model_limit)
+    }
+
     /// Returns the total spend for the current period.
     fn total(&self) -> f64;
 

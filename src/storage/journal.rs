@@ -6,6 +6,7 @@
 use crate::features::token_pricing::spend::SpendData;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
@@ -37,14 +38,28 @@ impl SpendJournal {
     /// Returns an error if the directory cannot be created.
     pub fn open(base_dir: &Path) -> Result<Self> {
         let spend_dir = base_dir.join("spend");
-        fs::create_dir_all(&spend_dir)
+        Self::open_in(&spend_dir)
+    }
+
+    /// Opens or creates a spend journal at an explicit directory path.
+    ///
+    /// Used by per-tenant journals which live at
+    /// `<base_dir>/spend/<tenant>/<month>.jsonl` rather than the legacy
+    /// `<base_dir>/spend/<month>.jsonl` layout.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the directory cannot be created or the
+    /// current-month journal file cannot be opened for append.
+    pub fn open_in(spend_dir: &Path) -> Result<Self> {
+        fs::create_dir_all(spend_dir)
             .with_context(|| format!("failed to create spend dir: {}", spend_dir.display()))?;
 
         let month = crate::features::token_pricing::spend::current_month();
-        let file = Self::open_month_file(&spend_dir, &month)?;
+        let file = Self::open_month_file(spend_dir, &month)?;
 
         Ok(Self {
-            spend_dir,
+            spend_dir: spend_dir.to_path_buf(),
             current_file: Some(file),
             current_month: month,
         })
@@ -89,6 +104,41 @@ impl SpendJournal {
         let month = &self.current_month;
         let path = self.month_path(month);
         Self::replay_file_for_tenant(&path, month, tenant)
+    }
+
+    /// Replays the current-month journal and returns one [`SpendData`]
+    /// per tenant id observed in the file.
+    ///
+    /// Untagged events (those without a `tenant` field) are bucketed under
+    /// the [`crate::storage::DEFAULT_TENANT`] key so per-tenant budget
+    /// enforcement covers legacy callers identically.
+    pub fn replay_all_tenants(&self) -> HashMap<String, SpendData> {
+        let path = self.month_path(&self.current_month);
+        let mut out: HashMap<String, SpendData> = HashMap::new();
+        let file = match File::open(&path) {
+            Ok(f) => f,
+            Err(_) => return out,
+        };
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let Ok(line) = line else { continue };
+            if line.is_empty() {
+                continue;
+            }
+            let Ok(event) = serde_json::from_str::<SpendEvent>(&line) else {
+                continue;
+            };
+            let tenant_key = event
+                .tenant
+                .clone()
+                .unwrap_or_else(|| crate::storage::DEFAULT_TENANT.to_string());
+            let entry = out.entry(tenant_key).or_default();
+            entry.total += event.cost_usd;
+            *entry.by_provider.entry(event.provider.clone()).or_default() += event.cost_usd;
+            *entry.by_model.entry(event.model.clone()).or_default() += event.cost_usd;
+            *entry.by_provider_count.entry(event.provider).or_default() += 1;
+        }
+        out
     }
 
     fn month_path(&self, month: &str) -> PathBuf {

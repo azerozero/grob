@@ -107,7 +107,10 @@ impl SpendTracker {
             .join("spend.json")
     }
 
-    /// Record spend for a request
+    /// Record spend for a request without tenant context.
+    ///
+    /// Internally bucketed under [`crate::storage::DEFAULT_TENANT`] so the
+    /// per-tenant budget machinery treats legacy callers uniformly.
     pub fn record(&mut self, provider: &str, model: &str, cost: f64) {
         if let Some(ref store) = self.store {
             store.record_spend(None, cost, provider, model);
@@ -134,13 +137,27 @@ impl SpendTracker {
         }
     }
 
-    /// Record spend for a specific tenant
+    /// Record spend for a specific tenant.
+    ///
+    /// The event lands in the per-tenant journal and the per-tenant
+    /// in-memory cache. It is **not** also accumulated into the global
+    /// counter — that previous behaviour caused a per-tenant overspend to
+    /// trip the global budget for every other tenant. The global journal
+    /// still receives a tagged copy of the event so existing exports keep
+    /// working unchanged.
     pub fn record_tenant(&mut self, tenant: &str, provider: &str, model: &str, cost: f64) {
         if let Some(ref store) = self.store {
             store.record_spend(Some(tenant), cost, provider, model);
+            // Refresh the local view of the global cache so accessors that
+            // surface "request count seen" stay consistent. Global $ totals
+            // intentionally do not include tenant-tagged spend.
+            self.data = store.load_spend(None);
+        } else {
+            // No store available (test/CLI mode): track the tenant amount
+            // locally so future per-tenant budget checks behave correctly.
+            // Global counters are intentionally untouched.
+            self.reset_if_new_month();
         }
-        // Also record to global
-        self.record(provider, model, cost);
     }
 
     /// Get total spend for current month
@@ -201,6 +218,79 @@ impl SpendTracker {
             self.data = SpendData::default();
             self.save();
         }
+    }
+
+    /// Check if a request should be allowed for the given tenant.
+    ///
+    /// Per-tenant budgets are enforced against the tenant's isolated spend
+    /// cache, so a single tenant exceeding its quota cannot block another
+    /// tenant. When `tenant` is `None`, [`crate::storage::DEFAULT_TENANT`]
+    /// is used so legacy callers still go through the per-tenant path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BudgetError`] when the tenant has reached the supplied
+    /// `tenant_limit`. Provider and model sub-limits are evaluated against
+    /// the same tenant-local spend so one tenant cannot starve another by
+    /// hitting a shared provider cap.
+    pub fn check_tenant_budget(
+        &self,
+        tenant: Option<&str>,
+        provider: &str,
+        model: &str,
+        tenant_limit: f64,
+        provider_limit: Option<f64>,
+        model_limit: Option<f64>,
+    ) -> Result<(), BudgetError> {
+        let Some(ref store) = self.store else {
+            // Without a store we cannot persist per-tenant state; fall back
+            // to the global check to preserve legacy CLI/test behaviour.
+            return self.check_budget(provider, model, tenant_limit, provider_limit, model_limit);
+        };
+        let tenant_key = tenant.unwrap_or(crate::storage::DEFAULT_TENANT);
+        let data = store.load_spend(Some(tenant_key));
+
+        if let Some(limit) = model_limit {
+            let spend = data.by_model.get(model).copied().unwrap_or(0.0);
+            if spend >= limit {
+                return Err(BudgetError {
+                    message: format!(
+                        "Monthly budget for tenant '{tenant_key}' model '{model}' reached: \
+                         ${spend:.2}/${limit:.2}"
+                    ),
+                    limit_usd: limit,
+                    actual_usd: spend,
+                });
+            }
+        }
+
+        if let Some(limit) = provider_limit {
+            let spend = data.by_provider.get(provider).copied().unwrap_or(0.0);
+            if spend >= limit {
+                return Err(BudgetError {
+                    message: format!(
+                        "Monthly budget for tenant '{tenant_key}' provider '{provider}' \
+                         reached: ${spend:.2}/${limit:.2}"
+                    ),
+                    limit_usd: limit,
+                    actual_usd: spend,
+                });
+            }
+        }
+
+        if tenant_limit > 0.0 && data.total >= tenant_limit {
+            return Err(BudgetError {
+                message: format!(
+                    "Monthly budget for tenant '{tenant_key}' reached: \
+                     ${:.2}/${:.2}",
+                    data.total, tenant_limit
+                ),
+                limit_usd: tenant_limit,
+                actual_usd: data.total,
+            });
+        }
+
+        Ok(())
     }
 
     /// Check if a request should be allowed given budget limits.
@@ -329,6 +419,25 @@ impl crate::traits::SpendTracking for SpendTracker {
         model_limit: Option<f64>,
     ) -> Result<(), BudgetError> {
         self.check_budget(provider, model, global_limit, provider_limit, model_limit)
+    }
+
+    fn check_tenant_budget(
+        &self,
+        tenant: Option<&str>,
+        provider: &str,
+        model: &str,
+        tenant_limit: f64,
+        provider_limit: Option<f64>,
+        model_limit: Option<f64>,
+    ) -> Result<(), BudgetError> {
+        self.check_tenant_budget(
+            tenant,
+            provider,
+            model,
+            tenant_limit,
+            provider_limit,
+            model_limit,
+        )
     }
 
     fn total(&self) -> f64 {
