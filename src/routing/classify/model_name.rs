@@ -331,6 +331,62 @@ mod tests {
             let twice = canonicalize_model_name(&once).into_owned();
             prop_assert_eq!(once, twice);
         }
+
+        /// Idempotence on the lowercase alphanumeric subspace shaped after
+        /// real model IDs (lower-leading + ascii alpha/dot/dash). Mirrors
+        /// the regex requested by the test plan so the suite covers both
+        /// the broader and narrower input families.
+        #[test]
+        fn prop_canonicalize_is_idempotent_lower_only(s in "[a-z][a-z0-9.\\-]{0,50}") {
+            let once = canonicalize_model_name(&s).into_owned();
+            let twice = canonicalize_model_name(&once).into_owned();
+            prop_assert_eq!(once, twice);
+        }
+
+        /// The function must never panic on arbitrary Unicode input,
+        /// including non-ASCII bytes, control characters, and embedded
+        /// nulls. Asserts that the byte-level scanners (date stripper,
+        /// dot-version replacer, Anthropic reorder) all stay within UTF-8
+        /// char boundaries.
+        #[test]
+        fn prop_canonicalize_does_not_panic(s in ".*") {
+            let _ = canonicalize_model_name(&s);
+        }
+    }
+
+    /// Known canonical forms from `presets/*.toml` and provider docs must
+    /// round-trip through the canonicalizer untouched. This locks the
+    /// "fixed-point" property documented in the module-level rules: any
+    /// already-canonical name maps to itself.
+    #[test]
+    fn canonicalize_preserves_known_canonical_forms() {
+        let canonicals: &[&str] = &[
+            // Anthropic — modern family-first spelling
+            "claude-sonnet-4-5",
+            "claude-haiku-4-5",
+            "claude-opus-4-7",
+            // OpenAI
+            "gpt-4o",
+            "gpt-5",
+            "gpt-5-2",
+            // DeepSeek
+            "deepseek-chat",
+            "deepseek-v3",
+            // Gemini — dashed-version form
+            "gemini-2-5-flash",
+            "gemini-3-pro",
+            // Grok
+            "grok-4",
+            "grok-4-1-fast",
+        ];
+        for input in canonicals {
+            let got = canonicalize_model_name(input);
+            assert_eq!(
+                got.as_ref(),
+                *input,
+                "canonical form {input:?} must be a fixed point, got {got:?}"
+            );
+        }
     }
 
     /// Date stripping requires exactly 8 digits — guards against eating
