@@ -25,6 +25,10 @@ pub struct BudgetLimits {
 pub struct BudgetError {
     /// Human-readable budget exceeded message.
     pub message: String,
+    /// Configured budget limit in USD (whichever scope tripped first).
+    pub limit_usd: f64,
+    /// Recorded spend in USD at check time.
+    pub actual_usd: f64,
 }
 
 impl std::fmt::Display for BudgetError {
@@ -216,6 +220,8 @@ impl SpendTracker {
                         "Monthly budget for model '{}' reached: ${:.2}/${:.2}",
                         model, spend, limit
                     ),
+                    limit_usd: limit,
+                    actual_usd: spend,
                 });
             }
         }
@@ -228,6 +234,8 @@ impl SpendTracker {
                         "Monthly budget for provider '{}' reached: ${:.2}/${:.2}",
                         provider, spend, limit
                     ),
+                    limit_usd: limit,
+                    actual_usd: spend,
                 });
             }
         }
@@ -240,6 +248,8 @@ impl SpendTracker {
                         "Monthly global budget reached: ${:.2}/${:.2}",
                         total, global_limit
                     ),
+                    limit_usd: global_limit,
+                    actual_usd: total,
                 });
             }
         }

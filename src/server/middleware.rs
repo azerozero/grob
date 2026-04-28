@@ -78,7 +78,7 @@ pub(crate) fn auth_error_response(message: &str) -> Response {
 
 /// Stored in request extensions for correlation
 #[derive(Clone, Debug)]
-pub(crate) struct RequestId(pub String);
+pub struct RequestId(pub String);
 
 /// Auth middleware: supports three modes:
 /// - "none" (default): all requests pass
@@ -319,6 +319,193 @@ pub(crate) async fn security_headers_response_middleware(
     let response = next.run(request).await;
     let config = SecurityHeadersConfig::api_mode();
     apply_security_headers(response, &config)
+}
+
+/// Marker inserted into response extensions by handlers that already wrote
+/// an audit entry. The audit middleware skips logging when present so that
+/// the dispatch pipeline (which audits with rich DLP and token-count context)
+/// is the source of truth for request-lifecycle entries on the hot path.
+///
+/// Endpoints that bypass dispatch entirely (oauth handlers, config API,
+/// errors raised in middleware before dispatch) leave this marker absent
+/// and are audited centrally by the middleware.
+#[derive(Clone, Debug)]
+pub struct AuditedAlready;
+
+/// Inputs captured by the audit middleware before the handler runs.
+///
+/// Stored on the request side so post-handler audit emission can rebuild
+/// the entry without re-reading consumed request state.
+pub struct AuditMiddlewareCapture {
+    /// HTTP method of the request.
+    pub method: axum::http::Method,
+    /// Path component of the request URI.
+    pub path: String,
+    /// Correlation ID resolved from the `RequestId` extension.
+    pub request_id: String,
+    /// Tenant identifier from JWT / virtual key, or empty.
+    pub tenant_id: String,
+    /// Client IP from `X-Forwarded-For` or `"unknown"`.
+    pub client_ip: String,
+    /// Wall-clock instant the middleware observed the request.
+    pub started_at: std::time::Instant,
+}
+
+/// Pulls the captured request context that `audit_log_layer` snapshots
+/// before the handler runs.
+pub fn capture_audit_input(request: &Request<Body>) -> AuditMiddlewareCapture {
+    let request_id = request
+        .extensions()
+        .get::<RequestId>()
+        .map(|r| r.0.clone())
+        .unwrap_or_default();
+
+    let tenant_id = if let Some(vk) = request
+        .extensions()
+        .get::<crate::auth::virtual_keys::VirtualKeyContext>()
+    {
+        vk.tenant_id.clone()
+    } else if let Some(claims) = request.extensions().get::<crate::auth::GrobClaims>() {
+        claims.tenant_id().to_string()
+    } else {
+        String::new()
+    };
+
+    AuditMiddlewareCapture {
+        method: request.method().clone(),
+        path: request.uri().path().to_string(),
+        request_id,
+        tenant_id,
+        client_ip: extract_client_ip(request.headers()),
+        started_at: std::time::Instant::now(),
+    }
+}
+
+/// Emits an `AuditEvent::RequestProcessed` entry from the captured request
+/// context plus the post-handler response. Returns `true` when an entry
+/// was written, `false` when the response carried [`AuditedAlready`] (in
+/// which case the dispatch pipeline already wrote a richer entry).
+///
+/// Extracted from [`audit_log_layer`] so it can be unit-tested without
+/// constructing a full `AppState`.
+pub fn emit_request_processed(
+    audit_log: &crate::security::AuditLog,
+    capture: &AuditMiddlewareCapture,
+    response: &Response,
+) -> bool {
+    if response.extensions().get::<AuditedAlready>().is_some() {
+        return false;
+    }
+
+    let status = response.status();
+    let duration_ms = capture.started_at.elapsed().as_millis() as u64;
+
+    let provider = response
+        .headers()
+        .get("x-ai-provider")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let model = response
+        .headers()
+        .get("x-ai-model")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    let error_variant = response
+        .extensions()
+        .get::<super::error::ErrorVariantTag>()
+        .map(|tag| tag.0.clone());
+
+    let backend = if !provider.is_empty() {
+        provider
+    } else if let Some(ref tag) = error_variant {
+        format!("ERROR:{}:{}", tag, status.as_u16())
+    } else if status.is_success() {
+        format!("{} {}", capture.method, capture.path)
+    } else {
+        format!("STATUS:{}", status.as_u16())
+    };
+
+    let tenant_for_entry = if capture.tenant_id.is_empty() {
+        capture.client_ip.as_str()
+    } else {
+        capture.tenant_id.as_str()
+    };
+
+    let mut builder = super::AuditEntryBuilder::new(
+        tenant_for_entry,
+        crate::security::audit_log::AuditEvent::RequestProcessed,
+        &backend,
+        &capture.client_ip,
+        duration_ms,
+    );
+
+    if !model.is_empty() {
+        builder = builder.model(model);
+    }
+
+    // Risk level: low for 2xx, medium for 4xx, high for 5xx — matches
+    // the EU AI Act Article 14 escalation threshold defaults.
+    let risk = if status.is_server_error() {
+        crate::security::audit_log::RiskLevel::High
+    } else if status.is_client_error() {
+        crate::security::audit_log::RiskLevel::Medium
+    } else {
+        crate::security::audit_log::RiskLevel::Low
+    };
+    builder = builder.risk(risk);
+
+    if let Some(tag) = error_variant {
+        builder = builder.dlp_rules(vec![format!(
+            "request_error:{}:status={}",
+            tag,
+            status.as_u16()
+        )]);
+    }
+
+    if let Err(e) = audit_log.write(builder.build()) {
+        tracing::error!(
+            error = %e,
+            request_id = %capture.request_id,
+            "audit middleware: write failed"
+        );
+    }
+    true
+}
+
+/// Audit-log middleware: emits `AuditEvent::RequestProcessed` for every HTTP
+/// request that flows through the server.
+///
+/// Wraps every endpoint, including the OAuth, config, and health surfaces
+/// that previously bypassed audit entirely. Captures request method, path,
+/// status, latency, error variant tag (when 4xx/5xx), tenant identifier
+/// (from JWT claims or virtual key context), client IP, and the upstream
+/// provider name when set on the response by the dispatch pipeline.
+///
+/// Skips logging when the dispatch pipeline has already written a richer
+/// audit entry (signalled by the [`AuditedAlready`] marker in response
+/// extensions). Health and metrics endpoints are excluded to avoid
+/// flooding the journal with unauthenticated probe traffic.
+pub(crate) async fn audit_log_layer(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+    next: Next,
+) -> Response {
+    let path = request.uri().path();
+    if matches!(path, "/health" | "/live" | "/ready" | "/metrics") {
+        return next.run(request).await;
+    }
+
+    let capture = capture_audit_input(&request);
+    let response = next.run(request).await;
+
+    if let Some(ref audit_log) = state.security.audit_log {
+        emit_request_processed(audit_log, &capture, &response);
+    }
+
+    response
 }
 
 #[cfg(test)]

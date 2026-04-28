@@ -4,14 +4,14 @@ use std::borrow::Cow;
 use std::sync::Arc;
 use tracing::info;
 
-use super::{AppError, ReloadableState};
+use super::{ReloadableState, RequestError};
 
 /// Resolve and sort provider mappings for a routing decision.
 pub(crate) fn resolve_provider_mappings(
     inner: &Arc<ReloadableState>,
     headers: &HeaderMap,
     decision: &crate::models::RouteDecision,
-) -> Result<Vec<crate::cli::ModelMapping>, AppError> {
+) -> Result<Vec<crate::cli::ModelMapping>, RequestError> {
     // Tier-based provider selection (opt-in via [[tiers]] config)
     if let Some(ref tier) = decision.complexity_tier {
         let tier_name = tier.to_string();
@@ -112,7 +112,7 @@ pub(crate) fn resolve_provider_mappings(
         if let Some(ref provider_name) = forced_provider {
             sorted.retain(|m| m.provider == *provider_name);
             if sorted.is_empty() {
-                return Err(AppError::RoutingError(format!(
+                return Err(RequestError::RoutingError(format!(
                     "Provider '{}' not found in mappings for model '{}'",
                     provider_name, decision.model_name
                 )));
@@ -137,7 +137,7 @@ pub(crate) fn resolve_provider_mappings(
                 provider_region == region_filter || provider_region == "global"
             });
             if sorted.is_empty() {
-                return Err(AppError::RoutingError(format!(
+                return Err(RequestError::RoutingError(format!(
                     "No providers match region '{}' for model '{}' (GDPR filtering enabled)",
                     region_filter, decision.model_name
                 )));
@@ -201,7 +201,7 @@ pub(crate) fn resolve_provider_mappings(
             .collect();
 
         if pass_through_mappings.is_empty() {
-            Err(AppError::RoutingError(format!(
+            Err(RequestError::RoutingError(format!(
                 "Model '{}' is not configured. Add a [[models]] entry in config.toml or set pass_through = true on a provider.",
                 decision.model_name
             )))

@@ -17,11 +17,11 @@
 //!
 //! After the loop exhausts the list, [`resolver::try_direct_provider_lookup`]
 //! offers a backward-compat path for unmapped models. A final audit entry
-//! is written before returning `AppError::ProviderError`.
+//! is written before returning `RequestError::ProviderUpstream`.
 
 use super::super::{
     check_budget, format_route_type, inject_continuation_text, is_provider_subscription,
-    should_inject_continuation, AppError,
+    should_inject_continuation, RequestError,
 };
 use super::resolver::{resolve_provider, try_direct_provider_lookup};
 use super::retry::{
@@ -39,7 +39,7 @@ pub(super) async fn dispatch_provider_loop(
     sorted_mappings: &[crate::cli::ModelMapping],
     decision: &crate::models::RouteDecision,
     cache_key: &Option<String>,
-) -> Result<DispatchResult, AppError> {
+) -> Result<DispatchResult, RequestError> {
     // Re-sort mappings by adaptive score when scorer is enabled
     let rescored;
     let effective_mappings: &[crate::cli::ModelMapping] =
@@ -156,7 +156,7 @@ pub(super) async fn dispatch_provider_loop(
                 );
                 // Abort the fallback cascade: this is a user-actionable error,
                 // not a transient provider failure.
-                return Err(AppError::AuthenticationError(format!(
+                return Err(RequestError::AuthRevoked(format!(
                     "OAuth token for provider '{}' revoked. Run: grob connect --force-reauth. Details: {}",
                     mapping.provider, msg
                 )));
@@ -189,11 +189,15 @@ pub(super) async fn dispatch_provider_loop(
         "All provider mappings failed for model: {}",
         decision.model_name
     );
-    Err(AppError::ProviderError(format!(
-        "All {} provider mappings failed for model: {}",
-        effective_mappings.len(),
-        decision.model_name
-    )))
+    Err(RequestError::ProviderUpstream {
+        provider: "all".to_string(),
+        status: 502,
+        body: Some(format!(
+            "All {} provider mappings failed for model: {}",
+            effective_mappings.len(),
+            decision.model_name
+        )),
+    })
 }
 
 /// Log the dispatch attempt info line (route type, stream mode, model -> provider).

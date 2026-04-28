@@ -1,0 +1,5 @@
+---
+source: tests/enterprise/snapshot_error_test.rs
+expression: snap
+---
+status=401 body={"error":{"type":"authentication_error","message":"OAuth token for provider 'anthropic' revoked. Run: grob connect --force-reauth"}}

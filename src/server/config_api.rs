@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use super::config_guard::is_section_or_key_denied;
-use super::{AppError, AppState, ReloadableState};
+use super::{AppState, ReloadableState, RequestError};
 
 /// Redact an API key for safe display (show first 4 + last 4 chars)
 pub(crate) fn redact_api_key(key: &str) -> String {
@@ -89,7 +89,7 @@ pub(crate) async fn get_config_json(State(state): State<Arc<AppState>>) -> impl 
 pub(crate) async fn update_config_json(
     State(state): State<Arc<AppState>>,
     Json(mut new_config): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<serde_json::Value>, RequestError> {
     // Remove null values (TOML doesn't support null)
     remove_null_values(&mut new_config);
 
@@ -99,7 +99,7 @@ pub(crate) async fn update_config_json(
             // Whole-section deny check (providers, dlp).
             if is_section_or_key_denied(section, "") {
                 warn!(section = %section, "config API: denied write to protected section");
-                return Err(AppError::ParseError(format!(
+                return Err(RequestError::Forbidden(format!(
                     "denied: section '{}' cannot be modified via the config API",
                     section
                 )));
@@ -109,7 +109,7 @@ pub(crate) async fn update_config_json(
                 for key in inner.keys() {
                     if is_section_or_key_denied(section, key) {
                         warn!(section = %section, key = %key, "config API: denied write to protected key");
-                        return Err(AppError::ParseError(format!(
+                        return Err(RequestError::Forbidden(format!(
                             "denied: {}.{} cannot be modified via the config API",
                             section, key
                         )));
@@ -123,7 +123,7 @@ pub(crate) async fn update_config_json(
     let config_path = match &state.config_source {
         crate::cli::ConfigSource::File(p) => p,
         crate::cli::ConfigSource::Url(_) => {
-            return Err(AppError::ParseError(
+            return Err(RequestError::BadRequest(
                 "Cannot save config: loaded from remote URL (read-only)".to_string(),
             ));
         }
@@ -132,15 +132,15 @@ pub(crate) async fn update_config_json(
     // Read current config and merge the incoming JSON updates into it.
     let config_str = tokio::fs::read_to_string(config_path)
         .await
-        .map_err(|e| AppError::ParseError(format!("Failed to read config: {e}")))?;
+        .map_err(|e| RequestError::Internal(anyhow::anyhow!("Failed to read config: {e}")))?;
 
     let mut config: toml::Value = toml::from_str(&config_str)
-        .map_err(|e| AppError::ParseError(format!("Failed to parse config: {e}")))?;
+        .map_err(|e| RequestError::ParseError(format!("Failed to parse config: {e}")))?;
 
     // Update providers section
     if let Some(providers) = new_config.get("providers") {
         let providers_toml: toml::Value = serde_json::from_str(&providers.to_string())
-            .map_err(|e| AppError::ParseError(format!("Failed to convert providers: {e}")))?;
+            .map_err(|e| RequestError::ParseError(format!("Failed to convert providers: {e}")))?;
 
         if let Some(table) = config.as_table_mut() {
             table.insert("providers".to_string(), providers_toml);
@@ -150,7 +150,7 @@ pub(crate) async fn update_config_json(
     // Update models section
     if let Some(models) = new_config.get("models") {
         let models_toml: toml::Value = serde_json::from_str(&models.to_string())
-            .map_err(|e| AppError::ParseError(format!("Failed to convert models: {e}")))?;
+            .map_err(|e| RequestError::ParseError(format!("Failed to convert models: {e}")))?;
 
         if let Some(table) = config.as_table_mut() {
             table.insert("models".to_string(), models_toml);
@@ -192,9 +192,9 @@ pub(crate) async fn update_config_json(
 
     // Deserialise the merged TOML into AppConfig so we can validate and reload.
     let merged_toml_str = toml::to_string_pretty(&config)
-        .map_err(|e| AppError::ParseError(format!("Failed to serialize config: {e}")))?;
+        .map_err(|e| RequestError::Internal(anyhow::anyhow!("Failed to serialize config: {e}")))?;
     let merged_config: crate::models::config::AppConfig = toml::from_str(&merged_toml_str)
-        .map_err(|e| AppError::ParseError(format!("Invalid config after merge: {e}")))?;
+        .map_err(|e| RequestError::ParseError(format!("Invalid config after merge: {e}")))?;
 
     // Backup, write, and hot-reload via the shared pipeline.
     super::config_guard::persist_and_reload(&state, &merged_config).await?;

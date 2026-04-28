@@ -1,0 +1,5 @@
+---
+source: tests/enterprise/snapshot_error_test.rs
+expression: snap
+---
+status=429 body={"error":{"type":"rate_limit_error","message":"Provider 'anthropic' rate-limited the request","provider":"anthropic","retry_after_ms":2500}}

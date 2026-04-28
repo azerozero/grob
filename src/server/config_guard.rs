@@ -67,11 +67,11 @@ pub fn is_key_denied(section: &ConfigSection, key: &str) -> bool {
 pub async fn persist_and_reload(
     state: &Arc<super::AppState>,
     config: &crate::models::config::AppConfig,
-) -> Result<(), super::AppError> {
+) -> Result<(), super::RequestError> {
     let config_path = match &state.config_source {
         crate::cli::ConfigSource::File(p) => p,
         crate::cli::ConfigSource::Url(_) => {
-            return Err(super::AppError::ParseError(
+            return Err(super::RequestError::BadRequest(
                 "Cannot save config: loaded from remote URL (read-only)".to_string(),
             ));
         }
@@ -81,15 +81,18 @@ pub async fn persist_and_reload(
     let backup_path = config_path.with_extension("toml.backup");
     tokio::fs::copy(config_path, &backup_path)
         .await
-        .map_err(|e| super::AppError::ParseError(format!("Failed to create backup: {e}")))?;
+        .map_err(|e| {
+            super::RequestError::Internal(anyhow::anyhow!("Failed to create backup: {e}"))
+        })?;
 
     // 2. Serialise and write
-    let toml_str = toml::to_string_pretty(config)
-        .map_err(|e| super::AppError::ParseError(format!("Failed to serialize config: {e}")))?;
+    let toml_str = toml::to_string_pretty(config).map_err(|e| {
+        super::RequestError::Internal(anyhow::anyhow!("Failed to serialize config: {e}"))
+    })?;
 
-    tokio::fs::write(config_path, toml_str)
-        .await
-        .map_err(|e| super::AppError::ParseError(format!("Failed to write config: {e}")))?;
+    tokio::fs::write(config_path, toml_str).await.map_err(|e| {
+        super::RequestError::Internal(anyhow::anyhow!("Failed to write config: {e}"))
+    })?;
 
     // 3. Hot-reload: rebuild router + provider registry from the new config
     reload_state(state, config.clone(), config_path)?;
@@ -109,7 +112,7 @@ fn reload_state(
     state: &Arc<super::AppState>,
     config: crate::models::config::AppConfig,
     _config_path: &Path,
-) -> Result<(), super::AppError> {
+) -> Result<(), super::RequestError> {
     let new_router = crate::routing::classify::Router::new(config.clone());
 
     let secret_backend =
@@ -123,7 +126,7 @@ fn reload_state(
         &config.server.timeouts,
     )
     .map_err(|e| {
-        super::AppError::ProviderError(format!("Failed to rebuild provider registry: {e}"))
+        super::RequestError::Internal(anyhow::anyhow!("Failed to rebuild provider registry: {e}"))
     })?;
 
     let new_inner = Arc::new(super::ReloadableState::new(

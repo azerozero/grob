@@ -2,4 +2,4 @@
 source: tests/enterprise/snapshot_error_test.rs
 expression: snap
 ---
-status=402 body={"error":{"type":"budget_exceeded","message":"Monthly global budget reached: $50.00/$50.00"}}
+status=402 body={"error":{"type":"budget_exceeded","message":"Budget exceeded: $50.0000 spent of $50.0000 limit","limit_usd":50.0,"actual_usd":50.0}}
