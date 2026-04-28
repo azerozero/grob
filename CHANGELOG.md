@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.41](https://github.com/azerozero/grob/compare/v0.36.40...v0.36.41) - 2026-04-28
+
+### Added
+
+- *(secrets)* add `grob secrets test` subcommand
+- *(presets)* add 'eu' preset (strict EU sovereign routing)
+- *(presets)* add 'optimal' preset (multi-provider speed-first routing)
+
+### Fixed
+
+- *(preset)* auto-discover builtins via include_dir, fix broken main
+- *(presets)* drop signup-bonus providers from ultra-cheap
+- *(presets)* drop MiniMax from ultra-cheap (avoid trial deadline)
+
+### Other
+
+- *(preset)* fix test_apply_preset_to_temp_config to use ultra-cheap
+- *(presets)* add Z.ai GLM, MiniMax, Mercury, DeepSeek direct
+- *(presets)* max ultra-cheap free tiers + correct rate limits
+- *(presets)* optimize ultra-cheap with Grok + R1 + V4 Flash
+- *(presets)* consolidate to 5 presets with clear positioning
+- *(presets)* split eu into eu-eco/pro/max, drop xAI Grok
+
 ### Routing roadmap (no code yet — design only)
 
 - **ADR-0018 promoted to `accepted`** (was `proposed` since 2026-04-17). Triggered by re-evaluation against two concrete user audiences: time-sensitive trading bots and security-prevails customers (defense, banks, OIV).
