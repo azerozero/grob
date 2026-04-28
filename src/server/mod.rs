@@ -172,6 +172,14 @@ pub struct AppState {
     pub active_requests: std::sync::atomic::AtomicU64,
     /// Server start time (for health/upgrade coordination)
     pub started_at: chrono::DateTime<chrono::Utc>,
+    /// Actual TCP port the OAuth callback server bound to.
+    ///
+    /// The configured port (`server.oauth_callback_port`) is used as the base
+    /// and the listener falls back to adjacent ports if it is busy. Handlers
+    /// that build OAuth `redirect_uri` values read this to stay in sync with
+    /// the live callback listener. `0` means the callback server has not yet
+    /// bound (or failed to bind).
+    pub actual_oauth_callback_port: std::sync::atomic::AtomicU16,
 
     /// Metrics, tracing, spend tracking
     pub observability: ObservabilityState,
@@ -274,6 +282,7 @@ pub async fn start_server(
         config_source,
         active_requests: std::sync::atomic::AtomicU64::new(0),
         started_at: chrono::Utc::now(),
+        actual_oauth_callback_port: std::sync::atomic::AtomicU16::new(0),
         event_bus,
         log_exporter,
         #[cfg(feature = "mcp")]
