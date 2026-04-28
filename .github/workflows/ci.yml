@@ -620,24 +620,49 @@ jobs:
           UNVIABLE: ${{ steps.mutate.outputs.unviable || 'n/a' }}
           ARTIFACT: mutants-pr-results-${{ github.sha }}
         run: |
-          # Render a compact comment body, then upsert via gh api so re-runs
-          # update a single comment instead of spamming the timeline. The
-          # marker line is greppable from past comments.
+          # Build the comment body via heredoc-style echos (no single-quoted
+          # printf format; shellcheck SC2016-friendly). The marker line is
+          # the discriminator we grep for to upsert prior comments.
           MARKER="<!-- mutants-pr-summary -->"
-          BODY="$(printf '%s\n## Mutation testing (PR diff sample)\n\nInformational — never blocks merge. Full matrix on `main`.\n\n| Metric | Value |\n|--------|-------|\n| Status | `%s` |\n| Duration | %s s |\n| Total | %s |\n| Caught | %s |\n| Missed | %s |\n| Timeout | %s |\n| Unviable | %s |\n\nLegend: `clean` (no survivors), `missed` (inspect artifact), `timed-out` (25 min cap reached).\n\nArtifact: `%s`.\n' \
-            "${MARKER}" "${STATUS}" "${DURATION}" "${TOTAL}" "${CAUGHT}" "${MISSED}" "${TIMEOUT_N}" "${UNVIABLE}" "${ARTIFACT}")"
+          BODY_FILE="$(mktemp)"
+          {
+            echo "${MARKER}"
+            echo "## Mutation testing (PR diff sample)"
+            echo
+            echo "Informational — never blocks merge. Full matrix runs on main."
+            echo
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Status | ${STATUS} |"
+            echo "| Duration | ${DURATION} s |"
+            echo "| Total | ${TOTAL} |"
+            echo "| Caught | ${CAUGHT} |"
+            echo "| Missed | ${MISSED} |"
+            echo "| Timeout | ${TIMEOUT_N} |"
+            echo "| Unviable | ${UNVIABLE} |"
+            echo
+            echo "Legend: clean (no survivors), missed (inspect artifact), timed-out (25 min cap reached)."
+            echo
+            echo "Artifact: ${ARTIFACT}."
+          } >"${BODY_FILE}"
 
-          # Look for an existing summary comment to update; otherwise post a new one.
-          EXISTING_ID="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-            --jq "[.[] | select(.body | startswith(\"${MARKER}\"))][0].id" || echo "")"
+          # Look for an existing summary comment to update; otherwise post a
+          # new one. `gh issue comment` does not support upsert natively, so
+          # we list comments, filter by marker, and PATCH if found.
+          COMMENTS_URL="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
+          EXISTING_ID=$(gh api "${COMMENTS_URL}" --jq "[.[] | select(.body | startswith(\"${MARKER}\"))][0].id" || true)
 
           if [ -n "${EXISTING_ID}" ] && [ "${EXISTING_ID}" != "null" ]; then
-            gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_ID}" \
-              -f body="${BODY}" >/dev/null
+            # PATCH a comment by ID — body comes from the file via jq -Rs,
+            # which slurps the whole file as a single JSON string for the
+            # request body envelope.
+            jq -Rs '{body: .}' "${BODY_FILE}" \
+              | gh api --method PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_ID}" --input - >/dev/null
             echo "Updated existing comment ${EXISTING_ID}."
           else
-            gh pr comment "${PR_NUMBER}" --body "${BODY}"
+            gh pr comment "${PR_NUMBER}" --body-file "${BODY_FILE}"
           fi
+          rm -f "${BODY_FILE}"
 
   # =========================================================================
   # Stage 3: Cross build (main push + tag push only, not PRs)
