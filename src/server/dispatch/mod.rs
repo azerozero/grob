@@ -254,6 +254,12 @@ pub(crate) async fn dispatch(
     // ── Step 1: DLP input scanning ──
     scan_dlp_input(ctx, request)?;
 
+    // ── Step 1.4: Tool-call spike anomaly detection (T-AD1) ──
+    // Runs after DLP so scoped DLP blocks still take precedence; runs
+    // before routing so a runaway client cannot exhaust provider quotas
+    // before the spike is observed.
+    check_tool_spike(ctx, request)?;
+
     // ── Step 1.5: MCP tool calibration ──
     #[cfg(feature = "mcp")]
     if let Some(ref mcp) = ctx.state.security.mcp {
@@ -551,6 +557,76 @@ async fn handle_fan_out_success(
 
     response.model = ctx.model.clone();
     Ok(DispatchResult::FanOut { response })
+}
+
+/// Run the per-session tool-call spike anomaly detector (T-AD1).
+///
+/// Counts the `tool_use` and `tool_result` content blocks in the
+/// incoming request and feeds them into a 60-second rolling window
+/// keyed by session id (or tenant id when absent). Crossing the warn
+/// threshold logs + emits a metric; crossing the block threshold
+/// emits a metric, writes an audit entry, and returns
+/// [`AppError::RateLimited`] (HTTP 429).
+fn check_tool_spike(
+    ctx: &DispatchContext<'_>,
+    request: &crate::models::CanonicalRequest,
+) -> Result<(), AppError> {
+    let Some(detector) = ctx.state.security.tool_spike_detector.as_ref() else {
+        return Ok(());
+    };
+
+    let count = crate::security::tool_spike::count_tool_blocks(request);
+    let key = crate::security::tool_spike::resolve_key(request, ctx.tenant_id.as_deref());
+    let action = detector.observe(&key, count);
+
+    match action {
+        crate::security::SpikeAction::Allow => Ok(()),
+        crate::security::SpikeAction::Warn => {
+            metrics::counter!("grob_tool_spike_warn_total", "key" => key.clone()).increment(1);
+            tracing::warn!(
+                session = %key,
+                rolling_total = detector.current_total(&key),
+                threshold = detector.config().warn_per_min,
+                "tool_spike: warn threshold crossed"
+            );
+            Ok(())
+        }
+        crate::security::SpikeAction::Block => {
+            metrics::counter!("grob_tool_spike_blocked_total", "key" => key.clone()).increment(1);
+            let total = detector.current_total(&key);
+            tracing::warn!(
+                session = %key,
+                rolling_total = total,
+                threshold = detector.config().block_per_min,
+                "tool_spike: block threshold crossed, returning 429"
+            );
+
+            ctx.log_audit_if_enabled(AuditEntry {
+                action: crate::security::audit_log::AuditEvent::ToolSpikeBlocked,
+                backend: "BLOCKED",
+                dlp_rules: vec![format!(
+                    "tool_spike: {} tool calls in 60s window (threshold {})",
+                    total,
+                    detector.config().block_per_min
+                )],
+                duration_ms: ctx.start_time.elapsed().as_millis() as u64,
+                model_name: Some(&ctx.model),
+                token_counts: None,
+                risk_level: Some(crate::security::audit_log::RiskLevel::High),
+                dlp_blocked: true,
+                dlp_had_injection: false,
+                dlp_had_pii: false,
+                dlp_had_redact_or_warn: false,
+            });
+
+            Err(AppError::RateLimited(format!(
+                "tool-call spike anomaly: {} tool calls observed in 60s window for session {} (block threshold {})",
+                total,
+                key,
+                detector.config().block_per_min
+            )))
+        }
+    }
 }
 
 /// Track cost for each provider in a fan-out response.

@@ -86,6 +86,8 @@ pub enum AuditEvent {
     HitApproval,
     /// TEE attestation report generated at startup.
     TeeAttestation,
+    /// Tool-call spike anomaly blocked (T-AD1).
+    ToolSpikeBlocked,
 }
 
 /// Immutable audit log entry.
