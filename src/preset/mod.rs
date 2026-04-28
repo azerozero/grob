@@ -757,8 +757,9 @@ default = "old-model"
         )
         .unwrap();
 
-        // Apply radin preset
-        apply_preset("cheap", &config_path).unwrap();
+        // Apply ultra-cheap preset (the post-cleanup successor to the
+        // deleted `cheap` preset; same family of router slots).
+        apply_preset("ultra-cheap", &config_path).unwrap();
 
         // Verify backup was created
         assert!(config_path.with_extension("toml.backup").exists());
@@ -777,7 +778,7 @@ default = "old-model"
 
         // Presets.active should be set
         assert!(
-            content.contains("cheap"),
+            content.contains("ultra-cheap"),
             "Active preset should be recorded"
         );
     }
