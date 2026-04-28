@@ -1,10 +1,17 @@
 ---
-status: done
+status: accepted
 date: 2026-04-09
 deciders: [azerozero, architect]
 consulted: []
 informed: []
 ---
+
+> **Status note (2026-04-28)**: status reverted from `done` to `accepted`.
+> redb persistence remains the active storage substrate in v0.36.x — `GrobStore`
+> in `src/storage/mod.rs` is still the live code path and `~/.grob/spend/*.jsonl`
+> has not yet been written. The A-7 storage refactor is deferred to v0.37+.
+> The decision recorded here remains binding; only the implementation flag has
+> been corrected to reflect that no production code matches the design yet.
 
 # ADR-0013: Storage on Atomic Files + Append-Only Journal — No redb
 
