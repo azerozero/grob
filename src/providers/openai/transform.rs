@@ -2,6 +2,60 @@ use super::types::*;
 use crate::models::{CanonicalRequest, MessageContent};
 use crate::providers::error::ProviderError;
 use crate::providers::{ContentBlock, KnownContentBlock, ProviderResponse, Usage};
+use serde::Serialize;
+use thiserror::Error;
+
+/// Errors raised while translating a [`CanonicalRequest`] into OpenAI wire format.
+///
+/// These map to user-visible 4xx responses since the offending data is
+/// always client-supplied (e.g. malformed tool-use input). The provider layer
+/// converts them to [`ProviderError::SerializationError`] for the existing
+/// error pipeline.
+#[derive(Debug, Error)]
+pub(crate) enum TransformError {
+    /// Failed to serialize a `tool_use` block's `input` field as JSON.
+    ///
+    /// OpenAI requires tool arguments as a JSON-encoded string; if the canonical
+    /// `Value` (or wrapped `Serialize` payload) cannot round-trip through
+    /// `serde_json::to_string`, surface the error rather than sending an empty
+    /// string upstream — empty arguments either parse-error in OpenAI or cause
+    /// the model to invoke the tool with no input, both of which were
+    /// previously silent.
+    #[error("failed to serialize tool_use input for tool '{tool_name}': {source}")]
+    ToolInputSerialization {
+        /// Name of the tool whose input failed to serialize.
+        tool_name: String,
+        /// Underlying serde_json error.
+        #[source]
+        source: serde_json::Error,
+    },
+}
+
+impl From<TransformError> for ProviderError {
+    fn from(err: TransformError) -> Self {
+        match err {
+            TransformError::ToolInputSerialization { source, .. } => {
+                ProviderError::SerializationError(source)
+            }
+        }
+    }
+}
+
+/// Serializes a tool-use input value as a JSON string, attaching the tool name on failure.
+///
+/// # Errors
+///
+/// Returns [`TransformError::ToolInputSerialization`] if the value cannot be
+/// encoded as JSON.
+pub(crate) fn serialize_tool_input<T: Serialize>(
+    input: &T,
+    tool_name: &str,
+) -> Result<String, TransformError> {
+    serde_json::to_string(input).map_err(|source| TransformError::ToolInputSerialization {
+        tool_name: tool_name.to_string(),
+        source,
+    })
+}
 
 /// Transform Anthropic request format to OpenAI Chat Completions format.
 ///
@@ -10,9 +64,16 @@ use crate::providers::{ContentBlock, KnownContentBlock, ProviderResponse, Usage}
 /// - `tool_result` blocks → separate `tool` role messages
 /// - `image` blocks → `image_url` content parts with data URI encoding
 /// - `thinking` blocks → dropped (OpenAI doesn't support this)
+/// - System role: hoisted to the top-level `system` message exactly once,
+///   even if the canonical `messages` array also contains a system entry.
+///
+/// # Errors
+///
+/// Returns [`TransformError::ToolInputSerialization`] if a `tool_use`
+/// block's `input` cannot be serialized as JSON.
 pub(crate) fn transform_request(
     request: &CanonicalRequest,
-) -> Result<OpenAIRequest, ProviderError> {
+) -> Result<OpenAIRequest, TransformError> {
     let mut openai_messages = Vec::new();
 
     // Add system message if present
@@ -27,8 +88,20 @@ pub(crate) fn transform_request(
         });
     }
 
-    // Transform messages
+    // Transform messages.
+    //
+    // NOTE: A canonical `system` was already hoisted to the top-level OpenAI
+    // `system` message above. Drop any residual system-role entries from the
+    // messages array to prevent duplicate system messages in the OpenAI
+    // payload (audit Bug #3 — clients may send `[user, system, assistant]`
+    // and grob previously emitted two `role:"system"` messages).
     for msg in &request.messages {
+        if msg.role == "system" {
+            tracing::debug!(
+                "Dropping system-role message from canonical messages array (already hoisted to top-level system)"
+            );
+            continue;
+        }
         match &msg.content {
             MessageContent::Text(text) => {
                 openai_messages.push(OpenAIMessage {
@@ -40,10 +113,21 @@ pub(crate) fn transform_request(
                 });
             }
             MessageContent::Blocks(blocks) => {
-                transform_block_message(&msg.role, blocks, &mut openai_messages);
+                transform_block_message(&msg.role, blocks, &mut openai_messages)?;
             }
         }
     }
+
+    // Invariant: at most one system message (the hoisted one at index 0)
+    // remains in the OpenAI payload.
+    debug_assert!(
+        openai_messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .count()
+            <= 1,
+        "system role leaked into OpenAI messages array more than once"
+    );
 
     // Transform tools if present
     let tools = transform_tools(request);
@@ -89,9 +173,9 @@ fn transform_block_message(
     role: &str,
     blocks: &[ContentBlock],
     openai_messages: &mut Vec<OpenAIMessage>,
-) {
+) -> Result<(), TransformError> {
     let tool_results = extract_tool_results(blocks);
-    let tool_calls = extract_tool_calls(blocks);
+    let tool_calls = extract_tool_calls(blocks)?;
     let content_parts = extract_content_parts(blocks);
 
     // Add separate tool result messages FIRST (OpenAI requires this ordering)
@@ -131,6 +215,7 @@ fn transform_block_message(
             tool_call_id: None,
         });
     }
+    Ok(())
 }
 
 /// Extract tool_result blocks as (tool_use_id, content) pairs.
@@ -163,24 +248,29 @@ fn extract_tool_results(blocks: &[ContentBlock]) -> Vec<(String, String)> {
 }
 
 /// Filters Anthropic `tool_use` content blocks and reshapes them as OpenAI `tool_calls` entries with JSON-stringified arguments.
-fn extract_tool_calls(blocks: &[ContentBlock]) -> Vec<OpenAIToolCall> {
-    blocks
-        .iter()
-        .filter_map(|block| {
-            if let ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input }) = block {
-                Some(OpenAIToolCall {
-                    id: id.clone(),
-                    r#type: "function".to_string(),
-                    function: OpenAIFunctionCall {
-                        name: name.clone(),
-                        arguments: serde_json::to_string(input).unwrap_or_default(),
-                    },
-                })
-            } else {
-                None
-            }
-        })
-        .collect()
+///
+/// # Errors
+///
+/// Returns [`TransformError::ToolInputSerialization`] if any tool's `input`
+/// fails JSON serialization. Previously substituted an empty string, which
+/// caused either an OpenAI parse error or a tool invocation with no
+/// arguments — both silent.
+fn extract_tool_calls(blocks: &[ContentBlock]) -> Result<Vec<OpenAIToolCall>, TransformError> {
+    let mut calls = Vec::new();
+    for block in blocks {
+        if let ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input }) = block {
+            let arguments = serialize_tool_input(input, name)?;
+            calls.push(OpenAIToolCall {
+                id: id.clone(),
+                r#type: "function".to_string(),
+                function: OpenAIFunctionCall {
+                    name: name.clone(),
+                    arguments,
+                },
+            });
+        }
+    }
+    Ok(calls)
 }
 
 /// Extract text and image content parts (excluding tool blocks and thinking).
@@ -453,4 +543,182 @@ pub(crate) fn transform_to_responses_request(
         store: false,
         stream: true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{
+        CanonicalRequest, ContentBlock, KnownContentBlock, Message, MessageContent, SystemPrompt,
+    };
+    use serde::{Serialize, Serializer};
+
+    fn base_request() -> CanonicalRequest {
+        CanonicalRequest {
+            model: "gpt-4o".to_string(),
+            messages: Vec::new(),
+            max_tokens: 100,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            extensions: Default::default(),
+        }
+    }
+
+    #[test]
+    fn transform_strips_system_from_messages_after_hoisting() {
+        // Bug #3: client sends `[user, system, assistant]` to grob, which
+        // already hoists `request.system`; the original system role MUST be
+        // dropped from the messages array, otherwise OpenAI receives two
+        // `role:"system"` messages.
+        let mut req = base_request();
+        req.system = Some(SystemPrompt::Text("hoisted system".to_string()));
+        req.messages = vec![
+            Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hi".to_string()),
+            },
+            Message {
+                role: "system".to_string(),
+                content: MessageContent::Text("inline system that must be dropped".to_string()),
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: MessageContent::Text("hello".to_string()),
+            },
+        ];
+
+        let openai = transform_request(&req).expect("transform");
+
+        let system_count = openai
+            .messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .count();
+        assert_eq!(
+            system_count,
+            1,
+            "expected exactly one system message after hoisting; got {} (messages: {:?})",
+            system_count,
+            openai.messages.iter().map(|m| &m.role).collect::<Vec<_>>()
+        );
+
+        // The remaining system message must be the hoisted one.
+        match &openai.messages[0].content {
+            Some(OpenAIContent::String(s)) => assert_eq!(s, "hoisted system"),
+            other => panic!("expected hoisted system text, got {:?}", other),
+        }
+
+        // Order of remaining roles preserved.
+        let roles: Vec<&str> = openai.messages.iter().map(|m| m.role.as_str()).collect();
+        assert_eq!(roles, vec!["system", "user", "assistant"]);
+    }
+
+    #[test]
+    fn transform_strips_system_when_no_hoisted_system_field() {
+        // If there's no `request.system` set, but a stray `role:"system"`
+        // message slipped into `messages`, we still drop it — the canonical
+        // wire format reserves `role:"system"` for the dedicated field.
+        let mut req = base_request();
+        req.messages = vec![
+            Message {
+                role: "system".to_string(),
+                content: MessageContent::Text("inline".to_string()),
+            },
+            Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hi".to_string()),
+            },
+        ];
+
+        let openai = transform_request(&req).expect("transform");
+        let system_count = openai
+            .messages
+            .iter()
+            .filter(|m| m.role == "system")
+            .count();
+        assert_eq!(system_count, 0);
+        assert_eq!(openai.messages.len(), 1);
+        assert_eq!(openai.messages[0].role, "user");
+    }
+
+    /// A `Serialize` payload that always errors. Mirrors `serde_json`'s
+    /// internal failure surface so we can exercise the error path even when
+    /// `serde_json::Value` itself is effectively infallible to encode.
+    struct AlwaysFail;
+
+    impl Serialize for AlwaysFail {
+        fn serialize<S: Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
+            Err(serde::ser::Error::custom("synthetic serialization failure"))
+        }
+    }
+
+    #[test]
+    fn transform_returns_error_when_tool_input_unserializable() {
+        // Direct exercise of the helper used by extract_tool_calls. A
+        // `Serialize` payload that always fails proves error propagation
+        // surfaces the tool name and underlying serde_json error.
+        let result = serialize_tool_input(&AlwaysFail, "broken_tool");
+        let err = result.expect_err("expected serialization failure");
+        match err {
+            TransformError::ToolInputSerialization { tool_name, source } => {
+                assert_eq!(tool_name, "broken_tool");
+                assert!(
+                    source
+                        .to_string()
+                        .contains("synthetic serialization failure"),
+                    "source error did not bubble through: {}",
+                    source
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn transform_propagates_tool_input_error_to_provider_error() {
+        // `From<TransformError> for ProviderError` keeps the legacy callers
+        // (which return `ProviderError`) compatible while preserving the
+        // structured error category.
+        let err = TransformError::ToolInputSerialization {
+            tool_name: "broken_tool".to_string(),
+            source: serde_json::from_str::<serde_json::Value>("{").unwrap_err(),
+        };
+        let provider_err: ProviderError = err.into();
+        assert!(matches!(provider_err, ProviderError::SerializationError(_)));
+    }
+
+    #[test]
+    fn transform_succeeds_when_tool_input_well_formed() {
+        // Sanity check: typical tool_use blocks still translate cleanly.
+        let mut req = base_request();
+        req.messages = vec![Message {
+            role: "assistant".to_string(),
+            content: MessageContent::Blocks(vec![ContentBlock::Known(
+                KnownContentBlock::ToolUse {
+                    id: "call_1".to_string(),
+                    name: "weather".to_string(),
+                    input: serde_json::json!({"city": "Paris"}),
+                },
+            )]),
+        }];
+
+        let openai = transform_request(&req).expect("transform");
+        let assistant = openai
+            .messages
+            .iter()
+            .find(|m| m.role == "assistant")
+            .expect("assistant message");
+        let tool_calls = assistant.tool_calls.as_ref().expect("tool_calls present");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].id, "call_1");
+        assert_eq!(tool_calls[0].function.name, "weather");
+        assert_eq!(tool_calls[0].function.arguments, r#"{"city":"Paris"}"#);
+    }
 }
