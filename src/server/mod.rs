@@ -46,7 +46,8 @@ pub(crate) use helpers::{
 pub(crate) use init::init_mcp;
 pub(crate) use init::{
     emit_tee_attestation, init_auth, init_core_services, init_dlp, init_observability,
-    init_provider_scorer, init_security, maybe_preset_sync, spawn_background_tasks,
+    init_provider_scorer, init_security, init_tool_spike_detector, maybe_preset_sync,
+    spawn_background_tasks,
 };
 pub(crate) use middleware::{
     apply_transparency_headers, auth_middleware, extract_api_credential, extract_client_ip,
@@ -155,6 +156,8 @@ pub struct SecurityState {
     pub mcp: Option<Arc<crate::features::mcp::McpState>>,
     /// Universal tool layer for injection, aliasing, and capability gating.
     pub tool_layer: Option<Arc<crate::features::tool_layer::ToolLayer>>,
+    /// Per-session tool-call spike anomaly detector (T-AD1).
+    pub tool_spike_detector: Option<Arc<crate::security::ToolSpikeDetector>>,
 }
 
 /// Application state shared across handlers
@@ -256,6 +259,7 @@ pub async fn start_server(
     emit_tee_attestation(&tee_status, &audit_log);
 
     let provider_scorer = init_provider_scorer(&config, &circuit_breakers);
+    let tool_spike_detector = init_tool_spike_detector(&config);
 
     // Coerce concrete types to trait objects for testability
     let tracer: Arc<dyn traits::Tracer> = message_tracer;
@@ -298,6 +302,7 @@ pub async fn start_server(
             #[cfg(feature = "mcp")]
             mcp: mcp_state,
             tool_layer,
+            tool_spike_detector,
         },
     });
 

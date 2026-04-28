@@ -21,6 +21,11 @@ pub enum AppError {
     ///
     /// Surfaced to the client as a terminal 401 without fallback to sibling providers.
     AuthenticationError(String),
+    /// Indicates the request was rejected by an in-process limiter
+    /// (e.g. tool-call spike anomaly detection).
+    ///
+    /// Returns HTTP 429 to the client.
+    RateLimited(String),
 }
 
 impl IntoResponse for AppError {
@@ -34,6 +39,7 @@ impl IntoResponse for AppError {
             AppError::AuthenticationError(msg) => {
                 (StatusCode::UNAUTHORIZED, "authentication_error", msg)
             }
+            AppError::RateLimited(msg) => (StatusCode::TOO_MANY_REQUESTS, "rate_limited", msg),
         };
 
         let body = Json(serde_json::json!({
@@ -56,6 +62,7 @@ impl std::fmt::Display for AppError {
             AppError::BudgetExceeded(msg) => write!(f, "Budget exceeded: {}", msg),
             AppError::DlpBlocked(msg) => write!(f, "DLP blocked: {}", msg),
             AppError::AuthenticationError(msg) => write!(f, "Authentication error: {}", msg),
+            AppError::RateLimited(msg) => write!(f, "Rate limited: {}", msg),
         }
     }
 }
@@ -142,6 +149,21 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("grob connect --force-reauth"));
+    }
+
+    #[tokio::test]
+    async fn rate_limited_returns_429_with_rate_limited_type() {
+        let err = AppError::RateLimited(
+            "tool-call spike: 600 in 60s window for session sess-1 (block 500)".to_string(),
+        );
+        let (status, json) = error_response_parts(err).await;
+
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(json["error"]["type"], "rate_limited");
+        assert!(json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("tool-call spike"));
     }
 
     #[test]

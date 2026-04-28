@@ -4,7 +4,10 @@ use crate::features::token_pricing::spend::SpendTracker;
 use crate::features::token_pricing::SharedPricingTable;
 use crate::models::config::AppConfig;
 use crate::providers::ProviderRegistry;
-use crate::security::{AuditLog, CircuitBreakerRegistry, RateLimitConfig, RateLimiter};
+use crate::security::{
+    AuditLog, CircuitBreakerRegistry, RateLimitConfig, RateLimiter, ToolSpikeConfig,
+    ToolSpikeDetector,
+};
 use crate::shared::message_tracing::MessageTracer;
 use crate::storage::GrobStore;
 use std::sync::Arc;
@@ -363,6 +366,26 @@ pub(crate) fn init_mcp(
     }
 
     Some(state)
+}
+
+/// Initializes the tool-call spike anomaly detector.
+///
+/// Returns `None` when both warn and block thresholds are zero (the
+/// feature is fully disabled), otherwise returns an `Arc` ready to be
+/// stored on [`crate::server::SecurityState`].
+pub(crate) fn init_tool_spike_detector(config: &AppConfig) -> Option<Arc<ToolSpikeDetector>> {
+    let cfg = ToolSpikeConfig {
+        warn_per_min: config.security.tool_spike_warn_per_min,
+        block_per_min: config.security.tool_spike_block_per_min,
+    };
+    if !cfg.is_active() {
+        return None;
+    }
+    info!(
+        "🔍 Tool-spike detector enabled (warn={}, block={} per session per min)",
+        cfg.warn_per_min, cfg.block_per_min
+    );
+    Some(Arc::new(ToolSpikeDetector::new(cfg)))
 }
 
 /// Initializes the adaptive provider scorer if enabled.
