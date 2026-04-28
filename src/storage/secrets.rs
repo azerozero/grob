@@ -233,6 +233,7 @@ mod tests {
             pool: None,
             circuit_breaker: None,
             health_check: None,
+            max_retries: None,
         }
     }
 

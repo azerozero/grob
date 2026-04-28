@@ -126,6 +126,7 @@ pub fn base_provider_config(name: &str) -> grob::providers::ProviderConfig {
         circuit_breaker: None,
 
         health_check: None,
+        max_retries: None,
     }
 }
 
