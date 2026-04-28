@@ -944,3 +944,489 @@ fn test_non_default_routes_have_no_tier() {
         "Non-default routes should not carry a tier"
     );
 }
+
+// ── Background regex coverage ───────────────────────────────────────────────
+//
+// The default `background_regex` is `(?i)claude.*haiku` — case-insensitive
+// and required to match the substring "haiku" anywhere after "claude".
+// These tests pin the contract for future regex tweaks.
+
+#[test]
+fn background_regex_matches_haiku_uppercase() {
+    let config = create_test_config();
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "Claude-3-5-HAIKU-20241022".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(
+        decision.route_type,
+        RouteType::Background,
+        "Default `(?i)` flag must match HAIKU regardless of case"
+    );
+    assert_eq!(decision.model_name, "background.model");
+}
+
+#[test]
+fn background_regex_matches_haiku_lowercase() {
+    let config = create_test_config();
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-haiku-4-5".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::Background);
+    assert_eq!(decision.model_name, "background.model");
+}
+
+#[test]
+fn background_regex_does_not_match_sonnet() {
+    let config = create_test_config();
+    let router = Router::new(config);
+
+    // Sonnet must not be classified as background; the default regex
+    // requires a literal "haiku" substring.
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-sonnet-4-5".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_ne!(
+        decision.route_type,
+        RouteType::Background,
+        "Sonnet must not match the haiku-only background regex"
+    );
+}
+
+// ── Prompt-rule priority and skip behaviour ─────────────────────────────────
+//
+// The router walks `[[router.prompt_rules]]` in declaration order and stops
+// at the first hit. These tests lock that contract and the negative path.
+
+#[test]
+fn prompt_rule_first_match_wins() {
+    use crate::cli::PromptRule;
+    let mut config = create_test_config();
+    // Two rules whose patterns both match the same prompt — the first
+    // declared rule must win regardless of how specific the second is.
+    config.router.prompt_rules = vec![
+        PromptRule {
+            pattern: r"(?i)deploy".to_string(),
+            model: "first-model".to_string(),
+            strip_match: false,
+        },
+        PromptRule {
+            pattern: r"(?i)deploy.*production".to_string(),
+            model: "second-model".to_string(),
+            strip_match: false,
+        },
+    ];
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Please deploy to production");
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::PromptRule);
+    assert_eq!(
+        decision.model_name, "first-model",
+        "Earlier prompt rule must take precedence even when a later rule also matches"
+    );
+}
+
+#[test]
+fn prompt_rule_skipped_when_no_match() {
+    use crate::cli::PromptRule;
+    let mut config = create_test_config();
+    config.router.prompt_rules = vec![PromptRule {
+        pattern: r"(?i)refactor.*module".to_string(),
+        model: "refactor-model".to_string(),
+        strip_match: false,
+    }];
+    // Disable background so a haiku-named model would still fall through.
+    config.router.background = None;
+    let router = Router::new(config);
+
+    // Prompt does not contain "refactor" — rule must be skipped and the
+    // request continues down the priority chain to the default route.
+    let mut request = create_simple_request("Just say hi");
+    let decision = router.route(&mut request).unwrap();
+    assert_ne!(decision.route_type, RouteType::PromptRule);
+    assert_eq!(decision.model_name, "default.model");
+}
+
+// ── Model-name canonicalization at the router level ────────────────────────
+//
+// `canonicalize_model_name` is exhaustively tested in `model_name.rs`; these
+// tests verify the **integration**: the canonicalized form is what reaches
+// the `[[models]]` lookup, while the original `request.model` is overwritten
+// in place so downstream stages (and the response surface) see the
+// canonical key.
+
+#[test]
+fn canonicalized_name_used_in_models_lookup() {
+    // A request for the date-suffixed Anthropic ID must hit the explicit
+    // `[[models]]` entry whose name uses the canonical (date-stripped,
+    // family-first) form. Without canonicalization, the lookup would miss
+    // and the request would be auto-mapped to `default.model`.
+    use crate::cli::ModelConfig;
+
+    let mut config = create_test_config();
+    config.models.push(ModelConfig {
+        name: "claude-sonnet-3-5".to_string(),
+        mappings: vec![],
+        budget_usd: None,
+        strategy: Default::default(),
+        fan_out: None,
+        deprecated: None,
+    });
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-3-5-sonnet-20241022".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    // Auto-map skipped because the canonical form matches an explicit
+    // entry, so the request resolves to the canonical name verbatim.
+    assert_eq!(decision.route_type, RouteType::Default);
+    assert_eq!(decision.model_name, "claude-sonnet-3-5");
+}
+
+#[test]
+fn original_name_returned_to_client_unchanged() {
+    // When canonicalization yields the same string (already-canonical input),
+    // `request.model` is not rewritten and the route decision carries the
+    // exact name the client sent. This guarantees clients that pin a model
+    // name see it preserved on the response surface.
+    let mut config = create_test_config();
+    // Disable auto-map to keep the test focused on canonicalization.
+    config.router.auto_map_regex = Some("^never-matches-".to_string());
+    let router = Router::new(config);
+
+    let original = "gpt-4o";
+    let mut request = create_simple_request("Hello");
+    request.model = original.to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(
+        request.model, original,
+        "Already-canonical input must not be rewritten"
+    );
+    assert_eq!(decision.model_name, original);
+}
+
+// ── Auto-map edge cases (locked from PR #293) ──────────────────────────────
+//
+// PR #293 introduced the "auto-map skipped when an explicit `[[models]]`
+// entry exists" guard. The tests above (`test_auto_map_skips_explicit_*`)
+// cover the original Sonnet-4-6 regression. The aliases below cross-link
+// the new naming convention requested in the test plan to the existing
+// regression tests so future grep-based audits hit either name.
+
+#[test]
+fn auto_map_skipped_when_explicit_model_entry_exists() {
+    // Alias for `test_auto_map_skips_explicit_virtual_model` under the
+    // naming used in the routing test plan. Locks PR #293 against
+    // accidental removal of the explicit-models guard.
+    use crate::cli::ModelConfig;
+
+    let mut config = create_test_config();
+    config.models.push(ModelConfig {
+        name: "claude-experimental".to_string(),
+        mappings: vec![],
+        budget_usd: None,
+        strategy: Default::default(),
+        fan_out: None,
+        deprecated: None,
+    });
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-experimental".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(
+        decision.model_name, "claude-experimental",
+        "Auto-map must defer to an explicit `[[models]]` entry"
+    );
+}
+
+#[test]
+fn auto_map_rewrites_unknown_claude_model_to_default() {
+    // Alias for `test_auto_map_still_rewrites_unmapped_claude` under the
+    // plan's naming. Counter-test for the guard above.
+    let config = create_test_config();
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-totally-new-variant-2099".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.model_name, "default.model");
+}
+
+#[test]
+fn auto_map_does_not_match_non_claude_models() {
+    // Alias for `test_no_auto_map_non_matching` — non-claude IDs survive
+    // the auto-mapper untouched and reach the default route as-is.
+    let config = create_test_config();
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "deepseek-v3".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::Default);
+    assert_eq!(decision.model_name, "deepseek-v3");
+}
+
+// ── Edge cases: malformed config, empty fields ─────────────────────────────
+
+#[test]
+fn router_accepts_invalid_auto_map_regex_falls_back_to_default() {
+    // A malformed user-supplied regex must not crash `Router::new`; the
+    // constructor falls back to the default `^claude-` pattern and logs.
+    let mut config = create_test_config();
+    config.router.auto_map_regex = Some("[invalid(regex".to_string());
+    let router = Router::new(config);
+
+    // Default fallback still rewrites claude-* models.
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-something-new".to_string();
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.model_name, "default.model");
+}
+
+#[test]
+fn router_skips_invalid_prompt_rules_silently() {
+    // Bad regex in `[[router.prompt_rules]]` is logged and skipped at
+    // construction time; well-formed rules in the same list still apply.
+    use crate::cli::PromptRule;
+    let mut config = create_test_config();
+    config.router.prompt_rules = vec![
+        PromptRule {
+            pattern: "[unclosed".to_string(),
+            model: "broken-model".to_string(),
+            strip_match: false,
+        },
+        PromptRule {
+            pattern: r"(?i)valid-pattern".to_string(),
+            model: "valid-model".to_string(),
+            strip_match: false,
+        },
+    ];
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("contains valid-pattern here");
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::PromptRule);
+    assert_eq!(decision.model_name, "valid-model");
+}
+
+#[test]
+fn router_handles_empty_prompt_rules_list() {
+    // Empty `prompt_rules` must not change routing; falls through to default.
+    let mut config = create_test_config();
+    config.router.prompt_rules = vec![];
+    config.router.background = None;
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("anything goes");
+    request.model = "deepseek-chat".to_string();
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::Default);
+    assert_eq!(decision.model_name, "deepseek-chat");
+}
+
+// ── Routing priority order pins ────────────────────────────────────────────
+//
+// These tests fix the exact precedence chain documented in `Router::route`
+// so any reordering shows up as a test failure rather than a silent
+// behavior change.
+
+#[test]
+fn websearch_outranks_background() {
+    // A request whose model name matches the background regex but which
+    // also carries a `web_search` tool must route to websearch.
+    let config = create_test_config();
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-3-5-haiku-20241022".to_string();
+    request.tools = Some(vec![crate::models::Tool {
+        r#type: Some("web_search".to_string()),
+        name: None,
+        description: None,
+        input_schema: None,
+    }]);
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::WebSearch);
+    assert_eq!(decision.model_name, "websearch.model");
+}
+
+#[test]
+fn background_outranks_auto_map() {
+    // The auto-map step rewrites `claude-*` to `default` only after the
+    // background check has run; a haiku request must not reach auto-map.
+    let config = create_test_config();
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Hello");
+    request.model = "claude-haiku-4-5".to_string();
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::Background);
+    // Cross-check: model_name must NOT be the auto-map target.
+    assert_ne!(decision.model_name, "default.model");
+}
+
+#[test]
+fn prompt_rule_outranks_think_mode() {
+    // Plan-mode is checked AFTER prompt rules. A request that triggers
+    // both must take the prompt-rule branch.
+    use crate::cli::PromptRule;
+    let mut config = create_test_config();
+    config.router.prompt_rules = vec![PromptRule {
+        pattern: r"(?i)trigger".to_string(),
+        model: "rule-model".to_string(),
+        strip_match: false,
+    }];
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("This will trigger the rule");
+    request.thinking = Some(crate::models::ThinkingConfig {
+        r#type: "enabled".to_string(),
+        budget_tokens: Some(8_000),
+    });
+
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::PromptRule);
+    assert_eq!(decision.model_name, "rule-model");
+}
+
+// ── Tier-routing integration with [[tiers.match]] ──────────────────────────
+//
+// The tier_match unit tests in `tier_match.rs` verify each condition in
+// isolation. The tests below exercise the same logic through the public
+// `Router::route` surface to lock the wiring in `Router::new`.
+
+#[test]
+fn tier_max_tokens_below_filters_correctly_via_router() {
+    use crate::cli::{TierConfig, TierMatchCondition};
+    let mut config = create_test_config();
+    config.tiers = vec![TierConfig {
+        name: "trivial".to_string(),
+        providers: vec![],
+        fanout: false,
+        match_conditions: Some(TierMatchCondition {
+            max_tokens_below: Some(500),
+            ..Default::default()
+        }),
+    }];
+    let router = Router::new(config);
+
+    // Below threshold → trivial fires.
+    let mut small = create_simple_request("hello");
+    small.max_tokens = 256;
+    let decision = router.route(&mut small).unwrap();
+    assert_eq!(
+        decision.complexity_tier.as_ref().map(ToString::to_string),
+        Some("trivial".to_string()),
+    );
+
+    // Above threshold → declarative match misses; algorithmic fallback
+    // selects whatever tier the scorer assigns (just assert it is not
+    // forced to trivial).
+    let mut big = create_simple_request("hello");
+    big.max_tokens = 8_000;
+    let decision = router.route(&mut big).unwrap();
+    // The scorer may classify "hello" + 8K tokens as medium/complex; the
+    // key invariant is that the declarative match did NOT pin trivial.
+    let tier = decision
+        .complexity_tier
+        .as_ref()
+        .map(ToString::to_string)
+        .expect("scorer fallback should populate a tier");
+    assert_ne!(tier, "trivial", "max_tokens_below must not match 8000");
+}
+
+#[test]
+fn tier_keywords_match_in_last_message_via_router() {
+    use crate::cli::{TierConfig, TierMatchCondition};
+    let mut config = create_test_config();
+    config.tiers = vec![TierConfig {
+        name: "complex".to_string(),
+        providers: vec![],
+        fanout: false,
+        match_conditions: Some(TierMatchCondition {
+            keywords: vec!["refactor".to_string(), "migration".to_string()],
+            ..Default::default()
+        }),
+    }];
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("Plan the refactor strategy");
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(
+        decision.complexity_tier.as_ref().map(ToString::to_string),
+        Some("complex".to_string()),
+    );
+}
+
+#[test]
+fn tier_first_matching_wins_when_multiple_match_via_router() {
+    // Two tier matchers whose conditions both fire — declaration order
+    // wins, not specificity.
+    use crate::cli::{TierConfig, TierMatchCondition};
+    let mut config = create_test_config();
+    config.tiers = vec![
+        TierConfig {
+            name: "medium".to_string(),
+            providers: vec![],
+            fanout: false,
+            match_conditions: Some(TierMatchCondition {
+                keywords: vec!["test".to_string()],
+                ..Default::default()
+            }),
+        },
+        TierConfig {
+            name: "complex".to_string(),
+            providers: vec![],
+            fanout: false,
+            match_conditions: Some(TierMatchCondition {
+                keywords: vec!["test".to_string()],
+                ..Default::default()
+            }),
+        },
+    ];
+    let router = Router::new(config);
+
+    let mut request = create_simple_request("test the code");
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(
+        decision.complexity_tier.as_ref().map(ToString::to_string),
+        Some("medium".to_string()),
+        "Earlier `[[tiers]]` entry must win when multiple match"
+    );
+}
+
+#[test]
+fn tier_unknown_name_skipped_with_warning() {
+    // A `[[tiers]]` entry with a name that does not map to a
+    // `ComplexityTier` variant must be skipped at construction time and
+    // the router must continue to function.
+    use crate::cli::{TierConfig, TierMatchCondition};
+    let mut config = create_test_config();
+    config.tiers = vec![TierConfig {
+        name: "non-existent-tier".to_string(),
+        providers: vec![],
+        fanout: false,
+        match_conditions: Some(TierMatchCondition::default()),
+    }];
+    let router = Router::new(config);
+
+    // Router still routes; unknown tier was dropped during compile.
+    let mut request = create_simple_request("hello");
+    let decision = router.route(&mut request).unwrap();
+    assert_eq!(decision.route_type, RouteType::Default);
+}
