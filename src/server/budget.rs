@@ -4,7 +4,7 @@ use crate::providers::AuthType;
 use std::sync::Arc;
 use tracing::warn;
 
-use super::{AppError, AppState, ReloadableState};
+use super::{AppState, ReloadableState, RequestError};
 
 /// Maximum retries per provider before falling back to the next mapping.
 /// NOTE: 2 retries (3 total attempts) balances latency vs resilience — most
@@ -62,13 +62,13 @@ pub(crate) fn record_request_metrics(m: &RequestMetrics<'_>) {
     }
 }
 
-/// Check budget before a request. Returns Err(AppError::BudgetExceeded) if any limit is hit.
+/// Check budget before a request. Returns `Err(RequestError::BudgetExceeded)` if any limit is hit.
 pub(crate) async fn check_budget(
     state: &Arc<AppState>,
     inner: &Arc<ReloadableState>,
     provider_name: &str,
     model_name: &str,
-) -> Result<(), AppError> {
+) -> Result<(), RequestError> {
     let budget_config = &inner.config.budget;
     let global_limit = budget_config.monthly_limit_usd.value();
 
@@ -92,7 +92,10 @@ pub(crate) async fn check_budget(
         provider_limit,
         model_limit,
     ) {
-        return Err(AppError::BudgetExceeded(e.message));
+        return Err(RequestError::BudgetExceeded {
+            limit_usd: e.limit_usd,
+            actual_usd: e.actual_usd,
+        });
     }
 
     if let Some(warning) = tracker.check_warnings(

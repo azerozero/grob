@@ -23,8 +23,8 @@ use std::sync::Arc;
 
 use super::{
     calculate_cost, is_provider_subscription, log_audit, record_request_metrics,
-    resolve_provider_mappings, sanitize_provider_response_reported, AppError, AppState,
-    AuditCompliance, AuditParams, ReloadableState, RequestMetrics,
+    resolve_provider_mappings, sanitize_provider_response_reported, AppState, AuditCompliance,
+    AuditParams, ReloadableState, RequestError, RequestMetrics,
 };
 use crate::features::watch::events::{DlpDirection, WatchEvent};
 
@@ -46,6 +46,9 @@ pub(crate) struct DispatchContext<'a> {
     pub headers: &'a HeaderMap,
     /// Message tracer context. None for OpenAI compat endpoint.
     pub trace_id: Option<String>,
+    /// Audit-emitted flag — flipped by `log_audit_if_enabled` so the
+    /// outer audit middleware can skip writing a duplicate entry.
+    pub audited: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Resolved policy for this request (when policies feature is enabled).
     #[cfg(feature = "policies")]
     #[allow(dead_code)]
@@ -169,6 +172,9 @@ impl DispatchContext<'_> {
                 dlp_had_pii: entry.dlp_had_pii,
                 dlp_had_redact_or_warn: entry.dlp_had_redact_or_warn,
             });
+            // Flag so the outer audit middleware skips a duplicate entry.
+            self.audited
+                .store(true, std::sync::atomic::Ordering::Release);
         }
     }
 }
@@ -244,7 +250,7 @@ pub(crate) fn resolve_grob_hint(
 pub(crate) async fn dispatch(
     ctx: &DispatchContext<'_>,
     request: &mut CanonicalRequest,
-) -> Result<DispatchResult, AppError> {
+) -> Result<DispatchResult, RequestError> {
     // ── Step 0: Resolve complexity hint ──
     // Resolved up-front (borrows `request` immutably) but applied post-routing
     // so the client-declared tier overrides the algorithmic scorer.
@@ -291,7 +297,7 @@ pub(crate) async fn dispatch(
         .inner
         .router
         .route(request)
-        .map_err(|e| AppError::RoutingError(e.to_string()))?;
+        .map_err(|e| RequestError::RoutingError(e.to_string()))?;
 
     // ── Step 3.5: Apply client-declared complexity hint ──
     // The hint (header / body metadata / MCP one-shot) overrides whatever tier
@@ -398,7 +404,7 @@ async fn check_cache(
 fn scan_dlp_input(
     ctx: &DispatchContext<'_>,
     request: &mut CanonicalRequest,
-) -> Result<(), AppError> {
+) -> Result<(), RequestError> {
     let Some(ref dlp_engine) = ctx.dlp else {
         return Ok(());
     };
@@ -476,7 +482,7 @@ fn scan_dlp_input(
                 dlp_had_pii: false,
                 dlp_had_redact_or_warn: false,
             });
-            Err(AppError::DlpBlocked(format!("{}", block_err)))
+            Err(RequestError::DlpBlocked(format!("{}", block_err)))
         }
     }
 }
@@ -488,7 +494,7 @@ async fn dispatch_fan_out(
     sorted_mappings: &[crate::cli::ModelMapping],
     fan_out_config: &crate::cli::FanOutConfig,
     decision: &crate::models::RouteDecision,
-) -> Result<DispatchResult, AppError> {
+) -> Result<DispatchResult, RequestError> {
     let mut fan_request = request.clone();
     ctx.sanitize_input(&mut fan_request);
 
@@ -503,7 +509,11 @@ async fn dispatch_fan_out(
         Ok((response, provider_info)) => {
             handle_fan_out_success(ctx, response, &provider_info, decision).await
         }
-        Err(e) => Err(AppError::ProviderError(format!("Fan-out failed: {}", e))),
+        Err(e) => Err(RequestError::ProviderUpstream {
+            provider: "fan_out".to_string(),
+            status: 502,
+            body: Some(format!("Fan-out failed: {}", e)),
+        }),
     }
 }
 
@@ -513,7 +523,7 @@ async fn handle_fan_out_success(
     mut response: ProviderResponse,
     provider_info: &[(String, String)],
     decision: &crate::models::RouteDecision,
-) -> Result<DispatchResult, AppError> {
+) -> Result<DispatchResult, RequestError> {
     ctx.sanitize_output(&mut response);
 
     let latency_ms = ctx.start_time.elapsed().as_millis() as u64;

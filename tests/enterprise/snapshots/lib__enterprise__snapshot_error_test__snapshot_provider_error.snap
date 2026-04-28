@@ -2,4 +2,4 @@
 source: tests/enterprise/snapshot_error_test.rs
 expression: snap
 ---
-status=502 body={"error":{"type":"error","message":"upstream timeout after 30s"}}
+status=502 body={"error":{"type":"error","message":"upstream timeout after 30s","provider":"openai","upstream_status":502}}

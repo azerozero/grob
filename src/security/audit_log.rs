@@ -86,6 +86,10 @@ pub enum AuditEvent {
     HitApproval,
     /// TEE attestation report generated at startup.
     TeeAttestation,
+    /// HTTP request fully processed (emitted by the audit middleware once a
+    /// response has been produced — covers the entire request lifecycle from
+    /// authentication through dispatch and error handling).
+    RequestProcessed,
 }
 
 /// Immutable audit log entry.

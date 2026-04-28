@@ -1,0 +1,5 @@
+---
+source: tests/enterprise/snapshot_error_test.rs
+expression: snap
+---
+status=401 body={"error":{"type":"authentication_error","message":"Missing or invalid credentials"}}
