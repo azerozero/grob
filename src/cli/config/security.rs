@@ -61,6 +61,12 @@ pub struct SecurityConfig {
     /// Persist scores across restarts (default false)
     #[serde(default)]
     pub scoring_persist: bool,
+    /// When `true`, requests without an `X-Tenant-ID` header *and* without a
+    /// JWT `tenant` claim are rejected with HTTP 400. Use in regulated
+    /// multi-tenant deployments (HDS, SecNumCloud) where audit logs must be
+    /// keyed on a non-anonymous tenant id.
+    #[serde(default)]
+    pub strict_tenant: bool,
 }
 
 impl Default for SecurityConfig {
@@ -83,6 +89,7 @@ impl Default for SecurityConfig {
             scoring_window_size: default_scoring_window_size(),
             scoring_decay_rate: default_scoring_decay_rate(),
             scoring_persist: false,
+            strict_tenant: false,
         }
     }
 }

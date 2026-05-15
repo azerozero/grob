@@ -719,7 +719,7 @@ mod tests {
             calls: AtomicUsize,
         }
         impl SecretBackend for CountingBackend {
-            fn get(&self, name: &str) -> Option<SecretString> {
+            fn get(&self, _tenant: &str, name: &str) -> Option<SecretString> {
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 if name == "openrouter" {
                     Some(SecretString::new("sk-resolved-real-key".into()))

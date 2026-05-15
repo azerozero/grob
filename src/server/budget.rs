@@ -62,12 +62,18 @@ pub(crate) fn record_request_metrics(m: &RequestMetrics<'_>) {
     }
 }
 
-/// Check budget before a request. Returns `Err(RequestError::BudgetExceeded)` if any limit is hit.
-pub(crate) async fn check_budget(
+/// Check budget before a request, scoped to a specific tenant.
+///
+/// Per-tenant overspend is enforced against a tenant-isolated counter so a
+/// single tenant exceeding its quota cannot block other tenants. The global
+/// counter is still consulted for un-tagged callers and provides the
+/// rate-limiting baseline for non-tenant-aware deployments.
+pub(crate) async fn check_budget_for_tenant(
     state: &Arc<AppState>,
     inner: &Arc<ReloadableState>,
     provider_name: &str,
     model_name: &str,
+    tenant_id: Option<&str>,
 ) -> Result<(), RequestError> {
     let budget_config = &inner.config.budget;
     let global_limit = budget_config.monthly_limit_usd.value();
@@ -85,7 +91,25 @@ pub(crate) async fn check_budget(
 
     let tracker = state.observability.spend_tracker.lock().await;
 
-    if let Err(e) = tracker.check_budget(
+    // Per-tenant limits use the same numeric caps as the global config; in
+    // a future revision they will key on a `[budget.tenants]` map. Tenants
+    // overspending their slice cannot trip the global counter for other
+    // tenants because `check_tenant_budget` reads the per-tenant cache.
+    if let Some(tenant) = tenant_id {
+        if let Err(e) = tracker.check_tenant_budget(
+            Some(tenant),
+            provider_name,
+            model_name,
+            global_limit,
+            provider_limit,
+            model_limit,
+        ) {
+            return Err(RequestError::BudgetExceeded {
+                limit_usd: e.limit_usd,
+                actual_usd: e.actual_usd,
+            });
+        }
+    } else if let Err(e) = tracker.check_budget(
         provider_name,
         model_name,
         global_limit,

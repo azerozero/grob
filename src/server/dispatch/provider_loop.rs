@@ -20,7 +20,7 @@
 //! is written before returning `RequestError::ProviderUpstream`.
 
 use super::super::{
-    check_budget, format_route_type, inject_continuation_text, is_provider_subscription,
+    check_budget_for_tenant, format_route_type, inject_continuation_text, is_provider_subscription,
     should_inject_continuation, RequestError,
 };
 use super::resolver::{resolve_provider, try_direct_provider_lookup};
@@ -55,11 +55,12 @@ pub(super) async fn dispatch_provider_loop(
             continue;
         };
 
-        check_budget(
+        check_budget_for_tenant(
             ctx.state,
             ctx.inner,
             &mapping.provider,
             &decision.model_name,
+            ctx.tenant_id.as_deref(),
         )
         .await?;
 
