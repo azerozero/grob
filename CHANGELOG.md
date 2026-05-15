@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.43](https://github.com/azerozero/grob/compare/v0.36.42...v0.36.43) - 2026-05-15
+
+### Added
+
+- *(security)* per-tenant isolation for spend, secrets, strict mode
+
 ## [0.36.42](https://github.com/azerozero/grob/compare/v0.36.41...v0.36.42) - 2026-04-28
 
 ### Fixed
