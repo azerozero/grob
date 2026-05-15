@@ -249,10 +249,10 @@ mod tests {
         let table = PricingTable::from_known();
         assert!(!table.is_empty());
 
-        // Exact match
+        // Exact match — Opus 4.6 moved to $5/$25 in early 2026 (was $15/$75).
         let (inp, out) = table.get("claude-opus-4-6").unwrap();
-        assert_eq!(inp, 15.0);
-        assert_eq!(out, 75.0);
+        assert_eq!(inp, 5.0);
+        assert_eq!(out, 25.0);
     }
 
     #[test]
