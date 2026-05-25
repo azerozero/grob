@@ -241,17 +241,10 @@ pub(crate) fn effective_token_counts(
 ///
 /// A deliberately cheap, tokenizer-free heuristic that only feeds the
 /// estimate-mode fallback; saturates rather than overflowing on huge inputs.
-fn tokens_from_chars(chars: usize) -> u32 {
+/// Shared by the non-streaming estimators and the streaming spend fallback
+/// (which passes an accumulated `text_delta` length directly).
+pub(crate) fn tokens_from_chars(chars: usize) -> u32 {
     u32::try_from(chars.div_ceil(4)).unwrap_or(u32::MAX)
-}
-
-/// Estimates a token count from arbitrary text (~4 chars/token).
-///
-/// Shared by the streaming spend fallback, which accumulates raw `text_delta`
-/// content rather than a structured [`ProviderResponse`]. Reuses the same
-/// tokenizer-free heuristic as the non-streaming estimators.
-pub(crate) fn estimate_tokens_from_text(text: &str) -> u32 {
-    tokens_from_chars(text.chars().count())
 }
 
 /// Estimates input tokens from a request's system prompt and message text.

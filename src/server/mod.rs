@@ -35,8 +35,8 @@ pub use audit::AuditEntryBuilder;
 pub(crate) use audit::{log_audit, AuditCompliance, AuditParams};
 pub(crate) use budget::{
     calculate_cost, check_budget_for_tenant, effective_token_counts, estimate_input_tokens,
-    estimate_output_tokens, estimate_tokens_from_text, is_auth_revoked_error, is_estimate_mode,
-    is_provider_subscription, is_retryable, record_request_metrics, record_spend, retry_delay,
+    estimate_output_tokens, is_auth_revoked_error, is_estimate_mode, is_provider_subscription,
+    is_retryable, record_request_metrics, record_spend, retry_delay, tokens_from_chars,
     RequestMetrics, MAX_RETRIES,
 };
 pub use error::{ErrorVariantTag, RequestError};

@@ -50,8 +50,8 @@ use std::task::{Context, Poll};
 
 use crate::models::RouteType;
 use crate::server::{
-    calculate_cost, estimate_tokens_from_text, is_estimate_mode, record_request_metrics,
-    record_spend, AppState, RequestMetrics,
+    calculate_cost, is_estimate_mode, record_request_metrics, record_spend, tokens_from_chars,
+    AppState, RequestMetrics,
 };
 
 /// Owned context the spend wrapper needs after the request future returns.
@@ -327,14 +327,10 @@ fn resolve_billed_tokens(
 ///
 /// Delegates to the shared ~4-chars/token heuristic so the streaming estimate
 /// matches the non-streaming fallback. SSE output text is overwhelmingly ASCII,
-/// so byte length and char count coincide for the coarse estimate.
+/// so byte length and char count coincide for this coarse estimate — letting us
+/// feed the accumulated length directly, with no intermediate allocation.
 fn estimate_tokens_from_bytes(bytes: usize) -> u32 {
-    if bytes == 0 {
-        return 0;
-    }
-    // The estimator inspects only `chars().count()`; an ASCII filler of the same
-    // length yields the same token count without retaining the output text.
-    estimate_tokens_from_text(&"x".repeat(bytes))
+    tokens_from_chars(bytes)
 }
 
 /// Records spend and Prometheus metrics for a completed stream.
