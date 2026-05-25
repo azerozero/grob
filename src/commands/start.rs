@@ -48,21 +48,31 @@ pub async fn cmd_start(
         }
         instance::cleanup_legacy_pid();
 
-        spawn_background_service(port, cli_config)?;
-        tokio::time::sleep(tokio::time::Duration::from_millis(
-            PROCESS_TRANSITION_GRACE_MS,
-        ))
-        .await;
-
+        let log_path = spawn_background_service(port, cli_config)?;
         let base_url = cli::format_base_url(&config.server.host, effective_port);
-        if let Some(pid) = instance::find_instance_pid(&config.server.host, effective_port).await {
-            println!("✅ Grob started in background (PID: {})", pid);
-        } else {
-            let _ = poll_health(&base_url, 10, HEALTH_POLL_INTERVAL_MS).await;
-            println!("✅ Grob started in background");
+
+        // Wait for the listener to actually accept /health before claiming
+        // success — otherwise the message lies while the daemon is still
+        // binding (or has already crashed).
+        if poll_health(&base_url, HEALTH_POLL_MAX_ATTEMPTS, HEALTH_POLL_INTERVAL_MS).await {
+            match instance::find_instance_pid(&config.server.host, effective_port).await {
+                Some(pid) => println!("✅ Grob started in background (PID: {})", pid),
+                None => println!("✅ Grob started in background"),
+            }
+            println!("📡 Running on port {}", effective_port);
+            if let Some(ref path) = log_path {
+                println!("📝 Logs: {}", path.display());
+            }
+            return Ok(());
         }
-        println!("📡 Running on port {}", effective_port);
-        return Ok(());
+
+        let timeout_secs = HEALTH_POLL_MAX_ATTEMPTS as u64 * HEALTH_POLL_INTERVAL_MS / 1000;
+        eprintln!("❌ Grob did not become healthy within {}s.", timeout_secs);
+        match log_path {
+            Some(path) => eprintln!("   Check the daemon log: {}", path.display()),
+            None => eprintln!("   No log file available (could not open ~/.grob/grob.log)."),
+        }
+        anyhow::bail!("background service failed to start");
     }
 
     // Foreground mode

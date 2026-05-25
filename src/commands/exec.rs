@@ -44,10 +44,13 @@ pub async fn cmd_exec(
             eprintln!("✅ Grob already running on port {}", effective_port);
         } else {
             eprintln!("Starting Grob on port {}...", effective_port);
-            spawn_background_service(Some(effective_port), cli_config)?;
+            let log_path = spawn_background_service(Some(effective_port), cli_config)?;
 
             if !poll_health(&base_url, HEALTH_POLL_MAX_ATTEMPTS, HEALTH_POLL_INTERVAL_MS).await {
                 eprintln!("❌ Grob failed to start within 5 seconds");
+                if let Some(path) = log_path {
+                    eprintln!("   Check the daemon log: {}", path.display());
+                }
                 std::process::exit(1);
             }
             we_started = true;

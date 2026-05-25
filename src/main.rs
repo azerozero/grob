@@ -124,10 +124,14 @@ async fn main() -> anyhow::Result<()> {
         } else if use_json_logs {
             tracing_subscriber::fmt()
                 .json()
+                .with_timer(grob::shared::log_time::UtcTimer)
                 .with_env_filter(filter)
                 .init();
         } else {
-            tracing_subscriber::fmt().with_env_filter(filter).init();
+            tracing_subscriber::fmt()
+                .with_timer(grob::shared::log_time::UtcTimer)
+                .with_env_filter(filter)
+                .init();
         }
     }
 
@@ -136,10 +140,14 @@ async fn main() -> anyhow::Result<()> {
         if use_json_logs {
             tracing_subscriber::fmt()
                 .json()
+                .with_timer(grob::shared::log_time::UtcTimer)
                 .with_env_filter(filter)
                 .init();
         } else {
-            tracing_subscriber::fmt().with_env_filter(filter).init();
+            tracing_subscriber::fmt()
+                .with_timer(grob::shared::log_time::UtcTimer)
+                .with_env_filter(filter)
+                .init();
         }
     }
 

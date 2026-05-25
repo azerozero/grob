@@ -10,6 +10,7 @@
 //!
 //! - [`acme`] — Automatic TLS certificate provisioning via ACME (feature-gated).
 //! - [`instance`] — Multi-instance coordination (PID + port probing).
+//! - [`log_time`] — Consistent UTC timestamps for all tracing subscribers.
 //! - [`message_tracing`] — Request/response trace pipeline (JSONL with rotation).
 //! - [`net`] — Network binding helpers (SO_REUSEPORT for zero-downtime upgrades).
 //! - [`otel`] — OpenTelemetry subscriber bootstrap.
@@ -21,6 +22,9 @@ pub mod acme;
 
 /// Server instance lifecycle helpers (PID + port probing).
 pub mod instance;
+
+/// Consistent UTC timestamp formatting for tracing subscribers.
+pub mod log_time;
 
 /// Request/response message tracing utilities.
 pub mod message_tracing;

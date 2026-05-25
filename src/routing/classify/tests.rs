@@ -23,6 +23,7 @@ fn create_test_config() -> AppConfig {
         classifier: None,
         presets: Default::default(),
         budget: Default::default(),
+        pricing: Default::default(),
         dlp: Default::default(),
         auth: Default::default(),
         tap: Default::default(),

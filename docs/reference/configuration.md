@@ -15,6 +15,8 @@ host = "::1"              # Bind address (default: "::1" — IPv6 localhost)
 log_level = "info"        # Log level: trace, debug, info, warn, error
 api_key = "my-secret"     # Optional: require Bearer token on incoming requests
 oauth_callback_port = 1455 # Port for the OAuth callback server (default: 1455)
+warmup_connections = false # Pre-warm provider connections at startup (default: false)
+validate_on_start = false  # Probe each router model at startup (default: false)
 
 [server.timeouts]
 api_timeout_ms = 600000   # Provider request timeout (default: 10 min)
@@ -24,6 +26,15 @@ connect_timeout_ms = 10000 # TCP connect timeout (default: 10s)
 When `api_key` is set, all requests must include `Authorization: Bearer <token>` or `x-api-key: <token>`. Health, metrics, and OAuth endpoints are exempt.
 
 The default host `::1` is IPv6 localhost. Use `127.0.0.1` for IPv4-only environments, or `0.0.0.0` for container deployments.
+
+### Startup network behavior
+
+By default a fresh `grob start` performs **no outgoing network requests** and the listener binds immediately — startup is offline-safe and air-gap friendly. Two opt-in probes can be enabled:
+
+- `warmup_connections` — fires a background `HEAD` to each provider's base URL so the first real request avoids cold-connection latency.
+- `validate_on_start` — sends a minimal `max_tokens=1` test request to every provider mapping and logs a health summary. This consumes a small amount of provider quota per mapping, so it is off by default.
+
+Both run after the listener is already accepting traffic, so neither can stall the bind.
 
 ## Budget
 
@@ -38,6 +49,24 @@ warn_at_percent = 80          # Log warning at this % of any limit (default: 80)
 Budget checks follow a priority order: model limit > provider limit > global limit. When a limit is reached, requests return HTTP 402 with a `budget_exceeded` error. OAuth providers cost $0 and never hit caps.
 
 Spend is tracked in append-only JSONL journals (`~/.grob/spend/YYYY-MM.jsonl`) and resets automatically each month.
+
+## Pricing
+
+Controls where model prices come from and how token usage is accounted.
+
+```toml
+[pricing]
+fetch_openrouter = false       # Fetch live OpenRouter prices (default: false)
+refresh_interval_hours = 24    # Background refresh cadence when fetching (default: 24)
+token_counting = "api"         # "api" (default) or "estimate"
+```
+
+**Price source.** By default grob uses its built-in hardcoded price table, so startup performs no network I/O. When `fetch_openrouter = true`, the initial OpenRouter fetch runs in a **background task** (it never blocks the listener from binding) and merges live prices over the hardcoded table, refreshing every `refresh_interval_hours`. A failed fetch is logged and leaves the hardcoded table in place.
+
+**Token counting.**
+
+- `api` (default) — trust the provider-reported usage and record spend synchronously, so the next budget check sees it immediately.
+- `estimate` — move the spend mutex and journal write off the response hot path into a detached task, so request latency is never gated on disk I/O. Provider-reported usage stays the source of truth; counters consolidate a fraction of a second later, so a concurrent budget check may lag by at most one in-flight request.
 
 ## Providers
 

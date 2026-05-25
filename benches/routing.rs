@@ -30,6 +30,7 @@ fn make_router() -> Router {
         classifier: None,
         presets: Default::default(),
         budget: Default::default(),
+        pricing: Default::default(),
         dlp: Default::default(),
         auth: Default::default(),
         tap: Default::default(),

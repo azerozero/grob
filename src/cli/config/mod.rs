@@ -5,6 +5,7 @@
 //! | Module | Scope |
 //! |--------|-------|
 //! | [`budget`] | Monthly spend caps |
+//! | [`pricing`] | Price source (OpenRouter vs hardcoded) + token accounting |
 //! | [`cache`] | LLM response cache |
 //! | [`security`] | Rate limits, audit log, compliance, TEE, FIPS |
 //! | [`server`] | HTTP server, timeouts, TLS, ACME |
@@ -22,6 +23,7 @@ pub mod budget;
 pub mod cache;
 #[cfg(feature = "harness")]
 pub mod harness;
+pub mod pricing;
 pub mod providers;
 pub mod reliability;
 pub mod routing;
@@ -35,6 +37,7 @@ pub use budget::BudgetConfig;
 pub use cache::CacheConfig;
 #[cfg(feature = "harness")]
 pub use harness::HarnessConfig;
+pub use pricing::{PricingConfig, TokenCountingMode};
 pub use providers::{AuthType, PoolConfig, PoolStrategy, ProviderConfig};
 pub use reliability::{parse_duration, CircuitBreakerProviderConfig, HealthCheckProviderConfig};
 pub use routing::{

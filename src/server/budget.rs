@@ -138,7 +138,18 @@ pub(crate) async fn check_budget_for_tenant(
     Ok(())
 }
 
-/// Record spend after a successful request (global + per-tenant if applicable)
+/// Record spend after a successful request (global + per-tenant if applicable).
+///
+/// Honours [`crate::cli::TokenCountingMode`]:
+///
+/// - [`Api`](crate::cli::TokenCountingMode::Api) (default): the spend is
+///   committed synchronously before this function returns, so the next budget
+///   check sees it immediately (strong consistency).
+/// - [`Estimate`](crate::cli::TokenCountingMode::Estimate): the spend mutex and
+///   journal write are moved off the response hot path into a detached task, so
+///   request latency is never gated on disk I/O. Counters consolidate a beat
+///   later; under heavy concurrency a budget check may lag by at most one
+///   in-flight request.
 pub(crate) async fn record_spend(
     state: &Arc<AppState>,
     provider_name: &str,
@@ -146,13 +157,44 @@ pub(crate) async fn record_spend(
     cost: f64,
     tenant_id: Option<&str>,
 ) {
-    if cost > 0.0 {
-        let mut tracker = state.observability.spend_tracker.lock().await;
-        if let Some(tenant) = tenant_id {
-            tracker.record_tenant(tenant, provider_name, model_name, cost);
-        } else {
-            tracker.record(provider_name, model_name, cost);
+    if cost <= 0.0 {
+        return;
+    }
+
+    // Cheap Copy read; the guard is dropped before any `.await`.
+    let mode = state.snapshot().config.pricing.token_counting;
+
+    match mode {
+        crate::cli::TokenCountingMode::Api => {
+            commit_spend(state, provider_name, model_name, cost, tenant_id).await;
         }
+        crate::cli::TokenCountingMode::Estimate => {
+            // Consolidate the API-reported cost asynchronously so the response
+            // path doesn't wait on the spend mutex / JSONL append.
+            let state = state.clone();
+            let provider = provider_name.to_string();
+            let model = model_name.to_string();
+            let tenant = tenant_id.map(str::to_string);
+            tokio::spawn(async move {
+                commit_spend(&state, &provider, &model, cost, tenant.as_deref()).await;
+            });
+        }
+    }
+}
+
+/// Locks the spend tracker and records the cost (global or per-tenant).
+async fn commit_spend(
+    state: &Arc<AppState>,
+    provider_name: &str,
+    model_name: &str,
+    cost: f64,
+    tenant_id: Option<&str>,
+) {
+    let mut tracker = state.observability.spend_tracker.lock().await;
+    if let Some(tenant) = tenant_id {
+        tracker.record_tenant(tenant, provider_name, model_name, cost);
+    } else {
+        tracker.record(provider_name, model_name, cost);
     }
 }
 

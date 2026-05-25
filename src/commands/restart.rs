@@ -41,19 +41,31 @@ pub async fn cmd_restart(
     if detach {
         println!("Starting service in background...");
         let port_from_config = Some(config.server.port.value());
-        spawn_background_service(port_from_config, cli_config)?;
-        tokio::time::sleep(tokio::time::Duration::from_millis(
-            PROCESS_TRANSITION_GRACE_MS,
-        ))
-        .await;
+        let log_path = spawn_background_service(port_from_config, cli_config)?;
+        let base_url = cli::format_base_url(&config.server.host, config.server.port.value());
 
         let verb = if was_running { "restarted" } else { "started" };
-        if let Some(pid) =
-            instance::find_instance_pid(&config.server.host, config.server.port.value()).await
-        {
-            println!("✅ Service {} successfully (PID: {})", verb, pid);
+        // Confirm the listener is actually serving before reporting success.
+        if poll_health(&base_url, HEALTH_POLL_MAX_ATTEMPTS, HEALTH_POLL_INTERVAL_MS).await {
+            match instance::find_instance_pid(&config.server.host, config.server.port.value()).await
+            {
+                Some(pid) => println!("✅ Service {} successfully (PID: {})", verb, pid),
+                None => println!("✅ Service {} successfully", verb),
+            }
+            if let Some(ref path) = log_path {
+                println!("📝 Logs: {}", path.display());
+            }
         } else {
-            println!("✅ Service {} successfully", verb);
+            let timeout_secs = HEALTH_POLL_MAX_ATTEMPTS as u64 * HEALTH_POLL_INTERVAL_MS / 1000;
+            eprintln!(
+                "❌ Service did not become healthy within {}s.",
+                timeout_secs
+            );
+            match log_path {
+                Some(path) => eprintln!("   Check the daemon log: {}", path.display()),
+                None => eprintln!("   No log file available (could not open ~/.grob/grob.log)."),
+            }
+            anyhow::bail!("service failed to restart");
         }
     } else {
         start_foreground(config, config_source).await?;
