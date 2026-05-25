@@ -304,7 +304,7 @@ pub async fn start_server(
         },
     });
 
-    maybe_preset_sync(&config).await;
+    maybe_preset_sync(&config);
     spawn_background_tasks(&state);
 
     let app = build_app_router(&config, state.clone());

@@ -146,8 +146,23 @@ pub async fn start_foreground(
     result
 }
 
+/// Returns the path of the detached daemon log file (`~/.grob/grob.log`).
+pub fn daemon_log_path() -> Option<std::path::PathBuf> {
+    crate::grob_home().map(|h| h.join("grob.log"))
+}
+
 /// Spawns the Grob server as a detached background process.
-pub fn spawn_background_service(port: Option<u16>, config: Option<String>) -> anyhow::Result<()> {
+///
+/// The child's stdout and stderr are redirected to `~/.grob/grob.log` (append
+/// mode) so a crash in detached mode leaves a diagnosable trail instead of
+/// vanishing into `/dev/null`. Returns the log path on success, or `None` when
+/// the log file could not be opened (in which case output is discarded).
+pub fn spawn_background_service(
+    port: Option<u16>,
+    config: Option<String>,
+) -> anyhow::Result<Option<std::path::PathBuf>> {
+    use std::process::Stdio;
+
     let exe_path = std::env::current_exe()?;
     let mut cmd = Command::new(&exe_path);
     cmd.arg("start");
@@ -179,10 +194,34 @@ pub fn spawn_background_service(port: Option<u16>, config: Option<String>) -> an
         cmd.creation_flags(0x0000_0008 | 0x0000_0200);
     }
 
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    // Capture daemon output to a log file so detached crashes are visible.
+    let log_path = daemon_log_path();
+    let log_file = log_path.as_ref().and_then(|path| {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .ok()
+    });
+
+    cmd.stdin(Stdio::null());
+    let captured = match log_file {
+        Some(file) => {
+            let err = file
+                .try_clone()
+                .map_err(|e| anyhow::anyhow!("Failed to duplicate log file handle: {}", e))?;
+            cmd.stdout(Stdio::from(file)).stderr(Stdio::from(err));
+            true
+        }
+        None => {
+            cmd.stdout(Stdio::null()).stderr(Stdio::null());
+            false
+        }
+    };
 
     cmd.spawn()?;
-    Ok(())
+    Ok(if captured { log_path } else { None })
 }

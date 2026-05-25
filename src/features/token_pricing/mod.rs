@@ -144,16 +144,33 @@ impl PricingTable {
 /// Shared pricing table accessible across the application
 pub type SharedPricingTable = Arc<RwLock<PricingTable>>;
 
-/// Create a shared pricing table and spawn background refresh every 24h
-pub async fn init_pricing_table() -> SharedPricingTable {
-    let table = PricingTable::fetch_and_merge().await;
-    let shared = Arc::new(RwLock::new(table));
+/// Build the shared pricing table, seeding it from the hardcoded fallback table.
+///
+/// This is **synchronous and never performs network I/O**: it returns
+/// immediately with the built-in price table so server startup (and the
+/// listener bind) is never gated on a third-party endpoint. When
+/// [`fetch_openrouter`](crate::cli::PricingConfig::fetch_openrouter) is set, a background task fetches live
+/// OpenRouter prices, merges them over the fallback, and refreshes on the
+/// configured interval. A failed fetch is logged and leaves the fallback table
+/// in place, so grob stays fully functional offline / air-gapped.
+pub fn init_pricing_table(cfg: &crate::cli::PricingConfig) -> SharedPricingTable {
+    let shared = Arc::new(RwLock::new(PricingTable::from_known()));
 
-    // Spawn background refresh every 24 hours
+    if !cfg.fetch_openrouter {
+        tracing::debug!("OpenRouter pricing fetch disabled; using hardcoded price table");
+        return shared;
+    }
+
+    // Clamp to a sane floor so a misconfigured 0 doesn't busy-loop the fetcher.
+    let refresh = std::time::Duration::from_secs(cfg.refresh_interval_hours.max(1) * 60 * 60);
     let shared_clone = shared.clone();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(24 * 60 * 60));
-        interval.tick().await; // Skip first immediate tick
+        // Initial fetch runs here (not on the bind path) so it cannot stall startup.
+        let table = PricingTable::fetch_and_merge().await;
+        *shared_clone.write().await = table;
+
+        let mut interval = tokio::time::interval(refresh);
+        interval.tick().await; // Skip the immediate first tick.
         loop {
             interval.tick().await;
             tracing::info!("Refreshing OpenRouter pricing table...");
@@ -275,5 +292,18 @@ mod tests {
         let counter =
             TokenCounter::with_pricing("claude-sonnet-4-6", 1000, 500, false, Some(&table));
         assert!(counter.estimated_cost_usd > 0.0);
+    }
+
+    #[tokio::test]
+    async fn init_pricing_table_is_synchronous_and_offline_by_default() {
+        // With the default (fetch disabled) config, the table is seeded from the
+        // hardcoded fallback without any network I/O and without spawning tasks.
+        let cfg = crate::cli::PricingConfig::default();
+        assert!(!cfg.fetch_openrouter);
+        let shared = init_pricing_table(&cfg);
+        let table = shared.read().await;
+        assert!(!table.is_empty());
+        // A well-known price resolves immediately from the seeded table.
+        assert!(table.get("claude-sonnet-4-6").is_some());
     }
 }

@@ -39,6 +39,22 @@ pub struct ServerConfig {
     /// Port for the OAuth callback server (default: 1455)
     #[serde(default = "default_oauth_callback_port")]
     pub oauth_callback_port: u16,
+    /// Pre-warm TCP/TLS connections to every provider at startup (default: false).
+    ///
+    /// When enabled, grob fires a background `HEAD` request to each provider's
+    /// base URL so the first real request avoids cold-connection latency.
+    /// Disabled by default so a fresh `grob start` performs **no outgoing
+    /// network requests** unless explicitly opted in.
+    #[serde(default)]
+    pub warmup_connections: bool,
+    /// Probe every router model against its providers at startup (default: false).
+    ///
+    /// When enabled, grob sends a minimal `max_tokens=1` test request to each
+    /// configured provider mapping and logs a health summary. This consumes a
+    /// small amount of provider quota per mapping, so it is **off by default**:
+    /// startup stays offline-safe and free of surprise spend.
+    #[serde(default)]
+    pub validate_on_start: bool,
 }
 
 // NOTE: 1455 is an unregistered IANA port unlikely to conflict with common
@@ -58,6 +74,8 @@ impl Default for ServerConfig {
             tracing: TracingConfig::default(),
             tls: TlsConfig::default(),
             oauth_callback_port: default_oauth_callback_port(),
+            warmup_connections: false,
+            validate_on_start: false,
         }
     }
 }

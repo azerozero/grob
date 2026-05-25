@@ -22,7 +22,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use super::{
-    calculate_cost, is_provider_subscription, log_audit, record_request_metrics,
+    calculate_cost, is_provider_subscription, log_audit, record_request_metrics, record_spend,
     resolve_provider_mappings, sanitize_provider_response_reported, AppState, AuditCompliance,
     AuditParams, ReloadableState, RequestError, RequestMetrics,
 };
@@ -579,7 +579,15 @@ async fn record_fan_out_costs(
             is_subscription,
         )
         .await;
-        let mut tracker = ctx.state.observability.spend_tracker.lock().await;
-        tracker.record(provider_name, actual_model, counter.estimated_cost_usd);
+        // Route through the shared recorder so the configured token-counting
+        // mode (synchronous `api` vs off-hot-path `estimate`) is honoured here too.
+        record_spend(
+            ctx.state,
+            provider_name,
+            actual_model,
+            counter.estimated_cost_usd,
+            ctx.tenant_id.as_deref(),
+        )
+        .await;
     }
 }

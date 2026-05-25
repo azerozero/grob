@@ -62,7 +62,11 @@ pub(crate) async fn init_core_services(
         .map_err(|e| anyhow::anyhow!("Failed to initialize provider registry: {}", e))?,
     );
 
-    provider_registry.warmup_connections();
+    // Connection pre-warming is an outgoing network request per provider, so it
+    // is opt-in: a default `grob start` stays fully offline.
+    if config.server.warmup_connections {
+        provider_registry.warmup_connections();
+    }
 
     info!(
         "📦 Loaded {} providers with {} models",
@@ -70,7 +74,10 @@ pub(crate) async fn init_core_services(
         provider_registry.list_models().len()
     );
 
-    {
+    // Startup validation sends a real (token-spending) probe to every provider
+    // mapping, so it is opt-in. Off by default keeps startup free of surprise
+    // outgoing requests and provider spend.
+    if config.server.validate_on_start {
         let config_ref = config.clone();
         let registry_ref = provider_registry.clone();
         tokio::spawn(async move {
@@ -117,7 +124,9 @@ pub(crate) async fn init_observability(
         );
     }
 
-    let pricing_table = crate::features::token_pricing::init_pricing_table().await;
+    // Synchronous + non-blocking: seeds the hardcoded table immediately and
+    // only fetches OpenRouter prices in the background when explicitly enabled.
+    let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
 
     let prometheus_builder = metrics_exporter_prometheus::PrometheusBuilder::new();
     let metrics_handle = prometheus_builder
@@ -476,19 +485,28 @@ pub(crate) fn spawn_background_tasks(state: &Arc<super::AppState>) {
     }
 }
 
-/// Performs initial preset sync and spawns background sync if configured.
-pub(crate) async fn maybe_preset_sync(config: &AppConfig) {
+/// Spawns initial and periodic preset sync without blocking the bind.
+///
+/// The initial sync runs in a detached task rather than being awaited so an
+/// unreachable or slow `sync_url` can never stall the listener from binding —
+/// the same failure class as the pricing fetch. Preset sync is also opt-in
+/// (it only runs when `sync_url` is configured), keeping default startup offline.
+pub(crate) fn maybe_preset_sync(config: &AppConfig) {
     if !config.presets.auto_sync {
         return;
     }
-    if let Some(ref sync_url) = config.presets.sync_url {
+    let Some(sync_url) = config.presets.sync_url.clone() else {
+        return;
+    };
+    let interval = config.presets.sync_interval.clone();
+    tokio::spawn(async move {
         info!("🔄 Initial preset sync from {}...", sync_url);
-        match crate::preset::sync_presets(sync_url).await {
+        match crate::preset::sync_presets(&sync_url).await {
             Ok(_) => info!("✅ Initial preset sync complete"),
             Err(e) => error!("⚠️ Initial preset sync failed: {}", e),
         }
-        if let Some(ref interval) = config.presets.sync_interval {
-            crate::preset::spawn_background_sync(sync_url.clone(), interval.clone());
+        if let Some(interval) = interval {
+            crate::preset::spawn_background_sync(sync_url, interval);
         }
-    }
+    });
 }

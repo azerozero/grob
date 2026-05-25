@@ -42,13 +42,17 @@ pub fn init_subscriber_with_otel(
         tracing_subscriber::registry()
             .with(filter)
             .with(otel_layer)
-            .with(tracing_subscriber::fmt::layer().json())
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_timer(super::log_time::UtcTimer),
+            )
             .init();
     } else {
         tracing_subscriber::registry()
             .with(filter)
             .with(otel_layer)
-            .with(tracing_subscriber::fmt::layer())
+            .with(tracing_subscriber::fmt::layer().with_timer(super::log_time::UtcTimer))
             .init();
     }
 

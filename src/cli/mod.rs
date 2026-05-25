@@ -14,9 +14,10 @@ pub use config::{
     AcmeConfig, AuthType, BudgetConfig, CacheConfig, CircuitBreakerProviderConfig,
     ComplianceConfig, EnforcementMode, FanOutConfig, FanOutMode, FipsConfig,
     HealthCheckProviderConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig, PoolConfig,
-    PoolStrategy, PresetConfig, ProjectConfig, ProjectRouterOverlay, PromptRule, ProviderConfig,
-    RouterConfig, SecretsBackend, SecretsConfig, SecretsFileConfig, SecurityConfig, ServerConfig,
-    TeeConfig, TierConfig, TierMatchCondition, TimeoutConfig, TlsConfig, TracingConfig, UserConfig,
+    PoolStrategy, PresetConfig, PricingConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,
+    ProviderConfig, RouterConfig, SecretsBackend, SecretsConfig, SecretsFileConfig, SecurityConfig,
+    ServerConfig, TeeConfig, TierConfig, TierMatchCondition, TimeoutConfig, TlsConfig,
+    TokenCountingMode, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 

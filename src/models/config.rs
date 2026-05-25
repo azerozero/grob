@@ -14,8 +14,9 @@ use crate::auth::jwt::AuthConfig;
 use crate::cli::HarnessConfig;
 use crate::cli::{
     BudgetConfig, CacheConfig, ComplianceConfig, ConfigSource, FipsConfig, LogExportConfig,
-    ModelConfig, ModelStrategy, OtelConfig, PresetConfig, ProjectConfig, ProviderConfig,
-    RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TierConfig, ToolLayerConfig, UserConfig,
+    ModelConfig, ModelStrategy, OtelConfig, PresetConfig, PricingConfig, ProjectConfig,
+    ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TierConfig,
+    ToolLayerConfig, UserConfig,
 };
 use crate::features::dlp::config::DlpConfig;
 #[cfg(feature = "mcp")]
@@ -53,6 +54,9 @@ pub struct AppConfig {
     /// Monthly spend budget and warning thresholds
     #[serde(default)]
     pub budget: BudgetConfig,
+    /// Price source (OpenRouter vs hardcoded) and token-accounting mode
+    #[serde(default)]
+    pub pricing: PricingConfig,
     /// Data loss prevention pipeline settings
     #[serde(default)]
     pub dlp: DlpConfig,
