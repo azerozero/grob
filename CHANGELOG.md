@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.44](https://github.com/azerozero/grob/compare/v0.36.43...v0.36.44) - 2026-05-25
+
+### Fixed
+
+- *(startup)* never block the bind on network I/O; log detached daemons
+
 ## [0.36.43](https://github.com/azerozero/grob/compare/v0.36.42...v0.36.43) - 2026-05-15
 
 ### Added
