@@ -197,8 +197,8 @@ emits a structured event to the Sokolsky log backend (ADR-0017):
 }
 ```
 
-The digest gives a stable identifier for the **applied** posture (base
-+ overlay) without leaking the full TOML to the audit log. Auditors
+The digest gives a stable identifier for the **applied** posture (base +
+overlay) without leaking the full TOML to the audit log. Auditors
 querying Sokolsky can correlate the digest with a preset version known
 at the time of application.
 
