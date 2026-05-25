@@ -208,6 +208,15 @@ pub(super) async fn dispatch_non_streaming(
     provider: &dyn crate::providers::LlmProvider,
     attempt: &ProviderAttempt<'_>,
 ) -> Result<DispatchResult, ProviderLoopAction> {
+    // Capture an input-token estimate before the request is consumed below. It
+    // is only ever read when the provider omits usage in estimate mode; skip
+    // the work entirely otherwise.
+    let estimated_input_tokens = if crate::server::is_estimate_mode(ctx.state) {
+        crate::server::estimate_input_tokens(&provider_request)
+    } else {
+        0
+    };
+
     // Wrap in Option so we can move (not clone) on the final attempt.
     let mut owned_request = Some(provider_request);
     for retry in 0..=MAX_RETRIES {
@@ -250,6 +259,7 @@ pub(super) async fn dispatch_non_streaming(
                     decision: attempt.decision,
                     response: &response,
                     latency_ms,
+                    estimated_input_tokens,
                 };
                 let cost_usd =
                     calculate_and_record_metrics(ctx, &outcome, attempt.is_subscription).await;

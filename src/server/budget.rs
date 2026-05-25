@@ -1,6 +1,8 @@
 use crate::features::token_pricing::TokenCounter;
-use crate::models::RouteType;
-use crate::providers::AuthType;
+use crate::models::{
+    CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent, RouteType, SystemPrompt,
+};
+use crate::providers::{AuthType, ProviderResponse};
 use std::sync::Arc;
 use tracing::warn;
 
@@ -198,6 +200,89 @@ async fn commit_spend(
     }
 }
 
+/// Returns `true` when token counting runs in off-hot-path estimate mode.
+pub(crate) fn is_estimate_mode(state: &Arc<AppState>) -> bool {
+    matches!(
+        state.snapshot().config.pricing.token_counting,
+        crate::cli::TokenCountingMode::Estimate
+    )
+}
+
+/// Resolves the token counts to bill, falling back to a local estimate.
+///
+/// Provider-reported usage is authoritative. Only when a provider omits usage
+/// entirely (both counts zero) **and** token counting is in
+/// [`Estimate`](crate::cli::TokenCountingMode::Estimate) mode does this estimate
+/// from the request and response text, so genuinely-consumed tokens are not
+/// silently billed as `$0`. In `api` mode (or with reported usage) the provider
+/// numbers are returned unchanged.
+pub(crate) fn effective_token_counts(
+    state: &Arc<AppState>,
+    request: &CanonicalRequest,
+    response: &ProviderResponse,
+) -> (u32, u32) {
+    let usage = &response.usage;
+    let usage_absent = usage.input_tokens == 0 && usage.output_tokens == 0;
+    if usage_absent && is_estimate_mode(state) {
+        let input = estimate_input_tokens(request);
+        let output = estimate_output_tokens(response);
+        tracing::debug!(
+            estimated_input_tokens = input,
+            estimated_output_tokens = output,
+            "provider omitted usage; billing from local token estimate"
+        );
+        (input, output)
+    } else {
+        (usage.input_tokens, usage.output_tokens)
+    }
+}
+
+/// Converts a character count to an approximate token count (~4 chars/token).
+///
+/// A deliberately cheap, tokenizer-free heuristic that only feeds the
+/// estimate-mode fallback; saturates rather than overflowing on huge inputs.
+fn tokens_from_chars(chars: usize) -> u32 {
+    u32::try_from(chars.div_ceil(4)).unwrap_or(u32::MAX)
+}
+
+/// Estimates input tokens from a request's system prompt and message text.
+///
+/// Non-text blocks (images, tool I/O) are ignored — this is a coarse fallback.
+pub(crate) fn estimate_input_tokens(req: &CanonicalRequest) -> u32 {
+    let mut chars = 0usize;
+    if let Some(system) = &req.system {
+        match system {
+            SystemPrompt::Text(t) => chars += t.chars().count(),
+            SystemPrompt::Blocks(blocks) => {
+                chars += blocks.iter().map(|b| b.text.chars().count()).sum::<usize>();
+            }
+        }
+    }
+    for msg in &req.messages {
+        match &msg.content {
+            MessageContent::Text(t) => chars += t.chars().count(),
+            MessageContent::Blocks(blocks) => chars += content_blocks_chars(blocks),
+        }
+    }
+    tokens_from_chars(chars)
+}
+
+/// Estimates output tokens from a response's text content blocks.
+pub(crate) fn estimate_output_tokens(resp: &ProviderResponse) -> u32 {
+    tokens_from_chars(content_blocks_chars(&resp.content))
+}
+
+/// Sums the character count of text content blocks, ignoring non-text blocks.
+fn content_blocks_chars(blocks: &[ContentBlock]) -> usize {
+    blocks
+        .iter()
+        .map(|b| match b {
+            ContentBlock::Known(KnownContentBlock::Text { text, .. }) => text.chars().count(),
+            _ => 0,
+        })
+        .sum()
+}
+
 /// Check if a provider uses OAuth (subscription = $0 cost)
 pub(crate) fn is_provider_subscription(inner: &Arc<ReloadableState>, provider_name: &str) -> bool {
     inner
@@ -392,5 +477,56 @@ mod tests {
             output_tokens: 25,
             cost_usd: 0.001,
         });
+    }
+
+    fn request_with_text(system: Option<&str>, user: &str) -> CanonicalRequest {
+        let mut body = serde_json::json!({
+            "model": "m",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": user}],
+        });
+        if let Some(s) = system {
+            body["system"] = serde_json::json!(s);
+        }
+        serde_json::from_value(body).expect("valid request")
+    }
+
+    fn response_with_text(text: &str) -> ProviderResponse {
+        serde_json::from_value(serde_json::json!({
+            "id": "r",
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}],
+            "model": "m",
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+        }))
+        .expect("valid response")
+    }
+
+    #[test]
+    fn tokens_from_chars_rounds_up() {
+        assert_eq!(tokens_from_chars(0), 0);
+        assert_eq!(tokens_from_chars(1), 1);
+        assert_eq!(tokens_from_chars(4), 1);
+        assert_eq!(tokens_from_chars(5), 2);
+    }
+
+    #[test]
+    fn estimate_input_counts_system_and_messages() {
+        // "you are concise" (15) + "hello there friend" (18) = 33 chars.
+        let req = request_with_text(Some("you are concise"), "hello there friend");
+        assert_eq!(estimate_input_tokens(&req), tokens_from_chars(15 + 18));
+    }
+
+    #[test]
+    fn estimate_input_ignores_absent_system() {
+        let req = request_with_text(None, "abcd"); // 4 chars → 1 token
+        assert_eq!(estimate_input_tokens(&req), 1);
+    }
+
+    #[test]
+    fn estimate_output_counts_text_blocks() {
+        // "abcd efgh" = 9 chars → ceil(9/4) = 3 tokens.
+        assert_eq!(estimate_output_tokens(&response_with_text("abcd efgh")), 3);
     }
 }

@@ -2,7 +2,10 @@ use crate::providers::ProviderResponse;
 use tracing::info;
 
 use super::DispatchContext;
-use crate::server::{calculate_cost, record_request_metrics, record_spend, RequestMetrics};
+use crate::server::{
+    calculate_cost, estimate_output_tokens, is_estimate_mode, record_request_metrics, record_spend,
+    RequestMetrics,
+};
 
 /// Outcome of a successful provider dispatch, used for metrics and telemetry.
 pub(crate) struct DispatchOutcome<'a> {
@@ -10,6 +13,9 @@ pub(crate) struct DispatchOutcome<'a> {
     pub decision: &'a crate::models::RouteDecision,
     pub response: &'a ProviderResponse,
     pub latency_ms: u64,
+    /// Local input-token estimate, used only as an estimate-mode fallback when
+    /// the provider omits usage. Zero in `api` mode (never consulted there).
+    pub estimated_input_tokens: u32,
 }
 
 /// Calculate cost and emit performance metrics + Prometheus counters.
@@ -22,12 +28,31 @@ pub(crate) async fn calculate_and_record_metrics(
     let response = outcome.response;
     let decision = outcome.decision;
     let latency_ms = outcome.latency_ms;
-    let tok_s = (response.usage.output_tokens as f32 * 1000.0) / latency_ms as f32;
+
+    // Bill provider-reported usage when present; only fall back to the local
+    // estimate when a provider omits usage and we're in estimate mode.
+    let (input_tokens, output_tokens) = {
+        let usage = &response.usage;
+        let usage_absent = usage.input_tokens == 0 && usage.output_tokens == 0;
+        if usage_absent && is_estimate_mode(ctx.state) {
+            let estimated_output = estimate_output_tokens(response);
+            tracing::debug!(
+                estimated_input_tokens = outcome.estimated_input_tokens,
+                estimated_output_tokens = estimated_output,
+                "provider omitted usage; billing from local token estimate"
+            );
+            (outcome.estimated_input_tokens, estimated_output)
+        } else {
+            (usage.input_tokens, usage.output_tokens)
+        }
+    };
+
+    let tok_s = (output_tokens as f32 * 1000.0) / latency_ms as f32;
     let cost = calculate_cost(
         ctx.state,
         &mapping.actual_model,
-        response.usage.input_tokens,
-        response.usage.output_tokens,
+        input_tokens,
+        output_tokens,
         is_subscription,
     )
     .await;
@@ -37,7 +62,7 @@ pub(crate) async fn calculate_and_record_metrics(
         mapping.provider,
         latency_ms,
         tok_s,
-        response.usage.output_tokens,
+        output_tokens,
         cost.estimated_cost_usd,
         if is_subscription {
             " (subscription)"
@@ -52,8 +77,8 @@ pub(crate) async fn calculate_and_record_metrics(
         route_type: &decision.route_type,
         status: "ok",
         latency_ms,
-        input_tokens: response.usage.input_tokens,
-        output_tokens: response.usage.output_tokens,
+        input_tokens,
+        output_tokens,
         cost_usd: cost.estimated_cost_usd,
     });
 
