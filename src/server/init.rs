@@ -200,6 +200,16 @@ pub(crate) fn init_policies(
 }
 
 /// Initializes JWT validation and spawns the JWKS refresh loop.
+///
+/// The initial JWKS fetch runs inside the spawned background task (first
+/// iteration, before any sleep) rather than being awaited here, so a slow or
+/// unreachable JWKS endpoint can never stall the listener bind. The function
+/// returns as soon as the validator is built.
+///
+/// As a consequence, JWT requests that rely on JWKS keys are rejected with an
+/// auth error (mapped to HTTP 401) until the first refresh completes — see
+/// [`crate::auth::JwtValidator::validate`], which returns `InvalidToken` when no
+/// loaded key can verify the token rather than panicking.
 pub(crate) async fn init_auth(
     config: &AppConfig,
 ) -> anyhow::Result<Option<Arc<crate::auth::JwtValidator>>> {
@@ -214,11 +224,13 @@ pub(crate) async fn init_auth(
 
     if validator.jwks_url().is_some() {
         let jwt_validator = validator.clone();
-        if let Err(e) = jwt_validator.refresh_jwks().await {
-            warn!("Initial JWKS fetch failed (will retry): {}", e);
-        }
         let base_interval = config.auth.jwt.jwks_refresh_interval;
         tokio::spawn(async move {
+            // Immediate first refresh, backgrounded so it can never block the
+            // bind. JWT requests are rejected until this succeeds.
+            if let Err(e) = jwt_validator.refresh_jwks().await {
+                warn!("Initial JWKS fetch failed (will retry): {}", e);
+            }
             let mut current_interval = base_interval;
             let max_interval = base_interval * 8;
             loop {
