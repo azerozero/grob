@@ -245,6 +245,15 @@ fn tokens_from_chars(chars: usize) -> u32 {
     u32::try_from(chars.div_ceil(4)).unwrap_or(u32::MAX)
 }
 
+/// Estimates a token count from arbitrary text (~4 chars/token).
+///
+/// Shared by the streaming spend fallback, which accumulates raw `text_delta`
+/// content rather than a structured [`ProviderResponse`]. Reuses the same
+/// tokenizer-free heuristic as the non-streaming estimators.
+pub(crate) fn estimate_tokens_from_text(text: &str) -> u32 {
+    tokens_from_chars(text.chars().count())
+}
+
 /// Estimates input tokens from a request's system prompt and message text.
 ///
 /// Non-text blocks (images, tool I/O) are ignored — this is a coarse fallback.

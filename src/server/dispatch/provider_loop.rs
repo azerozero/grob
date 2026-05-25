@@ -26,7 +26,7 @@ use super::super::{
 use super::resolver::{resolve_provider, try_direct_provider_lookup};
 use super::retry::{
     dispatch_non_streaming, dispatch_streaming, try_rotate_and_retry, ProviderAttempt,
-    ProviderLoopAction,
+    ProviderLoopAction, StreamingAttempt,
 };
 use super::{AuditEntry, DispatchContext, DispatchResult};
 use crate::models::RouteType;
@@ -94,7 +94,17 @@ pub(super) async fn dispatch_provider_loop(
         }
 
         let result = if ctx.is_streaming {
-            dispatch_streaming(ctx, provider_request, provider.as_ref(), mapping).await
+            dispatch_streaming(
+                ctx,
+                provider_request,
+                provider.as_ref(),
+                &StreamingAttempt {
+                    mapping,
+                    decision,
+                    is_subscription,
+                },
+            )
+            .await
         } else {
             dispatch_non_streaming(
                 ctx,

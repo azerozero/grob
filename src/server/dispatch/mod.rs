@@ -7,6 +7,7 @@
 mod provider_loop;
 mod resolver;
 mod retry;
+mod spend_stream;
 mod telemetry;
 
 use crate::cli::ModelStrategy;
