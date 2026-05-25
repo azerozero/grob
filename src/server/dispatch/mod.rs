@@ -22,8 +22,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use super::{
-    calculate_cost, effective_token_counts, is_provider_subscription, log_audit,
-    record_request_metrics, record_spend, resolve_provider_mappings,
+    calculate_cost, check_budget_for_tenant, effective_token_counts, is_provider_subscription,
+    log_audit, record_request_metrics, record_spend, resolve_provider_mappings,
     sanitize_provider_response_reported, AppState, AuditCompliance, AuditParams, ReloadableState,
     RequestError, RequestMetrics,
 };
@@ -496,6 +496,23 @@ async fn dispatch_fan_out(
     fan_out_config: &crate::cli::FanOutConfig,
     decision: &crate::models::RouteDecision,
 ) -> Result<DispatchResult, RequestError> {
+    // Budget enforcement: fan-out returns from `dispatch()` *before* the
+    // provider loop, which is where the per-attempt budget gate lives. Without
+    // this check, fan-out — the most expensive dispatch (N providers in
+    // parallel) — would bypass budget caps entirely. Each participating mapping
+    // is checked; if any provider/model/global cap is already reached the whole
+    // fan-out is rejected before any upstream call is made.
+    for mapping in sorted_mappings {
+        check_budget_for_tenant(
+            ctx.state,
+            ctx.inner,
+            &mapping.provider,
+            &decision.model_name,
+            ctx.tenant_id.as_deref(),
+        )
+        .await?;
+    }
+
     let mut fan_request = request.clone();
     ctx.sanitize_input(&mut fan_request);
 
