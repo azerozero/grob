@@ -22,9 +22,10 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use super::{
-    calculate_cost, is_provider_subscription, log_audit, record_request_metrics, record_spend,
-    resolve_provider_mappings, sanitize_provider_response_reported, AppState, AuditCompliance,
-    AuditParams, ReloadableState, RequestError, RequestMetrics,
+    calculate_cost, effective_token_counts, is_provider_subscription, log_audit,
+    record_request_metrics, record_spend, resolve_provider_mappings,
+    sanitize_provider_response_reported, AppState, AuditCompliance, AuditParams, ReloadableState,
+    RequestError, RequestMetrics,
 };
 use crate::features::watch::events::{DlpDirection, WatchEvent};
 
@@ -507,7 +508,7 @@ async fn dispatch_fan_out(
     .await
     {
         Ok((response, provider_info)) => {
-            handle_fan_out_success(ctx, response, &provider_info, decision).await
+            handle_fan_out_success(ctx, &fan_request, response, &provider_info, decision).await
         }
         Err(e) => Err(RequestError::ProviderUpstream {
             provider: "fan_out".to_string(),
@@ -520,6 +521,7 @@ async fn dispatch_fan_out(
 /// Process a successful fan-out response: DLP output scan, cost tracking, metrics, audit.
 async fn handle_fan_out_success(
     ctx: &DispatchContext<'_>,
+    request: &CanonicalRequest,
     mut response: ProviderResponse,
     provider_info: &[(String, String)],
     decision: &crate::models::RouteDecision,
@@ -527,7 +529,7 @@ async fn handle_fan_out_success(
     ctx.sanitize_output(&mut response);
 
     let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
-    record_fan_out_costs(ctx, &response, provider_info).await;
+    record_fan_out_costs(ctx, request, &response, provider_info).await;
 
     record_request_metrics(&RequestMetrics {
         model: &ctx.model,
@@ -566,16 +568,20 @@ async fn handle_fan_out_success(
 /// Track cost for each provider in a fan-out response.
 async fn record_fan_out_costs(
     ctx: &DispatchContext<'_>,
+    request: &CanonicalRequest,
     response: &ProviderResponse,
     provider_info: &[(String, String)],
 ) {
+    // Bill provider-reported usage, or a local estimate when usage is absent in
+    // estimate mode (computed once for the shared fan-out response).
+    let (input_tokens, output_tokens) = effective_token_counts(ctx.state, request, response);
     for (provider_name, actual_model) in provider_info {
         let is_subscription = is_provider_subscription(ctx.inner, provider_name);
         let counter = calculate_cost(
             ctx.state,
             actual_model,
-            response.usage.input_tokens,
-            response.usage.output_tokens,
+            input_tokens,
+            output_tokens,
             is_subscription,
         )
         .await;

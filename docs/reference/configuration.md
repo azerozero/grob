@@ -66,7 +66,7 @@ token_counting = "api"         # "api" (default) or "estimate"
 **Token counting.**
 
 - `api` (default) — trust the provider-reported usage and record spend synchronously, so the next budget check sees it immediately.
-- `estimate` — move the spend mutex and journal write off the response hot path into a detached task, so request latency is never gated on disk I/O. Provider-reported usage stays the source of truth; counters consolidate a fraction of a second later, so a concurrent budget check may lag by at most one in-flight request.
+- `estimate` — move the spend mutex and journal write off the response hot path into a detached task, so request latency is never gated on disk I/O. Provider-reported usage stays the source of truth; counters consolidate a fraction of a second later, so a concurrent budget check may lag by at most one in-flight request. When a provider omits usage entirely, input and output tokens are estimated locally (~4 chars/token) so genuinely-consumed tokens aren't billed as `$0` (non-streaming responses).
 
 ## Providers
 
