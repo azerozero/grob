@@ -43,6 +43,16 @@ pub(super) struct ProviderAttempt<'a> {
     pub is_subscription: bool,
 }
 
+/// Per-provider dispatch parameters (streaming path).
+///
+/// Carries the routing metadata the spend wrapper needs to attribute cost,
+/// captured before the request is consumed by `send_message_stream`.
+pub(super) struct StreamingAttempt<'a> {
+    pub mapping: &'a crate::cli::ModelMapping,
+    pub decision: &'a crate::models::RouteDecision,
+    pub is_subscription: bool,
+}
+
 /// Returns `true` when a provider error reports a 429 rate-limit upstream.
 ///
 /// Defers to the `RequestError::RateLimited` mapping rules so the
@@ -136,7 +146,17 @@ pub(super) async fn try_rotate_and_retry(
         &attempt.decision.route_type,
     );
     let retry_result = if ctx.is_streaming {
-        dispatch_streaming(ctx, retry_request, provider, attempt.mapping).await
+        dispatch_streaming(
+            ctx,
+            retry_request,
+            provider,
+            &StreamingAttempt {
+                mapping: attempt.mapping,
+                decision: attempt.decision,
+                is_subscription: attempt.is_subscription,
+            },
+        )
+        .await
     } else {
         dispatch_non_streaming(ctx, retry_request, provider, attempt).await
     };
@@ -148,13 +168,24 @@ pub(super) async fn dispatch_streaming(
     ctx: &DispatchContext<'_>,
     provider_request: crate::models::CanonicalRequest,
     provider: &dyn crate::providers::LlmProvider,
-    mapping: &crate::cli::ModelMapping,
+    attempt: &StreamingAttempt<'_>,
 ) -> Result<DispatchResult, ProviderLoopAction> {
-    // Capture request body for tap before ownership moves
+    let mapping = attempt.mapping;
+
+    // Capture request body for tap before ownership moves.
     let tap_request_body = if ctx.state.security.tap_sender.is_some() {
         serde_json::to_string(&provider_request).ok()
     } else {
         None
+    };
+
+    // Capture the input-token estimate before the request is consumed below.
+    // Only read as the estimate-mode fallback when the provider omits usage;
+    // skip the work in `api` mode.
+    let estimated_input_tokens = if crate::server::is_estimate_mode(ctx.state) {
+        crate::server::estimate_input_tokens(&provider_request)
+    } else {
+        0
     };
 
     match provider.send_message_stream(provider_request).await {
@@ -166,7 +197,24 @@ pub(super) async fn dispatch_streaming(
                 .await;
             ctx.record_endpoint_success(&mapping.provider, &mapping.actual_model);
 
-            let stream = wrap_stream_with_middleware(ctx, stream_response.stream, tap_request_body);
+            // Spend accounting: streaming previously recorded no persistent
+            // spend. Wrap the post-provider byte stream so cost is committed on
+            // termination (provider usage, else estimate-mode fallback).
+            let spend_ctx = super::spend_stream::SpendStreamContext {
+                state: Arc::clone(ctx.state),
+                provider: mapping.provider.clone(),
+                model_name: attempt.decision.model_name.clone(),
+                actual_model: mapping.actual_model.clone(),
+                route_type: attempt.decision.route_type,
+                tenant_id: ctx.tenant_id.clone(),
+                is_subscription: attempt.is_subscription,
+                estimated_input_tokens,
+                start_time: ctx.start_time,
+            };
+            let accounted =
+                super::spend_stream::SpendStream::new(stream_response.stream, spend_ctx);
+
+            let stream = wrap_stream_with_middleware(ctx, Box::pin(accounted), tap_request_body);
 
             let upstream_headers: Vec<(String, String)> =
                 stream_response.headers.into_iter().collect();

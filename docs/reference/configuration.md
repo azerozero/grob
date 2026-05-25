@@ -66,7 +66,9 @@ token_counting = "api"         # "api" (default) or "estimate"
 **Token counting.**
 
 - `api` (default) — trust the provider-reported usage and record spend synchronously, so the next budget check sees it immediately.
-- `estimate` — move the spend mutex and journal write off the response hot path into a detached task, so request latency is never gated on disk I/O. Provider-reported usage stays the source of truth; counters consolidate a fraction of a second later, so a concurrent budget check may lag by at most one in-flight request. When a provider omits usage entirely, input and output tokens are estimated locally (~4 chars/token) so genuinely-consumed tokens aren't billed as `$0` (non-streaming responses).
+- `estimate` — move the spend mutex and journal write off the response hot path into a detached task, so request latency is never gated on disk I/O. Provider-reported usage stays the source of truth; counters consolidate a fraction of a second later, so a concurrent budget check may lag by at most one in-flight request. When a provider omits usage entirely, input and output tokens are estimated locally (~4 chars/token) so genuinely-consumed tokens aren't billed as `$0`. This local fallback covers **both non-streaming and streaming responses**: for streaming, output tokens are estimated from the accumulated `text_delta` text and spend is recorded when the stream terminates.
+
+**Streaming spend.** Streaming responses (`stream: true`) record spend like non-streaming ones. A passthrough wrapper observes the SSE stream without altering the bytes the client receives — it forwards each chunk immediately (unchanged time-to-first-byte and inter-chunk timing) and does only a cheap substring scan per chunk. On stream termination it records spend in a detached task, so the final chunk is never delayed by the spend mutex or journal write. Provider-reported usage (`message_start` input tokens, `message_delta` output tokens) is authoritative; the estimate-mode fallback above applies only when a provider omits usage entirely. In `api` mode with no reported usage, nothing is billed (matching non-streaming behaviour).
 
 ## Providers
 
