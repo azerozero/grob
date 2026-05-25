@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.46](https://github.com/azerozero/grob/compare/v0.36.45...v0.36.46) - 2026-05-25
+
+### Added
+
+- *(pricing)* spend accounting for streaming responses with estimate fallback
+
+### Other
+
+- *(pricing)* bill streaming output estimate without a throwaway alloc
+
 ## [0.36.45](https://github.com/azerozero/grob/compare/v0.36.44...v0.36.45) - 2026-05-25
 
 ### Added
