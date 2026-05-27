@@ -90,6 +90,8 @@ pub enum AuditEvent {
     /// response has been produced — covers the entire request lifecycle from
     /// authentication through dispatch and error handling).
     RequestProcessed,
+    /// Tool-call spike anomaly blocked (T-AD1).
+    ToolSpikeBlocked,
 }
 
 /// Immutable audit log entry.

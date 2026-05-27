@@ -228,6 +228,36 @@ When adaptive scoring is enabled alongside circuit breakers:
 
 Model mappings are sorted by `priority / adaptive_factor`. Providers with factor `0.0` receive infinite effective priority (tried last). A new, unknown provider starts with factor `1.0`.
 
+## Tool-call spike detection (T-AD1)
+
+Detects per-session tool-call spikes so a misbehaving agent cannot exhaust provider quotas or trigger billing surprises. Runs in the dispatch pipeline after DLP scanning and before routing.
+
+```toml
+[security]
+tool_spike_warn_per_min = 100     # log + metric above this (default: 100)
+tool_spike_block_per_min = 500    # return HTTP 429 above this (default: 500)
+```
+
+### Behavior
+
+- **Counting**: each request contributes the number of `tool_use` and `tool_result` content blocks it carries.
+- **Window**: a 60-second rolling ring of one-second buckets per session key. Old buckets age out lazily on access — no background sweeping of the hot path.
+- **Key resolution**: `metadata.session_id` → `metadata.user_id` → tenant id → `"anon"`.
+- **Warn**: crossing `tool_spike_warn_per_min` logs a `WARN` line and increments `grob_tool_spike_warn_total`. The request proceeds.
+- **Block**: crossing `tool_spike_block_per_min` increments `grob_tool_spike_blocked_total`, writes a signed `TOOL_SPIKE_BLOCKED` audit entry, and returns HTTP 429 with body type `rate_limited`. The block is terminal — it is **not** retried against a sibling provider.
+
+### Defaults
+
+`100/min/session` is roughly the upper bound for a busy build run (an agent reading ~2 files/sec). `500/min` equals >8/sec sustained, which only a runaway loop produces.
+
+### Disabling
+
+Set both thresholds to `0` to disable the detector entirely; it is then never installed and adds no per-request work. Setting only `tool_spike_block_per_min = 0` keeps warnings while disabling blocking.
+
+### Memory
+
+Idle session rings are pruned by a 60-second background task, bounding memory under churning session ids.
+
 ## Risk classification (EU AI Act)
 
 ```toml

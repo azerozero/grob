@@ -64,6 +64,13 @@ pub enum RequestError {
     },
     /// Indicates the DLP pipeline blocked the request (HTTP 400).
     DlpBlocked(String),
+    /// Indicates an in-process limiter rejected the request (HTTP 429).
+    ///
+    /// Distinct from [`RequestError::RateLimited`], which forwards an
+    /// upstream provider 429 and is retryable. This is a terminal local
+    /// rejection (e.g. the tool-call spike anomaly detector, T-AD1) and
+    /// is never retried against a sibling provider.
+    ToolSpikeBlocked(String),
     /// Indicates an upstream OAuth credential was revoked (HTTP 401).
     ///
     /// Surfaces a terminal authentication error — the user must run
@@ -154,6 +161,9 @@ impl RequestError {
                 ),
             ),
             RequestError::DlpBlocked(msg) => (StatusCode::BAD_REQUEST, "dlp_block", msg.clone()),
+            RequestError::ToolSpikeBlocked(msg) => {
+                (StatusCode::TOO_MANY_REQUESTS, "rate_limited", msg.clone())
+            }
             RequestError::AuthRevoked(msg) => (
                 StatusCode::UNAUTHORIZED,
                 "authentication_error",
@@ -179,6 +189,7 @@ impl RequestError {
             RequestError::ProviderUpstream { .. } => "provider_upstream",
             RequestError::BudgetExceeded { .. } => "budget_exceeded",
             RequestError::DlpBlocked(_) => "dlp_blocked",
+            RequestError::ToolSpikeBlocked(_) => "tool_spike_blocked",
             RequestError::AuthRevoked(_) => "auth_revoked",
             RequestError::Internal(_) => "internal",
         }
@@ -489,6 +500,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_spike_blocked_returns_429_with_rate_limited_type() {
+        let err = RequestError::ToolSpikeBlocked(
+            "tool-call spike: 600 in 60s window for session sess-1 (block 500)".to_string(),
+        );
+        let (status, json) = error_response_parts(err).await;
+
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(json["error"]["type"], "rate_limited");
+        assert!(json["error"]["message"]
+            .as_str()
+            .expect("message is a string")
+            .contains("tool-call spike"));
+    }
+
+    #[test]
+    fn tool_spike_blocked_is_not_retryable() {
+        let err = RequestError::ToolSpikeBlocked("spike".to_string());
+        assert!(!err.is_retryable());
+    }
+
+    #[tokio::test]
     async fn auth_revoked_returns_401() {
         let err = RequestError::AuthRevoked(
             "OAuth token for provider 'anthropic' revoked. Run: grob connect --force-reauth"
@@ -690,6 +722,10 @@ mod tests {
         assert_eq!(
             RequestError::DlpBlocked("x".to_string()).variant_tag(),
             "dlp_blocked"
+        );
+        assert_eq!(
+            RequestError::ToolSpikeBlocked("x".to_string()).variant_tag(),
+            "tool_spike_blocked"
         );
         assert_eq!(
             RequestError::AuthRevoked("x".to_string()).variant_tag(),
