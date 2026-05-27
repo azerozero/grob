@@ -321,7 +321,7 @@ impl AppConfig {
 
             eprintln!("Created default config file at: {}", path.display());
             eprintln!("Please edit the config file to add your providers and models.");
-            eprintln!("Run 'grob preset apply medium' for a quick multi-provider setup.");
+            eprintln!("Run 'grob preset list' to see presets, then 'grob preset apply <name>'.");
         }
 
         Ok(())

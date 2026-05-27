@@ -1,24 +1,42 @@
 # Ollama Local Development Configuration
+#
+# Routes requests to a local Ollama instance via its OpenAI-compatible
+# endpoint. Ollama does not require a real API key, but the OpenAI provider
+# type still expects one, so any placeholder string works.
 
 [server]
-port = 3456
 host = "127.0.0.1"
+port = 13456
 log_level = "info"
+
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000
 
 [[providers]]
 name = "ollama"
-api_base_url = "http://localhost:11434/v1/chat/completions"
-api_key = "ollama"  # Ollama doesn't require real API key
+provider_type = "openai"
+base_url = "http://localhost:11434/v1"
+api_key = "ollama" # Ollama ignores the key; any non-empty value works.
+enabled = true
 models = ["qwen2.5-coder:latest", "deepseek-r1:latest"]
 
-[providers.model_context]
-"qwen2.5-coder:latest" = 32768
-"deepseek-r1:latest" = 64000
+[[models]]
+name = "qwen2.5-coder"
+
+[[models.mappings]]
+provider = "ollama"
+actual_model = "qwen2.5-coder:latest"
+priority = 1
+
+[[models]]
+name = "deepseek-r1"
+
+[[models.mappings]]
+provider = "ollama"
+actual_model = "deepseek-r1:latest"
+priority = 1
 
 [router]
-default = "ollama.qwen2.5-coder:latest"
-think = "ollama.deepseek-r1:latest"
-
-# Optional: Enable long context routing for large files
-longContext = "ollama.deepseek-r1:latest"
-longContextThreshold = 32000                # Switch when >32K tokens
+default = "qwen2.5-coder"
+think = "deepseek-r1"

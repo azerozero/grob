@@ -10,7 +10,7 @@ This tutorial walks you through installing Grob, configuring it with a preset, a
 
 ## Step 1: Install Grob
 
-Choose one of three methods:
+Grob ships as a standalone binary. Choose one of two methods:
 
 **Option A: Install script (recommended)**
 
@@ -24,11 +24,9 @@ curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install
 brew install azerozero/tap/grob
 ```
 
-**Option C: Build from source**
-
-```bash
-cargo install --git https://github.com/azerozero/grob
-```
+The install script fetches the latest release binary for your platform from
+[GitHub Releases](https://github.com/azerozero/grob/releases). Container users
+can pull `ghcr.io/azerozero/grob:latest` instead.
 
 Verify the installation:
 
@@ -54,27 +52,28 @@ If you have an Anthropic Pro or Max subscription and want to use OAuth instead o
 
 ## Step 3: Apply a preset
 
-Presets are pre-built configurations that set up providers, models, and routing in one command. Pick the one that matches your setup:
+Presets are pre-built configurations that set up providers, models, and routing in one command. List them with `grob preset list`, then pick the one that matches your setup:
 
-| Preset | Primary provider | Fallback | Monthly cost estimate |
-|--------|-----------------|----------|----------------------|
-| `perf` | Anthropic (Opus + Sonnet) | Anthropic | Subscription only |
-| `medium` | Anthropic OAuth | OpenRouter | Subscription + ~$10-100 |
-| `cheap` | DeepSeek R1 (OpenRouter) | GLM-5 (z.ai) | ~$0.15/M tokens |
-| `local` | Anthropic OAuth | Ollama (local) | Subscription + free |
+| Preset | What it sets up | Monthly cost estimate |
+|--------|-----------------|----------------------|
+| `perf` | Pure Anthropic OAuth (Pro/Max), auto-maps `claude-*` to native | Subscription only |
+| `ultra-cheap` | Stacked free tiers (Groq + Cerebras + Z.ai + OpenRouter `:free`) | ~€0-2/month |
+| `gdpr` | EU-only routing (Mistral, Scaleway, OVH) + DLP | Pay-as-you-go |
+| `eu-ai-act` | EU AI Act compliant (EU providers + transparency headers) | Pay-as-you-go |
+| `eu-eco` / `eu-pro` / `eu-max` | Strict-EU sovereign tiers (budget / balanced / premium) | Pay-as-you-go |
 
-Apply the `medium` preset:
+Apply the `perf` preset (simplest — one Anthropic subscription, no fallbacks):
 
 ```bash
-grob preset apply medium
+grob preset apply perf
 ```
 
-This creates `~/.grob/config.toml` with Anthropic OAuth as the primary for thinking tasks and OpenRouter models for everything else.
+This creates `~/.grob/config.toml` with Anthropic OAuth for every `claude-*` model.
 
 To see what a preset contains before applying:
 
 ```bash
-grob preset info medium
+grob preset info perf
 ```
 
 ## Step 4: Start Grob and launch your tool
@@ -110,7 +109,7 @@ You should see output like:
 ```
 Grob is running (PID 12345)
   Port: 13456
-  Preset: medium
+  Preset: perf
   Spend: $0.00 / $0.00 (no limit)
 ```
 

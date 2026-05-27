@@ -3,7 +3,7 @@
 > Manages builtin and installed config presets: load, apply, overlay, export, validate, sync, credentials.
 
 ## Purpose
-Provides curated TOML config bundles (`perf`, `medium`, `local`, `cheap`, `fast`, `gdpr`, `eu-ai-act`) plus user-installed presets in `~/.grob/presets/`. Merges a preset into an existing config while preserving `[server]` and `[user]`, validates that every routing target resolves to a real provider+model, and orchestrates the credential wizard for providers a preset requires.
+Provides curated TOML config bundles (`perf`, `ultra-cheap`, `gdpr`, `eu-ai-act`, `eu-eco`, `eu-pro`, `eu-max`) plus user-installed presets in `~/.grob/presets/`. Merges a preset into an existing config while preserving `[server]` and `[user]`, validates that every routing target resolves to a real provider+model, and orchestrates the credential wizard for providers a preset requires.
 
 ## Public API
 | Item | Location | Used by |
@@ -16,7 +16,7 @@ Provides curated TOML config bundles (`perf`, `medium`, `local`, `cheap`, `fast`
 | `parse_interval`, `spawn_background_sync`, `sync_presets`, `install_from_source` | `sync.rs` | `start`, `commands::preset` |
 
 ## Owns
-- Seven builtin presets shipped via `include_str!` from `presets/*.toml`.
+- Seven builtin presets auto-discovered via `include_dir!` from `presets/*.toml` (`index.toml` is skipped).
 - TOML merge logic: replaces `[router]`, `[[providers]]`, `[[models]]`, `[security]`, `[compliance]`, `[dlp]` while keeping `[server]` and `[user]` intact, sets `presets.active`.
 - Compliance overlay path: merges only `[security]`, `[compliance]`, `[dlp]`, plus `router.gdpr`/`router.region`.
 - Backup-before-write (`config.toml.backup`) on every apply.
