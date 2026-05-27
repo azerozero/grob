@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.47](https://github.com/azerozero/grob/compare/v0.36.46...v0.36.47) - 2026-05-27
+
+### Added
+
+- *(oauth)* retry adjacent ports when OAuth callback port is busy
+
+### Other
+
+- use values()/values_mut() to satisfy clippy::for_kv_map
+- Merge pull request #347 from azerozero/fix/fanout-budget-enforcement
+
 ## [0.36.46](https://github.com/azerozero/grob/compare/v0.36.45...v0.36.46) - 2026-05-25
 
 ### Added
