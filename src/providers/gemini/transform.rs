@@ -18,7 +18,7 @@ pub(super) fn clean_json_schema(value: &mut serde_json::Value) {
             map.remove("$defs");
 
             // Recursively clean nested objects
-            for (_, v) in map.iter_mut() {
+            for v in map.values_mut() {
                 clean_json_schema(v);
             }
         }

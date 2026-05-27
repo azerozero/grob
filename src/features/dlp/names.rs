@@ -248,7 +248,7 @@ impl NameAnonymizer {
         // Phase 2: Dynamic cache reverse lookup
         if self.mode == NamesMode::AutoDetect {
             let cache = self.dynamic_cache.lock().unwrap_or_else(|e| e.into_inner());
-            for (_, (real_name, pseudo)) in cache.iter() {
+            for (real_name, pseudo) in cache.values() {
                 if current.contains(pseudo.as_str()) {
                     current = current.replace(pseudo.as_str(), real_name);
                     modified = true;
@@ -324,7 +324,7 @@ impl NameAnonymizer {
         let mut all_rules = self.rules.clone();
         let mut all_pseudonyms = self.pseudonyms.clone();
 
-        for (_, (real_name, pseudo)) in cache.iter() {
+        for (real_name, pseudo) in cache.values() {
             all_rules.push(NameRule {
                 term: real_name.clone(),
                 action: NameAction::Pseudonym,
