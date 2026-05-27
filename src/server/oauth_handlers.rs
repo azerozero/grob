@@ -80,17 +80,39 @@ pub struct TokenInfo {
     pub needs_refresh: bool,
 }
 
+/// Returns the port the OAuth callback server actually bound to.
+///
+/// Falls back to the configured `server.oauth_callback_port` when the callback server
+/// has not yet recorded its port (e.g. before [`spawn_oauth_callback`] binds).
+///
+/// [`spawn_oauth_callback`]: super::lifecycle::spawn_oauth_callback
+fn live_oauth_callback_port(state: &AppState) -> u16 {
+    let actual = state
+        .actual_oauth_callback_port
+        .load(std::sync::atomic::Ordering::Relaxed);
+    if actual != 0 {
+        actual
+    } else {
+        state.snapshot().config.server.oauth_callback_port
+    }
+}
+
 /// Get authorization URL
 pub async fn oauth_authorize(
     State(state): State<Arc<AppState>>,
     Json(req): Json<OAuthAuthorizeRequest>,
 ) -> Result<Json<OAuthAuthorizeResponse>, (StatusCode, String)> {
+    // NOTE: Gemini follows RFC 8252 and accepts any loopback port, so its callback
+    // redirect is realigned with the port the local server actually bound. OpenAI
+    // Codex pins its redirect server-side (localhost:1455) and is left untouched.
+    let callback_port = live_oauth_callback_port(&state);
+
     // Create OAuth config based on type
     let config = match req.oauth_type.as_str() {
         "max" => OAuthConfig::anthropic(),
         "console" => OAuthConfig::anthropic_console(),
         "openai-codex" => OAuthConfig::openai_codex(),
-        "gemini" => OAuthConfig::gemini(),
+        "gemini" => OAuthConfig::gemini().with_callback_port(callback_port),
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -134,11 +156,15 @@ pub async fn oauth_exchange(
         req.oauth_type
     );
 
+    // Gemini's loopback redirect is realigned with the live callback port (RFC 8252);
+    // OpenAI Codex keeps its server-pinned redirect. See `oauth_authorize`.
+    let callback_port = live_oauth_callback_port(&state);
+
     // Determine OAuth config based on oauth_type if provided, otherwise fall back to provider_id
     let config = if let Some(ref oauth_type) = req.oauth_type {
         match oauth_type.as_str() {
             "openai-codex" => OAuthConfig::openai_codex(),
-            "gemini" => OAuthConfig::gemini(),
+            "gemini" => OAuthConfig::gemini().with_callback_port(callback_port),
             "console" => OAuthConfig::anthropic_console(),
             "max" => OAuthConfig::anthropic(),
             _ => {
@@ -265,6 +291,8 @@ pub async fn oauth_refresh_token(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeleteTokenRequest>,
 ) -> Result<Json<OAuthExchangeResponse>, (StatusCode, String)> {
+    let callback_port = live_oauth_callback_port(&state);
+
     // Determine OAuth config based on provider_id
     let config = if req.provider_id.to_lowercase().contains("openai")
         || req.provider_id.to_lowercase().contains("codex")
@@ -274,7 +302,8 @@ pub async fn oauth_refresh_token(
     } else if req.provider_id.to_lowercase().contains("gemini")
         || req.provider_id.to_lowercase().contains("google")
     {
-        OAuthConfig::gemini()
+        // Gemini accepts any loopback port (RFC 8252); keep its redirect aligned.
+        OAuthConfig::gemini().with_callback_port(callback_port)
     } else {
         OAuthConfig::anthropic()
     };
