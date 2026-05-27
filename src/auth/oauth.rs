@@ -119,6 +119,38 @@ impl OAuthConfig {
             OAuthProviderType::Anthropic
         }
     }
+
+    /// Rewrites the port of a loopback `redirect_uri`, leaving other URIs untouched.
+    ///
+    /// Only `localhost`, `127.0.0.1`, and `[::1]` redirects are rewritten. This keeps
+    /// the callback `redirect_uri` aligned with the port the local callback server
+    /// actually bound when the configured port was busy.
+    ///
+    /// Apply this **only** to providers that accept any loopback port per RFC 8252
+    /// (OAuth 2.0 for Native Apps) — e.g. Gemini. Providers with a server-pinned
+    /// redirect (OpenAI Codex registers `localhost:1455` and rejects any mismatch)
+    /// must keep their original URI, so this is intentionally not applied to them.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let cfg = OAuthConfig::gemini().with_callback_port(13_460);
+    /// assert!(cfg.redirect_uri.contains(":13460/"));
+    /// ```
+    #[must_use]
+    pub fn with_callback_port(mut self, port: u16) -> Self {
+        if !is_localhost_url(&self.redirect_uri) {
+            return self;
+        }
+        // NOTE: set_port fails only on cannot-be-a-base URLs; loopback http(s)
+        // URIs are always base URLs, so a parse failure leaves the URI unchanged.
+        if let Ok(mut url) = url::Url::parse(&self.redirect_uri) {
+            if url.set_port(Some(port)).is_ok() {
+                self.redirect_uri = url.to_string();
+            }
+        }
+        self
+    }
 }
 
 impl OAuthConfig {
@@ -618,5 +650,28 @@ mod tests {
         assert!(auth_url.url.contains("code_challenge="));
         assert!(auth_url.url.contains("code_challenge_method=S256"));
         assert!(auth_url.url.contains("scope="));
+    }
+
+    #[test]
+    fn test_with_callback_port_rewrites_gemini_loopback() {
+        let cfg = OAuthConfig::gemini().with_callback_port(13_460);
+        assert_eq!(
+            cfg.redirect_uri,
+            "http://localhost:13460/api/oauth/callback"
+        );
+    }
+
+    #[test]
+    fn test_with_callback_port_preserves_path_and_scheme() {
+        let cfg = OAuthConfig::openai_codex().with_callback_port(1456);
+        // Loopback rewrite only touches the port; scheme and path are preserved.
+        assert_eq!(cfg.redirect_uri, "http://localhost:1456/auth/callback");
+    }
+
+    #[test]
+    fn test_with_callback_port_leaves_remote_redirect_alone() {
+        let original = OAuthConfig::anthropic().redirect_uri;
+        let cfg = OAuthConfig::anthropic().with_callback_port(9999);
+        assert_eq!(cfg.redirect_uri, original);
     }
 }

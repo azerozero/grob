@@ -8,8 +8,13 @@ use super::{oauth_handlers, AppState};
 use crate::models::config::AppConfig;
 use axum::{routing::get, Router as AxumRouter};
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use tracing::{error, info, warn};
+
+/// Number of adjacent ports the OAuth callback server tries before giving up.
+///
+/// The configured `server.oauth_callback_port` is attempt one; each later attempt
+/// increments the port by one.
+const OAUTH_CALLBACK_BIND_ATTEMPTS: u16 = crate::shared::net::DEFAULT_PORT_RETRY_ATTEMPTS;
 
 /// Binds the server socket and serves with optional TLS and graceful shutdown.
 pub(super) async fn bind_and_serve(
@@ -114,30 +119,56 @@ pub(super) async fn drain_in_flight(state: &Arc<AppState>) {
     }
 }
 
-/// Spawn the OAuth callback server (required for OpenAI Codex OAuth)
+/// Spawns the OAuth callback server (required for OpenAI Codex OAuth).
+///
+/// Tries the configured `server.oauth_callback_port` first, then up to
+/// [`OAUTH_CALLBACK_BIND_ATTEMPTS`] adjacent ports if it is busy. The port that
+/// actually bound is recorded in [`AppState::actual_oauth_callback_port`] so OAuth
+/// handlers can build loopback `redirect_uri` values that match the live listener.
+///
+/// Binds to `127.0.0.1` because OAuth providers (OpenAI Codex, Gemini) redirect to a
+/// literal loopback callback URL. Note that OpenAI Codex pins its redirect to the
+/// registered port (1455) and rejects any other; a fallback port keeps the callback
+/// server diagnosable but only providers that accept any loopback port (Gemini) will
+/// complete the flow on it. This is surfaced via a `warn!` when the port differs.
 pub(super) fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
-    let port = oauth_state.snapshot().config.server.oauth_callback_port;
+    let configured_port = oauth_state.snapshot().config.server.oauth_callback_port;
     tokio::spawn(async move {
         let oauth_callback_app = AxumRouter::new()
             .route("/auth/callback", get(oauth_handlers::oauth_callback))
-            .with_state(oauth_state);
+            .with_state(oauth_state.clone());
 
-        let oauth_addr = format!("127.0.0.1:{}", port);
-        match TcpListener::bind(&oauth_addr).await {
-            Ok(oauth_listener) => {
-                info!("OAuth callback server listening on {}", oauth_addr);
+        match crate::shared::net::bind_with_port_retry(
+            "127.0.0.1",
+            configured_port,
+            OAUTH_CALLBACK_BIND_ATTEMPTS,
+        )
+        .await
+        {
+            Ok((oauth_listener, actual_port)) => {
+                oauth_state
+                    .actual_oauth_callback_port
+                    .store(actual_port, std::sync::atomic::Ordering::Relaxed);
+                if actual_port == configured_port {
+                    info!("OAuth callback server listening on 127.0.0.1:{actual_port}");
+                } else {
+                    warn!(
+                        "OAuth callback port {configured_port} busy; bound 127.0.0.1:{actual_port} instead. \
+                         Providers with a pinned redirect (e.g. OpenAI Codex on {configured_port}) will reject this port."
+                    );
+                }
                 if let Err(e) = axum::serve(oauth_listener, oauth_callback_app).await {
-                    error!("OAuth callback server error: {}", e);
+                    error!("OAuth callback server error: {e}");
                 }
             }
             Err(e) => {
+                let last_port =
+                    configured_port.saturating_add(OAUTH_CALLBACK_BIND_ATTEMPTS.saturating_sub(1));
                 error!(
-                    "Failed to bind OAuth callback server on {}: {}",
-                    oauth_addr, e
+                    "Failed to bind OAuth callback server on 127.0.0.1 in port range {configured_port}..={last_port}: {e:#}"
                 );
                 error!(
-                    "OpenAI Codex OAuth will not work. Port {} must be available.",
-                    port
+                    "OpenAI Codex / Gemini OAuth will not work. Free a port in {configured_port}..={last_port} or set server.oauth_callback_port."
                 );
             }
         }
