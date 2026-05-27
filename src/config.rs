@@ -1,7 +1,14 @@
 //! Top-level application configuration.
 //!
-//! [`AppConfig`] lives here (rather than under `crate::cli`) so consumers
-//! can depend on a leaf module instead of pulling the whole `cli` graph.
+//! [`AppConfig`](crate::config::AppConfig) aggregates every config section, including feature config
+//! structs (`DlpConfig`, `McpConfig`, `PledgeConfig`, `TapConfig`,
+//! `PolicyConfig`). Because those feature modules import core types from
+//! `crate::models`, this aggregator must sit ABOVE both `models` and
+//! `features` in the dependency graph: it is a top-level module
+//! (`crate::config`), NOT a child of `crate::models`. Housing it under
+//! `models` closed a `models → features → models` cycle. See the
+//! `crate::pricing` leaf for the same anti-cycle pattern.
+//!
 //! Sub-configs (`ServerConfig`, `RouterConfig`, `ProviderConfig`, ...)
 //! remain in `crate::cli::config` and are re-imported here.
 
@@ -406,6 +413,10 @@ default = "placeholder-model"
 
     /// Validates configuration for common errors.
     ///
+    /// Runs each per-section validator in a fixed order; the first failing
+    /// section determines the returned error (validation short-circuits on the
+    /// first hard error, matching the original single-function behaviour).
+    ///
     /// # Errors
     ///
     /// Returns an error if model mappings reference unknown providers,
@@ -414,11 +425,36 @@ default = "placeholder-model"
     pub fn validate(&self) -> Result<()> {
         use std::collections::HashSet;
 
+        // Built once and shared by reference with the section validators to keep
+        // the hot validation path allocation-equivalent with the original.
         let provider_names: HashSet<&str> =
             self.providers.iter().map(|p| p.name.as_str()).collect();
+        let model_names: HashSet<&str> = self.models.iter().map(|m| m.name.as_str()).collect();
 
-        // Check model mappings reference existing providers
-        for model in &self.models {
+        // Order is load-bearing: callers rely on the first hard error surfacing,
+        // so the section sequence below must not be reordered.
+        Self::validate_model_mappings(&self.models, &provider_names)?;
+        Self::validate_provider_auth(&self.providers)?;
+        Self::validate_router_regexes(&self.router)?;
+        Self::warn_unknown_router_models(&self.router, &model_names);
+        Self::validate_acme(&self.server)?;
+        Self::validate_auth_mode(&self.auth)?;
+        Self::validate_fan_out(&self.models, &model_names)?;
+        Self::validate_tiers(&self.tiers, &provider_names)?;
+
+        Ok(())
+    }
+
+    /// Verifies every model mapping references a declared provider.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first mapping whose provider is unknown.
+    fn validate_model_mappings(
+        models: &[ModelConfig],
+        provider_names: &std::collections::HashSet<&str>,
+    ) -> Result<()> {
+        for model in models {
             for mapping in &model.mappings {
                 if !provider_names.contains(mapping.provider.as_str()) {
                     anyhow::bail!(
@@ -430,13 +466,21 @@ default = "placeholder-model"
                 }
             }
         }
+        Ok(())
+    }
 
-        // Check enabled providers have auth configured
-        for provider in &self.providers {
+    /// Verifies every enabled provider carries the credentials its auth type needs.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for the first enabled provider missing an API key
+    /// (except `vertex-ai`, which may use ADC) or an `oauth_provider`.
+    fn validate_provider_auth(providers: &[ProviderConfig]) -> Result<()> {
+        use crate::cli::AuthType;
+        for provider in providers {
             if !provider.is_enabled() {
                 continue;
             }
-            use crate::cli::AuthType;
             match provider.auth_type {
                 AuthType::ApiKey => {
                     let key_missing = provider.api_key.is_none();
@@ -460,29 +504,41 @@ default = "placeholder-model"
                 }
             }
         }
+        Ok(())
+    }
 
-        // Validate regex patterns compile
-        if let Some(ref pattern) = self.router.auto_map_regex {
+    /// Compiles every configured router regex to surface invalid patterns early.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `auto_map_regex`, `background_regex`, or any
+    /// `prompt_rules` pattern fails to compile.
+    fn validate_router_regexes(router: &RouterConfig) -> Result<()> {
+        if let Some(ref pattern) = router.auto_map_regex {
             if !pattern.is_empty() {
                 regex::Regex::new(pattern)
                     .with_context(|| format!("Invalid auto_map_regex: '{}'", pattern))?;
             }
         }
-        if let Some(ref pattern) = self.router.background_regex {
+        if let Some(ref pattern) = router.background_regex {
             if !pattern.is_empty() {
                 regex::Regex::new(pattern)
                     .with_context(|| format!("Invalid background_regex: '{}'", pattern))?;
             }
         }
-        for (i, rule) in self.router.prompt_rules.iter().enumerate() {
+        for (i, rule) in router.prompt_rules.iter().enumerate() {
             regex::Regex::new(&rule.pattern).with_context(|| {
                 format!("Invalid prompt_rule[{}] pattern: '{}'", i, rule.pattern)
             })?;
         }
+        Ok(())
+    }
 
-        // Warn if router models don't exist in [[models]]
-        let model_names: HashSet<&str> = self.models.iter().map(|m| m.name.as_str()).collect();
-
+    /// Warns (without failing) when a router model name is absent from `[[models]]`.
+    fn warn_unknown_router_models(
+        router: &RouterConfig,
+        model_names: &std::collections::HashSet<&str>,
+    ) {
         let check_router_model = |name: &str, field: &str| {
             if !model_names.contains(name) && !model_names.is_empty() {
                 eprintln!(
@@ -492,42 +548,66 @@ default = "placeholder-model"
             }
         };
 
-        check_router_model(&self.router.default, "default");
-        if let Some(ref m) = self.router.background {
+        check_router_model(&router.default, "default");
+        if let Some(ref m) = router.background {
             check_router_model(m, "background");
         }
-        if let Some(ref m) = self.router.think {
+        if let Some(ref m) = router.think {
             check_router_model(m, "think");
         }
-        if let Some(ref m) = self.router.websearch {
+        if let Some(ref m) = router.websearch {
             check_router_model(m, "websearch");
         }
+    }
 
-        // Validate ACME config (require domains + contacts when enabled)
-        if self.server.tls.acme.enabled {
-            if self.server.tls.acme.domains.is_empty() {
+    /// Verifies ACME has domains and contacts whenever it is enabled.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if ACME is enabled with empty `domains` or `contacts`.
+    fn validate_acme(server: &ServerConfig) -> Result<()> {
+        if server.tls.acme.enabled {
+            if server.tls.acme.domains.is_empty() {
                 anyhow::bail!(
                     "ACME is enabled but no domains configured. Set [server.tls.acme] domains = [\"example.com\"]"
                 );
             }
-            if self.server.tls.acme.contacts.is_empty() {
+            if server.tls.acme.contacts.is_empty() {
                 anyhow::bail!(
                     "ACME is enabled but no contacts configured. Set [server.tls.acme] contacts = [\"admin@example.com\"]"
                 );
             }
         }
+        Ok(())
+    }
 
-        // Validate auth mode
-        match self.auth.mode.as_str() {
+    /// Verifies the inbound auth mode is one of the supported values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `auth.mode` is not `none`, `api_key`, or `jwt`.
+    fn validate_auth_mode(auth: &AuthConfig) -> Result<()> {
+        match auth.mode.as_str() {
             "none" | "api_key" | "jwt" => {}
             other => anyhow::bail!(
                 "Invalid auth.mode '{}'. Must be one of: none, api_key, jwt",
                 other
             ),
         }
+        Ok(())
+    }
 
-        // Validate fan_out config consistency
-        for model in &self.models {
+    /// Verifies fan-out models carry a `[fan_out]` block and warns on unknown judges.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error for the first `strategy=fan_out` model lacking a
+    /// `[fan_out]` config block.
+    fn validate_fan_out(
+        models: &[ModelConfig],
+        model_names: &std::collections::HashSet<&str>,
+    ) -> Result<()> {
+        for model in models {
             if model.strategy == ModelStrategy::FanOut && model.fan_out.is_none() {
                 anyhow::bail!(
                     "Model '{}' has strategy=fan_out but no [fan_out] config block",
@@ -546,10 +626,22 @@ default = "placeholder-model"
                 }
             }
         }
+        Ok(())
+    }
 
-        // Validate tier config: provider names must exist (skip when no providers defined)
+    /// Verifies every tier references a declared provider (skipped when none exist).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first tier whose provider is unknown.
+    fn validate_tiers(
+        tiers: &[TierConfig],
+        provider_names: &std::collections::HashSet<&str>,
+    ) -> Result<()> {
+        // Skip when no providers are defined: an empty provider set means no
+        // declared names to validate against, matching the original guard.
         if !provider_names.is_empty() {
-            for tier in &self.tiers {
+            for tier in tiers {
                 for prov in &tier.providers {
                     if !provider_names.contains(prov.as_str()) {
                         anyhow::bail!(
@@ -562,7 +654,6 @@ default = "placeholder-model"
                 }
             }
         }
-
         Ok(())
     }
 }

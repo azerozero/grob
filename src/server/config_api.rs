@@ -1,4 +1,4 @@
-use crate::models::config::AppConfig;
+use crate::config::AppConfig;
 use crate::providers::ProviderRegistry;
 use crate::routing::classify::Router;
 use axum::{
@@ -193,7 +193,7 @@ pub(crate) async fn update_config_json(
     // Deserialise the merged TOML into AppConfig so we can validate and reload.
     let merged_toml_str = toml::to_string_pretty(&config)
         .map_err(|e| RequestError::Internal(anyhow::anyhow!("Failed to serialize config: {e}")))?;
-    let merged_config: crate::models::config::AppConfig = toml::from_str(&merged_toml_str)
+    let merged_config: crate::config::AppConfig = toml::from_str(&merged_toml_str)
         .map_err(|e| RequestError::ParseError(format!("Invalid config after merge: {e}")))?;
 
     // Backup, write, and hot-reload via the shared pipeline.

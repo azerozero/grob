@@ -23,7 +23,7 @@ in [`extensions::RequestExtensions`] for lossless roundtrips.
 | `CountTokensRequest`, `CountTokensResponse` | `mod.rs` | `LlmProvider::count_tokens` |
 | `RouteDecision`, `RouteType` | `mod.rs` | `routing::classify::Router`, transparency headers |
 | `default_max_tokens` | `mod.rs` | `openai_compat::transform` |
-| `config::AppConfig` | `config.rs` | `server::ReloadableState`, every CLI command |
+| `crate::config::AppConfig` | `../config.rs` | `server::ReloadableState`, every CLI command |
 | `extensions::RequestExtensions` | `extensions.rs` | provider-specific lossless roundtrips |
 
 ## Owns
@@ -49,7 +49,7 @@ in [`extensions::RequestExtensions`] for lossless roundtrips.
 
 - `tests/unit/models_test.rs` covers canonical request shapes and serialization.
 - `#[cfg(test)] mod tests` inside `mod.rs` covers `default_max_tokens` for Anthropic, OpenAI, Gemini, and fallback families.
-- `#[cfg(test)] mod tests` inside `extensions.rs`, `config.rs` cover extension preservation and config defaults.
+- `#[cfg(test)] mod tests` inside `extensions.rs` covers extension preservation. Config-default tests live in `crate::config` (`../config.rs`), which moved out of this module.
 
 ## Related ADRs
 

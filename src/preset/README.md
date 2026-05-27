@@ -24,7 +24,7 @@ Provides curated TOML config bundles (`perf`, `ultra-cheap`, `gdpr`, `eu-ai-act`
 - Background sync from a Git source URL, periodic refresh, install-from-source.
 
 ## Depends on
-- `crate::cli` (config structs), `crate::models::config::AppConfig`.
+- `crate::cli` (config structs), `crate::config::AppConfig`.
 - `crate::providers::registry::ProviderRegistry`, `crate::auth::TokenStore`.
 - `toml`, `anyhow`, `tempfile` (tests).
 

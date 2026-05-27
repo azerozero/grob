@@ -89,7 +89,7 @@ pub async fn clear(
 /// Pure mutation helper for `set`. Validates the profile name and
 /// either upserts a per-source rule or updates the default profile.
 fn apply_set(
-    config: &mut crate::models::config::AppConfig,
+    config: &mut crate::config::AppConfig,
     profile: &str,
     source: Option<&str>,
 ) -> Result<(), ErrorObjectOwned> {
@@ -138,7 +138,7 @@ fn apply_set(
 
 /// Pure mutation helper for `clear`. Drops all rules and resets the
 /// default profile to the catalogue default (`full`).
-fn apply_clear(config: &mut crate::models::config::AppConfig) {
+fn apply_clear(config: &mut crate::config::AppConfig) {
     config.pledge.rules.clear();
     config.pledge.default_profile = "full".to_string();
 }
@@ -152,7 +152,7 @@ fn is_known_profile(name: &str) -> bool {
 /// it. Same primitive as `config_ns::set` and `tools_ns::*`.
 fn swap_state(
     state: &Arc<AppState>,
-    new_config: crate::models::config::AppConfig,
+    new_config: crate::config::AppConfig,
     caller: &CallerIdentity,
     action: &str,
 ) -> Result<(), ErrorObjectOwned> {
@@ -233,7 +233,7 @@ pub async fn list_profiles(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::config::AppConfig;
+    use crate::config::AppConfig;
     use crate::server::rpc::types::ERR_FORBIDDEN;
 
     fn fixture_config() -> AppConfig {

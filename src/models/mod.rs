@@ -1,7 +1,10 @@
 //! Shared data models: canonical request/response types, routing types.
+//!
+//! NOTE: [`AppConfig`](crate::config::AppConfig) no longer lives here. It moved
+//! to the top-level `crate::config` module because it aggregates feature config
+//! structs whose modules depend on these core types, which would otherwise form
+//! a `models → features → models` cycle.
 
-/// Top-level application configuration ([`config::AppConfig`]).
-pub mod config;
 /// Provider-specific request extensions for lossless roundtrips.
 pub mod extensions;
 /// Spend tracking data types shared between storage and pricing.

@@ -31,7 +31,7 @@ pub(crate) mod tier_match;
 // awkward `routing::classify::classify::ComplexityTier`.
 pub use classify::{classify_complexity, ComplexityTier, ScoringConfig, ScoringWeights};
 
-use crate::models::config::AppConfig;
+use crate::config::AppConfig;
 use crate::models::{CanonicalRequest, RouteDecision, RouteType};
 use anyhow::Result;
 use regex::Regex;

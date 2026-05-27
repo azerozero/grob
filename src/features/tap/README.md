@@ -10,7 +10,7 @@ Provides a fire-and-forget observability sink: every request and its assembled S
 
 | Item | Location | Used by |
 |------|----------|---------|
-| `TapConfig` | `mod.rs` | `models::config`, server init |
+| `TapConfig` | `mod.rs` | `config`, server init |
 | `TapEvent` (`Request`, `StreamChunk`, `StreamEnd`) | `mod.rs` | dispatch, retry, streaming layer |
 | `TapSender` | `mod.rs` | `server::mod`, `server::dispatch::retry` |
 | `init_tap` | `mod.rs` | `server::init` |

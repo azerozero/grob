@@ -11,7 +11,7 @@ Exposes grob's control plane as MCP tools (query, bench, calibrate, hint, config
 | Item | Location | Used by |
 |------|----------|---------|
 | `McpState` | `mod.rs` | `server::mod`, `server::mcp_handlers` |
-| `McpConfig`, `McpServerConfig`, `BenchConfig`, `ToolRoutingConfig`, `ToolChain` | `config.rs` | `models::config` |
+| `McpConfig`, `McpServerConfig`, `BenchConfig`, `ToolRoutingConfig`, `ToolChain` | `config.rs` | `config` |
 | `ToolMatrix`, `ToolEntry`, `ToolSchema`, `ProviderToolCapability`, `ToolScore`, `RuntimeScores` | `matrix.rs` | router, MCP server |
 | `ToolScorer`, `ToolMetric` | `scorer.rs` | bench engine |
 | `calibration::calibrate_tools` | `calibration.rs` | dispatch — per-request tool gating |

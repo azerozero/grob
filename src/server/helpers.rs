@@ -7,213 +7,264 @@ use tracing::info;
 use super::{ReloadableState, RequestError};
 
 /// Resolve and sort provider mappings for a routing decision.
+///
+/// Tries the opt-in tier path first; if it yields no usable provider, falls
+/// back to explicit `[[models]]` routing, then to pass-through inference. The
+/// branch order and per-branch behaviour are identical to the original
+/// single-function implementation.
 pub(crate) fn resolve_provider_mappings(
     inner: &Arc<ReloadableState>,
     headers: &HeaderMap,
     decision: &crate::models::RouteDecision,
 ) -> Result<Vec<crate::cli::ModelMapping>, RequestError> {
-    // Tier-based provider selection (opt-in via [[tiers]] config)
-    if let Some(ref tier) = decision.complexity_tier {
-        let tier_name = tier.to_string();
-        if let Some(tier_cfg) = inner.config.tiers.iter().find(|t| t.name == tier_name) {
-            info!(
-                "📊 Tier '{}' matched — resolving provider mappings",
-                tier_name
-            );
-
-            // Look up [[models]] config once so we can pick actual_model per provider.
-            let model_config = inner.find_model(&decision.model_name);
-
-            let mut priority: u32 = 0;
-            let mappings: Vec<crate::cli::ModelMapping> = tier_cfg
-                .providers
-                .iter()
-                .filter_map(|provider_name| {
-                    // Step 1: prefer explicit actual_model from [[models.mappings]].
-                    if let Some(mc) = model_config {
-                        if let Some(mapping) =
-                            mc.mappings.iter().find(|m| m.provider == *provider_name)
-                        {
-                            info!(
-                                "tier {} -> provider {} -> actual_model {} (from [[models]] mapping)",
-                                tier_name, provider_name, mapping.actual_model
-                            );
-                            priority += 1;
-                            return Some(crate::cli::ModelMapping {
-                                priority,
-                                provider: provider_name.clone(),
-                                actual_model: mapping.actual_model.clone(),
-                                inject_continuation_prompt: mapping.inject_continuation_prompt,
-                            });
-                        }
-                    }
-
-                    // Step 2: provider explicitly lists the model name — use as-is.
-                    let provider_supports = inner
-                        .config
-                        .providers
-                        .iter()
-                        .find(|p| p.name == *provider_name)
-                        .map(|p| {
-                            p.models.iter().any(|m| m == &decision.model_name)
-                                || p.pass_through.unwrap_or(false)
-                        })
-                        .unwrap_or(false);
-
-                    if provider_supports {
-                        info!(
-                            "tier {} -> provider {} -> actual_model {} (provider models list)",
-                            tier_name, provider_name, decision.model_name
-                        );
-                        priority += 1;
-                        return Some(crate::cli::ModelMapping {
-                            priority,
-                            provider: provider_name.clone(),
-                            actual_model: decision.model_name.clone(),
-                            inject_continuation_prompt: false,
-                        });
-                    }
-
-                    // Step 3: no resolution — skip this provider to avoid sending an unknown model name.
-                    info!(
-                        "tier {} -> provider {} SKIP (no resolution for model '{}')",
-                        tier_name, provider_name, decision.model_name
-                    );
-                    None
-                })
-                .collect();
-
-            if !mappings.is_empty() {
-                return Ok(mappings);
-            }
-            // All tier providers were skipped — fall through to [[models]] / pass-through logic.
-            info!(
-                "tier {} — all providers skipped, falling back to [[models]] routing",
-                tier_name
-            );
-        }
+    // Tier-based provider selection (opt-in via [[tiers]] config). A non-empty
+    // result short-circuits; `None` means "fall through" exactly as before.
+    if let Some(mappings) = resolve_tier_mappings(inner, decision) {
+        return Ok(mappings);
     }
 
     if let Some(model_config) = inner.find_model(&decision.model_name) {
-        let forced_provider = headers
-            .get("x-provider")
-            .and_then(|v| v.to_str().ok())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-
-        if let Some(ref provider_name) = forced_provider {
-            info!(
-                "🎯 Using forced provider from X-Provider header: {}",
-                provider_name
-            );
-        }
-
-        let mut sorted = model_config.mappings.clone();
-        if let Some(ref provider_name) = forced_provider {
-            sorted.retain(|m| m.provider == *provider_name);
-            if sorted.is_empty() {
-                return Err(RequestError::RoutingError(format!(
-                    "Provider '{}' not found in mappings for model '{}'",
-                    provider_name, decision.model_name
-                )));
-            }
-        } else {
-            sorted.sort_by_key(|m| m.priority);
-        }
-
-        // GDPR/region filtering: if gdpr=true or region is set, only keep matching providers
-        let gdpr = inner.config.router.gdpr;
-        let required_region = inner.config.router.region.as_deref();
-        if gdpr || required_region.is_some() {
-            let region_filter = required_region.unwrap_or("eu");
-            sorted.retain(|m| {
-                let provider_region = inner
-                    .config
-                    .providers
-                    .iter()
-                    .find(|p| p.name == m.provider)
-                    .and_then(|p| p.region.as_deref())
-                    .unwrap_or("global");
-                provider_region == region_filter || provider_region == "global"
-            });
-            if sorted.is_empty() {
-                return Err(RequestError::RoutingError(format!(
-                    "No providers match region '{}' for model '{}' (GDPR filtering enabled)",
-                    region_filter, decision.model_name
-                )));
-            }
-        }
-
-        Ok(sorted)
+        resolve_explicit_model_mappings(inner, headers, decision, model_config)
     } else {
-        // No explicit [[models]] config — check for pass-through providers
-        let gdpr = inner.config.router.gdpr;
-        let required_region = inner.config.router.region.as_deref();
-        let all_pass_through: Vec<&crate::providers::ProviderConfig> = inner
-            .config
-            .providers
-            .iter()
-            .filter(|p| p.is_enabled() && p.pass_through.unwrap_or(false))
-            .filter(|p| {
-                // GDPR/region filtering for pass-through providers
-                if gdpr || required_region.is_some() {
-                    let region_filter = required_region.unwrap_or("eu");
-                    let provider_region = p.region.as_deref().unwrap_or("global");
-                    provider_region == region_filter || provider_region == "global"
-                } else {
-                    true
+        resolve_pass_through_mappings(inner, decision)
+    }
+}
+
+/// Resolves provider mappings from a matched complexity tier, if any.
+///
+/// Returns `Some(mappings)` only when a tier matched and produced at least one
+/// usable provider; returns `None` to signal the caller should fall through to
+/// `[[models]]` / pass-through routing (no tier, no tier config, or every tier
+/// provider skipped).
+fn resolve_tier_mappings(
+    inner: &Arc<ReloadableState>,
+    decision: &crate::models::RouteDecision,
+) -> Option<Vec<crate::cli::ModelMapping>> {
+    let tier = decision.complexity_tier.as_ref()?;
+    let tier_name = tier.to_string();
+    let tier_cfg = inner.config.tiers.iter().find(|t| t.name == tier_name)?;
+
+    info!(
+        "📊 Tier '{}' matched — resolving provider mappings",
+        tier_name
+    );
+
+    // Look up [[models]] config once so we can pick actual_model per provider.
+    let model_config = inner.find_model(&decision.model_name);
+
+    let mut priority: u32 = 0;
+    let mappings: Vec<crate::cli::ModelMapping> = tier_cfg
+        .providers
+        .iter()
+        .filter_map(|provider_name| {
+            // Step 1: prefer explicit actual_model from [[models.mappings]].
+            if let Some(mc) = model_config {
+                if let Some(mapping) = mc.mappings.iter().find(|m| m.provider == *provider_name) {
+                    info!(
+                        "tier {} -> provider {} -> actual_model {} (from [[models]] mapping)",
+                        tier_name, provider_name, mapping.actual_model
+                    );
+                    priority += 1;
+                    return Some(crate::cli::ModelMapping {
+                        priority,
+                        provider: provider_name.clone(),
+                        actual_model: mapping.actual_model.clone(),
+                        inject_continuation_prompt: mapping.inject_continuation_prompt,
+                    });
                 }
-            })
-            .collect();
-
-        // Smart filtering: prefer providers whose type matches the inferred model family
-        let inferred =
-            crate::routing::classify::inference::infer_provider_type(&decision.model_name);
-        let filtered: Vec<&crate::providers::ProviderConfig> = if let Some(inf) = inferred {
-            let matched: Vec<_> = all_pass_through
-                .iter()
-                .filter(|p| {
-                    p.provider_type == inf
-                        || (inf == "openai" && p.provider_type == "openrouter")
-                        || (inf == "anthropic" && p.provider_type == "openrouter")
-                        || (inf == "gemini" && p.provider_type == "openrouter")
-                })
-                .copied()
-                .collect();
-            if matched.is_empty() {
-                all_pass_through
-            } else {
-                matched
             }
-        } else {
-            all_pass_through
-        };
 
-        let pass_through_mappings: Vec<crate::cli::ModelMapping> = filtered
-            .iter()
-            .enumerate()
-            .map(|(i, p)| crate::cli::ModelMapping {
-                priority: (i as u32) + 1,
-                provider: p.name.clone(),
-                actual_model: decision.model_name.clone(),
-                inject_continuation_prompt: false,
-            })
-            .collect();
+            // Step 2: provider explicitly lists the model name — use as-is.
+            let provider_supports = inner
+                .config
+                .providers
+                .iter()
+                .find(|p| p.name == *provider_name)
+                .map(|p| {
+                    p.models.iter().any(|m| m == &decision.model_name)
+                        || p.pass_through.unwrap_or(false)
+                })
+                .unwrap_or(false);
 
-        if pass_through_mappings.is_empty() {
-            Err(RequestError::RoutingError(format!(
-                "Model '{}' is not configured. Add a [[models]] entry in config.toml or set pass_through = true on a provider.",
-                decision.model_name
-            )))
-        } else {
+            if provider_supports {
+                info!(
+                    "tier {} -> provider {} -> actual_model {} (provider models list)",
+                    tier_name, provider_name, decision.model_name
+                );
+                priority += 1;
+                return Some(crate::cli::ModelMapping {
+                    priority,
+                    provider: provider_name.clone(),
+                    actual_model: decision.model_name.clone(),
+                    inject_continuation_prompt: false,
+                });
+            }
+
+            // Step 3: no resolution — skip this provider to avoid sending an unknown model name.
             info!(
-                "Pass-through routing '{}' to {} provider(s) (inferred: {:?})",
-                decision.model_name,
-                pass_through_mappings.len(),
-                inferred,
+                "tier {} -> provider {} SKIP (no resolution for model '{}')",
+                tier_name, provider_name, decision.model_name
             );
-            Ok(pass_through_mappings)
+            None
+        })
+        .collect();
+
+    if !mappings.is_empty() {
+        return Some(mappings);
+    }
+    // All tier providers were skipped — fall through to [[models]] / pass-through logic.
+    info!(
+        "tier {} — all providers skipped, falling back to [[models]] routing",
+        tier_name
+    );
+    None
+}
+
+/// Resolves mappings for a model declared in `[[models]]`.
+///
+/// Honours the `X-Provider` forced-provider header, otherwise sorts by priority,
+/// then applies GDPR/region filtering.
+///
+/// # Errors
+///
+/// Returns [`RequestError::RoutingError`] if the forced provider is absent from
+/// the model's mappings, or if region filtering leaves no eligible provider.
+fn resolve_explicit_model_mappings(
+    inner: &Arc<ReloadableState>,
+    headers: &HeaderMap,
+    decision: &crate::models::RouteDecision,
+    model_config: &crate::cli::ModelConfig,
+) -> Result<Vec<crate::cli::ModelMapping>, RequestError> {
+    let forced_provider = headers
+        .get("x-provider")
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    if let Some(ref provider_name) = forced_provider {
+        info!(
+            "🎯 Using forced provider from X-Provider header: {}",
+            provider_name
+        );
+    }
+
+    let mut sorted = model_config.mappings.clone();
+    if let Some(ref provider_name) = forced_provider {
+        sorted.retain(|m| m.provider == *provider_name);
+        if sorted.is_empty() {
+            return Err(RequestError::RoutingError(format!(
+                "Provider '{}' not found in mappings for model '{}'",
+                provider_name, decision.model_name
+            )));
         }
+    } else {
+        sorted.sort_by_key(|m| m.priority);
+    }
+
+    // GDPR/region filtering: if gdpr=true or region is set, only keep matching providers
+    let gdpr = inner.config.router.gdpr;
+    let required_region = inner.config.router.region.as_deref();
+    if gdpr || required_region.is_some() {
+        let region_filter = required_region.unwrap_or("eu");
+        sorted.retain(|m| {
+            let provider_region = inner
+                .config
+                .providers
+                .iter()
+                .find(|p| p.name == m.provider)
+                .and_then(|p| p.region.as_deref())
+                .unwrap_or("global");
+            provider_region == region_filter || provider_region == "global"
+        });
+        if sorted.is_empty() {
+            return Err(RequestError::RoutingError(format!(
+                "No providers match region '{}' for model '{}' (GDPR filtering enabled)",
+                region_filter, decision.model_name
+            )));
+        }
+    }
+
+    Ok(sorted)
+}
+
+/// Resolves mappings for an unconfigured model via pass-through providers.
+///
+/// Keeps enabled pass-through providers (after GDPR/region filtering), prefers
+/// those whose type matches the inferred model family, and assigns priorities.
+///
+/// # Errors
+///
+/// Returns [`RequestError::RoutingError`] if no pass-through provider remains.
+fn resolve_pass_through_mappings(
+    inner: &Arc<ReloadableState>,
+    decision: &crate::models::RouteDecision,
+) -> Result<Vec<crate::cli::ModelMapping>, RequestError> {
+    // No explicit [[models]] config — check for pass-through providers
+    let gdpr = inner.config.router.gdpr;
+    let required_region = inner.config.router.region.as_deref();
+    let all_pass_through: Vec<&crate::providers::ProviderConfig> = inner
+        .config
+        .providers
+        .iter()
+        .filter(|p| p.is_enabled() && p.pass_through.unwrap_or(false))
+        .filter(|p| {
+            // GDPR/region filtering for pass-through providers
+            if gdpr || required_region.is_some() {
+                let region_filter = required_region.unwrap_or("eu");
+                let provider_region = p.region.as_deref().unwrap_or("global");
+                provider_region == region_filter || provider_region == "global"
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    // Smart filtering: prefer providers whose type matches the inferred model family
+    let inferred = crate::routing::classify::inference::infer_provider_type(&decision.model_name);
+    let filtered: Vec<&crate::providers::ProviderConfig> = if let Some(inf) = inferred {
+        let matched: Vec<_> = all_pass_through
+            .iter()
+            .filter(|p| {
+                p.provider_type == inf
+                    || (inf == "openai" && p.provider_type == "openrouter")
+                    || (inf == "anthropic" && p.provider_type == "openrouter")
+                    || (inf == "gemini" && p.provider_type == "openrouter")
+            })
+            .copied()
+            .collect();
+        if matched.is_empty() {
+            all_pass_through
+        } else {
+            matched
+        }
+    } else {
+        all_pass_through
+    };
+
+    let pass_through_mappings: Vec<crate::cli::ModelMapping> = filtered
+        .iter()
+        .enumerate()
+        .map(|(i, p)| crate::cli::ModelMapping {
+            priority: (i as u32) + 1,
+            provider: p.name.clone(),
+            actual_model: decision.model_name.clone(),
+            inject_continuation_prompt: false,
+        })
+        .collect();
+
+    if pass_through_mappings.is_empty() {
+        Err(RequestError::RoutingError(format!(
+            "Model '{}' is not configured. Add a [[models]] entry in config.toml or set pass_through = true on a provider.",
+            decision.model_name
+        )))
+    } else {
+        info!(
+            "Pass-through routing '{}' to {} provider(s) (inferred: {:?})",
+            decision.model_name,
+            pass_through_mappings.len(),
+            inferred,
+        );
+        Ok(pass_through_mappings)
     }
 }
 
@@ -304,8 +355,7 @@ mod tests {
 
     /// Builds a minimal [`ReloadableState`] from a TOML snippet.
     fn make_state(toml: &str) -> Arc<ReloadableState> {
-        let config: crate::models::config::AppConfig =
-            toml::from_str(toml).expect("valid test TOML");
+        let config: crate::config::AppConfig = toml::from_str(toml).expect("valid test TOML");
         let router = Router::new(config.clone());
         let registry = Arc::new(ProviderRegistry::new());
         Arc::new(ReloadableState::new(config, router, registry))

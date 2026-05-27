@@ -139,7 +139,7 @@ pub async fn set_policy(
 #[cfg(feature = "policies")]
 fn swap_state(
     state: &Arc<AppState>,
-    new_config: crate::models::config::AppConfig,
+    new_config: crate::config::AppConfig,
     caller: &CallerIdentity,
     action: &str,
 ) -> Result<(), ErrorObjectOwned> {

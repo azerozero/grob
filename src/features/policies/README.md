@@ -13,7 +13,7 @@ Evaluates a [`context::RequestContext`] against glob-based [`config::MatchRules`
 | `PolicyMatcher` | `matcher.rs` | `server::dispatch`, `server::init` |
 | `RequestContext` | `context.rs` | dispatch, handlers |
 | `ResolvedPolicy` | `resolved.rs` | dispatch, retry |
-| `PolicyConfig`, `MatchRules`, `*Override` structs | `config.rs` | `models::config` |
+| `PolicyConfig`, `MatchRules`, `*Override` structs | `config.rs` | `config` |
 | `HitOverride`, `HitDecision`, `ToolUseInfo`, `evaluate_tool_use*` | `hit.rs` | dispatch, stream approval |
 | `HitAuthorization`, `HitAuthParams`, `AuthDecision`, `AuthMethod` | `hit_auth.rs` | HIT gateway handlers |
 | `MultiSigCollector`, `MultiSigStatus` | `multisig.rs` | HIT approval flow |

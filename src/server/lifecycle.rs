@@ -5,7 +5,7 @@
 //! `rustls-pki-types`.
 
 use super::{oauth_handlers, AppState};
-use crate::models::config::AppConfig;
+use crate::config::AppConfig;
 use axum::{routing::get, Router as AxumRouter};
 use std::sync::Arc;
 use tracing::{error, info, warn};
