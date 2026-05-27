@@ -2,10 +2,17 @@
 //!
 //! A decision token is an MCP token emitted by a boss agent, invisible to the
 //! target agent. Grob reads the `mode` claim to route toward the correct backend
-//! (paper for training, real for live). The agent cannot read or modify this token.
+//! (paper for training, real for live). The token travels over the MCP transport
+//! and is serialized to JSON, so it crosses a trust boundary: an adversary on
+//! that path could otherwise flip `mode` (training → live) to escape the paper
+//! sandbox. To prevent this, each token carries an HMAC-SHA256 tag keyed by the
+//! process policy secret (see [`crate::features::policies::signing`]); only a
+//! holder of that secret can mint or alter a token, so a tampered token fails
+//! [`DecisionToken::verify_integrity`].
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+
+use super::signing;
 
 /// Operating mode carried by a decision token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,8 +66,8 @@ pub enum DecisionTokenError {
     /// Mode claim has an unrecognized value.
     #[error("unknown decision token mode: {0}")]
     UnknownMode(String),
-    /// Token hash does not match computed hash (tampered).
-    #[error("decision token integrity check failed")]
+    /// Token authentication tag does not match (tampered or wrong key).
+    #[error("decision token authentication failed")]
     IntegrityFailure,
     /// Token issuer is not authorized.
     #[error("decision token issuer '{0}' is not authorized")]
@@ -89,7 +96,8 @@ pub struct DecisionClaims {
 
 /// A decision token issued by a boss agent.
 ///
-/// Contains claims readable only by grob, plus a SHA-256 integrity hash.
+/// Contains claims readable only by grob, plus a keyed HMAC-SHA256 tag that
+/// authenticates the claims against the policy secret.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecisionToken {
     /// Unique token identifier.
@@ -100,8 +108,8 @@ pub struct DecisionToken {
     pub claims: DecisionClaims,
     /// ISO-8601 timestamp of issuance.
     pub issued_at: String,
-    /// SHA-256 integrity hash.
-    pub hash: String,
+    /// Hex-encoded HMAC-SHA256 authentication tag over the token fields.
+    pub mac: String,
 }
 
 /// Discriminates session tokens from decision tokens.
@@ -136,7 +144,7 @@ pub struct AgentVisibleToken {
 }
 
 impl DecisionToken {
-    /// Creates a new decision token with computed integrity hash.
+    /// Creates a new decision token signed with the policy key.
     pub fn new(token_id: String, claims: DecisionClaims) -> Self {
         let issued_at = chrono::Utc::now().to_rfc3339();
         let mut token = Self {
@@ -144,35 +152,43 @@ impl DecisionToken {
             token_type: TokenType::Decision,
             claims,
             issued_at,
-            hash: String::new(),
+            mac: String::new(),
         };
-        token.hash = token.compute_hash();
+        token.mac = signing::compute_tag(&token.signing_bytes());
         token
     }
 
-    /// Computes SHA-256 hash over token fields for integrity verification.
-    fn compute_hash(&self) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(self.token_id.as_bytes());
-        hasher.update(self.token_type.to_string().as_bytes());
-        hasher.update(self.claims.mode.to_string().as_bytes());
-        hasher.update(self.claims.issuer.as_bytes());
-        hasher.update(self.claims.audience.as_bytes());
-        hasher.update(self.issued_at.as_bytes());
-        if let Some(ref exp) = self.claims.expires_at {
-            hasher.update(exp.as_bytes());
+    /// Returns the canonical byte string the MAC authenticates.
+    ///
+    /// Field order and the `\0` separator are part of the wire contract: the
+    /// separator prevents adjacent fields from being shifted across boundaries
+    /// (e.g. issuer `"a"` + audience `"bc"` colliding with `"ab"` + `"c"`).
+    fn signing_bytes(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        for part in [
+            self.token_id.as_str(),
+            self.token_type.to_string().as_str(),
+            self.claims.mode.to_string().as_str(),
+            self.claims.issuer.as_str(),
+            self.claims.audience.as_str(),
+            self.issued_at.as_str(),
+            self.claims.expires_at.as_deref().unwrap_or(""),
+        ] {
+            data.extend_from_slice(part.as_bytes());
+            data.push(0);
         }
-        hex::encode(hasher.finalize())
+        data
     }
 
-    /// Verifies token integrity (hash matches computed value).
+    /// Verifies the token's HMAC tag against the policy key.
     ///
     /// # Errors
     ///
-    /// Returns [`DecisionTokenError::IntegrityFailure`] if the stored
-    /// hash does not match the recomputed hash.
+    /// Returns [`DecisionTokenError::IntegrityFailure`] if the stored tag is
+    /// not a valid HMAC-SHA256 over the token fields under the policy key,
+    /// i.e. the token was tampered with or signed with a different key.
     pub fn verify_integrity(&self) -> Result<(), DecisionTokenError> {
-        if self.hash != self.compute_hash() {
+        if !signing::verify_tag(&self.signing_bytes(), &self.mac) {
             return Err(DecisionTokenError::IntegrityFailure);
         }
         Ok(())
@@ -182,8 +198,8 @@ impl DecisionToken {
     ///
     /// # Errors
     ///
-    /// Returns [`DecisionTokenError::IntegrityFailure`] if integrity
-    /// verification fails before resolving the backend.
+    /// Returns [`DecisionTokenError::IntegrityFailure`] if authentication
+    /// fails before resolving the backend.
     pub fn resolve_backend(&self) -> Result<BackendTarget, DecisionTokenError> {
         self.verify_integrity()?;
         Ok(match self.claims.mode {
@@ -328,6 +344,36 @@ mod tests {
     }
 
     #[test]
+    fn test_forged_token_with_recomputed_plain_hash_rejected() {
+        // The original attack: flip Training -> Live and recompute a *plain*
+        // SHA-256 over the fields. Without the policy key, the recomputed
+        // digest is not a valid HMAC tag, so verification must still fail.
+        use sha2::{Digest as _, Sha256};
+
+        let token =
+            DecisionToken::new("tok-forge".to_string(), boss_claims(DecisionMode::Training));
+        let mut forged = token.clone();
+        forged.claims.mode = DecisionMode::Live;
+
+        // Attacker recomputes an unkeyed hash over the tampered fields.
+        let mut hasher = Sha256::new();
+        hasher.update(forged.token_id.as_bytes());
+        hasher.update(forged.token_type.to_string().as_bytes());
+        hasher.update(forged.claims.mode.to_string().as_bytes());
+        hasher.update(forged.claims.issuer.as_bytes());
+        hasher.update(forged.claims.audience.as_bytes());
+        hasher.update(forged.issued_at.as_bytes());
+        forged.mac = hex::encode(hasher.finalize());
+
+        assert_eq!(
+            forged.verify_integrity(),
+            Err(DecisionTokenError::IntegrityFailure),
+            "forged token with recomputed plain hash must be rejected"
+        );
+        assert_eq!(route_by_decision_token(&forged), BackendTarget::Deny);
+    }
+
+    #[test]
     fn test_mode_from_str() {
         assert_eq!(
             "training".parse::<DecisionMode>().unwrap(),
@@ -369,7 +415,7 @@ mod tests {
         let deserialized: DecisionToken = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.token_id, token.token_id);
         assert_eq!(deserialized.claims.mode, token.claims.mode);
-        assert_eq!(deserialized.hash, token.hash);
+        assert_eq!(deserialized.mac, token.mac);
         assert!(deserialized.verify_integrity().is_ok());
     }
 }

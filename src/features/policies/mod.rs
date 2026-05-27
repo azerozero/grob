@@ -15,5 +15,6 @@ pub mod multisig;
 pub mod quorum;
 pub mod resolved;
 pub mod scoring;
+pub mod signing;
 #[cfg(feature = "policies")]
 pub mod stream;
