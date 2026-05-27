@@ -622,6 +622,7 @@ mod tests {
                 circuit_breaker: None,
 
                 health_check: None,
+                max_retries: None,
             },
             ProviderConfig {
                 name: "provider-b".to_string(),
@@ -645,6 +646,7 @@ mod tests {
                 circuit_breaker: None,
 
                 health_check: None,
+                max_retries: None,
             },
         ];
 
@@ -756,6 +758,7 @@ mod tests {
             pool: None,
             circuit_breaker: None,
             health_check: None,
+            max_retries: None,
         }];
 
         let registry = ProviderRegistry::from_configs_with_models(

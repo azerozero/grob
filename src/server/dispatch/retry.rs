@@ -15,7 +15,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use super::super::{is_auth_revoked_error, is_retryable, retry_delay, MAX_RETRIES};
+use super::super::{is_auth_revoked_error, is_retryable, provider_max_retries, retry_delay};
 use super::telemetry::{
     calculate_and_record_metrics, record_success_telemetry, store_response_cache,
 };
@@ -99,6 +99,7 @@ fn classify_and_handle_error(
     mapping: &crate::cli::ModelMapping,
     e: &crate::providers::error::ProviderError,
     attempt: u32,
+    max_retries: u32,
 ) -> bool {
     if let Some(ref trace_id) = ctx.trace_id {
         ctx.state
@@ -107,7 +108,7 @@ fn classify_and_handle_error(
             .trace_error(trace_id, &e.to_string());
     }
     emit_provider_error_metrics(mapping, e);
-    is_retryable(e) && attempt < MAX_RETRIES
+    is_retryable(e) && attempt < max_retries
 }
 
 /// Log provider error metrics for the streaming path.
@@ -265,23 +266,29 @@ pub(super) async fn dispatch_non_streaming(
         0
     };
 
+    // Resolve the per-provider retry budget (`[[providers]] max_retries = N`),
+    // falling back to the global default. Looked up once per dispatch — config
+    // is static for the lifetime of this loop (a hot reload swaps the snapshot
+    // for *future* requests, never an in-flight one).
+    let max_retries = provider_max_retries(ctx.inner, &attempt.mapping.provider);
+
     // Wrap in Option so we can move (not clone) on the final attempt.
     let mut owned_request = Some(provider_request);
-    for retry in 0..=MAX_RETRIES {
+    for retry in 0..=max_retries {
         if retry > 0 {
             let delay = retry_delay(retry - 1);
             warn!(
                 "Retrying provider {} (attempt {}/{}), backoff {}ms",
                 attempt.mapping.provider,
                 retry + 1,
-                MAX_RETRIES + 1,
+                max_retries + 1,
                 delay.as_millis()
             );
             tokio::time::sleep(delay).await;
         }
 
         // Clone for earlier attempts; move on the last to avoid an extra allocation.
-        let req = if retry < MAX_RETRIES {
+        let req = if retry < max_retries {
             owned_request.as_ref().expect("set before loop").clone()
         } else {
             owned_request.take().expect("set before loop")
@@ -364,7 +371,7 @@ pub(super) async fn dispatch_non_streaming(
                     return Err(ProviderLoopAction::AuthRevoked(e.to_string()));
                 }
 
-                if classify_and_handle_error(ctx, attempt.mapping, &e, retry) {
+                if classify_and_handle_error(ctx, attempt.mapping, &e, retry, max_retries) {
                     // On 429, try rotating to next pooled key before retrying.
                     if is_upstream_rate_limit(&e) && provider.rotate_key_pool() {
                         info!(
