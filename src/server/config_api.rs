@@ -28,7 +28,7 @@ fn remove_null_values(value: &mut serde_json::Value) {
     match value {
         serde_json::Value::Object(map) => {
             map.retain(|_, v| !v.is_null());
-            for (_, v) in map.iter_mut() {
+            for v in map.values_mut() {
                 remove_null_values(v);
             }
         }
