@@ -16,6 +16,21 @@ const NONCE_LEN: usize = 12;
 /// AES-256 key length (256 bits / 32 bytes).
 const KEY_LEN: usize = 32;
 
+/// Magic prefix marking a grob-encrypted blob (`b"GRB1"`).
+///
+/// Legacy blobs (written before this envelope existed) carry no magic and are
+/// the bare `nonce || ciphertext` produced by older builds. The magic makes
+/// "is this ciphertext or plaintext?" decidable: any blob starting with this
+/// prefix is unambiguously encrypted, so a GCM authentication failure on it is
+/// tampering or corruption — never a reason to fall back to plaintext.
+const MAGIC: &[u8; 4] = b"GRB1";
+
+/// Envelope format version, appended after [`MAGIC`].
+const VERSION: u8 = 1;
+
+/// Length of the envelope header (`MAGIC || VERSION`).
+const HEADER_LEN: usize = MAGIC.len() + 1;
+
 /// Manages AES-256-GCM encryption with a file-backed key.
 pub(crate) struct StorageCipher {
     cipher: Aes256Gcm,
@@ -55,7 +70,10 @@ impl StorageCipher {
         Ok(Self { cipher })
     }
 
-    /// Encrypts plaintext bytes. Returns `nonce || ciphertext` (12 + N bytes).
+    /// Encrypts plaintext bytes. Returns `MAGIC || VERSION || nonce || ciphertext`.
+    ///
+    /// The [`MAGIC`] prefix makes the output self-describing so a later read can
+    /// tell encrypted blobs apart from legacy plaintext without guessing.
     ///
     /// # Errors
     ///
@@ -71,28 +89,39 @@ impl StorageCipher {
             .encrypt(nonce, plaintext)
             .map_err(|e| anyhow::anyhow!("AES-GCM encryption failed: {}", e))?;
 
-        let mut result = Vec::with_capacity(NONCE_LEN + ciphertext.len());
+        let mut result = Vec::with_capacity(HEADER_LEN + NONCE_LEN + ciphertext.len());
+        result.extend_from_slice(MAGIC);
+        result.push(VERSION);
         result.extend_from_slice(&nonce_bytes);
         result.extend_from_slice(&ciphertext);
         Ok(result)
     }
 
-    /// Decrypts data produced by [`encrypt`]. Expects `nonce || ciphertext`.
+    /// Reports whether a blob carries the grob encryption envelope header.
+    ///
+    /// A blob that starts with [`MAGIC`] is unambiguously encrypted; the body
+    /// must authenticate or be rejected. A blob without it is legacy data
+    /// (either a pre-envelope ciphertext or genuine plaintext).
+    fn has_envelope(data: &[u8]) -> bool {
+        data.len() >= HEADER_LEN && &data[..MAGIC.len()] == MAGIC
+    }
+
+    /// Decrypts the AES-256-GCM body `nonce || ciphertext` (no envelope header).
     ///
     /// # Errors
     ///
-    /// Returns an error if the data is shorter than the nonce length
+    /// Returns an error if the body is shorter than the nonce length
     /// or AES-256-GCM decryption fails (wrong key or corrupted data).
-    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
-        if data.len() < NONCE_LEN {
+    fn decrypt_body(&self, body: &[u8]) -> Result<Vec<u8>> {
+        if body.len() < NONCE_LEN {
             anyhow::bail!(
                 "Encrypted data too short ({} bytes, minimum {})",
-                data.len(),
+                body.len(),
                 NONCE_LEN
             );
         }
 
-        let (nonce_bytes, ciphertext) = data.split_at(NONCE_LEN);
+        let (nonce_bytes, ciphertext) = body.split_at(NONCE_LEN);
         let nonce = Nonce::from_slice(nonce_bytes);
 
         self.cipher
@@ -100,18 +129,68 @@ impl StorageCipher {
             .map_err(|e| anyhow::anyhow!("AES-GCM decryption failed: {}", e))
     }
 
-    /// Attempts decryption; falls back to treating data as plaintext JSON.
+    /// Decrypts a blob produced by [`encrypt`].
     ///
-    /// Handles migration from unencrypted to encrypted storage: if decryption
-    /// fails but the data is valid JSON, it is returned as-is (unencrypted).
-    pub fn decrypt_or_plaintext(&self, data: &[u8]) -> Vec<u8> {
-        match self.decrypt(data) {
-            Ok(plaintext) => plaintext,
-            Err(_) => {
-                // Likely unencrypted legacy data — return as-is.
-                data.to_vec()
+    /// Accepts both the current envelope (`MAGIC || VERSION || nonce ||
+    /// ciphertext`) and the legacy bare-body form (`nonce || ciphertext`) so
+    /// upgrades do not lock anyone out.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the data is too short, the envelope version is
+    /// unsupported, or AES-256-GCM decryption fails (wrong key, tampering, or
+    /// corruption).
+    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        if Self::has_envelope(data) {
+            let version = data[MAGIC.len()];
+            if version != VERSION {
+                anyhow::bail!("Unsupported encryption envelope version: {}", version);
             }
+            self.decrypt_body(&data[HEADER_LEN..])
+        } else {
+            self.decrypt_body(data)
         }
+    }
+
+    /// Decrypts a credential blob, tolerating only genuine legacy plaintext.
+    ///
+    /// This is the credential-read path (OAuth tokens, secrets, virtual keys).
+    /// It fails closed: an enveloped blob (carrying [`MAGIC`]) that fails
+    /// authentication is treated as tampering or corruption and surfaces an
+    /// error — it is never reinterpreted as plaintext. Only a blob with no
+    /// envelope and no decryptable legacy body is accepted as legacy plaintext,
+    /// and that fallback always logs a `warn!` so the silent fail-open is gone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when an enveloped blob fails to decrypt, i.e. when data
+    /// that should be authentic ciphertext does not authenticate.
+    pub fn decrypt_or_plaintext(&self, data: &[u8]) -> Result<Vec<u8>> {
+        // Enveloped blobs are unambiguously ciphertext: authenticate or reject.
+        // Falling back to plaintext here would be a fail-open on credentials.
+        if Self::has_envelope(data) {
+            return self.decrypt(data).context(
+                "encrypted credential blob failed authentication (tampered or corrupted); \
+                 refusing to fall back to plaintext",
+            );
+        }
+
+        // No envelope: either a pre-envelope ciphertext or genuine legacy
+        // plaintext. A successful legacy decrypt proves it was ciphertext.
+        if let Ok(plaintext) = self.decrypt_body(data) {
+            return Ok(plaintext);
+        }
+
+        // Genuine legacy plaintext (or undecryptable non-enveloped bytes). We
+        // accept it for backward compatibility but never silently: emit a
+        // warning so operators can migrate it by re-saving. No secret material
+        // is logged — only the size.
+        tracing::warn!(
+            bytes = data.len(),
+            "reading credential as unencrypted legacy plaintext (no encryption envelope); \
+             re-save it to migrate to AES-256-GCM at rest"
+        );
+        Ok(data.to_vec())
     }
 
     /// Derives the key file path from the database path.
@@ -122,7 +201,6 @@ impl StorageCipher {
             .join("encryption.key")
     }
 
-    /// Generates a random 256-bit key and saves it with owner-only permissions.
     /// Generates a random 256-bit key and saves it with owner-only permissions.
     ///
     /// Caller is responsible for zeroizing the returned `Vec<u8>` after use.
@@ -151,31 +229,116 @@ impl StorageCipher {
 mod tests {
     use super::*;
 
-    #[test]
-    fn encrypt_decrypt_roundtrip() {
+    fn test_cipher() -> (tempfile::TempDir, StorageCipher) {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("grob.db");
         let cipher = StorageCipher::load_or_generate(&db_path).unwrap();
+        (dir, cipher)
+    }
+
+    /// Builds a legacy (pre-envelope) ciphertext: bare `nonce || ciphertext`.
+    fn legacy_encrypt(cipher: &StorageCipher, plaintext: &[u8]) -> Vec<u8> {
+        let enveloped = cipher.encrypt(plaintext).unwrap();
+        assert!(StorageCipher::has_envelope(&enveloped));
+        enveloped[HEADER_LEN..].to_vec()
+    }
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let (_dir, cipher) = test_cipher();
 
         let plaintext = b"secret oauth token data";
         let encrypted = cipher.encrypt(plaintext).unwrap();
 
-        // Encrypted data should differ from plaintext.
-        assert_ne!(&encrypted[NONCE_LEN..], plaintext);
+        // Output carries the self-describing envelope header.
+        assert!(StorageCipher::has_envelope(&encrypted));
+        assert_eq!(&encrypted[..MAGIC.len()], MAGIC);
+        assert_eq!(encrypted[MAGIC.len()], VERSION);
+        // Ciphertext body must differ from plaintext.
+        assert_ne!(&encrypted[HEADER_LEN + NONCE_LEN..], plaintext);
 
         let decrypted = cipher.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted, plaintext);
     }
 
+    /// (a) A valid enveloped ciphertext round-trips through the credential path.
     #[test]
-    fn decrypt_or_plaintext_with_unencrypted() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("grob.db");
-        let cipher = StorageCipher::load_or_generate(&db_path).unwrap();
+    fn decrypt_or_plaintext_roundtrips_valid_ciphertext() {
+        let (_dir, cipher) = test_cipher();
+
+        let secret = br#"{"provider_id":"anthropic","token":"sk-xxx"}"#;
+        let encrypted = cipher.encrypt(secret).unwrap();
+        let out = cipher.decrypt_or_plaintext(&encrypted).unwrap();
+        assert_eq!(out, secret);
+    }
+
+    /// (b) Genuine legacy plaintext (no envelope, not decryptable) still reads.
+    #[test]
+    fn decrypt_or_plaintext_reads_genuine_legacy_plaintext() {
+        let (_dir, cipher) = test_cipher();
 
         let json = br#"{"provider_id":"test"}"#;
-        let result = cipher.decrypt_or_plaintext(json);
+        // Sanity: this does not accidentally look like our envelope.
+        assert!(!StorageCipher::has_envelope(json));
+        let result = cipher.decrypt_or_plaintext(json).unwrap();
         assert_eq!(result, json);
+    }
+
+    /// Backward compatibility: a pre-envelope ciphertext still decrypts.
+    #[test]
+    fn decrypt_or_plaintext_reads_legacy_ciphertext() {
+        let (_dir, cipher) = test_cipher();
+
+        let secret = b"legacy encrypted secret";
+        let legacy = legacy_encrypt(&cipher, secret);
+        assert!(!StorageCipher::has_envelope(&legacy));
+        let out = cipher.decrypt_or_plaintext(&legacy).unwrap();
+        assert_eq!(out, secret);
+    }
+
+    /// (c) A tampered enveloped ciphertext fails closed — no raw-byte fallback.
+    #[test]
+    fn decrypt_or_plaintext_tampered_envelope_fails_closed() {
+        let (_dir, cipher) = test_cipher();
+
+        let mut encrypted = cipher.encrypt(b"important credential").unwrap();
+        // Flip a byte inside the ciphertext body (after header + nonce).
+        let idx = HEADER_LEN + NONCE_LEN + 1;
+        encrypted[idx] ^= 0xFF;
+
+        let result = cipher.decrypt_or_plaintext(&encrypted);
+        assert!(
+            result.is_err(),
+            "tampered enveloped ciphertext must not fall back to plaintext"
+        );
+    }
+
+    /// A truncated enveloped blob (looks encrypted, body invalid) fails closed.
+    #[test]
+    fn decrypt_or_plaintext_truncated_envelope_fails_closed() {
+        let (_dir, cipher) = test_cipher();
+
+        let mut encrypted = cipher.encrypt(b"important credential").unwrap();
+        // Drop the authentication tag and part of the ciphertext.
+        encrypted.truncate(HEADER_LEN + NONCE_LEN + 1);
+        assert!(StorageCipher::has_envelope(&encrypted));
+
+        let result = cipher.decrypt_or_plaintext(&encrypted);
+        assert!(
+            result.is_err(),
+            "truncated enveloped ciphertext must fail closed"
+        );
+    }
+
+    /// An unsupported envelope version is rejected rather than mis-parsed.
+    #[test]
+    fn decrypt_rejects_unknown_version() {
+        let (_dir, cipher) = test_cipher();
+
+        let mut encrypted = cipher.encrypt(b"data").unwrap();
+        encrypted[MAGIC.len()] = VERSION.wrapping_add(1);
+        assert!(cipher.decrypt(&encrypted).is_err());
+        assert!(cipher.decrypt_or_plaintext(&encrypted).is_err());
     }
 
     #[test]
@@ -193,13 +356,12 @@ mod tests {
 
     #[test]
     fn tampered_ciphertext_fails() {
-        let dir = tempfile::tempdir().unwrap();
-        let db_path = dir.path().join("grob.db");
-        let cipher = StorageCipher::load_or_generate(&db_path).unwrap();
+        let (_dir, cipher) = test_cipher();
 
         let mut encrypted = cipher.encrypt(b"important data").unwrap();
-        // Flip a byte in the ciphertext (after the nonce).
-        if let Some(byte) = encrypted.get_mut(NONCE_LEN + 1) {
+        // Flip a byte in the ciphertext body (after header + nonce).
+        let idx = HEADER_LEN + NONCE_LEN + 1;
+        if let Some(byte) = encrypted.get_mut(idx) {
             *byte ^= 0xFF;
         }
         assert!(cipher.decrypt(&encrypted).is_err());
