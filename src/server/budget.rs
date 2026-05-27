@@ -12,7 +12,36 @@ use super::{AppState, ReloadableState, RequestError};
 /// NOTE: 2 retries (3 total attempts) balances latency vs resilience — most
 /// transient 429/5xx errors resolve within 2 exponential-backoff cycles (~1-4s),
 /// while more retries would unacceptably delay user-facing LLM responses.
+///
+/// Acts as the **global default**. Individual providers can override the
+/// budget via `[[providers]] max_retries = N` — see [`provider_max_retries`]
+/// for the per-provider lookup helper.
 pub(crate) const MAX_RETRIES: u32 = 2;
+
+/// Resolves the retry budget for a named provider.
+///
+/// Returns the value of `[[providers]] max_retries = N` when set, or the
+/// global [`MAX_RETRIES`] default when the provider is absent or did not
+/// override the budget. Used by the dispatch retry loop so per-provider
+/// tuning applies without hard-coding provider names in the dispatch path.
+pub(crate) fn provider_max_retries(inner: &Arc<ReloadableState>, provider_name: &str) -> u32 {
+    resolve_max_retries(&inner.config.providers, provider_name)
+}
+
+/// Pure lookup helper backing [`provider_max_retries`].
+///
+/// Decoupled from [`ReloadableState`] so unit tests can pass a literal
+/// `[ProviderConfig]` slice without standing up the full app state graph.
+pub(crate) fn resolve_max_retries(
+    providers: &[crate::cli::ProviderConfig],
+    provider_name: &str,
+) -> u32 {
+    providers
+        .iter()
+        .find(|p| p.name == provider_name)
+        .and_then(|p| p.max_retries)
+        .unwrap_or(MAX_RETRIES)
+}
 
 /// Data needed to record Prometheus metrics for a completed request.
 pub(crate) struct RequestMetrics<'a> {
@@ -530,5 +559,76 @@ mod tests {
     fn estimate_output_counts_text_blocks() {
         // "abcd efgh" = 9 chars → ceil(9/4) = 3 tokens.
         assert_eq!(estimate_output_tokens(&response_with_text("abcd efgh")), 3);
+    }
+
+    // ── per-provider max_retries resolution ────────────────────────────────
+
+    /// Builds a stub provider config carrying only the fields the lookup reads.
+    fn provider_with_retries(name: &str, max_retries: Option<u32>) -> crate::cli::ProviderConfig {
+        crate::cli::ProviderConfig {
+            name: name.into(),
+            provider_type: "stub".into(),
+            auth_type: crate::cli::AuthType::ApiKey,
+            api_key: None,
+            oauth_provider: None,
+            project_id: None,
+            location: None,
+            base_url: None,
+            headers: None,
+            models: vec![],
+            enabled: Some(true),
+            budget_usd: None,
+            region: None,
+            pass_through: None,
+            tls_cert: None,
+            tls_key: None,
+            tls_ca: None,
+            pool: None,
+            circuit_breaker: None,
+            health_check: None,
+            max_retries,
+        }
+    }
+
+    #[test]
+    fn resolve_max_retries_falls_back_to_default_for_unknown_provider() {
+        let providers = vec![provider_with_retries("anthropic", Some(5))];
+        assert_eq!(resolve_max_retries(&providers, "openai"), MAX_RETRIES);
+    }
+
+    #[test]
+    fn resolve_max_retries_falls_back_to_default_when_unset() {
+        let providers = vec![provider_with_retries("anthropic", None)];
+        assert_eq!(resolve_max_retries(&providers, "anthropic"), MAX_RETRIES);
+    }
+
+    #[test]
+    fn resolve_max_retries_honors_override() {
+        // OpenAI: better queueing — 3 retries amortise transient 429s.
+        let providers = vec![provider_with_retries("openai", Some(3))];
+        assert_eq!(resolve_max_retries(&providers, "openai"), 3);
+    }
+
+    #[test]
+    fn resolve_max_retries_honors_zero_override() {
+        // Explicit `max_retries = 0` disables retries (single attempt, no fallback retry).
+        let providers = vec![provider_with_retries("flaky", Some(0))];
+        assert_eq!(resolve_max_retries(&providers, "flaky"), 0);
+    }
+
+    #[test]
+    fn resolve_max_retries_isolates_per_provider_overrides() {
+        // Distinct budgets must not leak between providers.
+        let providers = vec![
+            provider_with_retries("anthropic", Some(2)),
+            provider_with_retries("openai", Some(3)),
+            provider_with_retries("default-provider", None),
+        ];
+        assert_eq!(resolve_max_retries(&providers, "anthropic"), 2);
+        assert_eq!(resolve_max_retries(&providers, "openai"), 3);
+        assert_eq!(
+            resolve_max_retries(&providers, "default-provider"),
+            MAX_RETRIES
+        );
     }
 }
