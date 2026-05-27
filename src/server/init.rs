@@ -4,7 +4,10 @@ use crate::features::token_pricing::spend::SpendTracker;
 use crate::features::token_pricing::SharedPricingTable;
 use crate::models::config::AppConfig;
 use crate::providers::ProviderRegistry;
-use crate::security::{AuditLog, CircuitBreakerRegistry, RateLimitConfig, RateLimiter};
+use crate::security::{
+    AuditLog, CircuitBreakerRegistry, RateLimitConfig, RateLimiter, ToolSpikeConfig,
+    ToolSpikeDetector,
+};
 use crate::shared::message_tracing::MessageTracer;
 use crate::storage::GrobStore;
 use std::sync::Arc;
@@ -386,6 +389,26 @@ pub(crate) fn init_mcp(
     Some(state)
 }
 
+/// Initializes the tool-call spike anomaly detector (T-AD1).
+///
+/// Returns `None` when both warn and block thresholds are zero (the
+/// feature is fully disabled), otherwise an `Arc` ready to store on
+/// [`crate::server::SecurityState`].
+pub(crate) fn init_tool_spike_detector(config: &AppConfig) -> Option<Arc<ToolSpikeDetector>> {
+    let cfg = ToolSpikeConfig {
+        warn_per_min: config.security.tool_spike_warn_per_min,
+        block_per_min: config.security.tool_spike_block_per_min,
+    };
+    if !cfg.is_active() {
+        return None;
+    }
+    info!(
+        "🔍 Tool-spike detector enabled (warn={}, block={} per session per min)",
+        cfg.warn_per_min, cfg.block_per_min
+    );
+    Some(Arc::new(ToolSpikeDetector::new(cfg)))
+}
+
 /// Initializes the adaptive provider scorer if enabled.
 pub(crate) fn init_provider_scorer(
     config: &AppConfig,
@@ -492,6 +515,20 @@ pub(crate) fn spawn_background_tasks(state: &Arc<super::AppState>) {
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                     _ => {}
                 }
+            }
+        });
+    }
+
+    // Tool-spike detector: prune session rings idle longer than the
+    // rolling window so memory stays bounded under churning session ids.
+    if let Some(detector) = state.security.tool_spike_detector.clone() {
+        tokio::spawn(async move {
+            // 60s cadence matches the rolling window: an entry is dropped
+            // at most one window after its last activity.
+            let mut ticker = tokio::time::interval(std::time::Duration::from_secs(60));
+            loop {
+                ticker.tick().await;
+                detector.cleanup_idle();
             }
         });
     }

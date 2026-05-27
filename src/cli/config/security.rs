@@ -67,6 +67,20 @@ pub struct SecurityConfig {
     /// keyed on a non-anonymous tenant id.
     #[serde(default)]
     pub strict_tenant: bool,
+    /// Tool-call spike: warn threshold per session per minute (default 100).
+    ///
+    /// Crossing this rolling 60s count logs a warning and emits a
+    /// metric without rejecting the request. Set to `0` to disable
+    /// warnings.
+    #[serde(default = "default_tool_spike_warn_per_min")]
+    pub tool_spike_warn_per_min: u32,
+    /// Tool-call spike: block threshold per session per minute (default 500).
+    ///
+    /// Crossing this rolling 60s count returns HTTP 429, writes a
+    /// signed audit entry, and emits a metric. Set to `0` to disable
+    /// blocking. Setting both thresholds to `0` disables the detector.
+    #[serde(default = "default_tool_spike_block_per_min")]
+    pub tool_spike_block_per_min: u32,
 }
 
 impl Default for SecurityConfig {
@@ -90,6 +104,8 @@ impl Default for SecurityConfig {
             scoring_decay_rate: default_scoring_decay_rate(),
             scoring_persist: false,
             strict_tenant: false,
+            tool_spike_warn_per_min: default_tool_spike_warn_per_min(),
+            tool_spike_block_per_min: default_tool_spike_block_per_min(),
         }
     }
 }
@@ -129,6 +145,19 @@ fn default_scoring_window_size() -> usize {
 // stale high scores while keeping recently-active providers competitive.
 fn default_scoring_decay_rate() -> f64 {
     0.001
+}
+
+// NOTE: 100 tool calls/min/session is roughly the upper bound for a busy
+// build run (Claude Code reading ~2 files/sec while exploring a tree).
+// Above this we want a paper trail but still let the request through.
+fn default_tool_spike_warn_per_min() -> u32 {
+    100
+}
+
+// NOTE: 500 tool calls/min/session is firmly anomalous — >8/sec sustained,
+// which only a runaway loop produces. Blocks dispatch and audit-logs.
+fn default_tool_spike_block_per_min() -> u32 {
+    500
 }
 
 /// EU AI Act compliance configuration
