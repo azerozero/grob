@@ -103,6 +103,13 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | [0016](decisions/0016-decision-tokens-transparent-routing.md) | Decision tokens, transparent routing |
 | [0017](decisions/0017-sokolsky-log-backend.md) | Sokolsky log backend |
 | [0018](decisions/0018-nature-inspired-routing.md) | Nature-inspired routing (RE-1a/RE-1b) |
+| [0019](decisions/0019-ema-stigmergy-endpoint-scoring.md) | EMA stigmergy — adaptive endpoint health scoring (proposed) |
+| [0020](decisions/0020-hedged-requests.md) | Hedged requests — tail-latency reduction (proposed) |
+| [0022](decisions/0022-declarative-endpoints-policies-schema.md) | Declarative `[[endpoints]]` and `[[policies]]` routing schema (proposed) |
+| [0023](decisions/0023-preset-naming-and-composition.md) | Preset naming and composition strategy (proposed) |
+| [0024](decisions/0024-preset-as-compliance-template.md) | Preset-as-compliance-template (proposed) |
+| [0025](decisions/0025-rpc-mutation-transactionality.md) | RPC mutation transactionality and in-flight visibility (proposed) |
+| [0026](decisions/0026-model-name-canonicalization-policy.md) | Model name canonicalization policy (proposed) |
 
 ### Examples
 

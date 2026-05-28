@@ -186,6 +186,34 @@ When the scope of a change involves a new architectural decision, add
 an ADR in `docs/decisions/NNNN-short-title.md` using
 `docs/decisions/0000-template.md`.
 
+## Drift Surveillance
+
+[`CONTRACTS.md`](CONTRACTS.md) records the **intended behavior** of
+critical functions and APIs — invariants, pre/postconditions, boundary
+behavior, and known drifts. It is the reference against which an
+autophagy scan compares the code to catch **silent semantic drift**:
+changes that compile and pass tests but quietly violate the original
+intention.
+
+When your change alters the behavior of a contracted item, you must keep
+`CONTRACTS.md` in lockstep:
+
+- **Intentional behavior change** — update the relevant contract section
+  (invariants, postconditions, boundary behavior) so it describes the
+  new intended behavior, and add a dated entry under **Known drifts**
+  explaining what changed and why. The drift entry is the audit trail;
+  do not silently overwrite an invariant.
+- **Bug fix** — do **not** edit `CONTRACTS.md` to match a bug. The
+  contract is the source of truth; fix the code so it matches the
+  contract instead.
+- **New contracted surface** — if you add a function or API critical
+  enough to be audited (routing, dispatch, spend, DLP, storage), add a
+  new contract section following the existing format.
+
+Reviewers should reject a PR that changes contracted behavior without a
+corresponding `CONTRACTS.md` update. If you are unsure whether an item is
+contracted, search `CONTRACTS.md` for its name before merging.
+
 ## Reporting bugs
 
 File bugs at <https://github.com/azerozero/grob/issues/new>. Include

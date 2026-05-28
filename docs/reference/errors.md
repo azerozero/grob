@@ -79,7 +79,7 @@ A provider has accumulated 5+ consecutive failures. Grob skips it for 30 seconds
 
 ### `Failed to parse config` (startup)
 
-The TOML config file has a syntax error. Run `grob doctor` for validation details, or start fresh with `grob preset apply medium`.
+The TOML config file has a syntax error. Run `grob doctor` for validation details, or start fresh with `grob preset apply perf`.
 
 ## Provider-specific errors
 

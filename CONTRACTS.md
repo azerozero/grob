@@ -30,7 +30,7 @@
 - On success: returns `DispatchResult` (Streaming, Complete, or FanOut)
 - On failure: returns `AppError` with a specific error variant
 - DLP events are emitted for every DLP action taken
-- Spend is recorded after successful provider response
+- Spend is recorded after a successful provider response. For **complete** responses this happens inline after the provider returns; for **streaming** responses the `SpendStream` wrapper records on stream termination (see `SpendStream::poll_next` below). Both paths record against the same tenant and routed model name.
 
 **Boundary behavior:**
 - No providers available: returns `AppError` (after exhausting all fallbacks)
@@ -154,27 +154,31 @@
 - INV-2 (Non-blocking): Budget check reads current spend but does not record or modify anything.
 - INV-3 (Threshold semantics): The check uses `>=` (greater-than-or-equal), meaning the exact limit value is already considered exceeded.
 - INV-4 (Zero global bypass): A `global_limit` of `0.0` means no global limit (skipped, not "zero budget").
+- INV-5 (Tenant isolation): `check_tenant_budget(tenant, ...)` evaluates the supplied limits against the **tenant-local** spend cache (`load_spend(Some(tenant))`), not the global counter. One tenant exceeding its quota cannot block another. `tenant == None` falls back to [`DEFAULT_TENANT`](crate::storage::DEFAULT_TENANT) so legacy single-tenant callers still go through the per-tenant path.
 
 **Preconditions:**
 - Spend data is loaded and reflects the current month
 
 **Postconditions:**
 - On `Ok(())`: no limit exceeded
-- On `Err(BudgetError)`: message identifies which limit (model/provider/global) was hit
+- On `Err(BudgetError)`: message identifies which limit (model/provider/global) was hit; for `check_tenant_budget`, the message names the offending tenant
 
 **Boundary behavior:**
 - `model_limit` is `None`: model budget check is skipped
 - `provider_limit` is `None`: provider budget check is skipped
 - `global_limit` is `0.0`: global budget check is skipped
 - New month: spend data auto-resets before check (via `reset_if_new_month`)
+- `check_tenant_budget` with no `GrobStore` (test/CLI mode): falls back to the global `check_budget` path with `tenant_limit` used as the global limit
 
 **Known drifts:**
-- (none recorded yet)
+- 2026-05 (intentional, multi-tenant isolation): `record_tenant` no longer accumulates tenant-tagged spend into the **global** counter. Previously a per-tenant overspend tripped the global budget for every other tenant. The event still lands in the global JSONL journal as a tenant-tagged copy (so exports keep working), but the global `$` total and per-tenant budget checks are now isolated. Global `check_budget` therefore reflects only untagged (`None`/default-tenant) spend.
 
 **Red flags to detect:**
 - Check order changed (e.g., global before model)
 - `>` used instead of `>=` (off-by-one at boundary)
 - `global_limit == 0.0` treated as "zero budget" instead of "no limit"
+- Tenant spend leaking back into the global counter (regression of the multi-tenant isolation drift)
+- `check_tenant_budget` reading global spend instead of `load_spend(Some(tenant))`
 
 ---
 
@@ -374,3 +378,39 @@
 - Probe spawned with `BlockingClient` or on the dispatch runtime — must stay on tokio, timeout isolated.
 - `JoinHandle::abort()` missing from `Drop` — registry reload would leak tasks.
 - `HealthStatus` retrieved via mutex on the hot path — must stay `AtomicBool`.
+
+---
+
+## SpendStream::poll_next() (streaming spend accounting)
+
+**Module:** `src/server/dispatch/spend_stream.rs`
+**Intention:** Passthrough wrapper around a provider SSE byte stream that observes events, captures provider-reported usage, and records persistent spend on stream termination. Closes the historical gap where streaming responses recorded **no** persistent spend (only ephemeral Prometheus metrics), so budget enforcement now covers streamed requests the same as complete ones.
+
+**Invariants:**
+- INV-1 (Byte transparency): Each chunk is forwarded unchanged in the same poll. Time-to-first-byte and inter-chunk timing are identical to the un-wrapped stream; the wrapper never buffers, reorders, or rewrites bytes.
+- INV-2 (Record once, on termination): Spend is recorded exactly once, when the underlying stream ends (or errors). Mid-stream chunks never commit spend.
+- INV-3 (Token source priority): Provider-reported usage is authoritative (`message_start.message.usage.input_tokens`, `message_delta.usage.output_tokens`). The estimate-mode fallback (pre-captured input estimate + ~4-chars/token output estimate from accumulated `text_delta`) is used only when the provider omits usage **and** token counting is in `Estimate` mode.
+- INV-4 (Tenant + model parity): Spend is recorded against the same tenant (`SpendStreamContext::tenant_id`) and routed model name as the non-streaming path, so per-tenant isolation (see `check_budget` INV-5) holds for streamed requests.
+- INV-5 (Off-hot-path commit): Cost computation, the spend mutex, and the JSONL append run in a detached spawned task on termination, so the final client poll returns without waiting on disk I/O.
+
+**Preconditions:**
+- Wrapper owns an `Arc<AppState>` and `String` clones (it outlives the request handler; it must not borrow the transient `DispatchContext`).
+- `SpendStreamContext` carries provider, model_name, actual_model, route_type, tenant_id, is_subscription, and the input estimate.
+
+**Postconditions:**
+- The wrapped stream yields the identical sequence of `Bytes`/errors as the inner stream.
+- On termination, spend is recorded via the shared `record_spend` path (tenant-isolated) unless billed amount is `$0`.
+
+**Boundary behavior:**
+- OAuth/subscription provider (`is_subscription == true`): billed as `$0` (subscription cost model).
+- `api` mode with no provider usage: nothing is recorded — matching non-streaming, where `$0` usage bills `$0`.
+- Stream errors mid-flight: spend for usage observed so far is still recorded on termination.
+
+**Known drifts:**
+- 2026-05 (intentional, streaming spend accounting): streaming responses now commit spend to the monthly JSONL journal. Previously `send_message_stream` only emitted ephemeral Prometheus metrics and committed nothing, so streamed traffic was invisible to budget enforcement.
+
+**Red flags to detect:**
+- Chunk buffered/parsed with `serde_json` on every poll instead of a cheap `memchr::memmem` substring scan (only usage-bearing events should be JSON-parsed).
+- Spend recorded per-chunk instead of once on termination (double-billing).
+- Terminal recording run inline on the poll path instead of a detached task (TTFB / tail-latency regression).
+- Streaming spend recorded against the global counter instead of the request's tenant (regression of tenant isolation).

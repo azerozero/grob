@@ -14,6 +14,11 @@ Start here: **[Documentation Index](index.md)**
 - [How to Contribute](how-to/contribute.md) -- Development workflow, code style, CI
 - [Provider Setup](how-to/providers.md) -- Per-provider configuration
 - [OAuth Setup](how-to/oauth-setup.md) -- OAuth for Anthropic Pro/Max and Gemini Pro
+- [OAuth Testing](how-to/oauth-testing.md) -- Verify and debug OAuth flows
+- [Manage Secrets](how-to/manage-secrets.md) -- Manage upstream provider secrets
+- [Auto-tune Routing](how-to/auto-tune-routing.md) -- Tune routing with trace analysis
+- [Configure the SimHash Cache](how-to/configure-simhash-cache.md) -- Fuzzy response cache setup
+- [Use grob_hint](how-to/use-grob-hint.md) -- Override request complexity per call
 - [Troubleshooting](how-to/troubleshooting.md) -- Common errors and fixes
 
 ## Reference (information-oriented)
@@ -22,6 +27,8 @@ Start here: **[Documentation Index](index.md)**
 - [CLI Reference](reference/cli.md) -- All commands and flags
 - [Error Reference](reference/errors.md) -- HTTP status codes and error types
 - [OpenAI Compatibility](reference/openai-compatibility.md) -- `/v1/chat/completions` endpoint
+- [HIT Risk Scoring](reference/hit-scoring.md) -- Human-in-the-loop risk scoring details
+- [DLP Indirect Injection Detection](reference/dlp-indirect-injection.md) -- Indirect prompt injection coverage
 - [OpenAPI Specification](openapi.yaml) -- Full API in OpenAPI 3.0
 
 ## Explanation (understanding-oriented)
