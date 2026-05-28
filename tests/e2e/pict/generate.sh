@@ -198,7 +198,6 @@ while IFS=$'\t' read -r auth provider dlp policy format payload; do
         echo "HTTP ${status}"
 
         # Assertions
-        local asserts
         asserts=$(build_asserts "$status" "$auth" "$provider" "$dlp" "$format" "$payload")
         if [[ -n "$asserts" ]]; then
             echo "[Asserts]"

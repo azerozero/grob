@@ -2,7 +2,7 @@
 # A6: Decrypted entry must contain model name (EU AI Act Art. 12)
 AUDIT_DIR="${1:?}"
 RSSI_KEY="crypto/rssi.key"
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 for f in "$AUDIT_DIR"/*; do
   model=$(age -d -i "$RSSI_KEY" "$f" | jq -r '.model // .model_name // empty' 2>/dev/null)
   [ -n "$model" ] || { echo "FAIL: no model field in $f"; exit 1; }

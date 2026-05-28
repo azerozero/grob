@@ -4,7 +4,7 @@
 # For now, just verify that entries have the signature field.
 AUDIT_DIR="${1:?usage: $0 <audit_dir>}"
 RSSI_KEY="crypto/rssi.key"
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 
 for f in "$AUDIT_DIR"/*; do
   decrypted=$(age -d -i "$RSSI_KEY" "$f" 2>/dev/null) || { echo "FAIL: cannot decrypt $f"; exit 1; }

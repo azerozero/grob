@@ -3,11 +3,13 @@
 # This is a negative test — tampering should be detectable.
 AUDIT_DIR="${1:?usage: $0 <audit_dir>}"
 RSSI_KEY="crypto/rssi.key"
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 
 # Decrypt all entries into a temp JSONL file.
+# Bash expands globs in lexical (LC_COLLATE) order, so this matches the
+# previous `ls | sort` behaviour without the word-splitting fragility.
 PLAINTEXT=$(mktemp)
-for f in $(ls "$AUDIT_DIR"/* | sort); do
+for f in "$AUDIT_DIR"/*; do
   age -d -i "$RSSI_KEY" "$f" 2>/dev/null >> "$PLAINTEXT" || { echo "FAIL: cannot decrypt $f"; exit 1; }
   echo >> "$PLAINTEXT"
 done

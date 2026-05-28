@@ -11,5 +11,7 @@ cd "$E2E_ROOT"
 HOST="${HOST:-127.0.0.1:13456}"
 JWT="${JWT:-$(cat auth/tokens/jwt-default.txt 2>/dev/null || echo "")}"
 
-resp=$(curl -sf "http://$HOST/health")
+# `-sf` + `set -e` make this fail loudly if the health endpoint is down;
+# the body is intentionally discarded (only the exit status matters).
+curl -sf "http://$HOST/health" >/dev/null
 echo "PASS: C0 — compliance features loaded (health ok)"
