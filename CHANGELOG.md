@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.49](https://github.com/azerozero/grob/compare/v0.36.48...v0.36.49) - 2026-05-28
+
+### Other
+
+- *(storage)* split GrobStore into per-concern submodules
+- fix residual shellcheck warnings the gate surfaced
+- add shellcheck gate, fix SC2168, drop empty scaffolds
+
 ## [0.36.48](https://github.com/azerozero/grob/compare/v0.36.47...v0.36.48) - 2026-05-28
 
 ### Other
