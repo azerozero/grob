@@ -143,7 +143,7 @@ pub(super) async fn dispatch_provider_loop(
                 emit_fallback(
                     ctx,
                     mapping,
-                    effective_mappings.get(idx + 1),
+                    effective_mappings.get(next_mapping_index(idx)),
                     "rate limited",
                 );
                 tokio::task::yield_now().await;
@@ -153,7 +153,7 @@ pub(super) async fn dispatch_provider_loop(
                 emit_fallback(
                     ctx,
                     mapping,
-                    effective_mappings.get(idx + 1),
+                    effective_mappings.get(next_mapping_index(idx)),
                     "provider error",
                 );
                 tokio::task::yield_now().await;
@@ -211,6 +211,27 @@ pub(super) async fn dispatch_provider_loop(
     })
 }
 
+/// Returns the index of the next mapping to fall back to.
+///
+/// Extracted so the fallback-index arithmetic in [`dispatch_provider_loop`] is
+/// unit-testable without constructing a full [`DispatchContext`].
+#[inline]
+fn next_mapping_index(idx: usize) -> usize {
+    idx + 1
+}
+
+/// Returns the ` [n/total]` retry suffix, or an empty string for the first try.
+///
+/// Extracted so the `idx > 0` boundary in [`log_dispatch_attempt`] is
+/// unit-testable without constructing a full [`DispatchContext`].
+fn retry_suffix(idx: usize, total: usize) -> String {
+    if idx > 0 {
+        format!(" [{}/{}]", idx + 1, total)
+    } else {
+        String::new()
+    }
+}
+
 /// Log the dispatch attempt info line (route type, stream mode, model -> provider).
 fn log_dispatch_attempt(
     ctx: &DispatchContext<'_>,
@@ -219,11 +240,7 @@ fn log_dispatch_attempt(
     idx: usize,
     total: usize,
 ) {
-    let retry_info = if idx > 0 {
-        format!(" [{}/{}]", idx + 1, total)
-    } else {
-        String::new()
-    };
+    let retry_info = retry_suffix(idx, total);
     let stream_mode = if ctx.is_streaming { "stream" } else { "sync" };
     let route_type_display = format_route_type(decision);
 
@@ -237,6 +254,16 @@ fn log_dispatch_attempt(
         mapping.actual_model,
         retry_info
     );
+}
+
+/// Returns `true` when a continuation prompt should be injected.
+///
+/// Continuation is injected only when the mapping opts in *and* the request is
+/// not a background task. Extracted so the guard in [`prepare_provider_request`]
+/// is unit-testable without constructing a full [`DispatchContext`].
+#[inline]
+fn should_attempt_continuation(inject_continuation_prompt: bool, route_type: &RouteType) -> bool {
+    inject_continuation_prompt && *route_type != RouteType::Background
 }
 
 /// Clone the request, substitute the actual model, run DLP, and optionally inject continuation.
@@ -254,7 +281,7 @@ pub(super) fn prepare_provider_request(
     provider_request.model = mapping.actual_model.clone();
     ctx.sanitize_input(&mut provider_request);
 
-    if mapping.inject_continuation_prompt && *route_type != RouteType::Background {
+    if should_attempt_continuation(mapping.inject_continuation_prompt, route_type) {
         if let Some(last_msg) = provider_request.messages.last_mut() {
             if should_inject_continuation(last_msg) {
                 info!(
@@ -286,5 +313,45 @@ fn emit_fallback(
                 reason: reason.to_string(),
                 timestamp: chrono::Utc::now(),
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_mapping_index_increments() {
+        // `idx + 1`: the `+` → `*` mutant collapses to `idx` (idx*1) and the
+        // `+` → `-` mutant points one slot backwards. Both diverge here.
+        assert_eq!(next_mapping_index(0), 1);
+        assert_eq!(next_mapping_index(1), 2);
+        assert_eq!(next_mapping_index(2), 3);
+    }
+
+    #[test]
+    fn retry_suffix_empty_on_first_attempt() {
+        // `idx > 0`: the `>` → `==` mutant would emit a suffix for idx 0.
+        assert_eq!(retry_suffix(0, 3), "");
+    }
+
+    #[test]
+    fn retry_suffix_present_on_retries() {
+        // idx 1 is the second attempt → " [2/3]". The `idx > 0` → `idx == 0`
+        // mutant would return an empty string here instead.
+        assert_eq!(retry_suffix(1, 3), " [2/3]");
+        assert_eq!(retry_suffix(2, 3), " [3/3]");
+    }
+
+    #[test]
+    fn continuation_requires_opt_in_and_non_background() {
+        // `inject && route != Background`.
+        // The `&&` → `||` mutant injects when only one side holds;
+        // the `!=` → `==` mutant injects exactly for the Background route.
+        assert!(should_attempt_continuation(true, &RouteType::Default));
+        assert!(should_attempt_continuation(true, &RouteType::Think));
+        assert!(!should_attempt_continuation(true, &RouteType::Background));
+        assert!(!should_attempt_continuation(false, &RouteType::Default));
+        assert!(!should_attempt_continuation(false, &RouteType::Background));
     }
 }

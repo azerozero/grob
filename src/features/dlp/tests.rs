@@ -1134,6 +1134,18 @@ fn display_indirect_injection_blocked_multi() {
         msg.contains("new system prompt"),
         "must contain second detection"
     );
+    // The separator must sit *between* the two detections, never before the
+    // first. The `i > 0` → `i == 0` mutant would emit the comma before item 0
+    // ("detected: , injection: ...") and drop it between items, so assert the
+    // exact join shape: first detection, then ", ", then the second.
+    assert!(
+        msg.contains("en_ignore', injection:"),
+        "comma separator must join the two detections, got: {msg}"
+    );
+    assert!(
+        !msg.contains("detected: , "),
+        "separator must not precede the first detection, got: {msg}"
+    );
 }
 
 #[test]

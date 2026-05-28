@@ -500,6 +500,62 @@ mod tests {
         assert_eq!(tier, ComplexityTier::Medium);
     }
 
+    // ── 11. Token estimation helpers (kill `/` → `*` mutants) ──
+
+    #[test]
+    fn estimate_tokens_divides_by_four() {
+        // `text.len() / 4`: 2000 chars → 500 tokens.
+        // The `/` → `*` mutant would yield 8_000_000.
+        let text = "x".repeat(2000);
+        assert_eq!(estimate_tokens(&text), 500);
+        // A non-multiple-of-4 length must round down, not multiply up.
+        assert_eq!(estimate_tokens("abcde"), 1);
+    }
+
+    #[test]
+    fn estimate_tokens_from_chars_divides_by_four() {
+        // `chars / 4`: 2000 → 500. The `/` → `*` mutant would yield 8000.
+        assert_eq!(estimate_tokens_from_chars(2000), 500);
+        assert_eq!(estimate_tokens_from_chars(7), 1);
+    }
+
+    // ── 12. Context-size medium boundary (kill `<` → `>`/`==` at line 154) ──
+
+    #[test]
+    fn context_size_under_token_cap_stays_below_complex() {
+        // 3 messages (msg_count > 2 but <= 10) totalling ~600 estimated tokens
+        // (2400 chars / 4). `est_tokens < 4000` holds, so context scores 1.0
+        // and the only signal yields a total score of 1.0 → Trivial.
+        //
+        // The `<` → `>` (`600 > 4000`) and `<` → `==` (`600 == 4000`) mutants
+        // both make the condition false, dropping the request into the complex
+        // branch (3.0), which would classify it as Medium instead.
+        let body = "y".repeat(800); // 800 chars per message → 2400 total
+        let req = CanonicalRequest {
+            model: "test".to_string(),
+            messages: (0..3)
+                .map(|_| Message {
+                    role: "user".to_string(),
+                    content: MessageContent::Text(body.clone()),
+                })
+                .collect(),
+            max_tokens: 0,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            extensions: Default::default(),
+        };
+        let tier = classify_complexity(&req, &default_config());
+        assert_eq!(tier, ComplexityTier::Trivial);
+    }
+
     // ── helpers ──
 
     fn make_tool(name: &str) -> Tool {

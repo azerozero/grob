@@ -108,7 +108,17 @@ fn classify_and_handle_error(
             .trace_error(trace_id, &e.to_string());
     }
     emit_provider_error_metrics(mapping, e);
-    is_retryable(e) && attempt < max_retries
+    should_retry_after_error(is_retryable(e), attempt, max_retries)
+}
+
+/// Returns `true` when a failed attempt should be retried.
+///
+/// A retry happens only when the error is retryable *and* attempts remain
+/// (`attempt < max_retries`). Extracted so the decision in
+/// [`classify_and_handle_error`] is unit-testable without a [`DispatchContext`].
+#[inline]
+fn should_retry_after_error(retryable: bool, attempt: u32, max_retries: u32) -> bool {
+    retryable && attempt < max_retries
 }
 
 /// Log provider error metrics for the streaming path.
@@ -133,7 +143,7 @@ pub(super) async fn try_rotate_and_retry(
     provider: &dyn crate::providers::LlmProvider,
     attempt: &ProviderAttempt<'_>,
 ) -> Option<DispatchResult> {
-    if !provider.rotate_key_pool() {
+    if rotation_unavailable(provider.rotate_key_pool()) {
         return None;
     }
     info!(
@@ -250,6 +260,56 @@ pub(super) async fn dispatch_streaming(
     }
 }
 
+/// Returns `true` when this loop iteration is a retry (needs a backoff sleep).
+///
+/// The first iteration (`retry == 0`) is the initial attempt, not a retry.
+/// Extracted so the `retry > 0` boundary in [`dispatch_non_streaming`] is
+/// unit-testable without a [`DispatchContext`].
+#[inline]
+fn is_backoff_attempt(retry: u32) -> bool {
+    retry > 0
+}
+
+/// Maps a retry counter to its zero-based backoff exponent (`retry - 1`).
+///
+/// Only called when [`is_backoff_attempt`] holds, so `retry >= 1` and the
+/// subtraction never underflows. Extracted so the `retry - 1` arithmetic in
+/// [`dispatch_non_streaming`] is unit-testable without a [`DispatchContext`].
+#[inline]
+fn backoff_step(retry: u32) -> u32 {
+    retry - 1
+}
+
+/// Returns `true` when the request must be cloned (more attempts remain).
+///
+/// On the final attempt (`retry == max_retries`) the owned request is moved
+/// instead of cloned. Extracted so the `retry < max_retries` boundary in
+/// [`dispatch_non_streaming`] is unit-testable without a [`DispatchContext`].
+#[inline]
+fn should_clone_for_retry(retry: u32, max_retries: u32) -> bool {
+    retry < max_retries
+}
+
+/// Returns `true` only when the error is a rate-limit *and* rotation succeeds.
+///
+/// The `rotate` closure is invoked solely when `rate_limited` holds, preserving
+/// the original short-circuit (`is_upstream_rate_limit(e) && rotate_key_pool()`)
+/// so a non-429 error never advances the key pool. Extracted so the guard in
+/// [`dispatch_non_streaming`] is unit-testable without a [`DispatchContext`].
+#[inline]
+fn try_rotation_on_rate_limit(rate_limited: bool, rotate: impl FnOnce() -> bool) -> bool {
+    rate_limited && rotate()
+}
+
+/// Returns `true` when key-pool rotation was unavailable (`!rotated`).
+///
+/// Extracted so the early-return guard in [`try_rotate_and_retry`] is
+/// unit-testable without a [`DispatchContext`].
+#[inline]
+fn rotation_unavailable(rotated: bool) -> bool {
+    !rotated
+}
+
 /// Handle the non-streaming path with retry for a single provider.
 pub(super) async fn dispatch_non_streaming(
     ctx: &DispatchContext<'_>,
@@ -275,8 +335,8 @@ pub(super) async fn dispatch_non_streaming(
     // Wrap in Option so we can move (not clone) on the final attempt.
     let mut owned_request = Some(provider_request);
     for retry in 0..=max_retries {
-        if retry > 0 {
-            let delay = retry_delay(retry - 1);
+        if is_backoff_attempt(retry) {
+            let delay = retry_delay(backoff_step(retry));
             warn!(
                 "Retrying provider {} (attempt {}/{}), backoff {}ms",
                 attempt.mapping.provider,
@@ -288,7 +348,7 @@ pub(super) async fn dispatch_non_streaming(
         }
 
         // Clone for earlier attempts; move on the last to avoid an extra allocation.
-        let req = if retry < max_retries {
+        let req = if should_clone_for_retry(retry, max_retries) {
             owned_request.as_ref().expect("set before loop").clone()
         } else {
             owned_request.take().expect("set before loop")
@@ -373,7 +433,8 @@ pub(super) async fn dispatch_non_streaming(
 
                 if classify_and_handle_error(ctx, attempt.mapping, &e, retry, max_retries) {
                     // On 429, try rotating to next pooled key before retrying.
-                    if is_upstream_rate_limit(&e) && provider.rotate_key_pool() {
+                    let rate_limited = is_upstream_rate_limit(&e);
+                    if try_rotation_on_rate_limit(rate_limited, || provider.rotate_key_pool()) {
                         info!(
                             "Provider {} rate-limited, rotated to next pooled key",
                             attempt.mapping.provider
@@ -387,7 +448,8 @@ pub(super) async fn dispatch_non_streaming(
                 }
 
                 // Before giving up on this provider, try key rotation for 429.
-                if is_upstream_rate_limit(&e) && provider.rotate_key_pool() {
+                let rate_limited = is_upstream_rate_limit(&e);
+                if try_rotation_on_rate_limit(rate_limited, || provider.rotate_key_pool()) {
                     info!(
                         "Provider {} exhausted retries but rotated to next pooled key",
                         attempt.mapping.provider
@@ -479,6 +541,16 @@ fn wrap_stream_with_middleware(
     }
 }
 
+/// Returns `true` when the log-export content mode requests encryption.
+///
+/// Extracted so the mode comparison in [`build_encrypted_content`] is
+/// unit-testable without a [`DispatchContext`].
+#[cfg(feature = "policies")]
+#[inline]
+fn encryption_enabled(mode: &crate::features::log_export::ContentMode) -> bool {
+    *mode == crate::features::log_export::ContentMode::Encrypted
+}
+
 /// Builds encrypted content for log export when policy requires it.
 ///
 /// Returns `(None, None)` when encryption is not configured or no policy matches.
@@ -489,14 +561,12 @@ fn build_encrypted_content(
 ) -> (Option<String>, Option<Vec<String>>) {
     #[cfg(feature = "policies")]
     {
-        use crate::features::log_export::ContentMode;
-
         // Check if log export is configured for encryption.
         if ctx.state.log_exporter.is_none() {
             return (None, None);
         }
         let log_config = &ctx.inner.config.log_export;
-        if log_config.content != ContentMode::Encrypted {
+        if !encryption_enabled(&log_config.content) {
             return (None, None);
         }
 
@@ -542,5 +612,109 @@ fn build_encrypted_content(
     #[cfg(not(feature = "policies"))]
     {
         (None, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    // ── classify_and_handle_error retry decision ──
+
+    #[test]
+    fn should_retry_requires_retryable_and_budget() {
+        // `retryable && attempt < max_retries`.
+        // The `&&` → `||` mutant retries on either condition; the `<` → `>` /
+        // `<` → `==` mutant flips the budget comparison.
+        assert!(should_retry_after_error(true, 0, 3));
+        assert!(should_retry_after_error(true, 2, 3));
+        // Not retryable: never retry, even with budget left.
+        assert!(!should_retry_after_error(false, 0, 3));
+        // Retryable but budget exhausted: `attempt == max_retries`.
+        assert!(!should_retry_after_error(true, 3, 3));
+        // Retryable but over budget: `attempt > max_retries`.
+        assert!(!should_retry_after_error(true, 4, 3));
+    }
+
+    // ── dispatch_non_streaming loop arithmetic ──
+
+    #[test]
+    fn is_backoff_attempt_only_after_first() {
+        // `retry > 0`: the `>` → `==` mutant would treat the initial attempt
+        // (retry 0) as a backoff and skip the real first retry.
+        assert!(!is_backoff_attempt(0));
+        assert!(is_backoff_attempt(1));
+        assert!(is_backoff_attempt(2));
+    }
+
+    #[test]
+    fn backoff_step_is_retry_minus_one() {
+        // `retry - 1`: the `-` → `+` mutant doubles the exponent and the
+        // `-` → `/` mutant leaves it unchanged (`retry / 1`).
+        assert_eq!(backoff_step(1), 0);
+        assert_eq!(backoff_step(2), 1);
+        assert_eq!(backoff_step(3), 2);
+    }
+
+    #[test]
+    fn should_clone_until_final_attempt() {
+        // `retry < max_retries`: the `<` → `>` / `<` → `==` mutant would move
+        // the request too early (and clone on the final attempt).
+        assert!(should_clone_for_retry(0, 2));
+        assert!(should_clone_for_retry(1, 2));
+        // Final attempt: move, do not clone.
+        assert!(!should_clone_for_retry(2, 2));
+        assert!(!should_clone_for_retry(3, 2));
+    }
+
+    // ── rate-limit rotation guards ──
+
+    #[test]
+    fn rotation_skipped_when_not_rate_limited() {
+        // `rate_limited && rotate()`: the closure must NOT run when the error
+        // is not a rate limit (short-circuit). The `&&` → `||` mutant would
+        // invoke rotation unconditionally and return true.
+        let rotated = Cell::new(false);
+        let result = try_rotation_on_rate_limit(false, || {
+            rotated.set(true);
+            true
+        });
+        assert!(!result, "non-429 error must not trigger rotation");
+        assert!(!rotated.get(), "rotate closure must not run for non-429");
+    }
+
+    #[test]
+    fn rotation_attempted_when_rate_limited() {
+        let rotated = Cell::new(false);
+        let result = try_rotation_on_rate_limit(true, || {
+            rotated.set(true);
+            true
+        });
+        assert!(result);
+        assert!(rotated.get(), "rotate closure must run on 429");
+        // Rotation attempted but unavailable → overall false.
+        assert!(!try_rotation_on_rate_limit(true, || false));
+    }
+
+    #[test]
+    fn rotation_unavailable_inverts_rotated_flag() {
+        // `!rotated`: the "delete !" mutant would early-return when rotation
+        // actually succeeded (and proceed when it failed).
+        assert!(rotation_unavailable(false));
+        assert!(!rotation_unavailable(true));
+    }
+
+    // ── build_encrypted_content mode gate ──
+
+    #[cfg(feature = "policies")]
+    #[test]
+    fn encryption_enabled_only_for_encrypted_mode() {
+        use crate::features::log_export::ContentMode;
+        // `mode == Encrypted` (used as `!encryption_enabled(...)` → return).
+        // The `!=` → `==` mutant inverts which modes proceed to encryption.
+        assert!(encryption_enabled(&ContentMode::Encrypted));
+        assert!(!encryption_enabled(&ContentMode::Plaintext));
+        assert!(!encryption_enabled(&ContentMode::None));
     }
 }
