@@ -240,21 +240,40 @@ impl GrobStore {
                 .tenant_journals
                 .lock()
                 .unwrap_or_else(|e| e.into_inner());
-            let journal_entry = tj.entry(safe_tenant.clone()).or_insert_with(|| {
-                let dir = self.base_dir.join("spend").join(&safe_tenant);
-                journal::SpendJournal::open_in(&dir)
-                    .unwrap_or_else(|e| panic!("open per-tenant spend journal: {e}"))
-            });
-            let tenant_event = journal::SpendEvent {
-                ts,
-                kind: "spend".to_string(),
-                provider: provider.to_string(),
-                model: model.to_string(),
-                cost_usd: amount,
-                tenant: Some(t.to_string()),
+            // Open the per-tenant journal lazily. A disk-full / permission error
+            // must NOT crash the spend path: log and skip the per-tenant append.
+            // The global journal above already holds a tenant-tagged copy of this
+            // event, so per-tenant spend remains recoverable.
+            use std::collections::hash_map::Entry;
+            let journal_entry = match tj.entry(safe_tenant.clone()) {
+                Entry::Occupied(occupied) => Some(occupied.into_mut()),
+                Entry::Vacant(vacant) => {
+                    let dir = self.base_dir.join("spend").join(&safe_tenant);
+                    match journal::SpendJournal::open_in(&dir) {
+                        Ok(journal) => Some(vacant.insert(journal)),
+                        Err(e) => {
+                            tracing::error!(
+                                tenant = %safe_tenant,
+                                "failed to open per-tenant spend journal; skipping per-tenant \
+                                 append (global journal retains a tagged copy): {e}"
+                            );
+                            None
+                        }
+                    }
+                }
             };
-            if let Err(e) = journal_entry.append(&tenant_event) {
-                tracing::warn!("failed to append per-tenant spend event: {e}");
+            if let Some(journal_entry) = journal_entry {
+                let tenant_event = journal::SpendEvent {
+                    ts,
+                    kind: "spend".to_string(),
+                    provider: provider.to_string(),
+                    model: model.to_string(),
+                    cost_usd: amount,
+                    tenant: Some(t.to_string()),
+                };
+                if let Err(e) = journal_entry.append(&tenant_event) {
+                    tracing::warn!("failed to append per-tenant spend event: {e}");
+                }
             }
         }
 
