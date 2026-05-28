@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.48](https://github.com/azerozero/grob/compare/v0.36.47...v0.36.48) - 2026-05-28
+
+### Other
+
+- break features↔models & auth↔providers cycles, split two god functions
+- fix claude-code-router fork leftovers
+- Merge pull request #350 from azerozero/revive/dispatch-retry-reload
+- Merge pull request #351 from azerozero/revive/tool-spike-anomaly
+
 ## [0.36.47](https://github.com/azerozero/grob/compare/v0.36.46...v0.36.47) - 2026-05-27
 
 ### Added
