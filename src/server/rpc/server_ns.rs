@@ -39,9 +39,11 @@ pub async fn status(
 
 /// Triggers an atomic configuration reload.
 ///
-/// Awaits validation against the candidate registry **before** swapping the
-/// live snapshot. A failure surfaces as a JSON-RPC error and the in-flight
-/// `inner` snapshot stays untouched — the same contract the HTTP
+/// Rejects only **structurally** invalid candidates (parse error,
+/// `AppConfig::validate()` failure, or provider-registry build failure) as a
+/// JSON-RPC error, leaving the in-flight `inner` snapshot untouched. A
+/// structurally-valid candidate is always swapped in — the reload is **not**
+/// gated on live provider health. The same contract the HTTP
 /// `/api/config/reload` endpoint enforces.
 pub async fn reload_config(
     state: &Arc<AppState>,
@@ -80,33 +82,26 @@ pub async fn reload_config(
     .map(Arc::new)
     .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to init providers: {e}")))?;
 
-    // Awaited validation BEFORE the swap so a misconfigured reload cannot
-    // briefly serve traffic. In-flight requests continue on the old snapshot
-    // via their cached `Arc<ReloadableState>`.
-    let validation = crate::preset::validate_config(&new_config, &new_registry).await;
-    crate::preset::log_validation_results(&validation);
-    let broken: Vec<&crate::preset::ModelValidation> =
-        validation.iter().filter(|m| !m.any_ok()).collect();
-    if !broken.is_empty() {
-        let detail = broken
-            .iter()
-            .map(|m| format!("{} [{}]", m.model_name, m.role))
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(rpc_err(
-            ERR_INTERNAL,
-            format!(
-                "Validation failed — config not reloaded. Models with no healthy provider: {detail}"
-            ),
-        ));
-    }
-
-    let new_inner = Arc::new(ReloadableState::new(new_config, new_router, new_registry));
+    // The candidate is already structurally valid: `from_source` re-parsed it
+    // and ran `AppConfig::validate()`, and `from_configs_with_models` confirmed
+    // the registry builds. We do NOT gate the swap on live provider health — a
+    // momentarily unreachable provider must not block a config reload.
+    // In-flight requests continue on the old snapshot via their cached
+    // `Arc<ReloadableState>`.
+    let new_inner = Arc::new(ReloadableState::new(
+        new_config.clone(),
+        new_router,
+        new_registry.clone(),
+    ));
 
     let active = state
         .active_requests
         .load(std::sync::atomic::Ordering::Relaxed);
     *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner;
+
+    // Detached live-health probe as a signal only: logs warnings on unhealthy
+    // router mappings after the swap, never blocking or reverting the reload.
+    crate::server::config_api::spawn_health_probe(new_config, new_registry);
 
     Ok(StatusResponse {
         status: "ok".into(),
