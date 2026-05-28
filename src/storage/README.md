@@ -27,7 +27,7 @@ former `redb` backend with crash-safe primitives (per ADR-0013): journals use
 
 - `~/.grob/` directory layout: `spend/YYYY-MM.jsonl`, `tokens/<id>.json.enc`, `vkeys/<hash>.json.enc`, `secrets/<name>.enc`.
 - Atomic write helper (write → fsync → rename) in `atomic.rs`.
-- AES-256-GCM cipher with `decrypt_or_plaintext` migration path in `encrypt.rs`.
+- AES-256-GCM cipher in `encrypt.rs`. Encrypted blobs carry a `GRB1` magic + version envelope, so `decrypt_or_plaintext` fails closed on tampered ciphertext and only accepts genuine (non-enveloped) legacy plaintext, with a `warn!`.
 - Append-only spend journal with monthly rotation and tenant-scoped replay (`journal.rs`).
 - Pluggable `SecretBackend` trait with three built-in implementations.
 

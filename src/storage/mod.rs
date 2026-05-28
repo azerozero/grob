@@ -304,10 +304,19 @@ impl GrobStore {
     }
 
     /// Gets an OAuth token by provider ID (decrypts from AES-256-GCM).
+    ///
+    /// Returns `None` if the file is absent or fails authentication; a failed
+    /// authentication is logged rather than silently treated as plaintext.
     pub fn get_oauth_token(&self, provider_id: &str) -> Option<OAuthToken> {
         let path = self.token_path(provider_id);
         let encrypted = std::fs::read(&path).ok()?;
-        let decrypted = self.cipher.decrypt_or_plaintext(&encrypted);
+        let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(provider_id, error = %e, "failed to read OAuth token");
+                return None;
+            }
+        };
         serde_json::from_slice(&decrypted).ok()
     }
 
@@ -357,11 +366,20 @@ impl GrobStore {
         Ok(())
     }
 
-    /// Reads a named secret. Returns `None` if absent.
+    /// Reads a named secret. Returns `None` if absent or unreadable.
+    ///
+    /// A blob that fails authentication is logged and yields `None` rather than
+    /// being silently surfaced as plaintext.
     pub fn get_secret(&self, name: &str) -> Option<secrecy::SecretString> {
         let path = self.secret_path(name);
         let encrypted = std::fs::read(&path).ok()?;
-        let decrypted = self.cipher.decrypt_or_plaintext(&encrypted);
+        let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(secret = name, error = %e, "failed to read secret");
+                return None;
+            }
+        };
         let s = String::from_utf8(decrypted).ok()?;
         Some(secrecy::SecretString::new(s))
     }
@@ -453,10 +471,19 @@ impl GrobStore {
     }
 
     /// Looks up a virtual key record by its SHA-256 hash.
+    ///
+    /// Returns `None` if absent or unreadable; an authentication failure is
+    /// logged rather than silently treated as plaintext.
     pub fn lookup_virtual_key(&self, key_hash: &str) -> Option<VirtualKeyRecord> {
         let path = self.vkey_hash_path(key_hash);
         let encrypted = std::fs::read(&path).ok()?;
-        let decrypted = self.cipher.decrypt_or_plaintext(&encrypted);
+        let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to read virtual key by hash");
+                return None;
+            }
+        };
         serde_json::from_slice(&decrypted).ok()
     }
 
@@ -480,9 +507,16 @@ impl GrobStore {
                 continue;
             }
             if let Ok(data) = std::fs::read(entry.path()) {
-                let decrypted = self.cipher.decrypt_or_plaintext(&data);
-                if let Ok(record) = serde_json::from_slice::<VirtualKeyRecord>(&decrypted) {
-                    records.push(record);
+                match self.cipher.decrypt_or_plaintext(&data) {
+                    Ok(decrypted) => {
+                        if let Ok(record) = serde_json::from_slice::<VirtualKeyRecord>(&decrypted) {
+                            records.push(record);
+                        }
+                    }
+                    // Skip unreadable records rather than abort the whole list.
+                    Err(e) => {
+                        tracing::warn!(error = %e, "skipping unreadable virtual key record");
+                    }
                 }
             }
         }
@@ -501,7 +535,7 @@ impl GrobStore {
             Ok(d) => d,
             Err(_) => return Ok(false),
         };
-        let decrypted = self.cipher.decrypt_or_plaintext(&data);
+        let decrypted = self.cipher.decrypt_or_plaintext(&data)?;
         let mut record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
         record.revoked = true;
         self.store_virtual_key(&record)?;
@@ -519,7 +553,7 @@ impl GrobStore {
             Ok(d) => d,
             Err(_) => return Ok(false),
         };
-        let decrypted = self.cipher.decrypt_or_plaintext(&data);
+        let decrypted = self.cipher.decrypt_or_plaintext(&data)?;
         let record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
 
         // Remove both files.
