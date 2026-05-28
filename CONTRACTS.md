@@ -251,11 +251,17 @@
 **Module:** `src/server/config_api.rs`
 **Intention:** Hot-reload the server configuration by atomically swapping the reloadable state (config, router, provider registry) without restarting the server. In-flight requests continue using the old snapshot.
 
+**Applies to both reload surfaces:** the HTTP `POST /api/config/reload`
+handler (`config_api::reload_config`) and the JSON-RPC
+`grob/server/reload_config` method (`rpc::server_ns::reload_config`). Both
+enforce the same contract.
+
 **Invariants:**
 - INV-1 (Atomicity): The swap from old to new state is a single write-lock assignment. No intermediate state is visible to readers.
 - INV-2 (Non-reloadable preservation): Token store, grob store, event bus, and other persistent state are NOT replaced. Only `ReloadableState` changes.
 - INV-3 (Error safety): If config parsing or provider initialization fails, the old config remains active. No partial reload.
 - INV-4 (Snapshot isolation): Requests that started before the reload continue using the old `Arc<ReloadableState>` snapshot (reference counting).
+- INV-5 (Structural-reject only): Reload rejects a candidate **only** for *structural* breakage — a parse error, an `AppConfig::validate()` failure (model mapping → unknown provider, missing provider auth, invalid router regex), or a provider-registry build failure. It does **NOT** gate the swap on *live* provider health. A structurally-valid config is always swapped in even if a live `validate_config` probe would fail, because a provider being momentarily unreachable must not block a config swap.
 
 **Preconditions:**
 - Server is running with valid initial config
@@ -263,21 +269,23 @@
 
 **Postconditions:**
 - On success: new config is active for all subsequent requests
-- On failure: old config remains active, error response returned
-- Background validation task is spawned after successful reload
+- On structural failure: old config remains active, 4xx error response returned
+- A detached, fire-and-forget live-health probe task (`spawn_health_probe`) is spawned **after** the successful swap. It only logs warnings on unhealthy mappings; it never reverts the reload.
 
 **Boundary behavior:**
-- Config file missing: returns error, old config preserved
-- Provider initialization fails: returns error, old config preserved
+- Config file missing / parse error: returns error, old config preserved
+- Provider initialization (registry build) fails: returns error, old config preserved
+- Provider reachable but a live probe fails: reload still succeeds (200); a warning is logged by the detached probe
 - Concurrent reload requests: serialized by write lock
 
 **Known drifts:**
-- (none recorded yet)
+- 2026-05: PR #350 introduced a live-health gate (awaited `validate_config` + `reject_if_validation_broken`) that returned HTTP 422 / a JSON-RPC error when any router model lacked a healthy *live* mapping. This conflated structural validity with live health, turning the E2E reload tests red (mock pod can't pass the probe). Reverted to structural-reject + detached log-only probe to satisfy INV-5.
 
 **Red flags to detect:**
 - Any persistent state (token_store, grob_store) being replaced during reload
 - Partial state update (e.g., router updated but registry not)
 - Missing error handling that allows partial reload
+- An **awaited** live-health probe (`validate_config`) gating the swap, or any reload rejection keyed on `any_ok()` / live mapping health (violates INV-5)
 
 ---
 
