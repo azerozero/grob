@@ -153,9 +153,10 @@ impl SpendTracker {
             // intentionally do not include tenant-tagged spend.
             self.data = store.load_spend(None);
         } else {
-            // No store available (test/CLI mode): track the tenant amount
-            // locally so future per-tenant budget checks behave correctly.
-            // Global counters are intentionally untouched.
+            // No store available (test/CLI mode): only month-reset bookkeeping
+            // runs here. Per-tenant amounts are intentionally NOT tracked in
+            // this mode — the store-backed path (production) is the source of
+            // truth for per-tenant budgets; global counters stay untouched.
             self.reset_if_new_month();
         }
     }
