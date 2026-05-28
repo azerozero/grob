@@ -8,6 +8,11 @@
 //! ├── tokens/<id>.json.enc  # AES-256-GCM encrypted OAuth tokens
 //! └── vkeys/<hash>.json.enc # AES-256-GCM encrypted virtual keys
 //! ```
+//!
+//! [`GrobStore`] owns one struct with four concerns, each split into its own
+//! submodule of cross-file `impl GrobStore` blocks: [`spend`], [`oauth`],
+//! [`secrets_store`], and [`vkeys`]. This module holds the struct, lifecycle
+//! (`open`), and shared helpers.
 
 /// Atomic file write (write → fsync → rename).
 pub(crate) mod atomic;
@@ -17,16 +22,22 @@ pub(crate) mod encrypt;
 pub(crate) mod journal;
 /// Legacy storage detection and warning.
 pub mod migrate;
+/// OAuth-token persistence (`impl GrobStore`).
+mod oauth;
 /// Pluggable secret backends (local encrypted, env, file).
 pub mod secrets;
+/// Named-secret persistence (`impl GrobStore`).
+mod secrets_store;
+/// Spend-journal persistence (`impl GrobStore`).
+mod spend;
+/// Virtual-key persistence (`impl GrobStore`).
+mod vkeys;
 
-use crate::auth::token_store::OAuthToken;
-use crate::auth::virtual_keys::VirtualKeyRecord;
 use crate::features::token_pricing::spend::SpendData;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::AtomicU32;
 use std::sync::Mutex;
 
 /// Default tenant id used when a request carries no tenant context.
@@ -134,475 +145,17 @@ impl GrobStore {
             .join("grob.db")
     }
 
-    /// Loads spend data (from cache for global, from per-tenant cache for tenants).
-    pub(crate) fn load_spend(&self, tenant: Option<&str>) -> SpendData {
-        if tenant.is_none() {
-            return self
-                .spend_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-        }
-        let tenant = tenant.unwrap_or("");
-        // Prefer the in-memory per-tenant cache; fall back to journal replay
-        // when the tenant has not yet been touched in this process (e.g. read
-        // before any record_spend call).
-        let caches = self.tenant_caches.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(data) = caches.get(tenant) {
-            return data.clone();
-        }
-        drop(caches);
-        let journal = self.journal.lock().unwrap_or_else(|e| e.into_inner());
-        journal.replay_for_tenant(tenant)
-    }
-
-    /// Records spend for a request. Uses in-memory cache + batched fsync.
-    ///
-    /// The global in-memory cache and global journal continue to receive
-    /// every event so legacy `total()` / Prometheus / monthly export paths
-    /// keep working unchanged. When `tenant` is `Some`, the event is also
-    /// appended to a per-tenant journal under `spend/<tenant>/<month>.jsonl`
-    /// and the per-tenant in-memory cache is updated for budget checks.
-    ///
-    /// `tenant = None` is treated as the [`DEFAULT_TENANT`] for in-memory
-    /// per-tenant accounting, but the journal entry is written without a
-    /// `tenant` field to keep on-disk backward compatibility.
-    pub(crate) fn record_spend(
-        &self,
-        tenant: Option<&str>,
-        amount: f64,
-        provider: &str,
-        model: &str,
-    ) {
-        let ts = chrono::Utc::now().to_rfc3339();
-
-        // Update in-memory global cache. Tenant-tagged events historically
-        // also accumulated here; that is now suppressed so a per-tenant
-        // overspend cannot trip the global budget. See ADR commentary in
-        // SpendTracker::record_tenant.
-        if tenant.is_none() {
-            let mut cache = self.spend_cache.lock().unwrap_or_else(|e| e.into_inner());
-            let now = crate::features::token_pricing::spend::current_month();
-            if cache.month != now {
-                *cache = SpendData::default();
-            }
-            cache.total += amount;
-            *cache.by_provider.entry(provider.to_string()).or_default() += amount;
-            *cache.by_model.entry(model.to_string()).or_default() += amount;
-            *cache
-                .by_provider_count
-                .entry(provider.to_string())
-                .or_default() += 1;
-        }
-
-        // Update in-memory per-tenant cache. Untagged calls are bucketed
-        // under DEFAULT_TENANT so per-tenant budget logic is uniform.
-        let tenant_key = tenant.unwrap_or(DEFAULT_TENANT);
-        {
-            let mut caches = self.tenant_caches.lock().unwrap_or_else(|e| e.into_inner());
-            let now = crate::features::token_pricing::spend::current_month();
-            let entry = caches.entry(tenant_key.to_string()).or_default();
-            if entry.month != now {
-                *entry = SpendData::default();
-            }
-            entry.total += amount;
-            *entry.by_provider.entry(provider.to_string()).or_default() += amount;
-            *entry.by_model.entry(model.to_string()).or_default() += amount;
-            *entry
-                .by_provider_count
-                .entry(provider.to_string())
-                .or_default() += 1;
-        }
-
-        // Append to global journal (preserves legacy on-disk layout).
-        let event = journal::SpendEvent {
-            ts: ts.clone(),
-            kind: "spend".to_string(),
-            provider: provider.to_string(),
-            model: model.to_string(),
-            cost_usd: amount,
-            tenant: tenant.map(String::from),
-        };
-        if let Ok(mut j) = self.journal.lock() {
-            if let Err(e) = j.append(&event) {
-                tracing::warn!("failed to append spend event to journal: {e}");
-            }
-        }
-
-        // Append to the per-tenant journal at `spend/<tenant>/<month>.jsonl`
-        // when a tenant is supplied so per-tenant exports do not have to
-        // re-scan the entire global journal.
-        if let Some(t) = tenant {
-            // Tenant ids reach the filesystem here; sanitize the same way as
-            // OAuth provider ids so unusual ids cannot escape the spend dir.
-            let safe_tenant = sanitize_filename(t);
-            let mut tj = self
-                .tenant_journals
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            // Open the per-tenant journal lazily. A disk-full / permission error
-            // must NOT crash the spend path: log and skip the per-tenant append.
-            // The global journal above already holds a tenant-tagged copy of this
-            // event, so per-tenant spend remains recoverable.
-            use std::collections::hash_map::Entry;
-            let journal_entry = match tj.entry(safe_tenant.clone()) {
-                Entry::Occupied(occupied) => Some(occupied.into_mut()),
-                Entry::Vacant(vacant) => {
-                    let dir = self.base_dir.join("spend").join(&safe_tenant);
-                    match journal::SpendJournal::open_in(&dir) {
-                        Ok(journal) => Some(vacant.insert(journal)),
-                        Err(e) => {
-                            tracing::error!(
-                                tenant = %safe_tenant,
-                                "failed to open per-tenant spend journal; skipping per-tenant \
-                                 append (global journal retains a tagged copy): {e}"
-                            );
-                            None
-                        }
-                    }
-                }
-            };
-            if let Some(journal_entry) = journal_entry {
-                let tenant_event = journal::SpendEvent {
-                    ts,
-                    kind: "spend".to_string(),
-                    provider: provider.to_string(),
-                    model: model.to_string(),
-                    cost_usd: amount,
-                    tenant: Some(t.to_string()),
-                };
-                if let Err(e) = journal_entry.append(&tenant_event) {
-                    tracing::warn!("failed to append per-tenant spend event: {e}");
-                }
-            }
-        }
-
-        // Batch fsync every 10 calls.
-        let count = self.save_counter.fetch_add(1, Ordering::Relaxed);
-        if count.is_multiple_of(10) {
-            self.flush_spend();
-        }
-    }
-
-    /// Forces journal fsync to disk (global + every per-tenant journal).
-    pub(crate) fn flush_spend(&self) {
-        if let Ok(mut j) = self.journal.lock() {
-            if let Err(e) = j.fsync() {
-                tracing::warn!("failed to fsync spend journal: {e}");
-            }
-        }
-        if let Ok(mut tj) = self.tenant_journals.lock() {
-            for (tenant, journal) in tj.iter_mut() {
-                if let Err(e) = journal.fsync() {
-                    tracing::warn!("failed to fsync per-tenant spend journal '{tenant}': {e}");
-                }
-            }
-        }
-    }
-
-    // ── OAuth token storage ─────────────────────────────────────────
-
-    fn token_path(&self, provider_id: &str) -> PathBuf {
-        self.base_dir
-            .join("tokens")
-            .join(format!("{}.json.enc", sanitize_filename(provider_id)))
-    }
-
-    /// Saves an OAuth token (encrypted with AES-256-GCM).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if serialization, encryption, or the
-    /// atomic file write fails.
-    pub fn save_oauth_token(&self, token: &OAuthToken) -> Result<()> {
-        let plaintext = serde_json::to_vec(token)?;
-        let encrypted = self.cipher.encrypt(&plaintext)?;
-        let path = self.token_path(&token.provider_id);
-        atomic::write_atomic(&path, &encrypted)?;
-        Ok(())
-    }
-
-    /// Gets an OAuth token by provider ID (decrypts from AES-256-GCM).
-    ///
-    /// Returns `None` if the file is absent or fails authentication; a failed
-    /// authentication is logged rather than silently treated as plaintext.
-    pub fn get_oauth_token(&self, provider_id: &str) -> Option<OAuthToken> {
-        let path = self.token_path(provider_id);
-        let encrypted = std::fs::read(&path).ok()?;
-        let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!(provider_id, error = %e, "failed to read OAuth token");
-                return None;
-            }
-        };
-        serde_json::from_slice(&decrypted).ok()
-    }
-
-    /// Deletes an OAuth token by provider ID.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file cannot be removed.
-    pub fn delete_oauth_token(&self, provider_id: &str) -> Result<()> {
-        let path = self.token_path(provider_id);
-        if path.exists() {
-            std::fs::remove_file(&path)
-                .with_context(|| format!("failed to delete token: {}", path.display()))?;
-        }
-        Ok(())
-    }
-
-    /// Lists all provider IDs that have tokens.
-    pub fn list_oauth_providers(&self) -> Vec<String> {
-        let tokens_dir = self.base_dir.join("tokens");
-        Self::list_enc_files(&tokens_dir)
-    }
-
-    // ── Generic secrets storage (for upstream provider api_keys) ────────
-
-    fn secret_path(&self, name: &str) -> PathBuf {
-        self.base_dir
-            .join("secrets")
-            .join(format!("{}.enc", sanitize_filename(name)))
-    }
-
-    fn ensure_secrets_dir(&self) -> Result<()> {
-        let dir = self.base_dir.join("secrets");
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create secrets dir: {}", dir.display()))
-    }
-
-    /// Stores a named secret encrypted with AES-256-GCM.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if encryption or the atomic file write fails.
-    pub fn set_secret(&self, name: &str, value: &str) -> Result<()> {
-        self.ensure_secrets_dir()?;
-        let encrypted = self.cipher.encrypt(value.as_bytes())?;
-        atomic::write_atomic(&self.secret_path(name), &encrypted)?;
-        Ok(())
-    }
-
-    /// Reads a named secret. Returns `None` if absent or unreadable.
-    ///
-    /// A blob that fails authentication is logged and yields `None` rather than
-    /// being silently surfaced as plaintext.
-    pub fn get_secret(&self, name: &str) -> Option<secrecy::SecretString> {
-        let path = self.secret_path(name);
-        let encrypted = std::fs::read(&path).ok()?;
-        let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!(secret = name, error = %e, "failed to read secret");
-                return None;
-            }
-        };
-        let s = String::from_utf8(decrypted).ok()?;
-        Some(secrecy::SecretString::new(s))
-    }
-
-    /// Lists secret names (no values).
-    pub fn list_secrets(&self) -> Vec<String> {
-        let dir = self.base_dir.join("secrets");
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(e) => e,
-            Err(_) => return vec![],
-        };
-        let mut names = vec![];
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let s = name.to_string_lossy();
-            if let Some(stripped) = s.strip_suffix(".enc") {
-                names.push(stripped.to_string());
-            }
-        }
-        names.sort();
-        names
-    }
-
-    /// Removes a named secret. Returns `Ok(false)` if it did not exist.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the file exists but cannot be removed.
-    pub fn remove_secret(&self, name: &str) -> Result<bool> {
-        let path = self.secret_path(name);
-        if !path.exists() {
-            return Ok(false);
-        }
-        std::fs::remove_file(&path)
-            .with_context(|| format!("failed to remove secret: {}", path.display()))?;
-        Ok(true)
-    }
-
-    /// Gets all OAuth tokens (decrypts each from AES-256-GCM).
-    pub fn all_oauth_tokens(&self) -> std::collections::HashMap<String, OAuthToken> {
-        let mut map = std::collections::HashMap::new();
-        for provider_id in self.list_oauth_providers() {
-            if let Some(token) = self.get_oauth_token(&provider_id) {
-                map.insert(provider_id, token);
-            }
-        }
-        map
-    }
-
     /// Gets the storage base directory path (for diagnostics).
     pub fn path(&self) -> &Path {
         &self.base_dir
     }
-
-    // ── Virtual key storage ─────────────────────────────────────────
-
-    fn vkey_hash_path(&self, key_hash: &str) -> PathBuf {
-        self.base_dir
-            .join("vkeys")
-            .join(format!("{}.json.enc", sanitize_filename(key_hash)))
-    }
-
-    fn vkey_id_path(&self, id: &uuid::Uuid) -> PathBuf {
-        self.base_dir
-            .join("vkeys")
-            .join(format!("id_{id}.json.enc"))
-    }
-
-    /// Stores a virtual key record (encrypted with AES-256-GCM).
-    ///
-    /// Creates two files: one keyed by hash (for O(1) auth lookup) and
-    /// one keyed by UUID (for management operations).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if serialization, encryption, or the
-    /// atomic file write fails.
-    pub fn store_virtual_key(&self, record: &VirtualKeyRecord) -> Result<()> {
-        let plaintext = serde_json::to_vec(record)?;
-        let encrypted = self.cipher.encrypt(&plaintext)?;
-
-        // Primary: by hash.
-        atomic::write_atomic(&self.vkey_hash_path(&record.key_hash), &encrypted)?;
-        // Secondary: by UUID.
-        let encrypted2 = self.cipher.encrypt(&plaintext)?;
-        atomic::write_atomic(&self.vkey_id_path(&record.id), &encrypted2)?;
-
-        Ok(())
-    }
-
-    /// Looks up a virtual key record by its SHA-256 hash.
-    ///
-    /// Returns `None` if absent or unreadable; an authentication failure is
-    /// logged rather than silently treated as plaintext.
-    pub fn lookup_virtual_key(&self, key_hash: &str) -> Option<VirtualKeyRecord> {
-        let path = self.vkey_hash_path(key_hash);
-        let encrypted = std::fs::read(&path).ok()?;
-        let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::warn!(error = %e, "failed to read virtual key by hash");
-                return None;
-            }
-        };
-        serde_json::from_slice(&decrypted).ok()
-    }
-
-    /// Lists all virtual key records.
-    pub fn list_virtual_keys(&self) -> Vec<VirtualKeyRecord> {
-        let vkeys_dir = self.base_dir.join("vkeys");
-        let entries = match std::fs::read_dir(&vkeys_dir) {
-            Ok(e) => e,
-            Err(_) => return vec![],
-        };
-
-        let mut records = vec![];
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            // Skip id_ files to avoid duplicates.
-            if name_str.starts_with("id_") {
-                continue;
-            }
-            if !name_str.ends_with(".json.enc") {
-                continue;
-            }
-            if let Ok(data) = std::fs::read(entry.path()) {
-                match self.cipher.decrypt_or_plaintext(&data) {
-                    Ok(decrypted) => {
-                        if let Ok(record) = serde_json::from_slice::<VirtualKeyRecord>(&decrypted) {
-                            records.push(record);
-                        }
-                    }
-                    // Skip unreadable records rather than abort the whole list.
-                    Err(e) => {
-                        tracing::warn!(error = %e, "skipping unreadable virtual key record");
-                    }
-                }
-            }
-        }
-        records
-    }
-
-    /// Revokes a virtual key by UUID (sets `revoked = true`).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the record cannot be read, deserialized,
-    /// or re-encrypted.
-    pub fn revoke_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
-        let id_path = self.vkey_id_path(id);
-        let data = match std::fs::read(&id_path) {
-            Ok(d) => d,
-            Err(_) => return Ok(false),
-        };
-        let decrypted = self.cipher.decrypt_or_plaintext(&data)?;
-        let mut record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
-        record.revoked = true;
-        self.store_virtual_key(&record)?;
-        Ok(true)
-    }
-
-    /// Deletes a virtual key by UUID (removes both hash and id files).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the files cannot be removed.
-    pub fn delete_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
-        let id_path = self.vkey_id_path(id);
-        let data = match std::fs::read(&id_path) {
-            Ok(d) => d,
-            Err(_) => return Ok(false),
-        };
-        let decrypted = self.cipher.decrypt_or_plaintext(&data)?;
-        let record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
-
-        // Remove both files.
-        let hash_path = self.vkey_hash_path(&record.key_hash);
-        let _ = std::fs::remove_file(&hash_path);
-        let _ = std::fs::remove_file(&id_path);
-        Ok(true)
-    }
-
-    // ── Helpers ──────────────────────────────────────────────────────
-
-    /// Lists entity IDs from `*.json.enc` files in a directory.
-    fn list_enc_files(dir: &Path) -> Vec<String> {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return vec![],
-        };
-        let mut ids = vec![];
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            if let Some(id) = name_str.strip_suffix(".json.enc") {
-                ids.push(id.to_string());
-            }
-        }
-        ids
-    }
 }
 
 /// Sanitizes a string for use as a filename.
+///
+/// Shared by every persistence submodule so that ids reaching the filesystem
+/// (provider ids, tenant ids, secret names, key hashes) cannot escape their
+/// directory. Visible to the `storage` submodules via `super::sanitize_filename`.
 fn sanitize_filename(s: &str) -> String {
     s.chars()
         .map(|c| {
@@ -618,6 +171,8 @@ fn sanitize_filename(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::token_store::OAuthToken;
+    use crate::auth::virtual_keys::VirtualKeyRecord;
     use chrono::Utc;
     use secrecy::{ExposeSecret, SecretString};
 
