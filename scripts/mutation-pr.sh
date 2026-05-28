@@ -24,7 +24,8 @@
 
 set -euo pipefail
 
-readonly SCRIPT_NAME="$(basename "$0")"
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
 readonly BASE_REF="${1:-origin/main}"
 readonly TIMEOUT_SECONDS="${MUTATION_TIMEOUT_SECONDS:-1500}"
 readonly PER_MUTANT_TIMEOUT="${MUTATION_PER_MUTANT_TIMEOUT:-120}"

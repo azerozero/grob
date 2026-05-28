@@ -11,7 +11,6 @@ set -euo pipefail
 #   ./run-wizard-tests.sh              # run all wizard tests
 #   ./run-wizard-tests.sh W1           # run a single test
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GROB="${GROB_BIN:-cargo run --quiet --}"
 TEST_HOME=$(mktemp -d)
 GROB_HOME="${TEST_HOME}/.grob"
