@@ -6,11 +6,11 @@ Grob ships with 7 built-in presets. Apply with `grob preset apply <name>`.
 
 | Preset | Description | Providers |
 |--------|-------------|-----------|
-| `perf` | Performance max | Anthropic + OpenAI + Gemini, top-tier models |
-| `medium` | Best quality/price | Anthropic thinking + OpenRouter defaults |
-| `local` | Private, zero API cost for defaults | Ollama local + Anthropic thinking |
-| `cheap` | Budget max ($0-5/month) | GLM-5 + DeepSeek + Gemini Flash |
-| `fast` | Premium quality, no limit | Opus + GPT-5.2 + Gemini Pro |
+| `perf` | Pure Anthropic OAuth (Pro/Max) — auto-map `claude-*` to native | Anthropic (OAuth) |
+| `ultra-cheap` | EUR0-2/month — stacked free tiers | Groq + Cerebras + Z.ai + OpenRouter `:free` |
+| `eu-eco` | Strict-EU sovereign, budget — ~75% SWE-V | Scaleway FR + Nebius eu-north1 |
+| `eu-pro` | Strict-EU sovereign, balanced — ~82% SWE-V | Hermes-4-405B + Qwen3.5-397B |
+| `eu-max` | Strict-EU sovereign, premium — ~85% SWE-V | preemptive 397B/405B everywhere |
 | `gdpr` | EU-only GDPR compliant | Mistral, Scaleway, OVH (region=eu) |
 | `eu-ai-act` | EU AI Act compliant | EU providers + transparency headers + risk classification |
 
@@ -19,8 +19,8 @@ Grob ships with 7 built-in presets. Apply with `grob preset apply <name>`.
 ```bash
 grob preset list                  # List all presets (built-in + installed)
 grob preset info perf             # Show providers, models, env vars, router config
-grob preset apply medium          # Apply preset (backs up current config to .toml.backup)
-grob preset apply medium --reload # Apply and hot-reload the running server
+grob preset apply eu-pro          # Apply preset (backs up current config to .toml.backup)
+grob preset apply eu-pro --reload # Apply and hot-reload the running server
 grob preset export my-custom      # Export current config as a reusable preset
 grob preset install https://github.com/org/presets.git  # Install from git repo
 grob preset sync                  # Sync presets from configured remote
@@ -180,7 +180,7 @@ The running server can reload configuration without restart:
 curl -X POST http://localhost:13456/api/config/reload
 
 # Via preset apply
-grob preset apply medium --reload
+grob preset apply eu-pro --reload
 ```
 
 Hot-reload atomically swaps the router, provider registry, and model index. In-flight requests continue on the old snapshot.

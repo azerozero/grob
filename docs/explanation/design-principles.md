@@ -29,7 +29,7 @@ Our goal is to minimize the complexity developers face when using multiple AI pr
 ### Value first, cost later
 **Get users productive first, expose advanced settings later.**
 
-- Presets (`grob preset apply medium`) give a working setup in one command.
+- Presets (`grob preset apply perf`) give a working setup in one command.
 - Manual config editing is for fine-tuning, not for getting started.
 - Required vs optional fields are clearly distinguished in config comments.
 
@@ -60,7 +60,7 @@ Our goal is to minimize the complexity developers face when using multiple AI pr
 
 ### Action-oriented CLI output
 - Good: `grob start`, `grob status`, `grob spend`
-- Good: Error messages that suggest a fix: `"No providers configured. Run 'grob preset apply medium' to get started."`
+- Good: Error messages that suggest a fix: `"No providers configured. Run 'grob preset apply perf' to get started."`
 
 ---
 

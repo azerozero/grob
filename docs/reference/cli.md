@@ -160,8 +160,8 @@ Manage configuration presets.
 ```bash
 grob preset list
 grob preset info perf
-grob preset apply medium --reload
-grob preset apply medium --dry-run          # Preview without writing
+grob preset apply eu-pro --reload
+grob preset apply eu-pro --dry-run          # Preview without writing
 grob preset export my-setup
 grob preset export my-setup --env qa        # Saves as my-setup.qa.toml
 grob preset install https://github.com/org/presets.git
@@ -256,7 +256,7 @@ Push a local preset to a remote grob instance. Loads the preset, fetches the rem
 
 ```bash
 grob preset push perf --target https://grob-qa.example.com
-grob preset push medium --target https://grob-prod.example.com --yes
+grob preset push eu-max --target https://grob-prod.example.com --yes
 ```
 
 ### `grob preset pull`
@@ -336,7 +336,7 @@ Compare local config against a preset or remote config. Defaults to comparing ag
 
 ```bash
 grob config-diff                  # Compare against active preset
-grob config-diff medium           # Compare against a specific preset
+grob config-diff eu-pro           # Compare against a specific preset
 ```
 
 Reports section-level differences for `[router]`, `[[providers]]`, and `[[models]]`.
