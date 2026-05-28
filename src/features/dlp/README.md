@@ -12,7 +12,7 @@ Sanitizes outbound LLM requests and inbound responses against secret leaks, PII 
 |------|----------|---------|
 | `DlpEngine` | `mod.rs` | `server::dispatch`, `server::handlers` |
 | `DlpAction`, `DlpRuleType`, `DlpActionReport`, `DlpBlockError` | `mod.rs` | dispatch, audit log |
-| `DlpConfig` and per-subsystem config structs | `config.rs` | `models::config`, server init |
+| `DlpConfig` and per-subsystem config structs | `config.rs` | `config`, server init |
 | `dfa::SecretScanner`, `dfa::DlpEvent` | `dfa.rs` | `DlpEngine` internals |
 | `pii::PiiScanner`, `pii::PiiType` | `pii.rs` | `DlpEngine` internals |
 | `prompt_injection::InjectionDetector` | `prompt_injection.rs` | `DlpEngine` internals |

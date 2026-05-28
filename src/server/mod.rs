@@ -61,9 +61,9 @@ pub use middleware::{
 };
 
 use crate::auth::TokenStore;
+use crate::config::AppConfig;
 use crate::features::dlp::session::DlpSessionManager;
 use crate::features::token_pricing::SharedPricingTable;
-use crate::models::config::AppConfig;
 use crate::providers::ProviderRegistry;
 use crate::routing::classify::Router;
 use crate::security::{AuditLog, RateLimiter};

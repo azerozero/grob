@@ -89,7 +89,7 @@ pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
 
 /// Starts the Grob server in the foreground, writing the PID file and handling SIGTERM for graceful shutdown.
 pub async fn start_foreground(
-    config: crate::models::config::AppConfig,
+    config: crate::config::AppConfig,
     config_source: crate::cli::ConfigSource,
 ) -> anyhow::Result<()> {
     if let Err(e) = crate::shared::pid::write_pid() {

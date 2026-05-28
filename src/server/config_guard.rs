@@ -113,7 +113,7 @@ pub fn is_key_denied(section: &ConfigSection, key: &str) -> bool {
 /// hot-reload (re-parse + provider rebuild) fails.
 pub async fn persist_and_reload(
     state: &Arc<super::AppState>,
-    config: &crate::models::config::AppConfig,
+    config: &crate::config::AppConfig,
 ) -> Result<(), super::RequestError> {
     let config_path = match &state.config_source {
         crate::cli::ConfigSource::File(p) => p,
@@ -157,7 +157,7 @@ pub async fn persist_and_reload(
 /// Same code path as `server::init` and `preset::build_registry`.
 fn reload_state(
     state: &Arc<super::AppState>,
-    config: crate::models::config::AppConfig,
+    config: crate::config::AppConfig,
     _config_path: &Path,
 ) -> Result<(), super::RequestError> {
     let new_router = crate::routing::classify::Router::new(config.clone());

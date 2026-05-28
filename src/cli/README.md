@@ -3,7 +3,7 @@
 > Defines the clap argument tree, the static TOML schema, and validated newtypes.
 
 ## Purpose
-Owns the user-facing surface of grob: every CLI flag, every subcommand declaration, and the strongly-typed config structs that the TOML loader deserializes into. Stays a leaf module so the rest of the crate depends on it without forming a cycle. Re-exports `AppConfig` from `models::config` for backwards compatibility.
+Owns the user-facing surface of grob: every CLI flag, every subcommand declaration, and the strongly-typed config structs that the TOML loader deserializes into. Stays a leaf module so the rest of the crate depends on it without forming a cycle. Re-exports `AppConfig` from `crate::config` for backwards compatibility.
 
 ## Public API
 | Item | Location | Used by |
@@ -11,7 +11,7 @@ Owns the user-facing surface of grob: every CLI flag, every subcommand declarati
 | `Cli`, `Commands` (clap derive) | `args.rs` | `main.rs`, `commands/*` |
 | `detect_bare_trailing_cmd` | `args.rs` | `main.rs` (UX guard) |
 | `*Action` enums (`KeyAction`, `SecretsAction`, `PresetAction`, `LogsAction`, `HarnessAction`) | `args.rs` | `commands/*` dispatchers |
-| `ServerConfig`, `RouterConfig`, `ProviderConfig`, `ModelConfig` | `config/{server,routing,providers}.rs` | `models::config`, providers |
+| `ServerConfig`, `RouterConfig`, `ProviderConfig`, `ModelConfig` | `config/{server,routing,providers}.rs` | `crate::config`, providers |
 | `SecurityConfig`, `ComplianceConfig`, `TeeConfig`, `FipsConfig` | `config/security.rs` | `security/*` |
 | `BudgetConfig`, `CacheConfig`, `TracingConfig`, `OtelConfig` | `config/{budget,cache,telemetry}.rs` | features layer |
 | `SecretsConfig`, `SecretsBackend`, `SecretsFileConfig` | `config/secrets.rs` | `auth::secrets` |
@@ -28,10 +28,10 @@ Owns the user-facing surface of grob: every CLI flag, every subcommand declarati
 ## Depends on
 - `clap`, `clap_complete`, `serde`, `toml` for derive plumbing.
 - `crate::features::log_export::LogExportConfig` and `crate::features::tool_layer::config::ToolLayerConfig` (re-exported).
-- `crate::models::config::AppConfig` (re-exported to break the historical cycle).
+- `crate::config::AppConfig` (re-exported for backwards compatibility).
 
 ## Non-goals
-- Reading or writing config files (`models::config` and `commands::*` handle I/O).
+- Reading or writing config files (`crate::config` and `commands::*` handle I/O).
 - Implementing subcommand logic (lives in `commands/*`).
 - Runtime configuration mutation. Config is static once loaded; see ADR-0001.
 - Provider behaviour or routing logic.

@@ -21,11 +21,10 @@ pub use config::{
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 
-// Re-export AppConfig and related helpers from models::config for backwards
-// compatibility. Canonical path is `crate::models::config::AppConfig` — this
-// re-export keeps existing `crate::cli::AppConfig` call sites working while
-// breaking the dependency edge that previously made `cli` part of the mega-SCC.
-pub use crate::models::config::{find_project_config, merge_project_config, AppConfig};
+// Re-export AppConfig and related helpers from the top-level `config` module for
+// backwards compatibility. Canonical path is `crate::config::AppConfig` — this
+// re-export keeps existing `crate::cli::AppConfig` call sites working.
+pub use crate::config::{find_project_config, merge_project_config, AppConfig};
 
 /// Format a bind address with proper IPv6 bracket notation.
 /// IPv6 hosts (containing `:`) are wrapped in brackets: `[::1]:13456`

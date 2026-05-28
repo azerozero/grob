@@ -9,7 +9,7 @@ use crate::features::mcp::server::types::{
 use crate::server::config_guard::is_key_denied;
 use crate::server::rpc::types::Role;
 
-fn test_app_config() -> crate::models::config::AppConfig {
+fn test_app_config() -> crate::config::AppConfig {
     let toml_str = r#"
         [router]
         default = "claude-sonnet"

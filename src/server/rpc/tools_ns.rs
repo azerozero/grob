@@ -110,10 +110,7 @@ pub async fn disable(
 /// the new `InjectRule` into the supplied config. Separated from the
 /// async handler so the validation logic is unit-testable without an
 /// `AppState`.
-fn apply_enable(
-    config: &mut crate::models::config::AppConfig,
-    tool: &str,
-) -> Result<(), ErrorObjectOwned> {
+fn apply_enable(config: &mut crate::config::AppConfig, tool: &str) -> Result<(), ErrorObjectOwned> {
     if tool.trim().is_empty() {
         return Err(rpc_err(INVALID_PARAMS_CODE, "tool name cannot be empty"));
     }
@@ -133,7 +130,7 @@ fn apply_enable(
 /// Pure mutation helper for `disable`. Removes any inject rule matching
 /// `tool` from the supplied config. Separated for unit-testability.
 fn apply_disable(
-    config: &mut crate::models::config::AppConfig,
+    config: &mut crate::config::AppConfig,
     tool: &str,
 ) -> Result<(), ErrorObjectOwned> {
     if tool.trim().is_empty() {
@@ -155,7 +152,7 @@ fn apply_disable(
 /// In-memory only — see [`tools/enable`] / [`tools/disable`] for rationale.
 fn swap_state(
     state: &Arc<AppState>,
-    new_config: crate::models::config::AppConfig,
+    new_config: crate::config::AppConfig,
     caller: &CallerIdentity,
     action: &str,
 ) -> Result<(), ErrorObjectOwned> {
@@ -241,7 +238,7 @@ pub async fn catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::config::AppConfig;
+    use crate::config::AppConfig;
     use crate::server::rpc::types::ERR_FORBIDDEN;
 
     /// Minimal AppConfig for tool_layer mutation tests.

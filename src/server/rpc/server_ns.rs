@@ -49,7 +49,7 @@ pub async fn reload_config(
 ) -> Result<StatusResponse, ErrorObjectOwned> {
     require_role(caller, Role::Operator)?;
 
-    use crate::models::config::AppConfig;
+    use crate::config::AppConfig;
     use crate::providers::ProviderRegistry;
     use crate::routing::classify::Router;
     use crate::server::ReloadableState;

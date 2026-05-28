@@ -1,6 +1,6 @@
 //! Config-section read/write helpers shared by `grob_configure`, `grob_autotune`, and the wizard tools.
 //!
-//! These helpers operate on an [`AppConfig`](crate::models::config::AppConfig)
+//! These helpers operate on an [`AppConfig`](crate::config::AppConfig)
 //! by value: the caller clones the active config, mutates it via
 //! [`apply_config_update`], then persists and hot-reloads through
 //! [`super::super::config_guard::persist_and_reload`]. The deny-list lives in
@@ -10,7 +10,7 @@ use crate::features::mcp::server::types::ConfigSection;
 
 /// Returns a safe JSON view of the requested config section (no secrets).
 pub(super) fn read_config_section(
-    config: &crate::models::config::AppConfig,
+    config: &crate::config::AppConfig,
     section: &ConfigSection,
 ) -> serde_json::Value {
     match section {
@@ -76,7 +76,7 @@ pub(super) fn read_config_section(
 /// value type does not match the field, or when the section is read-only
 /// (currently `Dlp`).
 pub(super) fn apply_config_update(
-    config: &mut crate::models::config::AppConfig,
+    config: &mut crate::config::AppConfig,
     section: &ConfigSection,
     key: &str,
     value: &serde_json::Value,

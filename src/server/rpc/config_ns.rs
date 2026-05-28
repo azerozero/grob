@@ -2,7 +2,7 @@
 
 use super::auth::{require_role, CallerIdentity};
 use super::types::{rpc_err, Role, StatusResponse, ERR_INTERNAL};
-use crate::models::config::AppConfig;
+use crate::config::AppConfig;
 use crate::providers::ProviderRegistry;
 use crate::routing::classify::Router;
 use crate::server::config_guard::is_section_or_key_denied;
@@ -119,7 +119,7 @@ pub async fn diff(
             .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to serialize config: {e}")))?
     };
 
-    let disk = match crate::models::config::AppConfig::from_source(&state.config_source).await {
+    let disk = match crate::config::AppConfig::from_source(&state.config_source).await {
         Ok(cfg) => serde_json::to_value(&cfg).map_err(|e| {
             rpc_err(
                 ERR_INTERNAL,

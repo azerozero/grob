@@ -11,7 +11,12 @@ use std::io::{self, BufRead, Write};
 use crate::auth::device_code::{device_auth_url_for, headless_requested, DeviceCodeClient};
 use crate::auth::oauth::{OAuthClient, OAuthConfig};
 use crate::auth::token_store::TokenStore;
-use crate::providers::{AuthType, ProviderConfig};
+// NOTE: Import config types from their canonical home `cli::config` (re-exported
+// at `crate::cli`) rather than the `providers` re-export. `providers` depends on
+// `auth` (for `TokenStore`/OAuth), so reaching into `providers` here closed an
+// `auth ↔ providers` cycle. `auth → cli::config` is the sanctioned dependency
+// direction documented in `auth/README.md`.
+use crate::cli::{AuthType, ProviderConfig};
 
 /// Status of a single provider's credentials.
 pub enum CredentialStatus {

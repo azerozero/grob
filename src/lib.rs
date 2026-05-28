@@ -77,6 +77,14 @@ pub mod cache;
 pub mod cli;
 /// CLI command implementations (start, stop, exec, doctor, etc.).
 pub mod commands;
+/// Top-level application configuration aggregate ([`config::AppConfig`]).
+///
+/// INTENTIONALLY a top-level module (not under `models/`): [`config::AppConfig`]
+/// aggregates feature config structs (`DlpConfig`, `McpConfig`, ...) whose
+/// modules import core types from `models`. Keeping the aggregate above both
+/// `models` and `features` breaks an otherwise circular dependency between them,
+/// mirroring the `pricing` leaf pattern below.
+pub mod config;
 /// Generic control engine for unified CLI / MCP / UI dispatch.
 pub mod control;
 /// Optional features: DLP, MCP, TAP, token pricing.
