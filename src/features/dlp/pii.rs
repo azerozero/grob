@@ -202,10 +202,10 @@ impl PiiScanner {
         let mut last_end = 0;
 
         for det in &detections {
-            // mutants::skip — les regex PII utilisent \b (word boundary),
-            // donc deux matchs ne peuvent pas se chevaucher en pratique.
-            // Le guard est defensif ; l'overlap est structurellement impossible
-            // entre CC (\d), IBAN ([A-Z]\d), et BIC ([A-Z]) grace aux \b.
+            // mutants::skip — PII regexes use \b (word boundary), so two
+            // matches cannot overlap in practice. The guard is defensive; the
+            // overlap is structurally impossible between CC (\d), IBAN
+            // ([A-Z]\d), and BIC ([A-Z]) thanks to the \b anchors.
             if det.start < last_end {
                 continue;
             }
@@ -427,12 +427,12 @@ mod tests {
         }
     }
 
-    // ── Mutation testing : tests cibles pour tuer les mutants survivants ──
+    // ── Mutation testing: targeted tests to kill surviving mutants ──
 
-    // -- from_config: || -> && et delete ! sur any_enabled --
+    // -- from_config: || -> && and delete ! on any_enabled --
 
-    /// Tue : L57:47 || -> && dans from_config (config.credit_cards || config.iban).
-    /// Si &&, cc-only config retournerait None alors qu'elle doit retourner Some.
+    /// Kills: L57:47 || -> && in from_config (config.credit_cards || config.iban).
+    /// With &&, a cc-only config would return None when it must return Some.
     #[test]
     fn test_kill_mutant_57_from_config_single_cc_enabled() {
         let config = PiiConfig {
@@ -444,8 +444,8 @@ mod tests {
         assert!(PiiScanner::from_config(&config).is_some());
     }
 
-    /// Tue : L57:62 || -> && dans from_config (config.iban || config.bic).
-    /// Si &&, iban-only config retournerait None.
+    /// Kills: L57:62 || -> && in from_config (config.iban || config.bic).
+    /// With &&, an iban-only config would return None.
     #[test]
     fn test_kill_mutant_57_from_config_single_iban_enabled() {
         let config = PiiConfig {
@@ -457,7 +457,7 @@ mod tests {
         assert!(PiiScanner::from_config(&config).is_some());
     }
 
-    /// Tue : L57 meme famille. bic-only doit suffire.
+    /// Kills: L57 same family. bic-only must suffice.
     #[test]
     fn test_kill_mutant_57_from_config_single_bic_enabled() {
         let config = PiiConfig {
@@ -469,8 +469,8 @@ mod tests {
         assert!(PiiScanner::from_config(&config).is_some());
     }
 
-    /// Tue : L58 delete ! (if any_enabled -> if !any_enabled inverted).
-    /// Si le ! est supprime, une config all-enabled retournerait None.
+    /// Kills: L58 delete ! (if any_enabled -> if !any_enabled inverted).
+    /// If the ! is removed, an all-enabled config would return None.
     #[test]
     fn test_kill_mutant_58_from_config_all_enabled_returns_some() {
         let config = PiiConfig {
@@ -482,21 +482,21 @@ mod tests {
         assert!(PiiScanner::from_config(&config).is_some());
     }
 
-    // -- might_contain_pii : thresholds et branches --
+    // -- might_contain_pii: thresholds and branches --
 
-    /// Tue : L94 += -> -= et L95 >= -> < (digit_run ne monte jamais assez).
-    /// Exactement 8 digits d'affile = seuil.
+    /// Kills: L94 += -> -= and L95 >= -> < (digit_run never rises enough).
+    /// Exactly 8 digits in a row = threshold.
     #[test]
     fn test_kill_mutant_94_95_digit_run_threshold_exact() {
         let scanner = default_scanner();
-        // 8 digits consecutifs = true
+        // 8 consecutive digits = true
         assert!(scanner.might_contain_pii("12345678"));
-        // 7 digits consecutifs = false
+        // 7 consecutive digits = false
         assert!(!scanner.might_contain_pii("1234567"));
     }
 
-    /// Tue : L105 += -> -= et L106 >= -> < (upper_run).
-    /// 8 uppercase consecutifs = seuil.
+    /// Kills: L105 += -> -= and L106 >= -> < (upper_run).
+    /// 8 consecutive uppercase = threshold.
     #[test]
     fn test_kill_mutant_105_106_upper_run_threshold_exact() {
         let scanner = default_scanner();
@@ -506,7 +506,7 @@ mod tests {
         assert!(!scanner.might_contain_pii("ABCDEFG"));
     }
 
-    /// Tue : L88 replace -> true (tout retourne true).
+    /// Kills: L88 replace -> true (everything returns true).
     #[test]
     fn test_kill_mutant_88_might_contain_pii_false_on_empty() {
         let scanner = default_scanner();
@@ -514,37 +514,37 @@ mod tests {
         assert!(!scanner.might_contain_pii("hello world"));
     }
 
-    /// Tue : L88 replace -> false (tout retourne false).
+    /// Kills: L88 replace -> false (everything returns false).
     #[test]
     fn test_kill_mutant_88_might_contain_pii_true_on_long_digits() {
         let scanner = default_scanner();
         assert!(scanner.might_contain_pii("1234567890123456"));
     }
 
-    /// Tue : L98:25 == -> != (b' ') et L98:38 == -> != (b'-').
-    /// Espaces et tirets ne doivent PAS reset le digit_run.
+    /// Kills: L98:25 == -> != (b' ') and L98:38 == -> != (b'-').
+    /// Spaces and dashes must NOT reset the digit_run.
     #[test]
     fn test_kill_mutant_98_spaces_dashes_keep_digit_run() {
         let scanner = default_scanner();
-        // digits with spaces: 4+4+4+4 = 16 digits, spaces maintiennent le run
+        // digits with spaces: 4+4+4+4 = 16 digits, spaces keep the run going
         assert!(scanner.might_contain_pii("1234 5678 9012 3456"));
         // digits with dashes
         assert!(scanner.might_contain_pii("1234-5678-9012-3456"));
     }
 
-    /// Tue : L98:33 || -> && (space || dash).
-    /// Si &&, seul un char qui est a la fois space ET dash garderait le run.
-    /// Un space seul resetterait le run, ce qui est faux.
+    /// Kills: L98:33 || -> && (space || dash).
+    /// With &&, only a char that is both space AND dash would keep the run.
+    /// A space alone would reset the run, which is wrong.
     #[test]
     fn test_kill_mutant_98_or_spaces_only() {
         let scanner = default_scanner();
-        // 4 digits + espace + 4 digits = 8+ digits grace au run maintenu par espace
+        // 4 digits + space + 4 digits = 8+ digits thanks to the run kept by the space
         assert!(scanner.might_contain_pii("1234 56789"));
     }
 
-    // -- redact : mode Log vs Redact vs Canary, overlap detection --
+    // -- redact: Log vs Redact vs Canary mode, overlap detection --
 
-    /// Tue : L168 == -> != (PiiAction::Log check inverted).
+    /// Kills: L168 == -> != (PiiAction::Log check inverted).
     #[test]
     fn test_kill_mutant_168_redact_log_mode_no_modification() {
         let scanner = PiiScanner::from_config(&PiiConfig {
@@ -556,12 +556,12 @@ mod tests {
         .unwrap();
         let text = "card 4532015112830366 here";
         let (result, dets) = scanner.redact(text).unwrap();
-        // En mode Log, le texte DOIT etre inchange.
+        // In Log mode, the text MUST be unchanged.
         assert_eq!(result, text);
         assert_eq!(dets.len(), 1);
     }
 
-    /// Tue : L121 replace -> None (redact retourne toujours None).
+    /// Kills: L121 replace -> None (redact always returns None).
     #[test]
     fn test_kill_mutant_121_redact_returns_some_on_detection() {
         let scanner = default_scanner();
@@ -569,36 +569,36 @@ mod tests {
         assert!(result.is_some());
     }
 
-    /// Tue : L176 < -> == / > / <= (overlap skip : det.start < last_end).
+    /// Kills: L176 < -> == / > / <= (overlap skip: det.start < last_end).
     #[test]
     fn test_kill_mutant_176_redact_overlap_handling() {
         let scanner = default_scanner();
-        // Un seul numero = pas d'overlap, resultat normal.
+        // A single number = no overlap, normal result.
         let (result, _) = scanner.redact("card 4532015112830366 done").unwrap();
         assert!(result.contains("[CARD REDACTED]"));
         assert!(!result.contains("4532015112830366"));
     }
 
-    /// Tue : L127:33 >= -> < et L127:55 <= -> > (digit count guards dans CC detection).
+    /// Kills: L127:33 >= -> < and L127:55 <= -> > (digit count guards in CC detection).
     #[test]
     fn test_kill_mutant_127_redact_cc_digit_count_bounds() {
         let scanner = default_scanner();
-        // 13 digits (Visa old style) : doit passer la borne >= 13
-        // 0000000000000 passe Luhn (tout zero)
+        // 13 digits (Visa old style): must pass the >= 13 bound
+        // 0000000000000 passes Luhn (all zeros)
         assert!(scanner.redact("card 0000000000000 done").is_some());
     }
 
-    /// Tue : L127:39/61 && -> || (digit length AND Luhn check).
+    /// Kills: L127:39/61 && -> || (digit length AND Luhn check).
     #[test]
     fn test_kill_mutant_127_redact_cc_both_checks_required() {
         let scanner = default_scanner();
-        // 16 digits mais Luhn invalide : NE doit PAS etre detecte.
+        // 16 digits but invalid Luhn: must NOT be detected.
         assert!(scanner.redact("card 1234567890123456 done").is_none());
     }
 
-    // -- generate_pii_canary : dispatch par type --
+    // -- generate_pii_canary: dispatch by type --
 
-    /// Tue : L318 replace generate_pii_canary -> String.
+    /// Kills: L318 replace generate_pii_canary -> String.
     #[test]
     fn test_kill_mutant_318_canary_dispatch_bic() {
         let canary = generate_pii_canary(&PiiType::Bic, "DEUTDEFF");
@@ -606,18 +606,18 @@ mod tests {
         assert_eq!(canary.len(), 8);
     }
 
-    /// Tue : L326 BIC canary garde le country et location.
+    /// Kills: L326 BIC canary keeps the country and location.
     #[test]
     fn test_kill_mutant_326_canary_bic_preserves_suffix() {
         let canary = generate_pii_canary(&PiiType::Bic, "BNPAFRPP");
-        // Doit etre GROBFRPP (remplace bank code par GROB, garde country+location).
+        // Must be GROBFRPP (replaces bank code with GROB, keeps country+location).
         assert_eq!(&canary[4..6], "FR");
         assert_eq!(&canary[6..], "PP");
     }
 
     // -- PiiType Display --
 
-    /// Tue : L25 replace fmt -> Ok(Default::default()) (affichage vide).
+    /// Kills: L25 replace fmt -> Ok(Default::default()) (empty display).
     #[test]
     fn test_kill_mutant_25_pii_type_display() {
         assert_eq!(format!("{}", PiiType::CreditCard), "credit_card");

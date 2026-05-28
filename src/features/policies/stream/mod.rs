@@ -157,18 +157,6 @@ where
     }
 }
 
-// ── Auth method helper ────────────────────────────────────────────────────────
-
-fn parse_auth_method(s: &str) -> AuthMethod {
-    match s {
-        "yubikey" => AuthMethod::Yubikey,
-        "multisig" => AuthMethod::Multisig,
-        "machine_key" => AuthMethod::MachineKey,
-        "webhook" => AuthMethod::Webhook,
-        _ => AuthMethod::Prompt,
-    }
-}
-
 // ── Receipt writing ───────────────────────────────────────────────────────────
 
 /// Decision context for a single `HitAuthorization` receipt.
@@ -236,259 +224,203 @@ fn write_hit_receipt(
     }
 }
 
-// ── Phase helpers (free functions on projected fields) ────────────────────────
+// ── Projected mutable view ─────────────────────────────────────────────────────
 
-/// Polls the approval oneshot and resolves the paused state.
+/// Borrowed projection of the mutable [`HitStream`] fields the phase helpers
+/// touch, bundled to replace the previous 9–13 free-function parameters.
 ///
-/// Returns `true` if approval is still pending (oneshot not ready).
-#[allow(clippy::too_many_arguments)]
-fn poll_paused_approval(
-    state: &mut HitStreamState,
-    approval_rx: &mut Option<tokio::sync::oneshot::Receiver<bool>>,
-    paused_tool_name: &mut Option<String>,
-    tool_input_buffer: &mut String,
-    pending_chunks: &mut VecDeque<Bytes>,
-    last_hit_hash: &mut Option<String>,
-    audit_log: &Option<Arc<crate::security::AuditLog>>,
-    request_id: &str,
-    policy: &HitOverride,
-    event_bus: &Option<crate::features::watch::EventBus>,
-    cx: &mut Context<'_>,
-) -> bool {
-    let rx = match approval_rx.as_mut() {
-        Some(rx) => rx,
-        None => return false,
-    };
-    // SAFETY: oneshot::Receiver is Unpin so Pin::new is fine.
-    match Pin::new(rx).poll(cx) {
-        Poll::Ready(Ok(approved)) => {
-            let tool_name = paused_tool_name.take().unwrap_or_default();
-            let tool_input = std::mem::take(tool_input_buffer);
-            if let Some(ref bus) = event_bus {
-                bus.emit(
-                    crate::features::watch::events::WatchEvent::HitApprovalResponse {
-                        request_id: request_id.to_string(),
-                        tool_name: tool_name.clone(),
-                        approved,
-                        timestamp: chrono::Utc::now(),
+/// Built from the `pin_project` projection in [`Stream::poll_next`]; all fields
+/// are borrows into the live stream, so methods here mutate the stream directly.
+struct HitStreamMut<'a> {
+    /// Current state-machine position.
+    state: &'a mut HitStreamState,
+    /// Oneshot receiver for the human approval decision.
+    approval_rx: &'a mut Option<tokio::sync::oneshot::Receiver<bool>>,
+    /// Tool name captured when entering `Paused`.
+    paused_tool_name: &'a mut Option<String>,
+    /// Accumulated `partial_json` for the in-flight tool block.
+    tool_input_buffer: &'a mut String,
+    /// Chunks buffered while not in `Passthrough`.
+    pending_chunks: &'a mut VecDeque<Bytes>,
+    /// Tag of the last receipt, for chain linking.
+    last_hit_hash: &'a mut Option<String>,
+    /// Audit log sink for receipts.
+    audit_log: &'a Option<Arc<crate::security::AuditLog>>,
+    /// Correlation identifier for the owning request.
+    request_id: &'a str,
+    /// Active HIT policy.
+    policy: &'a HitOverride,
+    /// Shared pending-approval map for the approve endpoint.
+    approval_tx_store: &'a Option<Arc<HitPendingApprovals>>,
+    /// Event bus for HIT events.
+    event_bus: &'a Option<crate::features::watch::EventBus>,
+}
+
+impl HitStreamMut<'_> {
+    /// Polls the approval oneshot and resolves the paused state.
+    ///
+    /// Returns `true` if approval is still pending (oneshot not ready).
+    fn poll_paused_approval(&mut self, cx: &mut Context<'_>) -> bool {
+        let rx = match self.approval_rx.as_mut() {
+            Some(rx) => rx,
+            None => return false,
+        };
+        // SAFETY: oneshot::Receiver is Unpin so Pin::new is fine.
+        match Pin::new(rx).poll(cx) {
+            Poll::Ready(Ok(approved)) => {
+                let tool_name = self.paused_tool_name.take().unwrap_or_default();
+                let tool_input = std::mem::take(self.tool_input_buffer);
+                if let Some(ref bus) = self.event_bus {
+                    bus.emit(
+                        crate::features::watch::events::WatchEvent::HitApprovalResponse {
+                            request_id: self.request_id.to_string(),
+                            tool_name: tool_name.clone(),
+                            approved,
+                            timestamp: chrono::Utc::now(),
+                        },
+                    );
+                }
+                write_hit_receipt(
+                    self.last_hit_hash,
+                    self.audit_log,
+                    self.request_id,
+                    ReceiptContext {
+                        tool_name: &tool_name,
+                        tool_input: &tool_input,
+                        decision: if approved {
+                            AuthDecision::Approve
+                        } else {
+                            AuthDecision::Deny
+                        },
+                        auth_method: self.policy.auth_method,
+                        signer: "human",
                     },
                 );
+                *self.approval_rx = None;
+                *self.state = HitStreamState::Passthrough;
+                if !approved {
+                    self.pending_chunks.clear();
+                    tracing::info!(
+                        request_id = %self.request_id,
+                        tool = %tool_name,
+                        "HIT: tool_use denied by human"
+                    );
+                }
+                false
             }
-            write_hit_receipt(
-                last_hit_hash,
-                audit_log,
-                request_id,
-                ReceiptContext {
-                    tool_name: &tool_name,
-                    tool_input: &tool_input,
-                    decision: if approved {
-                        AuthDecision::Approve
-                    } else {
-                        AuthDecision::Deny
+            Poll::Ready(Err(_)) => {
+                self.pending_chunks.clear();
+                self.tool_input_buffer.clear();
+                *self.approval_rx = None;
+                *self.paused_tool_name = None;
+                *self.state = HitStreamState::Passthrough;
+                tracing::warn!(
+                    request_id = %self.request_id,
+                    "HIT: approval channel closed, treating as deny"
+                );
+                false
+            }
+            Poll::Pending => true,
+        }
+    }
+
+    /// Applies the HIT decision after a complete tool_use block.
+    fn apply_hit_decision(&mut self, decision: HitDecision, tname: &str) {
+        match decision {
+            HitDecision::AutoApprove => {
+                tracing::debug!(request_id = %self.request_id, tool = %tname, "HIT: auto-approved");
+                write_hit_receipt(
+                    self.last_hit_hash,
+                    self.audit_log,
+                    self.request_id,
+                    ReceiptContext {
+                        tool_name: tname,
+                        tool_input: self.tool_input_buffer,
+                        decision: AuthDecision::Approve,
+                        auth_method: AuthMethod::MachineKey,
+                        signer: "policy",
                     },
-                    auth_method: parse_auth_method(&policy.auth_method),
-                    signer: "human",
-                },
-            );
-            *approval_rx = None;
-            *state = HitStreamState::Passthrough;
-            if !approved {
-                pending_chunks.clear();
+                );
+                self.tool_input_buffer.clear();
+                *self.state = HitStreamState::Passthrough;
+            }
+            HitDecision::Deny => {
+                tracing::info!(request_id = %self.request_id, tool = %tname, "HIT: tool_use denied by policy");
+                metrics::counter!("grob_hit_denied_total").increment(1);
+                write_hit_receipt(
+                    self.last_hit_hash,
+                    self.audit_log,
+                    self.request_id,
+                    ReceiptContext {
+                        tool_name: tname,
+                        tool_input: self.tool_input_buffer,
+                        decision: AuthDecision::Deny,
+                        auth_method: AuthMethod::MachineKey,
+                        signer: "policy",
+                    },
+                );
+                self.pending_chunks.clear();
+                self.tool_input_buffer.clear();
+                *self.state = HitStreamState::Passthrough;
+            }
+            HitDecision::RequireApproval => self.apply_require_approval(tname),
+        }
+    }
+
+    /// Handles the `RequireApproval` branch for each auth method.
+    fn apply_require_approval(&mut self, tname: &str) {
+        match self.policy.auth_method {
+            AuthMethod::MachineKey => {
+                tracing::info!(request_id = %self.request_id, tool = %tname, "HIT: machine_key auto-approved");
+                write_hit_receipt(
+                    self.last_hit_hash,
+                    self.audit_log,
+                    self.request_id,
+                    ReceiptContext {
+                        tool_name: tname,
+                        tool_input: self.tool_input_buffer,
+                        decision: AuthDecision::Approve,
+                        auth_method: AuthMethod::MachineKey,
+                        signer: "machine_key",
+                    },
+                );
+                self.tool_input_buffer.clear();
+                *self.state = HitStreamState::Passthrough;
+            }
+            AuthMethod::Yubikey => {
+                tracing::warn!(
+                    request_id = %self.request_id,
+                    auth_method = %self.policy.auth_method,
+                    "HIT: yubikey auth not yet implemented (WI-8b), falling back to prompt"
+                );
+                self.enter_paused(tname);
+            }
+            _ => {
                 tracing::info!(
-                    request_id = %request_id,
-                    tool = %tool_name,
-                    "HIT: tool_use denied by human"
+                    request_id = %self.request_id, tool = %tname,
+                    auth_method = %self.policy.auth_method, "HIT: requesting human approval"
                 );
+                metrics::counter!("grob_hit_approval_requested_total").increment(1);
+                self.enter_paused(tname);
             }
-            false
-        }
-        Poll::Ready(Err(_)) => {
-            pending_chunks.clear();
-            tool_input_buffer.clear();
-            *approval_rx = None;
-            *paused_tool_name = None;
-            *state = HitStreamState::Passthrough;
-            tracing::warn!(
-                request_id = %request_id,
-                "HIT: approval channel closed, treating as deny"
-            );
-            false
-        }
-        Poll::Pending => true,
-    }
-}
-
-/// Applies the HIT decision after a complete tool_use block.
-///
-/// Returns `true` when the caller should yield `Poll::Pending`.
-#[allow(clippy::too_many_arguments)]
-fn apply_hit_decision(
-    decision: HitDecision,
-    tname: &str,
-    state: &mut HitStreamState,
-    tool_input_buffer: &mut String,
-    pending_chunks: &mut VecDeque<Bytes>,
-    last_hit_hash: &mut Option<String>,
-    audit_log: &Option<Arc<crate::security::AuditLog>>,
-    request_id: &str,
-    policy: &HitOverride,
-    approval_rx: &mut Option<tokio::sync::oneshot::Receiver<bool>>,
-    paused_tool_name: &mut Option<String>,
-    approval_tx_store: &Option<Arc<HitPendingApprovals>>,
-    event_bus: &Option<crate::features::watch::EventBus>,
-) {
-    match decision {
-        HitDecision::AutoApprove => {
-            tracing::debug!(request_id = %request_id, tool = %tname, "HIT: auto-approved");
-            write_hit_receipt(
-                last_hit_hash,
-                audit_log,
-                request_id,
-                ReceiptContext {
-                    tool_name: tname,
-                    tool_input: tool_input_buffer,
-                    decision: AuthDecision::Approve,
-                    auth_method: AuthMethod::MachineKey,
-                    signer: "policy",
-                },
-            );
-            tool_input_buffer.clear();
-            *state = HitStreamState::Passthrough;
-        }
-        HitDecision::Deny => {
-            tracing::info!(request_id = %request_id, tool = %tname, "HIT: tool_use denied by policy");
-            metrics::counter!("grob_hit_denied_total").increment(1);
-            write_hit_receipt(
-                last_hit_hash,
-                audit_log,
-                request_id,
-                ReceiptContext {
-                    tool_name: tname,
-                    tool_input: tool_input_buffer,
-                    decision: AuthDecision::Deny,
-                    auth_method: AuthMethod::MachineKey,
-                    signer: "policy",
-                },
-            );
-            pending_chunks.clear();
-            tool_input_buffer.clear();
-            *state = HitStreamState::Passthrough;
-        }
-        HitDecision::RequireApproval => {
-            apply_require_approval(
-                tname,
-                state,
-                tool_input_buffer,
-                last_hit_hash,
-                audit_log,
-                request_id,
-                policy,
-                approval_rx,
-                paused_tool_name,
-                approval_tx_store,
-                event_bus,
-            );
         }
     }
-}
 
-/// Handles the `RequireApproval` branch for each auth method.
-#[allow(clippy::too_many_arguments)]
-fn apply_require_approval(
-    tname: &str,
-    state: &mut HitStreamState,
-    tool_input_buffer: &mut String,
-    last_hit_hash: &mut Option<String>,
-    audit_log: &Option<Arc<crate::security::AuditLog>>,
-    request_id: &str,
-    policy: &HitOverride,
-    approval_rx: &mut Option<tokio::sync::oneshot::Receiver<bool>>,
-    paused_tool_name: &mut Option<String>,
-    approval_tx_store: &Option<Arc<HitPendingApprovals>>,
-    event_bus: &Option<crate::features::watch::EventBus>,
-) {
-    match policy.auth_method.as_str() {
-        "machine_key" => {
-            tracing::info!(request_id = %request_id, tool = %tname, "HIT: machine_key auto-approved");
-            write_hit_receipt(
-                last_hit_hash,
-                audit_log,
-                request_id,
-                ReceiptContext {
-                    tool_name: tname,
-                    tool_input: tool_input_buffer,
-                    decision: AuthDecision::Approve,
-                    auth_method: AuthMethod::MachineKey,
-                    signer: "machine_key",
-                },
-            );
-            tool_input_buffer.clear();
-            *state = HitStreamState::Passthrough;
-        }
-        "yubikey" => {
-            tracing::warn!(
-                request_id = %request_id,
-                auth_method = %policy.auth_method,
-                "HIT: yubikey auth not yet implemented (WI-8b), falling back to prompt"
-            );
-            enter_paused(
-                tname,
-                state,
-                tool_input_buffer,
-                approval_rx,
-                paused_tool_name,
-                request_id,
-                policy,
-                approval_tx_store,
-                event_bus,
-            );
-        }
-        _ => {
-            tracing::info!(
-                request_id = %request_id, tool = %tname,
-                auth_method = %policy.auth_method, "HIT: requesting human approval"
-            );
-            metrics::counter!("grob_hit_approval_requested_total").increment(1);
-            enter_paused(
-                tname,
-                state,
-                tool_input_buffer,
-                approval_rx,
-                paused_tool_name,
-                request_id,
-                policy,
-                approval_tx_store,
-                event_bus,
-            );
-        }
+    /// Transitions the stream into the `Paused` state with an approval channel.
+    fn enter_paused(&mut self, tname: &str) {
+        let preview: String = self.tool_input_buffer.chars().take(200).collect();
+        let rx = setup_approval(
+            self.request_id,
+            tname,
+            &preview,
+            self.policy,
+            self.approval_tx_store,
+            self.event_bus,
+        );
+        *self.approval_rx = Some(rx);
+        *self.paused_tool_name = Some(tname.to_string());
+        *self.state = HitStreamState::Paused;
     }
-}
-
-/// Transitions the stream into the `Paused` state with an approval channel.
-#[allow(clippy::too_many_arguments)]
-fn enter_paused(
-    tname: &str,
-    state: &mut HitStreamState,
-    tool_input_buffer: &str,
-    approval_rx: &mut Option<tokio::sync::oneshot::Receiver<bool>>,
-    paused_tool_name: &mut Option<String>,
-    request_id: &str,
-    policy: &HitOverride,
-    approval_tx_store: &Option<Arc<HitPendingApprovals>>,
-    event_bus: &Option<crate::features::watch::EventBus>,
-) {
-    let preview: String = tool_input_buffer.chars().take(200).collect();
-    let rx = setup_approval(
-        request_id,
-        tname,
-        &preview,
-        policy,
-        approval_tx_store,
-        event_bus,
-    );
-    *approval_rx = Some(rx);
-    *paused_tool_name = Some(tname.to_string());
-    *state = HitStreamState::Paused;
 }
 
 /// Scans a text_delta chunk for flagged patterns and emits events.
@@ -539,19 +471,20 @@ where
 
         // Phase 1: if paused, poll the approval oneshot.
         let approval_pending = if matches!(*this.state, HitStreamState::Paused) {
-            poll_paused_approval(
-                this.state,
-                this.approval_rx,
-                this.paused_tool_name,
-                this.tool_input_buffer,
-                this.pending_chunks,
-                this.last_hit_hash,
-                this.audit_log,
-                this.request_id,
-                this.policy,
-                this.event_bus,
-                cx,
-            )
+            HitStreamMut {
+                state: &mut *this.state,
+                approval_rx: &mut *this.approval_rx,
+                paused_tool_name: &mut *this.paused_tool_name,
+                tool_input_buffer: &mut *this.tool_input_buffer,
+                pending_chunks: &mut *this.pending_chunks,
+                last_hit_hash: &mut *this.last_hit_hash,
+                audit_log: this.audit_log,
+                request_id: this.request_id,
+                policy: this.policy,
+                approval_tx_store: this.approval_tx_store,
+                event_bus: this.event_bus,
+            }
+            .poll_paused_approval(cx)
         } else {
             false
         };
@@ -592,21 +525,20 @@ where
                                     input_preview: this.tool_input_buffer.clone(),
                                 };
                                 let decision = evaluate_tool_use(this.policy, &tool_info);
-                                apply_hit_decision(
-                                    decision,
-                                    &tname,
-                                    this.state,
-                                    this.tool_input_buffer,
-                                    this.pending_chunks,
-                                    this.last_hit_hash,
-                                    this.audit_log,
-                                    this.request_id,
-                                    this.policy,
-                                    this.approval_rx,
-                                    this.paused_tool_name,
-                                    this.approval_tx_store,
-                                    this.event_bus,
-                                );
+                                HitStreamMut {
+                                    state: &mut *this.state,
+                                    approval_rx: &mut *this.approval_rx,
+                                    paused_tool_name: &mut *this.paused_tool_name,
+                                    tool_input_buffer: &mut *this.tool_input_buffer,
+                                    pending_chunks: &mut *this.pending_chunks,
+                                    last_hit_hash: &mut *this.last_hit_hash,
+                                    audit_log: this.audit_log,
+                                    request_id: this.request_id,
+                                    policy: this.policy,
+                                    approval_tx_store: this.approval_tx_store,
+                                    event_bus: this.event_bus,
+                                }
+                                .apply_hit_decision(decision, &tname);
                             }
                         }
                     }

@@ -9,6 +9,7 @@
 use bytes::Bytes;
 use futures::StreamExt;
 use grob::features::policies::hit::HitOverride;
+use grob::features::policies::hit_auth::AuthMethod;
 use grob::features::policies::stream::{HitApprovalEntry, HitPendingApprovals, HitStream};
 use std::sync::Arc;
 
@@ -43,7 +44,7 @@ fn require_approval_policy() -> HitOverride {
         auto_approve: vec![],
         require_approval: vec!["Edit".into(), "Bash".into()],
         deny: vec!["Bash(rm -rf*)".into()],
-        auth_method: "prompt".into(),
+        auth_method: AuthMethod::Prompt,
         flag_patterns: vec![],
         webhook_url: None,
         required_signatures: None,

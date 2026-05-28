@@ -553,17 +553,17 @@ fn from_config_counts_secrets_and_custom_prefixes() {
     );
 }
 
-// ─── Tests tueurs de mutants cargo-mutants pour dlp/mod.rs ───
-// Couvrent les mutants MISSED identifies dans le shard 2 de la matrice
-// mutation-testing CI (voir docs interne T-CI-0b).
+// ─── cargo-mutants mutant-killing tests for dlp/mod.rs ───
+// Cover the MISSED mutants identified in shard 2 of the CI mutation-testing
+// matrix (see internal docs T-CI-0b).
 
-/// Tue : L229 `+` → `-` / `*` dans `DlpEngine::from_config` (compte de rules).
+/// Kills: L229 `+` → `-` / `*` in `DlpEngine::from_config` (rule count).
 ///
-/// Le compteur `secret_count = secrets.len() + custom_prefixes.len()` a ete
-/// extrait dans `count_secret_rules` pour etre observable depuis les tests.
+/// The counter `secret_count = secrets.len() + custom_prefixes.len()` was
+/// extracted into `count_secret_rules` to be observable from tests.
 #[test]
 fn test_kill_mutant_229_count_secret_rules_addition() {
-    // 2 + 3 = 5 (les mutants `-` donneraient -1, `*` donneraient 6).
+    // 2 + 3 = 5 (the `-` mutants would give -1, `*` would give 6).
     let config = DlpConfig {
         enabled: true,
         no_builtins: true,
@@ -605,7 +605,7 @@ fn test_kill_mutant_229_count_secret_rules_addition() {
     };
     assert_eq!(DlpEngine::count_secret_rules(&config), 5);
 
-    // Bornes asymetriques : 2 et 0, 0 et 3 — tue `*` (donnerait 0).
+    // Asymmetric bounds: 2 and 0, 0 and 3 — kills `*` (would give 0).
     let only_secrets = DlpConfig {
         enabled: true,
         no_builtins: true,
@@ -641,7 +641,7 @@ fn test_kill_mutant_229_count_secret_rules_addition() {
     assert_eq!(DlpEngine::count_secret_rules(&only_prefixes), 1);
 }
 
-/// Helper pour fabriquer un engine qui matche sur un secret et sur un nom.
+/// Helper to build an engine that matches on a secret and on a name.
 fn engine_with_secret_and_name() -> Arc<DlpEngine> {
     let config = DlpConfig {
         enabled: true,
@@ -663,14 +663,14 @@ fn engine_with_secret_and_name() -> Arc<DlpEngine> {
     DlpEngine::from_config(config).unwrap()
 }
 
-/// Tue : L610 `delete !` + `&& → ||` sur `!scanner.is_empty() && might_contain_secret`.
+/// Kills: L610 `delete !` + `&& → ||` on `!scanner.is_empty() && might_contain_secret`.
 ///
-/// On s'appuie sur le flag `secret_scan_attempted` du rapport pour distinguer
-/// les mutations des branches conditionnelles (sinon `redact` agit comme un
-/// second garde-fou et masque `&& → ||`).
+/// We rely on the report's `secret_scan_attempted` flag to distinguish the
+/// conditional-branch mutations (otherwise `redact` acts as a second safeguard
+/// and masks `&& → ||`).
 #[test]
 fn test_kill_mutant_610_scan_end_of_stream_secret_branch() {
-    // Cas 1 : engine SANS secrets → branche non evaluee (scanner empty).
+    // Case 1: engine WITHOUT secrets → branch not evaluated (scanner empty).
     let empty_secrets = DlpConfig {
         enabled: true,
         no_builtins: true,
@@ -682,69 +682,69 @@ fn test_kill_mutant_610_scan_end_of_stream_secret_branch() {
     assert_eq!(report.secrets, 0);
     assert!(
         !report.secret_scan_attempted,
-        "scanner vide → branche pas evaluee"
+        "empty scanner → branch not evaluated"
     );
 
-    // Cas 2 : engine AVEC secrets mais texte qui ne passe PAS le pre-filter
-    // (aucun byte 'g' ni 'A'). Tue `&& → ||` : avec `||`, on entrerait dans
-    // la branche alors qu'avec `&&` on saute.
+    // Case 2: engine WITH secrets but text that does NOT pass the pre-filter
+    // (no byte 'g' or 'A'). Kills `&& → ||`: with `||`, we would enter the
+    // branch whereas with `&&` we skip it.
     let engine_full = engine_with_secret_and_name();
-    let clean_report = engine_full.scan_end_of_stream_reported("rien ici");
+    let clean_report = engine_full.scan_end_of_stream_reported("nothing here");
     assert_eq!(clean_report.secrets, 0);
     assert!(
         !clean_report.secret_scan_attempted,
-        "pre-filter rejete → branche PAS entree (tue `&& → ||`)"
+        "pre-filter rejected → branch NOT entered (kills `&& → ||`)"
     );
 
-    // Cas 3 : engine AVEC secrets ET texte piege → branche entree ET detection.
-    // Tue `delete !` : avec `self.scanner.is_empty() && ...` le scanner
-    // non-vide donne false et on ne rentre plus dans la branche.
+    // Case 3: engine WITH secrets AND trap text → branch entered AND detection.
+    // Kills `delete !`: with `self.scanner.is_empty() && ...` the non-empty
+    // scanner yields false and we no longer enter the branch.
     let dirty_token = format!("ghp_{}", "abcdefghijklmnopqrstuvwxyz1234567890"); // nosemgrep: generic.secrets.security.detected-github-token
     let dirty_report = engine_full.scan_end_of_stream_reported(&dirty_token);
     assert_eq!(
         dirty_report.secrets, 1,
-        "secret present → 1 detection (tue `delete !`)"
+        "secret present → 1 detection (kills `delete !`)"
     );
     assert!(
         dirty_report.secret_scan_attempted,
-        "branche entree (tue `delete !`)"
+        "branch entered (kills `delete !`)"
     );
 }
 
-/// Tue : L626 `delete !` + `&& → ||` sur `!anonymizer.is_empty() && deanonymize_if_match`.
+/// Kills: L626 `delete !` + `&& → ||` on `!anonymizer.is_empty() && deanonymize_if_match`.
 #[test]
 fn test_kill_mutant_626_scan_end_of_stream_name_branch() {
-    // Engine avec un nom a pseudonymiser.
+    // Engine with a name to pseudonymize.
     let engine = engine_with_secret_and_name();
 
-    // Etape 1 : anonymise "Thales" pour produire un pseudonyme deterministique.
-    let anon = engine.sanitize_text("Contact Thales svp");
+    // Step 1: anonymize "Thales" to produce a deterministic pseudonym.
+    let anon = engine.sanitize_text("Contact Thales please");
     let pseudo = anon
         .as_ref()
         .strip_prefix("Contact ")
-        .and_then(|s| s.strip_suffix(" svp"))
-        .expect("format stable");
-    assert_ne!(pseudo, "Thales", "anonymisation attendue");
+        .and_then(|s| s.strip_suffix(" please"))
+        .expect("stable format");
+    assert_ne!(pseudo, "Thales", "anonymization expected");
 
-    // Cas A : anonymizer non-vide + texte contenant le pseudonyme.
-    // Tue `delete !` (sans !, scanner non-vide → false, branche PAS entree).
+    // Case A: non-empty anonymizer + text containing the pseudonym.
+    // Kills `delete !` (without !, non-empty scanner → false, branch NOT entered).
     let report = engine.scan_end_of_stream_reported(&anon);
-    assert_eq!(report.pseudonyms, 1, "1 detection attendue");
+    assert_eq!(report.pseudonyms, 1, "1 detection expected");
     assert!(
         report.name_scan_attempted,
-        "branche entree avec detection (tue `delete !`)"
+        "branch entered with detection (kills `delete !`)"
     );
 
-    // Cas B : anonymizer non-vide + texte SANS pseudonyme. Tue `&& → ||` :
-    // avec `||`, anonymizer non-vide suffit a entrer la branche.
+    // Case B: non-empty anonymizer + text WITHOUT pseudonym. Kills `&& → ||`:
+    // with `||`, a non-empty anonymizer is enough to enter the branch.
     let clean = engine.scan_end_of_stream_reported("hello world");
     assert_eq!(clean.pseudonyms, 0);
     assert!(
         !clean.name_scan_attempted,
-        "pas de pseudo → branche pas entree (tue `&& → ||`)"
+        "no pseudonym → branch not entered (kills `&& → ||`)"
     );
 
-    // Cas C : anonymizer vide → branche jamais entree.
+    // Case C: empty anonymizer → branch never entered.
     let empty_config = DlpConfig {
         enabled: true,
         no_builtins: true,
@@ -756,12 +756,12 @@ fn test_kill_mutant_626_scan_end_of_stream_name_branch() {
     assert!(!r.name_scan_attempted);
 }
 
-/// Tue : L635 `delete !` sur `!matches!(result, url_exfil::UrlExfilResult::Clean)`.
+/// Kills: L635 `delete !` on `!matches!(result, url_exfil::UrlExfilResult::Clean)`.
 #[test]
 fn test_kill_mutant_635_scan_end_of_stream_url_exfil_branch() {
-    // Engine avec URL exfil actif. Les valeurs par defaut activent
-    // `flag_long_query_params` et `flag_data_uris` — un data URI declenche
-    // sans dependance a la config de domaines.
+    // Engine with URL exfil active. The default values enable
+    // `flag_long_query_params` and `flag_data_uris` — a data URI triggers
+    // without depending on the domain config.
     let config = DlpConfig {
         enabled: true,
         no_builtins: true,
@@ -773,30 +773,30 @@ fn test_kill_mutant_635_scan_end_of_stream_url_exfil_branch() {
     };
     let engine = DlpEngine::from_config(config).unwrap();
 
-    // Cas propre : aucune URL → report.url_exfils == 0.
-    let clean = engine.scan_end_of_stream_reported("hello world sans url");
-    assert_eq!(clean.url_exfils, 0, "pas d'URL → pas de detection");
+    // Clean case: no URL → report.url_exfils == 0.
+    let clean = engine.scan_end_of_stream_reported("hello world without url");
+    assert_eq!(clean.url_exfils, 0, "no URL → no detection");
 
-    // Cas sale : data URI explicitement flagge par la config par defaut.
-    // Le mutant `delete !` rend la branche `matches!(Clean)`, donc
-    // avec une URL suspecte (resultat = Logged), la condition devient
-    // fausse et url_exfils reste a 0. L'assertion == 1 kills la mutation.
+    // Dirty case: data URI explicitly flagged by the default config.
+    // The `delete !` mutant makes the branch `matches!(Clean)`, so with a
+    // suspicious URL (result = Logged), the condition becomes false and
+    // url_exfils stays at 0. The == 1 assertion kills the mutation.
     let dirty = engine.scan_end_of_stream_reported(
         "leak data:text/plain;base64,SGVsbG8gV29ybGQhIFRoaXMgaXMgc2VjcmV0IGRhdGE=",
     );
     assert_eq!(
         dirty.url_exfils, 1,
-        "data URI doit etre detectee (tue `delete !`)"
+        "data URI must be detected (kills `delete !`)"
     );
 }
 
-/// Tue : L765 `scan_input_enabled -> bool` (true/false stub).
+/// Kills: L765 `scan_input_enabled -> bool` (true/false stub).
 #[cfg(feature = "dlp")]
 #[test]
 fn test_kill_mutant_765_scan_input_enabled_reflects_config() {
     use crate::traits::DlpPipeline;
 
-    // scan_input = true → retourne true, mutant `-> false` tue.
+    // scan_input = true → returns true, mutant `-> false` killed.
     let config_true = DlpConfig {
         enabled: true,
         scan_input: true,
@@ -806,7 +806,7 @@ fn test_kill_mutant_765_scan_input_enabled_reflects_config() {
     let engine_true = DlpEngine::from_config(config_true).unwrap();
     assert!(DlpPipeline::scan_input_enabled(&*engine_true));
 
-    // scan_input = false → retourne false, mutant `-> true` tue.
+    // scan_input = false → returns false, mutant `-> true` killed.
     let config_false = DlpConfig {
         enabled: true,
         scan_input: false,
@@ -817,13 +817,13 @@ fn test_kill_mutant_765_scan_input_enabled_reflects_config() {
     assert!(!DlpPipeline::scan_input_enabled(&*engine_false));
 }
 
-/// Tue : L769 `scan_output_enabled -> bool` (true/false stub).
+/// Kills: L769 `scan_output_enabled -> bool` (true/false stub).
 #[cfg(feature = "dlp")]
 #[test]
 fn test_kill_mutant_769_scan_output_enabled_reflects_config() {
     use crate::traits::DlpPipeline;
 
-    // scan_output = true → retourne true.
+    // scan_output = true → returns true.
     let config_true = DlpConfig {
         enabled: true,
         scan_output: true,
@@ -833,7 +833,7 @@ fn test_kill_mutant_769_scan_output_enabled_reflects_config() {
     let engine_true = DlpEngine::from_config(config_true).unwrap();
     assert!(DlpPipeline::scan_output_enabled(&*engine_true));
 
-    // scan_output = false → retourne false.
+    // scan_output = false → returns false.
     let config_false = DlpConfig {
         enabled: true,
         scan_output: false,

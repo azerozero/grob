@@ -13,7 +13,10 @@ pub mod autotune;
 // the full classification engine (router, inference, rules, tier_match), and
 // the inner `classify` module keeps its original filename since it predates
 // the merge (audit item #12) and is re-exported here.
-#[allow(clippy::module_inception)]
+#[expect(
+    clippy::module_inception,
+    reason = "Inner `classify` keeps its original filename predating the merge (audit item #12) and is re-exported here."
+)]
 pub mod classify;
 /// Provider type inference from model name prefixes.
 pub mod inference;

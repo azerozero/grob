@@ -9,13 +9,11 @@ use serde::{Deserialize, Serialize};
 pub const ERR_UNAUTHORIZED: i32 = -32001;
 /// Insufficient privileges for the requested method.
 pub const ERR_FORBIDDEN: i32 = -32002;
-/// Requested resource does not exist (Phase 2).
-#[allow(dead_code)]
+/// Requested resource does not exist.
 pub const ERR_NOT_FOUND: i32 = -32003;
 /// Operation failed at the backend.
 pub const ERR_INTERNAL: i32 = -32004;
-/// Budget limit exceeded (Phase 2).
-#[allow(dead_code)]
+/// Budget limit exceeded (Phase 2). Reserved code wired in a later phase.
 pub const ERR_BUDGET_EXCEEDED: i32 = -32005;
 
 /// Builds an owned JSON-RPC error object with the given numeric code and message.

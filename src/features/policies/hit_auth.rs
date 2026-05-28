@@ -37,18 +37,31 @@ impl std::fmt::Display for AuthDecision {
 }
 
 /// Authentication method used for the authorization.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+///
+/// The serde representation matches the lowercase config strings accepted in the
+/// `[policies.hit]` TOML section (`auth_method = "prompt"`, `"machine_key"`, …).
+/// An unknown value is rejected at deserialization rather than silently treated
+/// as [`Prompt`](AuthMethod::Prompt), so a config typo fails loudly.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum AuthMethod {
     /// Text approval in grob watch terminal.
+    #[default]
+    #[serde(rename = "prompt")]
     Prompt,
     /// FIDO2 YubiKey hardware key (cross-platform).
+    #[serde(rename = "yubikey")]
     Yubikey,
     /// M-of-N human co-signing.
+    #[serde(rename = "multisig")]
     Multisig,
+    /// N independent voters tally a quorum decision.
+    #[serde(rename = "quorum")]
+    Quorum,
     /// Automated machine key (CI/CD).
+    #[serde(rename = "machine_key")]
     MachineKey,
     /// HTTP webhook to external system.
+    #[serde(rename = "webhook")]
     Webhook,
 }
 
@@ -58,6 +71,7 @@ impl std::fmt::Display for AuthMethod {
             Self::Prompt => write!(f, "prompt"),
             Self::Yubikey => write!(f, "yubikey"),
             Self::Multisig => write!(f, "multisig"),
+            Self::Quorum => write!(f, "quorum"),
             Self::MachineKey => write!(f, "machine_key"),
             Self::Webhook => write!(f, "webhook"),
         }

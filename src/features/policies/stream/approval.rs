@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::features::policies::hit::HitOverride;
+use crate::features::policies::hit_auth::AuthMethod;
 
 // ── Pending approval entry types ──────────────────────────────────────────────
 
@@ -70,15 +71,15 @@ pub fn setup_approval(
     let (tx, rx) = tokio::sync::oneshot::channel();
     let key = format!("{}:{}", request_id, tool_name);
 
-    let entry = match policy.auth_method.as_str() {
-        "multisig" => HitApprovalEntry::MultiSig(HitMultiSigPending {
+    let entry = match policy.auth_method {
+        AuthMethod::Multisig => HitApprovalEntry::MultiSig(HitMultiSigPending {
             collector: crate::features::policies::multisig::MultiSigCollector::new(
                 policy.required_signatures.unwrap_or(2) as usize,
             ),
             sender: tx,
             last_hash: None,
         }),
-        "quorum" => HitApprovalEntry::Quorum(HitQuorumPending {
+        AuthMethod::Quorum => HitApprovalEntry::Quorum(HitQuorumPending {
             config: policy.quorum.clone().unwrap_or_else(default_quorum_config),
             votes: Vec::new(),
             sender: tx,
@@ -98,7 +99,7 @@ pub fn setup_approval(
                 request_id: request_id.to_string(),
                 tool_name: tool_name.to_string(),
                 tool_input_preview: tool_input_preview.to_string(),
-                auth_method: policy.auth_method.clone(),
+                auth_method: policy.auth_method.to_string(),
                 webhook_url: policy.webhook_url.clone(),
                 timestamp: chrono::Utc::now(),
             },

@@ -1,5 +1,6 @@
 use super::*;
 use crate::features::policies::hit::HitOverride;
+use crate::features::policies::hit_auth::AuthMethod;
 use bytes::Bytes;
 use futures::StreamExt;
 
@@ -32,7 +33,7 @@ fn policy_deny_arg() -> HitOverride {
         auto_approve: vec!["Read".into()],
         require_approval: vec!["Bash".into()],
         deny: vec!["dangerous_tool".into(), "Bash(rm -rf*)".into()],
-        auth_method: "prompt".into(),
+        auth_method: AuthMethod::Prompt,
         flag_patterns: vec![],
         webhook_url: None,
         required_signatures: None,
@@ -46,7 +47,7 @@ fn simple_policy() -> HitOverride {
         auto_approve: vec!["Read".into()],
         require_approval: vec!["Bash".into()],
         deny: vec!["dangerous_tool".into()],
-        auth_method: "prompt".into(),
+        auth_method: AuthMethod::Prompt,
         flag_patterns: vec![],
         webhook_url: None,
         required_signatures: None,
@@ -202,7 +203,7 @@ async fn test_require_approval_pauses() {
 async fn test_machine_key_approves() {
     let policy = HitOverride {
         require_approval: vec!["Bash".into()],
-        auth_method: "machine_key".into(),
+        auth_method: AuthMethod::MachineKey,
         ..simple_policy()
     };
     let chunks: Vec<Result<Bytes, crate::providers::error::ProviderError>> = vec![
@@ -229,7 +230,7 @@ async fn test_multisig_requires_two_approvals() {
 
     let policy = HitOverride {
         require_approval: vec!["Bash".into()],
-        auth_method: "multisig".into(),
+        auth_method: AuthMethod::Multisig,
         required_signatures: Some(2),
         ..simple_policy()
     };
