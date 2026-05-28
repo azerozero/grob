@@ -244,6 +244,24 @@ pub(crate) fn resolve_grob_hint(
         .and_then(|mut slot| slot.take())
 }
 
+/// Returns `true` when a configured tier name matches the request's tier.
+///
+/// Extracted so the tier-lookup equality in [`dispatch`] is unit-testable
+/// without constructing a full [`DispatchContext`].
+#[inline]
+fn tier_name_matches(tier_cfg_name: &str, request_tier_name: &str) -> bool {
+    tier_cfg_name == request_tier_name
+}
+
+/// Returns `true` when a model is configured for the fan-out strategy.
+///
+/// Extracted so the strategy comparison in [`dispatch`] is unit-testable
+/// without constructing a full [`DispatchContext`].
+#[inline]
+fn is_fan_out_strategy(strategy: &ModelStrategy) -> bool {
+    *strategy == ModelStrategy::FanOut
+}
+
 /// Run the full dispatch pipeline: DLP → cache → route → provider loop.
 ///
 /// Returns a `DispatchResult` that the handler transforms into the appropriate
@@ -345,7 +363,13 @@ pub(crate) async fn dispatch(
     // entry has fanout=true, dispatch to all tier providers in parallel.
     if let Some(ref tier) = decision.complexity_tier {
         let tier_name = tier.to_string();
-        if let Some(tier_cfg) = ctx.inner.config.tiers.iter().find(|t| t.name == tier_name) {
+        if let Some(tier_cfg) = ctx
+            .inner
+            .config
+            .tiers
+            .iter()
+            .find(|t| tier_name_matches(&t.name, &tier_name))
+        {
             if tier_cfg.fanout {
                 let fan_out_config = crate::cli::FanOutConfig {
                     mode: crate::cli::FanOutMode::Fastest,
@@ -367,7 +391,7 @@ pub(crate) async fn dispatch(
 
     // ── Step 6: Fan-out strategy (model-level) ──
     if let Some(model_config) = ctx.inner.find_model(&decision.model_name) {
-        if model_config.strategy == ModelStrategy::FanOut {
+        if is_fan_out_strategy(&model_config.strategy) {
             if let Some(ref fan_out_config) = model_config.fan_out {
                 return dispatch_fan_out(ctx, request, &sorted_mappings, fan_out_config, &decision)
                     .await;
@@ -407,6 +431,24 @@ async fn check_cache(
     })
 }
 
+/// Returns `true` when DLP input scanning is disabled for this request.
+///
+/// Extracted so the early-return guard in [`scan_dlp_input`] is unit-testable
+/// without constructing a full [`DispatchContext`].
+#[inline]
+fn dlp_input_scan_disabled(scan_input: bool) -> bool {
+    !scan_input
+}
+
+/// Returns `true` when a DLP block should escalate via the compliance webhook.
+///
+/// Extracted so the compliance-escalation guard in [`scan_dlp_input`] is
+/// unit-testable without constructing a full [`DispatchContext`].
+#[inline]
+fn should_escalate_compliance(enabled: bool, risk_classification: bool) -> bool {
+    enabled && risk_classification
+}
+
 /// DLP input scanning with risk assessment and audit logging.
 fn scan_dlp_input(
     ctx: &DispatchContext<'_>,
@@ -415,7 +457,7 @@ fn scan_dlp_input(
     let Some(ref dlp_engine) = ctx.dlp else {
         return Ok(());
     };
-    if !dlp_engine.config.scan_input {
+    if dlp_input_scan_disabled(dlp_engine.config.scan_input) {
         return Ok(());
     }
 
@@ -462,7 +504,7 @@ fn scan_dlp_input(
                 });
 
             let compliance = &ctx.inner.config.compliance;
-            if compliance.enabled && compliance.risk_classification {
+            if should_escalate_compliance(compliance.enabled, compliance.risk_classification) {
                 let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
                     &compliance.escalation_threshold,
                 );
@@ -699,5 +741,46 @@ async fn record_fan_out_costs(
             ctx.tenant_id.as_deref(),
         )
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── scan_dlp_input guards ──
+
+    #[test]
+    fn dlp_input_scan_disabled_inverts_scan_flag() {
+        // `!scan_input`: disabled when scanning is off. The "delete !" mutant
+        // would return the flag verbatim, flipping both outcomes.
+        assert!(dlp_input_scan_disabled(false));
+        assert!(!dlp_input_scan_disabled(true));
+    }
+
+    #[test]
+    fn should_escalate_compliance_requires_both_flags() {
+        // `enabled && risk_classification`: the `&&` → `||` mutant would
+        // escalate whenever either flag is set, so assert all four cells.
+        assert!(should_escalate_compliance(true, true));
+        assert!(!should_escalate_compliance(true, false));
+        assert!(!should_escalate_compliance(false, true));
+        assert!(!should_escalate_compliance(false, false));
+    }
+
+    // ── dispatch routing guards ──
+
+    #[test]
+    fn tier_name_matches_is_equality() {
+        // `==`: the `==` → `!=` mutant inverts every comparison.
+        assert!(tier_name_matches("complex", "complex"));
+        assert!(!tier_name_matches("complex", "trivial"));
+    }
+
+    #[test]
+    fn is_fan_out_strategy_only_for_fan_out() {
+        // `== ModelStrategy::FanOut`: the `==` → `!=` mutant inverts selection.
+        assert!(is_fan_out_strategy(&ModelStrategy::FanOut));
+        assert!(!is_fan_out_strategy(&ModelStrategy::Fallback));
     }
 }

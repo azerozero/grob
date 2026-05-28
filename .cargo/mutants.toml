@@ -17,10 +17,19 @@
 # `+ 97` est mathematiquement equivalent car l'iteration suivante applique
 # `% 97` sur le resultat, et (x + 97) % 97 ≡ x % 97 (97 ≡ 0 mod 97).
 
+# retry.rs build_encrypted_content: la valeur de retour entiere ne peut etre
+# couverte que par un chemin de succes (log_exporter configure + ContentMode
+# Encrypted + cles age de destinataires valides + chiffrement age reussi).
+# Ce chemin exige un AppState/DispatchContext complet (I/O, etat serveur), donc
+# pas de test unitaire pur possible. La logique decisionnelle pure (gate du mode
+# de chiffrement) est extraite dans `encryption_enabled` et testee separement;
+# le mutant `!=` -> `==` y est tue. Seul le remplacement de corps entier reste,
+# structurellement non couvrable par un test unitaire.
 exclude_re = [
     "replace < with (==|<=) in PiiScanner::redact",
     "replace > with >= in luhn_check$",
     "replace > with >= in luhn_check_digit",
     "replace < with .* in generate_canary_cc$",
     "replace % with \\+ in generate_canary_iban",
+    "replace build_encrypted_content -> .* with",
 ]
