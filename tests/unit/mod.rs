@@ -1,5 +1,6 @@
 // Unit tests module
 mod config_test;
+mod example_configs_test;
 mod fan_out_test;
 mod inference_test;
 mod jwt_cache_test;

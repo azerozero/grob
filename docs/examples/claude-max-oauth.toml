@@ -25,6 +25,7 @@ provider_type = "anthropic"
 auth_type = "oauth"  # Use OAuth instead of api_key
 oauth_provider = "anthropic-max"  # References token in TokenStore
 enabled = true
+models = []  # Models are declared in the [[models]] blocks below.
 
 [[models]]
 name = "claude-sonnet"

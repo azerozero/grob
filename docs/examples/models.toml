@@ -1,43 +1,85 @@
 # Model Mapping Configuration
-# Maps external model names to multiple providers with fallback support
+#
+# Demonstrates how to map one external model name to multiple providers with
+# priority-ordered fallback. A request for `claude-sonnet-4-6` tries the
+# primary provider first (priority 1) and falls back to the next mapping on
+# failure. Every provider referenced by a mapping must have a matching
+# [[providers]] block.
 
-# Example: claude-sonnet-4-6 can use multiple providers
+[server]
+host = "127.0.0.1"
+port = 13456
+log_level = "info"
+
+# ── Providers ────────────────────────────────────────────────────
+[[providers]]
+name = "anthropic-native"
+provider_type = "anthropic"
+api_key = "$ANTHROPIC_API_KEY"
+enabled = true
+models = []
+
+[[providers]]
+name = "openai"
+provider_type = "openai"
+api_key = "$OPENAI_API_KEY"
+enabled = true
+models = []
+
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+api_key = "$OPENROUTER_API_KEY"
+enabled = true
+models = []
+
+[[providers]]
+name = "cerebras"
+provider_type = "openai"
+base_url = "https://api.cerebras.ai/v1"
+api_key = "$CEREBRAS_API_KEY"
+enabled = true
+models = []
+
+# ── Models ───────────────────────────────────────────────────────
+# Multi-provider fallback: Anthropic native first, OpenRouter as backup.
 [[models]]
-name = "claude-sonnet-4-6"  # External model name (used in API requests)
+name = "claude-sonnet-4-6"
 
-  # Primary provider
-  [[models.mappings]]
-  priority = 1
-  provider = "anthropic-native"
-  actual_model = "claude-sonnet-4-6"
+[[models.mappings]]
+priority = 1
+provider = "anthropic-native"
+actual_model = "claude-sonnet-4-6"
 
-  # Fallback provider 1
-  [[models.mappings]]
-  priority = 2
-  provider = "openrouter"
-  actual_model = "anthropic/claude-sonnet-4-6"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "anthropic/claude-sonnet-4-6"
 
-# Example: gpt-5.1 mapping
+# Another fallback chain across two providers.
 [[models]]
-name = "gpt-5.1"
+name = "gpt-5"
 
-  [[models.mappings]]
-  priority = 1
-  provider = "openai"
-  actual_model = "gpt-5.1"
+[[models.mappings]]
+priority = 1
+provider = "openai"
+actual_model = "gpt-5"
 
-  [[models.mappings]]
-  priority = 2
-  provider = "openrouter"
-  actual_model = "openai/gpt-5.1"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "openai/gpt-5"
 
-# Example: GLM-4.6 with continuation prompt injection
-# Some models stop prematurely after tool calls, inject_continuation_prompt fixes this
+# Continuation-prompt injection: some models stop prematurely after a tool
+# call. inject_continuation_prompt nudges them to keep going.
 [[models]]
-name = "GLM-4.6"
+name = "glm-4-plus"
 
-  [[models.mappings]]
-  priority = 1
-  provider = "cerebras1"
-  actual_model = "zai-glm-4.6"
-  inject_continuation_prompt = true  # Injects "Please continue with the next task." after tool results
+[[models.mappings]]
+priority = 1
+provider = "cerebras"
+actual_model = "zai-glm-4-plus"
+inject_continuation_prompt = true
+
+[router]
+default = "claude-sonnet-4-6"

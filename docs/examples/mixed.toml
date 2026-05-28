@@ -1,49 +1,70 @@
-# Mixed Provider Configuration with Smart Context Routing
+# Mixed Provider Configuration
+#
+# Combines a local Ollama model for most tasks, DeepSeek for heavier
+# reasoning, and OpenRouter for large-context work. All three speak an
+# OpenAI-compatible wire format. Models with multiple mappings fall back
+# in priority order (lowest priority number first).
 
 [server]
-port = 3456
 host = "127.0.0.1"
+port = 13456
 log_level = "info"
 
-# Local model for most tasks
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000
+
+# Local model for most tasks.
 [[providers]]
 name = "ollama"
-api_base_url = "http://localhost:11434/v1/chat/completions"
-api_key = "ollama"
+provider_type = "openai"
+base_url = "http://localhost:11434/v1"
+api_key = "ollama" # Ollama ignores the key; any non-empty value works.
+enabled = true
 models = ["qwen2.5-coder:latest"]
 
-[providers.model_context]
-"qwen2.5-coder:latest" = 32768
-
-# Cloud model for complex reasoning
+# Cloud model for complex reasoning.
 [[providers]]
 name = "deepseek"
-api_base_url = "https://api.deepseek.com/chat/completions"
+provider_type = "openai"
+base_url = "https://api.deepseek.com"
 api_key = "$DEEPSEEK_API_KEY"
-models = ["deepseek-chat", "deepseek-reasoner"]
+enabled = true
+models = ["deepseek-reasoner"]
 
-[providers.transformers]
-use = ["deepseek"]
-
-[providers.model_context]
-"deepseek-chat" = 64000
-"deepseek-reasoner" = 64000
-
-# Cloud model for large context
+# Cloud model with large context windows.
 [[providers]]
 name = "openrouter"
-api_base_url = "https://openrouter.ai/api/v1/chat/completions"
+provider_type = "openrouter"
 api_key = "$OPENROUTER_API_KEY"
-models = ["google/gemini-2.0-flash-exp"]
+enabled = true
+models = ["google/gemini-2.5-pro"]
 
-[providers.model_context]
-"google/gemini-2.0-flash-exp" = 1000000
+[[models]]
+name = "local-coder"
+
+[[models.mappings]]
+provider = "ollama"
+actual_model = "qwen2.5-coder:latest"
+priority = 1
+
+[[models]]
+name = "reasoner"
+
+[[models.mappings]]
+provider = "deepseek"
+actual_model = "deepseek-reasoner"
+priority = 1
+
+[[models]]
+name = "long-context"
+
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "google/gemini-2.5-pro"
+priority = 1
 
 [router]
-default = "ollama.qwen2.5-coder:latest"
-background = "ollama.qwen2.5-coder:latest"
-think = "deepseek.deepseek-reasoner"
-
-# Optional: Long context routing for large codebases
-longContext = "openrouter.google/gemini-2.0-flash-exp"
-longContextThreshold = 60000                     # Switch when >60K tokens
+default = "local-coder"
+background = "local-coder"
+think = "reasoner"

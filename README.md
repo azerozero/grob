@@ -113,7 +113,7 @@ grob watch
 │  11:24:04  ← claude-sonnet-4-6    anthropic   834 tok  1.4s  $0.02 │
 │  11:24:05  DLP: 1 secret redacted (AWS key pattern)                 │
 │  11:24:09  FALLBACK: anthropic 429 → openrouter                     │
-│  11:24:10  ← gemini-3-flash       openrouter  412 tok  0.6s  $0.001│
+│  11:24:10  ← gemini-2.5-pro       openrouter  412 tok  0.6s  $0.001│
 ├─ Alerts ─────────────────────────────────────────────────────────────┤
 │  DLP: 3 secrets | 1 PII | 0 injections   Circuit: all OK            │
 └──────────────────────────────────────────────────────────────────────┘
@@ -128,24 +128,28 @@ flowchart LR
     R[Request] --> CL[Classify]
     CL --> M[Model] --> P1["Provider (P1)"]
     P1 -->|fail| P2["Provider (P2)"]
-    CL -->|extended thinking?| O[Opus 4.6]
-    CL -->|web_search tool?| GP[Gemini 3 Pro]
-    CL -->|background task?| GF[Gemini 3 Flash]
+    CL -->|extended thinking?| O[Opus 4.7]
+    CL -->|web_search tool?| GP[Gemini 2.5 Pro]
+    CL -->|background task?| GF[Haiku 4.5]
     CL -->|regex match?| CM[custom model]
     CL -->|default| S[Sonnet 4.6]
 ```
 
 Presets configure everything in one command:
 
-| Preset | Think | Default | Cost |
-|--------|-------|---------|------|
-| **perf** | Opus 4.6 (Anthropic) | Sonnet 4.6 (Anthropic) | Max subscription |
-| **medium** | Opus 4.6 (Anthropic) | Kimi K2.5 (OpenRouter) | Max sub + ~$0.30/M |
-| **cheap** | DeepSeek R1 (OpenRouter) | GLM-5 (z.ai) | ~$0.15/M |
-| **local** | Opus 4.6 (Anthropic) | Qwen 2.5 Coder (Ollama) | Max sub + free |
+| Preset | What it sets up | Cost |
+|--------|-----------------|------|
+| **perf** | Pure Anthropic OAuth (Pro/Max) — auto-maps `claude-*` to native | Max subscription |
+| **ultra-cheap** | Stacked free tiers (Groq + Cerebras + Z.ai + OpenRouter `:free`) | ~€0-2/month |
+| **gdpr** | EU-only routing — Mistral, Scaleway, OVH (`region = "eu"`) | Pay-as-you-go |
+| **eu-ai-act** | EU AI Act compliant — EU providers + transparency headers + risk classification | Pay-as-you-go |
+| **eu-eco** | Strict-EU sovereign, budget — Scaleway FR + Nebius `eu-north1` | Pay-as-you-go |
+| **eu-pro** | Strict-EU sovereign, balanced — Hermes-4-405B + Qwen3.5-397B | Pay-as-you-go |
+| **eu-max** | Strict-EU sovereign, premium — preemptive 397B/405B everywhere | Pay-as-you-go |
 
 ```bash
 grob preset apply perf
+grob preset list   # see every available preset
 ```
 
 ## Supported providers
@@ -157,12 +161,12 @@ grob preset apply perf
 | **Gemini** | API key / OAuth (Pro) | Google AI Studio |
 | **Vertex AI** | ADC | Google Cloud |
 | **OpenRouter** | API key | 200+ models |
-| **DeepSeek** | API key | V3, R1 |
+| **DeepSeek** | API key | DeepSeek V4, R1 |
 | **Mistral** | API key | Devstral, Codestral |
 | **Groq** | API key | Fast inference |
-| **z.ai** | API key | GLM-5 |
+| **z.ai** | API key | GLM-4 family |
 | **MiniMax** | API key | MiniMax models |
-| **Kimi Coding** | API key | Kimi K2.5 |
+| **Kimi Coding** | API key | Kimi K2 |
 | **Zenmux** | API key | Aggregated routing |
 | **Ollama** | none | Local inference |
 
@@ -244,7 +248,7 @@ actual_model = "claude-sonnet-4-6"
 priority = 1
 [[models.mappings]]
 provider = "openrouter"
-actual_model = "openai/gpt-5.4"
+actual_model = "openai/gpt-5"
 priority = 2
 
 [router]
