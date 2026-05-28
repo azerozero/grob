@@ -34,8 +34,8 @@ pub fn luhn_check(digits: &str) -> bool {
         let mut d = ch.to_digit(10).unwrap_or(0);
         if double {
             d *= 2;
-            // mutants::skip — d *= 2 produit uniquement des valeurs paires
-            // (0,2,4,6,8,10,12,14,16,18). d == 9 est inatteignable, donc > et >= sont equivalents.
+            // mutants::skip — d *= 2 only produces even values
+            // (0,2,4,6,8,10,12,14,16,18). d == 9 is unreachable, so > and >= are equivalent.
             if d > 9 {
                 d -= 9;
             }
@@ -64,9 +64,9 @@ pub(super) fn generate_canary_cc(original: &str, id: u64) -> String {
         .map(|c| c.to_digit(10).unwrap_or(0) as u8)
         .collect();
 
-    // Pad defensif : le format! ci-dessus genere toujours >= len-1 chars
-    // grace au zero-padding {:0>width$}, donc cette boucle ne fire jamais.
-    // mutants::skip — dead code defensif, partial.len() == len-1 toujours vrai ici.
+    // Defensive pad: the format! above always generates >= len-1 chars thanks
+    // to the zero-padding {:0>width$}, so this loop never fires.
+    // mutants::skip — defensive dead code, partial.len() == len-1 always holds here.
     while partial.len() < len - 1 {
         partial.push(0);
     }
@@ -84,8 +84,8 @@ pub(super) fn luhn_check_digit(digits: &[u8]) -> u8 {
         let mut val = d as u32;
         if i % 2 == 0 {
             val *= 2;
-            // mutants::skip — val *= 2 produit uniquement des valeurs paires (0..18),
-            // donc val == 9 est inatteignable et > vs >= sont equivalents.
+            // mutants::skip — val *= 2 only produces even values (0..18),
+            // so val == 9 is unreachable and > vs >= are equivalent.
             if val > 9 {
                 val -= 9;
             }
@@ -120,43 +120,43 @@ mod tests {
         assert!(!luhn_check("1234567890123456"));
     }
 
-    /// Tue : L212 *= -> += (d *= 2 -> d += 2 change le resultat).
+    /// Kills: L212 *= -> += (d *= 2 -> d += 2 changes the result).
     #[test]
     fn test_kill_mutant_212_luhn_double_multiplication() {
         assert!(luhn_check("4111111111111111"));
         assert!(!luhn_check("4111111111111112"));
     }
 
-    /// Tue : L213 > -> >= / == / < (d > 9 seuil).
+    /// Kills: L213 > -> >= / == / < (d > 9 threshold).
     #[test]
     fn test_kill_mutant_213_luhn_d_gt_9_threshold() {
         assert!(luhn_check("5425233430109903"));
         assert!(!luhn_check("5425233430109900"));
     }
 
-    /// Tue : L214 -= -> += (d -= 9 doit soustraire, pas ajouter).
+    /// Kills: L214 -= -> += (d -= 9 must subtract, not add).
     #[test]
     fn test_kill_mutant_214_luhn_subtract_9() {
         assert!(luhn_check("5425233430109903"));
         assert!(!luhn_check("5425233430109904"));
     }
 
-    /// Tue : L217 += -> -= (sum += d doit accumuler, pas soustraire).
+    /// Kills: L217 += -> -= (sum += d must accumulate, not subtract).
     #[test]
     fn test_kill_mutant_217_luhn_sum_accumulate() {
         assert!(luhn_check("4532015112830366"));
         assert!(!luhn_check("4532015112830360"));
     }
 
-    /// Tue : L218 delete ! (double = !double toggle).
+    /// Kills: L218 delete ! (double = !double toggle).
     #[test]
     fn test_kill_mutant_218_luhn_double_toggle() {
         assert!(luhn_check("374245455400126"));
         assert!(!luhn_check("374245455400127"));
     }
 
-    /// Tue : L340:12 < -> <= (len < 2 guard). Avec <=, len==2 retournerait "00"
-    /// au lieu de generer un canary derive de l'input.
+    /// Kills: L340:12 < -> <= (len < 2 guard). With <=, len==2 would return "00"
+    /// instead of generating a canary derived from the input.
     #[test]
     fn test_kill_mutant_340_canary_cc_len_2_generates_valid() {
         let canary = generate_canary_cc("41", 1);
@@ -164,44 +164,44 @@ mod tests {
         assert_eq!(
             canary.chars().next().unwrap(),
             '4',
-            "Le premier digit doit etre preserve (network): {canary}"
+            "The first digit must be preserved (network): {canary}"
         );
         assert!(
             luhn_check(&canary),
-            "Canary CC 2 chars doit passer Luhn: {canary}"
+            "Canary CC 2 chars must pass Luhn: {canary}"
         );
     }
 
-    /// Tue : L334 < (len < 2 guard). len==1 doit retourner "0".
+    /// Kills: L334 < (len < 2 guard). len==1 must return "0".
     #[test]
     fn test_kill_mutant_334_canary_cc_len_1_returns_zero() {
         let canary = generate_canary_cc("4", 1);
         assert_eq!(canary, "0");
     }
 
-    /// Tue : L349:19 - -> + / / (width = len - 2).
+    /// Kills: L349:19 - -> + / / (width = len - 2).
     #[test]
     fn test_kill_mutant_349_canary_cc_seed_width() {
         let canary = generate_canary_cc("4111111111111111", 42);
-        assert_eq!(canary.len(), 16, "Canary doit avoir exactement 16 chars");
+        assert_eq!(canary.len(), 16, "Canary must have exactly 16 chars");
         assert!(
             luhn_check(&canary),
-            "Canary 16 chars doit passer Luhn: {canary}"
+            "Canary 16 chars must pass Luhn: {canary}"
         );
     }
 
-    /// Tue : L354:25 < -> > (while partial.len() < len - 1 pad loop).
+    /// Kills: L354:25 < -> > (while partial.len() < len - 1 pad loop).
     #[test]
     fn test_kill_mutant_354_canary_cc_pad_loop() {
         let canary = generate_canary_cc("4111111111111111", 1);
         assert_eq!(canary.len(), 16);
-        assert!(luhn_check(&canary), "Canary pad doit passer Luhn: {canary}");
+        assert!(luhn_check(&canary), "Canary pad must pass Luhn: {canary}");
         for c in canary.chars() {
-            assert!(c.is_ascii_digit(), "Char '{c}' n'est pas un digit");
+            assert!(c.is_ascii_digit(), "Char '{c}' is not a digit");
         }
     }
 
-    /// Tue : L362:34 + -> - ((b'0' + d) as char).
+    /// Kills: L362:34 + -> - ((b'0' + d) as char).
     #[test]
     fn test_kill_mutant_362_canary_cc_ascii_digits() {
         let canary = generate_canary_cc("5425233430109903", 999);
@@ -209,14 +209,14 @@ mod tests {
         for c in canary.chars() {
             assert!(
                 c.is_ascii_digit(),
-                "Attendu digit, got '{c}' (U+{:04X})",
+                "Expected digit, got '{c}' (U+{:04X})",
                 c as u32
             );
         }
-        assert!(luhn_check(&canary), "Canary doit passer Luhn: {canary}");
+        assert!(luhn_check(&canary), "Canary must pass Luhn: {canary}");
     }
 
-    /// Tue : L364 *= -> += et L365-366 > / -= (meme pattern que luhn_check).
+    /// Kills: L364 *= -> += and L365-366 > / -= (same pattern as luhn_check).
     #[test]
     fn test_kill_mutant_364_luhn_check_digit_correct() {
         let digits = vec![4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
@@ -227,7 +227,7 @@ mod tests {
         assert!(luhn_check(&s));
     }
 
-    /// Tue : L372 % -> / dans ((10 - (sum % 10)) % 10).
+    /// Kills: L372 % -> / in ((10 - (sum % 10)) % 10).
     #[test]
     fn test_kill_mutant_372_luhn_check_digit_modulo() {
         for prefix in [

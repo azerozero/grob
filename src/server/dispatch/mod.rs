@@ -53,7 +53,6 @@ pub(crate) struct DispatchContext<'a> {
     pub audited: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Resolved policy for this request (when policies feature is enabled).
     #[cfg(feature = "policies")]
-    #[allow(dead_code)]
     pub resolved_policy: Option<crate::features::policies::resolved::ResolvedPolicy>,
 }
 

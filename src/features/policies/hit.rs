@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::hit_auth::AuthMethod;
+
 /// HIT policy override from `[policies.hit]` TOML section.
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct HitOverride {
@@ -18,8 +20,11 @@ pub struct HitOverride {
     #[serde(default)]
     pub deny: Vec<String>,
     /// Authentication method for approvals.
-    #[serde(default = "default_auth_method")]
-    pub auth_method: String,
+    ///
+    /// An absent value defaults to [`AuthMethod::Prompt`]; an unknown value is
+    /// rejected at config load rather than silently defaulting.
+    #[serde(default)]
+    pub auth_method: AuthMethod,
     /// Regex patterns flagged as dangerous in response text.
     #[serde(default)]
     pub flag_patterns: Vec<String>,
@@ -36,10 +41,6 @@ pub struct HitOverride {
     /// Dynamic risk scoring configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scoring: Option<super::scoring::HitScoringConfig>,
-}
-
-fn default_auth_method() -> String {
-    "prompt".to_string()
 }
 
 /// Decision for a specific tool_use block.
@@ -159,7 +160,7 @@ mod tests {
                 "Write(*.env)".into(),
                 "delete_account".into(),
             ],
-            auth_method: "prompt".into(),
+            auth_method: AuthMethod::Prompt,
             flag_patterns: vec![],
             webhook_url: None,
             required_signatures: None,
@@ -349,5 +350,44 @@ mod tests {
             evaluate_tool_use_scored(&policy, &tool("Read", "/some/file"), None, &ctx);
         assert_eq!(decision, HitDecision::AutoApprove);
         assert!(risk.is_none());
+    }
+
+    #[test]
+    fn test_auth_method_parses_all_config_strings() {
+        // Every documented config value must deserialize to its typed variant,
+        // preserving back-compat with existing `[policies.hit]` TOML.
+        for (input, expected) in [
+            ("prompt", AuthMethod::Prompt),
+            ("yubikey", AuthMethod::Yubikey),
+            ("multisig", AuthMethod::Multisig),
+            ("quorum", AuthMethod::Quorum),
+            ("machine_key", AuthMethod::MachineKey),
+            ("webhook", AuthMethod::Webhook),
+        ] {
+            let toml_src = format!("auth_method = \"{input}\"\n");
+            let parsed: HitOverride =
+                toml::from_str(&toml_src).expect("known auth_method must deserialize");
+            assert_eq!(parsed.auth_method, expected, "for input {input:?}");
+            // Display round-trips back to the same config string.
+            assert_eq!(expected.to_string(), input);
+        }
+    }
+
+    #[test]
+    fn test_auth_method_absent_defaults_to_prompt() {
+        // An omitted field keeps the historical default of `prompt`.
+        let parsed: HitOverride = toml::from_str("").expect("empty policy must parse");
+        assert_eq!(parsed.auth_method, AuthMethod::Prompt);
+    }
+
+    #[test]
+    fn test_auth_method_unknown_value_is_rejected() {
+        // A typo (e.g. `yubi`) must fail loudly instead of silently falling back
+        // to `prompt`, which was the bug before the field became typed.
+        let err = toml::from_str::<HitOverride>("auth_method = \"yubi\"\n");
+        assert!(
+            err.is_err(),
+            "unknown auth_method must be rejected, got {err:?}"
+        );
     }
 }

@@ -122,7 +122,7 @@ mod tests {
         assert!(!bic_format_check("DEUTDEFFAAAA")); // too long (12)
     }
 
-    /// Tue : L257 != 8 && != 11 (accept only 8 or 11).
+    /// Kills: L257 != 8 && != 11 (accept only 8 or 11).
     #[test]
     fn test_kill_mutant_257_bic_length_strict() {
         assert!(!bic_format_check("DEUTD")); // 5 chars
@@ -132,7 +132,7 @@ mod tests {
         assert!(bic_format_check("BNPAFRPP75A")); // 11 exact
     }
 
-    /// Tue : L262 !...all(uppercase) first 4 bank code.
+    /// Kills: L262 !...all(uppercase) first 4 bank code.
     #[test]
     fn test_kill_mutant_262_bic_bank_code_uppercase_only() {
         assert!(!bic_format_check("dEUTDEFF")); // lowercase first char
@@ -140,7 +140,7 @@ mod tests {
         assert!(!bic_format_check("D3UTDEFF")); // digit in bank code
     }
 
-    /// Tue : L268 is_valid_country_code negation.
+    /// Kills: L268 is_valid_country_code negation.
     #[test]
     fn test_kill_mutant_268_bic_country_validation() {
         assert!(!bic_format_check("DEUTXXFF")); // XX invalid country
@@ -149,7 +149,7 @@ mod tests {
         assert!(bic_format_check("BNPAFRPP")); // FR valid
     }
 
-    /// Tue : L273-278 location alphanumeric check.
+    /// Kills: L273-278 location alphanumeric check.
     #[test]
     fn test_kill_mutant_273_bic_location_alphanum() {
         assert!(!bic_format_check("DEUTDE!!")); // special chars in location
@@ -157,7 +157,7 @@ mod tests {
         assert!(bic_format_check("DEUTDEFF")); // letters in location ok
     }
 
-    /// Tue : L281-287 branch alphanumeric check (11-char BIC).
+    /// Kills: L281-287 branch alphanumeric check (11-char BIC).
     #[test]
     fn test_kill_mutant_281_bic_branch_alphanum() {
         assert!(!bic_format_check("DEUTDEFF!!!")); // special chars in branch
@@ -165,7 +165,7 @@ mod tests {
         assert!(bic_format_check("DEUTDEFFABC")); // letters in branch ok
     }
 
-    /// Tue : L293 replace -> true/false (country code validation).
+    /// Kills: L293 replace -> true/false (country code validation).
     #[test]
     fn test_kill_mutant_293_country_code_validation() {
         assert!(is_valid_country_code("FR"));

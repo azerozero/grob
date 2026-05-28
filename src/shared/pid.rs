@@ -2,14 +2,19 @@ use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
 
-/// Get the PID file path
+/// Returns the path to the PID file.
 pub fn pid_file_path() -> PathBuf {
     crate::grob_home()
         .unwrap_or_else(|| PathBuf::from(".grob"))
         .join("grob.pid")
 }
 
-/// Write the current process PID to the PID file
+/// Writes the current process PID to the PID file.
+///
+/// # Errors
+///
+/// Returns an [`io::Error`] if the parent directory cannot be created or the
+/// PID file cannot be written.
 pub fn write_pid() -> io::Result<()> {
     let pid_file = pid_file_path();
 
@@ -24,7 +29,12 @@ pub fn write_pid() -> io::Result<()> {
     Ok(())
 }
 
-/// Read the PID from the PID file
+/// Reads the PID from the PID file.
+///
+/// # Errors
+///
+/// Returns an [`io::Error`] if the PID file cannot be read, or
+/// [`ErrorKind::InvalidData`] if its contents do not parse as a `u32`.
 pub fn read_pid() -> io::Result<u32> {
     let pid_file = pid_file_path();
     let pid_str = fs::read_to_string(&pid_file)?;
@@ -34,7 +44,11 @@ pub fn read_pid() -> io::Result<u32> {
         .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))
 }
 
-/// Remove the PID file
+/// Removes the PID file.
+///
+/// # Errors
+///
+/// Returns an [`io::Error`] if the PID file exists but cannot be removed.
 pub fn cleanup_pid() -> io::Result<()> {
     let pid_file = pid_file_path();
     if pid_file.exists() {

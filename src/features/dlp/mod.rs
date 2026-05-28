@@ -163,26 +163,26 @@ impl std::fmt::Display for DlpBlockError {
     }
 }
 
-/// Rapport d'un scan de fin de stream (SSE).
+/// Report of an end-of-stream scan (SSE).
 ///
-/// Compte les detections cross-chunk par categorie ET observe l'entree
-/// dans chaque branche conditionnelle. Les flags `*_scan_attempted` rendent
-/// les conditions `&& / !` observables depuis les tests, pour tuer les
-/// mutations cargo-mutants qui sinon resteraient MISSED (mutants equivalents
-/// a l'oeil nu mais distinguables par la branche d'entree).
+/// Counts cross-chunk detections per category AND observes entry into each
+/// conditional branch. The `*_scan_attempted` flags make the `&& / !`
+/// conditions observable from tests, in order to kill cargo-mutants mutations
+/// that would otherwise remain MISSED (mutants equivalent to the naked eye but
+/// distinguishable by the entry branch).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EosScanReport {
-    /// Indique si la branche de scan des secrets a ete evaluee (pre-filter passe).
+    /// Indicates whether the secret-scan branch was evaluated (pre-filter passed).
     pub secret_scan_attempted: bool,
-    /// Nombre de secrets cross-chunk detectes par le DFA scanner.
+    /// Number of cross-chunk secrets detected by the DFA scanner.
     pub secrets: usize,
-    /// Indique si la branche de scan des pseudonymes a ete evaluee.
+    /// Indicates whether the pseudonym-scan branch was evaluated.
     pub name_scan_attempted: bool,
-    /// Nombre de pseudonymes non deanonymises en cross-chunk.
+    /// Number of pseudonyms not deanonymized cross-chunk.
     pub pseudonyms: usize,
-    /// Indique si la branche de scan URL exfil a ete evaluee (scanner + URL).
+    /// Indicates whether the URL exfil scan branch was evaluated (scanner + URL).
     pub url_scan_attempted: bool,
-    /// Nombre d'URLs exfiltrantes detectees en cross-chunk.
+    /// Number of exfiltrating URLs detected cross-chunk.
     pub url_exfils: usize,
 }
 
@@ -762,12 +762,12 @@ impl DlpEngine {
         let _ = self.scan_end_of_stream_reported(full_text);
     }
 
-    /// End-of-stream scan qui retourne un rapport structure.
+    /// End-of-stream scan that returns a structured report.
     ///
-    /// Variante testable de [`scan_end_of_stream`] : renvoie un
-    /// [`EosScanReport`] avec le nombre de findings detectes par categorie,
-    /// pour que les tests unitaires puissent observer les branches `&&`/`!`
-    /// sans avoir a capturer les metriques globales.
+    /// Testable variant of [`scan_end_of_stream`]: returns an
+    /// [`EosScanReport`] with the number of findings detected per category,
+    /// so that unit tests can observe the `&&`/`!` branches without having to
+    /// capture the global metrics.
     pub fn scan_end_of_stream_reported(&self, full_text: &str) -> EosScanReport {
         let mut report = EosScanReport::default();
         // DFA scan for cross-chunk secrets

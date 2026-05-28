@@ -82,7 +82,10 @@ pub(in crate::commands::setup) fn detect_schema_drift(config_path: &Path) -> Dri
 }
 
 /// Opens a URL in the default browser (best-effort, no error on failure).
-#[allow(dead_code)]
+#[expect(
+    dead_code,
+    reason = "Helper kept for the interactive setup flow; not yet wired to a call site."
+)]
 pub(in crate::commands::setup) fn open_browser(url: &str) {
     #[cfg(target_os = "macos")]
     {

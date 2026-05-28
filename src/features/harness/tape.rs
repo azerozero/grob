@@ -62,6 +62,11 @@ pub struct TapeResponse {
 }
 
 /// Loads a tape file (JSONL) into a vector of entries.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be opened or a line cannot be read.
+/// Malformed JSON lines are skipped with a warning rather than failing.
 pub async fn load_tape(path: &Path) -> anyhow::Result<Vec<TapeEntry>> {
     let file = tokio::fs::File::open(path).await?;
     let reader = BufReader::new(file);
@@ -92,6 +97,10 @@ pub struct TapeWriter {
 
 impl TapeWriter {
     /// Opens (or creates) the output file for appending.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be opened or created for appending.
     pub async fn new(path: &Path) -> anyhow::Result<Self> {
         let file = tokio::fs::OpenOptions::new()
             .create(true)
