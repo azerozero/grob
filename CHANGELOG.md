@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.50](https://github.com/azerozero/grob/compare/v0.36.49...v0.36.50) - 2026-05-28
+
+### Fixed
+
+- *(reload)* don't gate config reload on live provider health
+
 ## [0.36.49](https://github.com/azerozero/grob/compare/v0.36.48...v0.36.49) - 2026-05-28
 
 ### Other
