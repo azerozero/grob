@@ -5,11 +5,13 @@
 # empty previous_hash.
 AUDIT_DIR="${1:?usage: $0 <audit_dir>}"
 RSSI_KEY="crypto/rssi.key"
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../.." || exit 1
 
 # Decrypt all entries and sort by event_id or filename order.
+# Bash expands globs in lexical (LC_COLLATE) order, so this matches the
+# previous `ls | sort` behaviour without the word-splitting fragility.
 entries=()
-for f in $(ls "$AUDIT_DIR"/* | sort); do
+for f in "$AUDIT_DIR"/*; do
   decrypted=$(age -d -i "$RSSI_KEY" "$f" 2>/dev/null) || { echo "FAIL: cannot decrypt $f"; exit 1; }
   entries+=("$decrypted")
 done

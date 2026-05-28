@@ -1,0 +1,74 @@
+# ShellCheck gate: static analysis for the repo's shell scripts.
+#
+# Lints every tracked `*.sh` script (top-level, scripts/**, tests/e2e/**)
+# with `shellcheck -x` so `source`d files are followed. Runs on push to main
+# and on PRs that touch shell scripts or this workflow, catching shell bugs
+# (e.g. `local` outside a function, SC2168) before they reach main.
+#
+# Severity is pinned to `warning`: this still flags every genuine bug
+# (errors + warnings such as SC2168/SC2164/SC2034) while not failing on
+# `info`-level style notes for the intentional, deliberate word-splitting
+# idioms used throughout the e2e harness (e.g. `$GROB`, `$CURL_PID`).
+
+name: ShellCheck
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**.sh"
+      - ".github/workflows/shellcheck.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "**.sh"
+      - ".github/workflows/shellcheck.yml"
+
+concurrency:
+  group: shellcheck-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@v6
+      - name: Run shellcheck
+        run: |
+          set -euo pipefail
+          # ubuntu-latest ships shellcheck preinstalled; print the version so
+          # the log records exactly which ruleset produced the result.
+          shellcheck --version
+
+          # Collect the scoped scripts: scripts/**, tests/e2e/**, and any
+          # top-level *.sh. `! -path './*/*'` pins the third alternative to
+          # the repo root so it does not pull in scripts owned by other trees
+          # (e.g. demo/). -print0/-d '' keeps paths with spaces intact.
+          mapfile -d '' -t scripts < <(
+            find . \
+              -type d -name target -prune -o \
+              -type f -name '*.sh' \
+              \( -path './scripts/*' \
+                 -o -path './tests/e2e/*' \
+                 -o \( -path './*.sh' ! -path './*/*' \) \) \
+              -print0
+          )
+
+          if [ "${#scripts[@]}" -eq 0 ]; then
+            echo "::error::No shell scripts found — check the find globs."
+            exit 1
+          fi
+
+          printf 'Linting %d shell script(s):\n' "${#scripts[@]}"
+          printf '  %s\n' "${scripts[@]}"
+
+          # -x follows `source`/`.` directives; --severity=warning fails on
+          # errors and warnings but not info/style notes.
+          shellcheck -x --severity=warning "${scripts[@]}"

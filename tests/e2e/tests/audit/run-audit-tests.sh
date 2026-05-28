@@ -9,7 +9,7 @@ JWT=$(cat auth/tokens/jwt-hospital-eu.txt)
 rm -rf "$AUDIT_DIR" && mkdir -p "$AUDIT_DIR"
 
 echo "Generating audit entries..."
-for i in $(seq 1 3); do
+for _ in $(seq 1 3); do
   curl -sf -X POST "http://${HOST}/v1/chat/completions" \
     -H "Authorization: Bearer ${JWT}" \
     -H "Content-Type: application/json" \
