@@ -23,8 +23,10 @@
 # Ce chemin exige un AppState/DispatchContext complet (I/O, etat serveur), donc
 # pas de test unitaire pur possible. La logique decisionnelle pure (gate du mode
 # de chiffrement) est extraite dans `encryption_enabled` et testee separement;
-# le mutant `!=` -> `==` y est tue. Seul le remplacement de corps entier reste,
-# structurellement non couvrable par un test unitaire.
+# le mutant `!=` -> `==` y est tue. Les mutants restants dans le corps de
+# `build_encrypted_content` (remplacement de corps entier ET suppression d'un `!`
+# dans les guards internes) ne sont couvrables que par ce meme chemin de succes,
+# donc exclus tous les deux.
 exclude_re = [
     "replace < with (==|<=) in PiiScanner::redact",
     "replace > with >= in luhn_check$",
@@ -32,4 +34,5 @@ exclude_re = [
     "replace < with .* in generate_canary_cc$",
     "replace % with \\+ in generate_canary_iban",
     "replace build_encrypted_content -> .* with",
+    "in build_encrypted_content$",
 ]
