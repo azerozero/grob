@@ -350,16 +350,29 @@ impl LlmProvider for OpenAIProvider {
         let base_url = self.effective_base_url();
         let is_codex = Self::is_codex_model(&request.model);
 
-        let (url, request_body) = if is_codex {
+        // The ChatGPT backend (OAuth) and any Codex model speak the Responses
+        // API, which streams typed events; everything else uses Chat Completions.
+        // Mirrors the endpoint choice in the non-streaming `send_message`.
+        let use_responses = self.base.is_oauth() || is_codex;
+
+        let (url, request_body) = if use_responses {
+            // OAuth serves the stream under `/codex/responses`; the public API
+            // uses `/responses`. Mirrors the non-streaming `send_responses_api`.
+            let endpoint = if self.base.is_oauth() {
+                "/codex/responses"
+            } else {
+                "/responses"
+            };
             tracing::debug!(
-                "Using /v1/responses endpoint for Codex model (streaming): {}",
+                "Using {} endpoint for Responses-API stream: {}",
+                endpoint,
                 request.model
             );
             let responses_request =
                 transform::transform_to_responses_request(&request, CODEX_INSTRUCTIONS)?;
             let body = serde_json::to_value(&responses_request)
                 .map_err(ProviderError::SerializationError)?;
-            (format!("{}/responses", base_url), body)
+            (format!("{}{}", base_url, endpoint), body)
         } else {
             let openai_request = transform::transform_request(&request)?;
             let body =
@@ -377,7 +390,7 @@ impl LlmProvider for OpenAIProvider {
 
         if self.base.is_oauth() {
             req_builder =
-                Self::apply_oauth_headers(req_builder, &auth_value, is_codex, &self.base.name);
+                Self::apply_oauth_headers(req_builder, &auth_value, use_responses, &self.base.name);
         }
 
         req_builder = self.base.apply_headers(req_builder);
@@ -404,14 +417,22 @@ impl LlmProvider for OpenAIProvider {
         let sse_stream = SseStream::new(response.bytes_stream());
         let provider_name = self.base.name.clone();
         let model_name = request.model.clone();
+        let model_for_events = request.model.clone();
 
         let transformed_stream = sse_stream
             .then(move |result| {
                 let message_id = message_id.clone();
                 let state = state.clone();
                 let provider_name = provider_name.clone();
+                let model_for_events = model_for_events.clone();
                 async move {
                     match result {
+                        Ok(sse_event) if use_responses => process_codex_sse_event(
+                            &sse_event.data,
+                            &state,
+                            &message_id,
+                            &model_for_events,
+                        ),
                         Ok(sse_event) => {
                             process_sse_event(&sse_event.data, &state, &message_id, &provider_name)
                         }
@@ -468,6 +489,35 @@ impl LlmProvider for OpenAIProvider {
             .as_ref()
             .is_some_and(|pool| pool.rotate_on_error())
     }
+}
+
+/// Transform one Responses-API SSE event into Anthropic SSE.
+///
+/// Wraps [`streaming::transform_codex_event_to_anthropic_sse`] with the same
+/// guards as [`process_sse_event`]: skip once the stream has ended and ignore
+/// keepalive / `[DONE]` lines.
+fn process_codex_sse_event(
+    data: &str,
+    state: &std::sync::Arc<std::sync::Mutex<StreamTransformState>>,
+    message_id: &str,
+    model: &str,
+) -> Result<Bytes, ProviderError> {
+    if state.lock().unwrap_or_else(|e| e.into_inner()).stream_ended {
+        return Ok(Bytes::new());
+    }
+
+    let trimmed = data.trim();
+    if trimmed.is_empty() || trimmed == "[DONE]" {
+        return Ok(Bytes::new());
+    }
+
+    let sse_output = streaming::transform_codex_event_to_anthropic_sse(
+        data,
+        message_id,
+        model,
+        &mut state.lock().unwrap_or_else(|e| e.into_inner()),
+    );
+    Ok(Bytes::from(sse_output))
 }
 
 /// Transform a single OpenAI SSE event into Anthropic SSE format.

@@ -286,3 +286,189 @@ fn emit_stream_end(
         output_tokens
     );
 }
+
+/// Ensures the Anthropic `message_start` event is emitted exactly once.
+fn ensure_message_started(
+    output: &mut String,
+    state: &mut StreamTransformState,
+    message_id: &str,
+    model: &str,
+) {
+    if !state.message_started {
+        emit_message_start(output, message_id, model);
+        state.message_started = true;
+    }
+}
+
+/// Transform a single ChatGPT/Codex Responses-API SSE event to Anthropic SSE.
+///
+/// The Responses API streams typed events (`response.output_text.delta`,
+/// `response.reasoning_summary_text.delta`, `response.completed`, …) instead of
+/// Chat-Completions `choices[].delta` chunks. Text deltas map to a `text` block,
+/// reasoning summary deltas to a `thinking` block, and `response.completed`
+/// closes the message. Events without an Anthropic equivalent yield an empty
+/// string (filtered out downstream).
+pub(crate) fn transform_codex_event_to_anthropic_sse(
+    data: &str,
+    message_id: &str,
+    model: &str,
+    state: &mut StreamTransformState,
+) -> String {
+    let mut output = String::new();
+
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+        return output;
+    };
+    let event_type = json
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    match event_type {
+        "response.created" => ensure_message_started(&mut output, state, message_id, model),
+        ty if ty.ends_with("output_text.delta") => {
+            ensure_message_started(&mut output, state, message_id, model);
+            if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                if !delta.is_empty() {
+                    emit_text_delta(&mut output, state, delta);
+                }
+            }
+        }
+        ty if ty.contains("reasoning") && ty.ends_with(".delta") => {
+            ensure_message_started(&mut output, state, message_id, model);
+            if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                if !delta.is_empty() {
+                    emit_reasoning_delta(&mut output, state, delta);
+                }
+            }
+        }
+        "response.completed" | "response.incomplete" | "response.failed" => {
+            ensure_message_started(&mut output, state, message_id, model);
+            emit_codex_stream_end(&mut output, state, &json);
+        }
+        _ => {}
+    }
+
+    output
+}
+
+/// Closes any open content blocks and emits `message_delta` + `message_stop`
+/// for a terminal Responses-API event (`response.completed` / `.incomplete`).
+fn emit_codex_stream_end(
+    output: &mut String,
+    state: &mut StreamTransformState,
+    json: &serde_json::Value,
+) {
+    if state.stream_ended {
+        return;
+    }
+    state.stream_ended = true;
+
+    close_open_blocks(output, state);
+    for block_index in state.tool_blocks.values() {
+        emit_block_stop(output, *block_index);
+    }
+
+    let response = json.get("response");
+    let status = response
+        .and_then(|r| r.get("status"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("completed");
+    let stop_reason = if state.had_tool_calls {
+        "tool_use"
+    } else if status == "incomplete" {
+        "max_tokens"
+    } else {
+        "end_turn"
+    };
+
+    let usage = response.and_then(|r| r.get("usage"));
+    let input_tokens = usage
+        .and_then(|u| u.get("input_tokens"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let output_tokens = usage
+        .and_then(|u| u.get("output_tokens"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let message_delta = serde_json::json!({
+        "type": "message_delta",
+        "delta": { "stop_reason": stop_reason, "stop_sequence": null },
+        "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens }
+    });
+    output.push_str(&format!(
+        "event: message_delta\ndata: {}\n\n",
+        message_delta
+    ));
+    output.push_str(&format!(
+        "event: message_stop\ndata: {}\n\n",
+        serde_json::json!({ "type": "message_stop" })
+    ));
+}
+
+#[cfg(test)]
+mod codex_stream_tests {
+    use super::transform_codex_event_to_anthropic_sse as transform;
+    use crate::providers::openai::types::StreamTransformState;
+
+    fn run(events: &[&str]) -> String {
+        let mut state = StreamTransformState::default();
+        let mut out = String::new();
+        for event in events {
+            out.push_str(&transform(event, "msg_test", "gpt-5.5", &mut state));
+        }
+        out
+    }
+
+    #[test]
+    fn emits_message_start_then_incremental_text_then_stop() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_text.delta","delta":"Hel"}"#,
+            r#"{"type":"response.output_text.delta","delta":"lo"}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+        assert!(out.contains("event: message_start"));
+        assert!(out.contains("event: content_block_start"));
+        assert!(out.contains("text_delta"));
+        assert!(out.contains(r#""text":"Hel""#));
+        assert!(out.contains(r#""text":"lo""#));
+        assert!(out.contains("end_turn"));
+        assert_eq!(out.matches("event: message_stop").count(), 1);
+        assert_eq!(out.matches("event: message_start").count(), 1);
+    }
+
+    #[test]
+    fn maps_reasoning_delta_to_thinking_block() {
+        let out = run(&[
+            r#"{"type":"response.reasoning_summary_text.delta","delta":"weighing"}"#,
+            r#"{"type":"response.output_text.delta","delta":"answer"}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+        assert!(out.contains("thinking_delta"));
+        assert!(out.contains(r#""thinking":"weighing""#));
+        assert!(out.contains(r#""text":"answer""#));
+        // The thinking block is closed before the text block opens.
+        assert!(out.contains("event: content_block_stop"));
+    }
+
+    #[test]
+    fn incomplete_status_maps_to_max_tokens() {
+        let out = run(&[
+            r#"{"type":"response.output_text.delta","delta":"x"}"#,
+            r#"{"type":"response.incomplete","response":{"status":"incomplete"}}"#,
+        ]);
+        assert!(out.contains("max_tokens"));
+    }
+
+    #[test]
+    fn unknown_events_and_garbage_are_ignored() {
+        let out = run(&[
+            "not json",
+            r#"{"type":"response.in_progress"}"#,
+            r#"{"type":"response.output_item.added","item":{"type":"message"}}"#,
+        ]);
+        assert!(out.is_empty());
+    }
+}
