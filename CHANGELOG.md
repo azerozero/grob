@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.51](https://github.com/azerozero/grob/compare/v0.36.50...v0.36.51) - 2026-05-30
+
+### Fixed
+
+- *(openai)* stream ChatGPT Codex (OAuth) via the Responses API
+- *(openai)* parse Codex responses from output_item.done events
+
+### Other
+
+- *(examples)* add ChatGPT Codex OAuth config example
+- *(mutants)* exclude the `delete !` mutant in build_encrypted_content
+
 ## [0.36.50](https://github.com/azerozero/grob/compare/v0.36.49...v0.36.50) - 2026-05-28
 
 ### Fixed
