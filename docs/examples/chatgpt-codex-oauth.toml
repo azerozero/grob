@@ -1,0 +1,71 @@
+# ChatGPT Codex OAuth Configuration Example
+#
+# Routes grob at OpenAI Codex using a ChatGPT Plus/Pro subscription via OAuth —
+# no API key and no pay-as-you-go credits required. grob authenticates with your
+# ChatGPT login and calls the Codex backend (`chatgpt.com/backend-api`) that the
+# subscription covers.
+#
+# Setup:
+#   1. grob -c chatgpt-codex-oauth.toml connect openai-codex   # one-time browser login
+#   2. grob -c chatgpt-codex-oauth.toml start
+#
+# Models exposed to a Plus account via Codex OAuth:
+#   gpt-5.5        newest frontier model — OpenAI's recommended default
+#   gpt-5.4        flagship reasoning + coding
+#   gpt-5.4-mini   fast / sub-agent tier
+#   gpt-5.3-codex  dedicated agentic-coding model (strongest on SWE-bench)
+# `gpt-5.3-codex-spark` requires ChatGPT Pro. There is no `gpt-5.5-codex`
+# (GPT-5.5 in Codex is just `gpt-5.5`).
+
+[server]
+host = "127.0.0.1"
+port = 13456
+log_level = "info"
+
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000
+
+# OAuth provider — authenticates with ChatGPT instead of an API key.
+# `base_url` is ignored under OAuth: grob targets the ChatGPT Codex backend.
+[[providers]]
+name = "chatgpt-codex"
+provider_type = "openai"
+auth_type = "oauth"           # Use OAuth instead of api_key.
+oauth_provider = "openai-codex"  # Token key in the TokenStore (set by `grob connect`).
+enabled = true
+models = []                   # Models are declared in the [[models]] blocks below.
+
+# Default dev model: gpt-5.5 (OpenAI's recommended Codex default).
+# To prefer the dedicated coding model, set `default = "codex"` under [router].
+[[models]]
+name = "dev"
+
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.5"
+priority = 1
+
+# Dedicated agentic-coding model.
+[[models]]
+name = "codex"
+
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.3-codex"
+priority = 1
+
+# Fast / background tier.
+[[models]]
+name = "fast"
+
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.4-mini"
+priority = 1
+
+[router]
+default = "dev"
+think = "codex"
+background = "fast"
+websearch = "dev"
