@@ -117,6 +117,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 |-------|------|
 | Default config | [`examples/default.toml`](examples/default.toml) |
 | Anthropic Claude Max via OAuth | [`examples/claude-max-oauth.toml`](examples/claude-max-oauth.toml) |
+| ChatGPT Codex via OAuth (Plus/Pro) | [`examples/chatgpt-codex-oauth.toml`](examples/chatgpt-codex-oauth.toml) |
 | DeepSeek-only setup | [`examples/deepseek.toml`](examples/deepseek.toml) |
 | Multi-provider mix with fallbacks | [`examples/mixed.toml`](examples/mixed.toml) |
 | Model declaration patterns | [`examples/models.toml`](examples/models.toml) |
