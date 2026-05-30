@@ -435,41 +435,60 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
 
 /// Parse SSE response from ChatGPT Codex and extract content blocks.
 ///
-/// Finds the `response.completed` event and extracts reasoning + message output.
+/// The ChatGPT backend (`backend-api/codex`) delivers each finished block in a
+/// `response.output_item.done` event and leaves `response.completed.output`
+/// empty, whereas the standard Responses API populates `output[]` in the
+/// `response.completed` event. Both layouts are handled: per-item events win,
+/// with the completed-event output as a fallback.
 pub(crate) fn parse_sse_response(sse_text: &str) -> Result<Vec<ContentBlock>, ProviderError> {
     let lines: Vec<&str> = sse_text.lines().collect();
 
+    let mut item_blocks: Vec<ContentBlock> = Vec::new();
+    let mut completed_blocks: Vec<ContentBlock> = Vec::new();
+
     for (i, line) in lines.iter().enumerate() {
-        if !line.starts_with("event: response.completed") {
+        let Some(event) = line.strip_prefix("event: ").map(str::trim) else {
+            continue;
+        };
+        if event != "response.output_item.done" && event != "response.completed" {
             continue;
         }
 
-        let Some(data_line) = lines.get(i + 1) else {
-            continue;
-        };
-        let Some(json_str) = data_line.strip_prefix("data: ") else {
+        // The SSE `data:` payload sits on the line immediately after `event:`.
+        let Some(json_str) = lines.get(i + 1).and_then(|l| l.strip_prefix("data: ")) else {
             continue;
         };
         let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) else {
             continue;
         };
 
-        let Some(output) = json
-            .get("response")
-            .and_then(|r| r.get("output"))
-            .and_then(|v| v.as_array())
-        else {
-            continue;
-        };
-
-        let content_blocks: Vec<ContentBlock> = output
-            .iter()
-            .filter_map(extract_codex_output_block)
-            .collect();
-
-        if !content_blocks.is_empty() {
-            return Ok(content_blocks);
+        match event {
+            "response.output_item.done" => {
+                if let Some(block) = json.get("item").and_then(extract_codex_output_block) {
+                    item_blocks.push(block);
+                }
+            }
+            "response.completed" => {
+                if let Some(output) = json
+                    .get("response")
+                    .and_then(|r| r.get("output"))
+                    .and_then(|v| v.as_array())
+                {
+                    completed_blocks.extend(output.iter().filter_map(extract_codex_output_block));
+                }
+            }
+            _ => {}
         }
+    }
+
+    let content_blocks = if item_blocks.is_empty() {
+        completed_blocks
+    } else {
+        item_blocks
+    };
+
+    if !content_blocks.is_empty() {
+        return Ok(content_blocks);
     }
 
     Err(ProviderError::ApiError {
@@ -481,8 +500,11 @@ pub(crate) fn parse_sse_response(sse_text: &str) -> Result<Vec<ContentBlock>, Pr
 /// Maps a Codex `output[]` item (`reasoning` or `message`) to the corresponding Anthropic thinking or text block.
 fn extract_codex_output_block(item: &serde_json::Value) -> Option<ContentBlock> {
     let output_type = item.get("type").and_then(|v| v.as_str())?;
+    // `message` items carry text under `content[]`; `reasoning` items carry it
+    // under `summary[]`. Accept whichever is present.
     let text = item
         .get("content")
+        .or_else(|| item.get("summary"))
         .and_then(|v| v.as_array())
         .and_then(|arr| arr.first())
         .and_then(|first| first.get("text"))
@@ -720,5 +742,62 @@ mod tests {
         assert_eq!(tool_calls[0].id, "call_1");
         assert_eq!(tool_calls[0].function.name, "weather");
         assert_eq!(tool_calls[0].function.arguments, r#"{"city":"Paris"}"#);
+    }
+
+    #[test]
+    fn parse_sse_uses_output_item_done_when_completed_output_empty() {
+        // The ChatGPT backend (`backend-api/codex`) carries the message in a
+        // `response.output_item.done` event and leaves `completed.output` null.
+        let sse = concat!(
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"hi there\"}]}}\n",
+            "\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"output\":null}}\n",
+        );
+
+        let blocks = parse_sse_response(sse).expect("should extract content");
+        assert_eq!(blocks.len(), 1);
+        let value = serde_json::to_value(&blocks[0]).expect("serialize block");
+        assert_eq!(value["type"], "text");
+        assert_eq!(value["text"], "hi there");
+    }
+
+    #[test]
+    fn parse_sse_falls_back_to_completed_output_for_standard_api() {
+        // The public Responses API populates `output[]` in `response.completed`
+        // and emits no per-item done events.
+        let sse = concat!(
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"final\"}]}]}}\n",
+        );
+
+        let blocks = parse_sse_response(sse).expect("should extract content");
+        assert_eq!(blocks.len(), 1);
+        let value = serde_json::to_value(&blocks[0]).expect("serialize block");
+        assert_eq!(value["text"], "final");
+    }
+
+    #[test]
+    fn parse_sse_maps_reasoning_summary_to_thinking() {
+        let sse = concat!(
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"weighing options\"}]}}\n",
+            "\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}}\n",
+        );
+
+        let blocks = parse_sse_response(sse).expect("should extract content");
+        assert_eq!(blocks.len(), 2);
+        let thinking = serde_json::to_value(&blocks[0]).expect("serialize block");
+        assert_eq!(thinking["type"], "thinking");
+        assert_eq!(thinking["thinking"], "weighing options");
+    }
+
+    #[test]
+    fn parse_sse_errors_when_no_content() {
+        let sse = "event: response.created\ndata: {\"type\":\"response.created\"}\n";
+        assert!(parse_sse_response(sse).is_err());
     }
 }
