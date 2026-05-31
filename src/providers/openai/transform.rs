@@ -662,15 +662,16 @@ fn resolve_reasoning_effort(request: &CanonicalRequest, forced: Option<&str>) ->
 /// Maps Anthropic extended-thinking config to a Codex reasoning-effort tier.
 ///
 /// No thinking (or an explicitly `disabled` block) maps to `low` for snappy
-/// responses. Any other thinking block means the client asked for extended
-/// reasoning, so it maps to a higher tier: a large explicit budget scales up
-/// (`>=24k` → `xhigh`, the backend max; `>=16k` → `high`), and Claude Code's
-/// adaptive mode (`type: "adaptive"`, no budget) maps to `high`. Effort tiers:
-/// `low` < `medium` < `high` < `xhigh` (`max` is rejected by the backend).
+/// responses. Any other thinking block means the client opted into extended
+/// reasoning, so it maps high: Claude Code's adaptive mode (`type: "adaptive"`,
+/// no budget — the same for every `think`/`think hard`/`ultrathink` keyword, so
+/// they cannot be told apart) maps to `xhigh`, the backend's max tier; a small
+/// explicit budget maps to `medium`. Effort tiers: `low` < `medium` < `high` <
+/// `xhigh` (`max` is rejected by the backend).
 ///
 /// Note: Claude Code's `/effort` slider is client-internal and never reaches the
-/// API, so it cannot be mapped here — only the `think`/`ultrathink` keywords,
-/// which set a thinking block, do.
+/// API, so it cannot be mapped here — only the thinking keywords, which set a
+/// thinking block, do.
 fn auto_map_thinking_effort(request: &CanonicalRequest) -> String {
     let Some(thinking) = request.thinking.as_ref() else {
         return "low".to_string();
@@ -679,11 +680,10 @@ fn auto_map_thinking_effort(request: &CanonicalRequest) -> String {
         return "low".to_string();
     }
     match thinking.budget_tokens {
-        Some(budget) if budget >= 24_000 => "xhigh",
-        Some(budget) if budget >= 16_000 => "high",
+        Some(budget) if budget >= 16_000 => "xhigh",
         Some(_) => "medium",
-        // Adaptive thinking (no explicit budget) — let it reason hard.
-        None => "high",
+        // Adaptive thinking (no budget) is opt-in deep reasoning — give it the max.
+        None => "xhigh",
     }
     .to_string()
 }
@@ -925,12 +925,12 @@ mod tests {
         // No thinking → low (snappy).
         assert_eq!(effort(&req, None), serde_json::json!("low"));
 
-        // Thinking enabled with a large budget → high.
+        // Thinking enabled with a large explicit budget → xhigh, the max tier.
         req.thinking = Some(ThinkingConfig {
             r#type: "enabled".to_string(),
             budget_tokens: Some(20_000),
         });
-        assert_eq!(effort(&req, None), serde_json::json!("high"));
+        assert_eq!(effort(&req, None), serde_json::json!("xhigh"));
 
         // Smaller budget → medium.
         req.thinking = Some(ThinkingConfig {
@@ -939,19 +939,13 @@ mod tests {
         });
         assert_eq!(effort(&req, None), serde_json::json!("medium"));
 
-        // A very large budget (ultrathink ~32k) → xhigh, the backend max tier.
-        req.thinking = Some(ThinkingConfig {
-            r#type: "enabled".to_string(),
-            budget_tokens: Some(32_000),
-        });
-        assert_eq!(effort(&req, None), serde_json::json!("xhigh"));
-
-        // Claude Code's adaptive thinking (no budget) → high.
+        // Claude Code's adaptive thinking (no budget — every think/ultrathink
+        // keyword looks identical) → xhigh, since thinking is opt-in.
         req.thinking = Some(ThinkingConfig {
             r#type: "adaptive".to_string(),
             budget_tokens: None,
         });
-        assert_eq!(effort(&req, None), serde_json::json!("high"));
+        assert_eq!(effort(&req, None), serde_json::json!("xhigh"));
 
         // An explicitly disabled thinking block → low.
         req.thinking = Some(ThinkingConfig {
