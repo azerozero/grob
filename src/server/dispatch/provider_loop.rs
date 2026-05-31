@@ -50,6 +50,10 @@ pub(super) async fn dispatch_provider_loop(
             sorted_mappings
         };
 
+    // Most recent real upstream failure across attempted mappings, surfaced to
+    // the client when every mapping fails (instead of a misleading fallback).
+    let mut last_error: Option<RequestError> = None;
+
     for (idx, mapping) in effective_mappings.iter().enumerate() {
         let Some(provider) = resolve_provider(ctx, mapping).await else {
             continue;
@@ -123,7 +127,8 @@ pub(super) async fn dispatch_provider_loop(
 
         match result {
             Ok(dispatch_result) => return Ok(dispatch_result),
-            Err(ProviderLoopAction::RateLimited) => {
+            Err(ProviderLoopAction::RateLimited(err)) => {
+                last_error = Some(*err);
                 if let Some(ok) = try_rotate_and_retry(
                     ctx,
                     request,
@@ -149,7 +154,8 @@ pub(super) async fn dispatch_provider_loop(
                 tokio::task::yield_now().await;
                 continue;
             }
-            Err(ProviderLoopAction::Continue) => {
+            Err(ProviderLoopAction::Continue(err)) => {
+                last_error = Some(*err);
                 emit_fallback(
                     ctx,
                     mapping,
@@ -175,9 +181,16 @@ pub(super) async fn dispatch_provider_loop(
         }
     }
 
-    // All providers exhausted -- try backward-compat direct lookup
-    if let Some(result) = try_direct_provider_lookup(ctx, request, &decision.model_name).await? {
-        return Ok(result);
+    // Backward-compat direct lookup — only when no mapping was actually
+    // attempted (a bare model name not in `[[models.mappings]]`). When a mapping
+    // *was* tried and failed, the router model name (e.g. `dev`) is not a real
+    // upstream model, so re-sending it just yields a misleading "model not
+    // supported" error that masks the true failure (`last_error`).
+    if last_error.is_none() {
+        if let Some(result) = try_direct_provider_lookup(ctx, request, &decision.model_name).await?
+        {
+            return Ok(result);
+        }
     }
 
     // Audit: all providers failed
@@ -200,15 +213,21 @@ pub(super) async fn dispatch_provider_loop(
         "All provider mappings failed for model: {}",
         decision.model_name
     );
-    Err(RequestError::ProviderUpstream {
-        provider: "all".to_string(),
-        status: 502,
-        body: Some(format!(
-            "All {} provider mappings failed for model: {}",
-            effective_mappings.len(),
-            decision.model_name
-        )),
-    })
+
+    // Surface the real upstream failure (verbatim status + body, e.g. a 429
+    // `usage_limit_reached` with `resets_in_seconds`) when a mapping was tried;
+    // only fall back to a generic 502 when nothing was ever attempted.
+    Err(
+        last_error.unwrap_or_else(|| RequestError::ProviderUpstream {
+            provider: "all".to_string(),
+            status: 502,
+            body: Some(format!(
+                "All {} provider mappings failed for model: {}",
+                effective_mappings.len(),
+                decision.model_name
+            )),
+        }),
+    )
 }
 
 /// Returns the index of the next mapping to fall back to.

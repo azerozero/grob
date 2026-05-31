@@ -20,18 +20,47 @@ use super::telemetry::{
     calculate_and_record_metrics, record_success_telemetry, store_response_cache,
 };
 use super::{telemetry, DispatchContext, DispatchResult};
+use crate::providers::error::ProviderError;
+use crate::server::RequestError;
 
 /// Internal signal from the per-attempt dispatch back to the outer provider loop.
 pub(super) enum ProviderLoopAction {
     /// Non-terminal failure: move to the next mapping in the priority list.
-    Continue,
-    /// Rate-limited (429): the caller should attempt key pool rotation
-    /// before falling through to the next provider mapping.
-    RateLimited,
+    ///
+    /// Carries the captured upstream error so the loop can surface the real
+    /// cause to the client when every mapping fails, instead of a generic 502.
+    Continue(Box<RequestError>),
+    /// Rate-limited (429): the caller should attempt key pool rotation before
+    /// falling through to the next provider mapping. Carries the captured
+    /// upstream error for the same reason as [`ProviderLoopAction::Continue`].
+    RateLimited(Box<RequestError>),
     /// Terminal auth failure (401 `authentication_error`): do NOT fall back
     /// to sibling providers — surface the error directly to the client so the
     /// user is prompted to run `grob connect --force-reauth`.
     AuthRevoked(String),
+}
+
+/// Captures a provider failure as a [`RequestError`] preserving the upstream
+/// status and body verbatim.
+///
+/// The blanket `From<ProviderError>` flattens a 429 to a body-less
+/// `RateLimited`, dropping the diagnostic payload (e.g. ChatGPT's
+/// `usage_limit_reached` with `resets_in_seconds`). Keeping status + body here
+/// lets the loop surface the true upstream cause when every mapping fails,
+/// rather than a misleading fallback or a generic 502.
+fn capture_upstream_error(provider: &str, err: &ProviderError) -> RequestError {
+    match err {
+        ProviderError::ApiError { status, message } => RequestError::ProviderUpstream {
+            provider: provider.to_string(),
+            status: *status,
+            body: Some(message.clone()),
+        },
+        other => RequestError::ProviderUpstream {
+            provider: provider.to_string(),
+            status: 502,
+            body: Some(other.to_string()),
+        },
+    }
 }
 
 /// Per-provider dispatch parameters (non-streaming path).
@@ -251,10 +280,11 @@ pub(super) async fn dispatch_streaming(
             if is_auth_revoked_error(&e) {
                 return Err(ProviderLoopAction::AuthRevoked(e.to_string()));
             }
+            let captured = Box::new(capture_upstream_error(&mapping.provider, &e));
             if is_upstream_rate_limit(&e) {
-                Err(ProviderLoopAction::RateLimited)
+                Err(ProviderLoopAction::RateLimited(captured))
             } else {
-                Err(ProviderLoopAction::Continue)
+                Err(ProviderLoopAction::Continue(captured))
             }
         }
     }
@@ -334,6 +364,9 @@ pub(super) async fn dispatch_non_streaming(
 
     // Wrap in Option so we can move (not clone) on the final attempt.
     let mut owned_request = Some(provider_request);
+    // Most recent failure, captured so the outer loop can surface the real
+    // upstream error (status + body, rate-limit flag) instead of a generic 502.
+    let mut last_error: Option<(bool, RequestError)> = None;
     for retry in 0..=max_retries {
         if is_backoff_attempt(retry) {
             let delay = retry_delay(backoff_step(retry));
@@ -431,6 +464,13 @@ pub(super) async fn dispatch_non_streaming(
                     return Err(ProviderLoopAction::AuthRevoked(e.to_string()));
                 }
 
+                // Remember the latest failure so it can be surfaced verbatim if
+                // this provider is ultimately given up on.
+                last_error = Some((
+                    is_upstream_rate_limit(&e),
+                    capture_upstream_error(&attempt.mapping.provider, &e),
+                ));
+
                 if classify_and_handle_error(ctx, attempt.mapping, &e, retry, max_retries) {
                     // On 429, try rotating to next pooled key before retrying.
                     let rate_limited = is_upstream_rate_limit(&e);
@@ -471,7 +511,17 @@ pub(super) async fn dispatch_non_streaming(
             }
         }
     }
-    Err(ProviderLoopAction::Continue)
+    match last_error {
+        Some((true, err)) => Err(ProviderLoopAction::RateLimited(Box::new(err))),
+        Some((false, err)) => Err(ProviderLoopAction::Continue(Box::new(err))),
+        None => Err(ProviderLoopAction::Continue(Box::new(
+            RequestError::ProviderUpstream {
+                provider: attempt.mapping.provider.clone(),
+                status: 502,
+                body: None,
+            },
+        ))),
+    }
 }
 
 /// Wrap a raw provider stream with DLP sanitization, HIT authorization, and Tap recording layers.
