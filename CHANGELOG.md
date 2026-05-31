@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.53](https://github.com/azerozero/grob/compare/v0.36.52...v0.36.53) - 2026-05-31
+
+### Fixed
+
+- *(security)* raise tool-spike defaults for agentic clients
+
 ## [0.36.52](https://github.com/azerozero/grob/compare/v0.36.51...v0.36.52) - 2026-05-31
 
 ### Fixed
