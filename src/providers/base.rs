@@ -24,6 +24,7 @@ pub(crate) struct ProviderBase {
     pub api_timeout: Duration,
     pub pass_through: bool,
     pub key_pool: Option<Arc<KeyPool>>,
+    pub reasoning_effort: Option<String>,
 }
 
 impl ProviderBase {
@@ -43,6 +44,7 @@ impl ProviderBase {
             api_timeout: params.api_timeout,
             pass_through: params.pass_through,
             key_pool: params.key_pool,
+            reasoning_effort: params.reasoning_effort,
         }
     }
 

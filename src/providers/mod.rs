@@ -222,6 +222,8 @@ pub struct ProviderParams {
     pub tls_ca: Option<reqwest::Certificate>,
     /// Optional multi-account key pool for API key rotation.
     pub key_pool: Option<std::sync::Arc<key_pool::KeyPool>>,
+    /// Forced Codex reasoning effort, overriding per-request auto-mapping.
+    pub reasoning_effort: Option<String>,
 }
 
 // Re-export config types that were moved to cli::config to break the

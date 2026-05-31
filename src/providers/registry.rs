@@ -172,6 +172,7 @@ impl ProviderRegistry {
             tls_identity,
             tls_ca,
             key_pool,
+            reasoning_effort: config.reasoning_effort.clone(),
         }
     }
 
@@ -619,6 +620,7 @@ mod tests {
                 tls_key: None,
                 tls_ca: None,
                 pool: None,
+                reasoning_effort: None,
                 circuit_breaker: None,
 
                 health_check: None,
@@ -643,6 +645,7 @@ mod tests {
                 tls_key: None,
                 tls_ca: None,
                 pool: None,
+                reasoning_effort: None,
                 circuit_breaker: None,
 
                 health_check: None,
@@ -756,6 +759,7 @@ mod tests {
             tls_key: None,
             tls_ca: None,
             pool: None,
+            reasoning_effort: None,
             circuit_breaker: None,
             health_check: None,
             max_retries: None,
