@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.57](https://github.com/azerozero/grob/compare/v0.36.56...v0.36.57) - 2026-05-31
+
+### Added
+
+- *(openai)* forward Codex service_tier (priority = faster handling)
+
 ## [0.36.56](https://github.com/azerozero/grob/compare/v0.36.55...v0.36.56) - 2026-05-31
 
 ### Fixed
