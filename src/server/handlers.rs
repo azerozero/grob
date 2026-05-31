@@ -343,6 +343,20 @@ pub(crate) async fn handle_responses(
     let model = responses_request.model.clone();
     let is_streaming = responses_request.stream == Some(true);
 
+    // Surface the inbound Codex CLI request shape so a proxy operator can see
+    // the requested model and the service_tier (`"priority"` = the ~1.5x faster
+    // mode) and reasoning effort the real client sends.
+    tracing::info!(
+        "↘️  Codex inbound: model={} service_tier={:?} effort={:?} stream={}",
+        model,
+        responses_request.service_tier,
+        responses_request
+            .reasoning
+            .as_ref()
+            .and_then(|r| r.effort.clone()),
+        is_streaming,
+    );
+
     let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
 
     // Transform Responses → canonical format
