@@ -582,6 +582,7 @@ with its required arguments.";
 pub(crate) fn transform_to_responses_request(
     request: &CanonicalRequest,
     codex_instructions: &str,
+    forced_effort: Option<&str>,
 ) -> Result<OpenAIResponsesRequest, ProviderError> {
     let tools = transform_responses_tools(request);
 
@@ -633,7 +634,42 @@ pub(crate) fn transform_to_responses_request(
         tool_choice: tools.as_ref().and(transform_responses_tool_choice(request)),
         parallel_tool_calls: tools.as_ref().map(|_| true),
         tools,
+        reasoning: resolve_reasoning_effort(request, forced_effort)
+            .map(|effort| serde_json::json!({ "effort": effort })),
     })
+}
+
+/// Resolves the Codex reasoning effort for a request.
+///
+/// Precedence: a provider-config `forced_effort` wins, then an explicit
+/// `reasoning_effort` request extension (e.g. from a Codex CLI client),
+/// otherwise the effort is auto-mapped from the request's extended-thinking
+/// setting so simple turns stay fast while deliberate thinking turns get more
+/// reasoning. Returns `None` for unrecognised effort strings, leaving the
+/// backend default in place.
+fn resolve_reasoning_effort(request: &CanonicalRequest, forced: Option<&str>) -> Option<String> {
+    let candidate = forced
+        .map(str::to_string)
+        .or_else(|| request.extensions.reasoning_effort.clone())
+        .unwrap_or_else(|| auto_map_thinking_effort(request));
+    // Guard against typos slipping through to the backend.
+    matches!(candidate.as_str(), "minimal" | "low" | "medium" | "high").then_some(candidate)
+}
+
+/// Maps Anthropic extended-thinking config to a Codex reasoning-effort tier.
+///
+/// No thinking (or `disabled`) maps to `low` for snappy responses; enabled
+/// thinking scales with the token budget — a large budget signals the client
+/// wants deeper reasoning.
+fn auto_map_thinking_effort(request: &CanonicalRequest) -> String {
+    match request.thinking.as_ref() {
+        Some(t) if t.r#type == "enabled" => match t.budget_tokens {
+            Some(budget) if budget >= 16_000 => "high",
+            Some(_) | None => "medium",
+        },
+        _ => "low",
+    }
+    .to_string()
 }
 
 /// Expands a message's content blocks into Responses items, preserving order.
@@ -806,7 +842,7 @@ mod tests {
             },
         ];
 
-        let req = transform_to_responses_request(&request, "FULL CODEX PROMPT").unwrap();
+        let req = transform_to_responses_request(&request, "FULL CODEX PROMPT", None).unwrap();
         let json = serde_json::to_value(&req).unwrap();
 
         // Tools are forwarded in the flattened Responses shape.
@@ -845,7 +881,7 @@ mod tests {
             content: MessageContent::Text("be terse".to_string()),
         }];
 
-        let req = transform_to_responses_request(&request, "FULL").unwrap();
+        let req = transform_to_responses_request(&request, "FULL", None).unwrap();
         let json = serde_json::to_value(&req).unwrap();
         let input = json["input"].as_array().unwrap();
 
@@ -858,10 +894,55 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_effort_auto_maps_and_respects_overrides() {
+        use crate::models::ThinkingConfig;
+
+        let effort = |req: &CanonicalRequest, forced: Option<&str>| {
+            serde_json::to_value(transform_to_responses_request(req, "X", forced).unwrap()).unwrap()
+                ["reasoning"]["effort"]
+                .clone()
+        };
+
+        let mut req = base_request();
+        req.system = None;
+
+        // No thinking → low (snappy).
+        assert_eq!(effort(&req, None), serde_json::json!("low"));
+
+        // Thinking enabled with a large budget → high.
+        req.thinking = Some(ThinkingConfig {
+            r#type: "enabled".to_string(),
+            budget_tokens: Some(20_000),
+        });
+        assert_eq!(effort(&req, None), serde_json::json!("high"));
+
+        // Smaller budget → medium.
+        req.thinking = Some(ThinkingConfig {
+            r#type: "enabled".to_string(),
+            budget_tokens: Some(4_000),
+        });
+        assert_eq!(effort(&req, None), serde_json::json!("medium"));
+
+        // Provider-forced effort overrides the auto-mapping.
+        assert_eq!(effort(&req, Some("minimal")), serde_json::json!("minimal"));
+
+        // A request extension forces effort when no provider override is set.
+        req.thinking = None;
+        req.extensions.reasoning_effort = Some("high".to_string());
+        assert_eq!(effort(&req, None), serde_json::json!("high"));
+
+        // An unrecognised effort is dropped (backend default kept).
+        req.extensions.reasoning_effort = Some("turbo".to_string());
+        let out =
+            serde_json::to_value(transform_to_responses_request(&req, "X", None).unwrap()).unwrap();
+        assert!(out.get("reasoning").is_none() || out["reasoning"].is_null());
+    }
+
+    #[test]
     fn responses_request_without_tools_keeps_full_instructions() {
         let mut request = base_request();
         request.system = None;
-        let req = transform_to_responses_request(&request, "FULL CODEX PROMPT").unwrap();
+        let req = transform_to_responses_request(&request, "FULL CODEX PROMPT", None).unwrap();
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["instructions"], "FULL CODEX PROMPT");
         assert!(json.get("tools").is_none() || json["tools"].is_null());

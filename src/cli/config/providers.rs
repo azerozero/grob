@@ -86,6 +86,12 @@ pub struct ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pass_through: Option<bool>,
 
+    /// Forces a Codex reasoning effort (`"minimal"`, `"low"`, `"medium"`,
+    /// `"high"`) for this provider, overriding the per-request auto-mapping.
+    /// Only affects the OpenAI Responses (Codex) path. Lower effort cuts latency.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
+
     /// Path to PEM client certificate for mTLS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_cert: Option<String>,

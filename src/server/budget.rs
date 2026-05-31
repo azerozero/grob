@@ -584,6 +584,7 @@ mod tests {
             tls_key: None,
             tls_ca: None,
             pool: None,
+            reasoning_effort: None,
             circuit_breaker: None,
             health_check: None,
             max_retries,

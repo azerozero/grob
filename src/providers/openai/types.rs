@@ -71,6 +71,9 @@ pub(crate) struct OpenAIResponsesRequest {
     /// Whether the model may emit several tool calls in one turn.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
+    /// Reasoning controls, e.g. `{"effort": "low"}`. Lower effort cuts latency.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<serde_json::Value>,
 }
 
 /// Input for Responses API is an array of typed items.
