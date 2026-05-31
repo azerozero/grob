@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.54](https://github.com/azerozero/grob/compare/v0.36.53...v0.36.54) - 2026-05-31
+
+### Added
+
+- *(openai)* control Codex reasoning effort (auto-map + config override)
+- *(openai)* make ChatGPT Codex tool-calling work end-to-end
+
+### Other
+
+- *(openai)* update Codex tools contract pin to expect forwarded tools
+
 ## [0.36.53](https://github.com/azerozero/grob/compare/v0.36.52...v0.36.53) - 2026-05-31
 
 ### Fixed
