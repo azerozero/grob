@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.56](https://github.com/azerozero/grob/compare/v0.36.55...v0.36.56) - 2026-05-31
+
+### Fixed
+
+- *(dispatch)* surface the real upstream error instead of masking it
+
 ## [0.36.55](https://github.com/azerozero/grob/compare/v0.36.54...v0.36.55) - 2026-05-31
 
 ### Fixed
