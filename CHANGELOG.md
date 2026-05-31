@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.59](https://github.com/azerozero/grob/compare/v0.36.58...v0.36.59) - 2026-05-31
+
+### Fixed
+
+- *(responses-compat)* emit a spec-compliant Responses SSE stream
+
 ## [0.36.58](https://github.com/azerozero/grob/compare/v0.36.57...v0.36.58) - 2026-05-31
 
 ### Added
