@@ -4,7 +4,6 @@
 //! instead of the `data: {...}` format used by Chat Completions.
 
 use bytes::Bytes;
-use serde::Serialize;
 
 use crate::providers::streaming::{parse_sse_events, SseEvent};
 
@@ -15,6 +14,12 @@ pub struct AnthropicToResponsesStream {
     output_index: u32,
     content_index: u32,
     current_item_id: String,
+    /// Text accumulated for the current message item, replayed in
+    /// `response.output_text.done` (the Responses client expects the full text).
+    current_text: String,
+    /// Completed output items, included in the final `response.completed` so the
+    /// client can render the assistant message (Codex reads `response.output`).
+    output_items: Vec<serde_json::Value>,
 }
 
 impl AnthropicToResponsesStream {
@@ -26,28 +31,48 @@ impl AnthropicToResponsesStream {
             output_index: 0,
             content_index: 0,
             current_item_id: String::new(),
+            current_text: String::new(),
+            output_items: Vec::new(),
         }
     }
 
-    /// Formats a named SSE event: `event: <name>\ndata: <json>\n\n`
-    fn make_event(event_name: &str, data: &impl Serialize) -> Bytes {
+    /// Formats a named SSE event: `event: <name>\ndata: <json>\n\n`.
+    ///
+    /// Injects `"type": <name>` into the data — the Responses API requires every
+    /// event payload to carry a `type` field equal to the event name, and
+    /// clients (Codex CLI) dispatch on it. Without it the stream fails to decode.
+    fn make_event(event_name: &str, data: &serde_json::Value) -> Bytes {
+        let mut payload = data.clone();
+        if let Some(map) = payload.as_object_mut() {
+            map.insert(
+                "type".to_string(),
+                serde_json::Value::String(event_name.to_string()),
+            );
+        }
         let mut buf = Vec::with_capacity(256);
         buf.extend_from_slice(b"event: ");
         buf.extend_from_slice(event_name.as_bytes());
         buf.extend_from_slice(b"\ndata: ");
-        serde_json::to_writer(&mut buf, data).unwrap_or_default();
+        serde_json::to_writer(&mut buf, &payload).unwrap_or_default();
         buf.extend_from_slice(b"\n\n");
         Bytes::from(buf)
+    }
+
+    /// Builds the `response` object shared by the lifecycle events.
+    fn response_object(&self, status: &str, output: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({
+            "id": self.response_id,
+            "object": "response",
+            "model": self.model,
+            "status": status,
+            "output": output,
+        })
     }
 
     /// Formats the `response.created` event emitted at stream start.
     fn make_response_created(&self) -> Bytes {
         let data = serde_json::json!({
-            "id": self.response_id,
-            "object": "response",
-            "model": self.model,
-            "status": "in_progress",
-            "output": [],
+            "response": self.response_object("in_progress", serde_json::json!([])),
         });
         Self::make_event("response.created", &data)
     }
@@ -81,8 +106,11 @@ impl AnthropicToResponsesStream {
                 });
                 out.push(Self::make_event("response.output_item.added", &item_added));
 
+                self.current_text.clear();
+
                 // response.content_part.added
                 let part_added = serde_json::json!({
+                    "item_id": self.current_item_id,
                     "output_index": self.output_index,
                     "content_index": self.content_index,
                     "part": {
@@ -124,7 +152,7 @@ impl AnthropicToResponsesStream {
         out
     }
 
-    fn handle_content_block_delta(&self, data: &str) -> Option<Bytes> {
+    fn handle_content_block_delta(&mut self, data: &str) -> Option<Bytes> {
         let json: serde_json::Value = serde_json::from_str(data).ok()?;
         let delta = json.get("delta")?;
         let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -132,7 +160,9 @@ impl AnthropicToResponsesStream {
         match delta_type {
             "text_delta" => {
                 let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                self.current_text.push_str(text);
                 let event_data = serde_json::json!({
+                    "item_id": self.current_item_id,
                     "output_index": self.output_index,
                     "content_index": self.content_index,
                     "delta": text,
@@ -145,6 +175,7 @@ impl AnthropicToResponsesStream {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let event_data = serde_json::json!({
+                    "item_id": self.current_item_id,
                     "output_index": self.output_index,
                     "delta": partial,
                 });
@@ -162,15 +193,27 @@ impl AnthropicToResponsesStream {
 
         // Determine if this was text or tool_use based on current_item_id prefix
         if self.current_item_id.starts_with("msg_") {
-            // response.content_part.done
-            let part_done = serde_json::json!({
+            // response.output_text.done — carries the full accumulated text.
+            let text_done = serde_json::json!({
+                "item_id": self.current_item_id,
                 "output_index": self.output_index,
                 "content_index": self.content_index,
+                "text": self.current_text,
+            });
+            out.push(Self::make_event("response.output_text.done", &text_done));
+
+            // response.content_part.done
+            let part_done = serde_json::json!({
+                "item_id": self.current_item_id,
+                "output_index": self.output_index,
+                "content_index": self.content_index,
+                "part": { "type": "output_text", "text": self.current_text },
             });
             out.push(Self::make_event("response.content_part.done", &part_done));
         } else if self.current_item_id.starts_with("fc_") {
             // response.function_call_arguments.done
             let args_done = serde_json::json!({
+                "item_id": self.current_item_id,
                 "output_index": self.output_index,
             });
             out.push(Self::make_event(
@@ -179,17 +222,33 @@ impl AnthropicToResponsesStream {
             ));
         }
 
-        // response.output_item.done
+        // Build the completed item once — carried both in `output_item.done` and
+        // in the final `response.output` so the client can render the message.
+        let item = if self.current_item_id.starts_with("fc_") {
+            serde_json::json!({
+                "id": self.current_item_id,
+                "type": "function_call",
+                "status": "completed",
+            })
+        } else {
+            serde_json::json!({
+                "id": self.current_item_id,
+                "type": "message",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{ "type": "output_text", "text": self.current_text }],
+            })
+        };
+
         let item_done = serde_json::json!({
             "output_index": self.output_index,
-            "item": {
-                "id": self.current_item_id,
-                "status": "completed",
-            }
+            "item": item.clone(),
         });
         out.push(Self::make_event("response.output_item.done", &item_done));
+        self.output_items.push(item);
 
         self.output_index += 1;
+        self.current_text.clear();
         out
     }
 
@@ -201,7 +260,13 @@ impl AnthropicToResponsesStream {
 
         match event_type {
             "message_start" => {
-                vec![self.make_response_created()]
+                let in_progress = serde_json::json!({
+                    "response": self.response_object("in_progress", serde_json::json!([])),
+                });
+                vec![
+                    self.make_response_created(),
+                    Self::make_event("response.in_progress", &in_progress),
+                ]
             }
             "content_block_start" => self.handle_content_block_start(&event.data),
             "content_block_delta" => self
@@ -210,14 +275,13 @@ impl AnthropicToResponsesStream {
                 .collect(),
             "content_block_stop" => self.handle_content_block_stop(&event.data),
             "message_stop" => {
-                let mut out = Vec::new();
-                let completed = serde_json::json!({
-                    "id": self.response_id,
-                    "status": "completed",
-                });
-                out.push(Self::make_event("response.completed", &completed));
-                out.push(Bytes::from("data: [DONE]\n\n"));
-                out
+                let output = serde_json::Value::Array(std::mem::take(&mut self.output_items));
+                let completed =
+                    serde_json::json!({ "response": self.response_object("completed", output) });
+                vec![
+                    Self::make_event("response.completed", &completed),
+                    Bytes::from("data: [DONE]\n\n"),
+                ]
             }
             _ => Vec::new(),
         }
@@ -253,9 +317,15 @@ mod tests {
                 .to_string(),
         };
         let result = stream.transform_event(&event);
-        assert_eq!(result.len(), 1);
-        let text = std::str::from_utf8(&result[0]).unwrap();
-        assert!(text.starts_with("event: response.created\n"));
+        // message_start now emits response.created + response.in_progress.
+        assert_eq!(result.len(), 2);
+        let created = std::str::from_utf8(&result[0]).unwrap();
+        assert!(created.starts_with("event: response.created\n"));
+        // The data carries `type` (clients dispatch on it) and a `response` object.
+        assert!(created.contains(r#""type":"response.created""#));
+        assert!(created.contains(r#""response":{"#));
+        let in_progress = std::str::from_utf8(&result[1]).unwrap();
+        assert!(in_progress.starts_with("event: response.in_progress\n"));
     }
 
     #[test]
