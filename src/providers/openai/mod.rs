@@ -1,6 +1,7 @@
 //! OpenAI provider implementation.
 
 mod streaming;
+mod tool_salvage;
 mod transform;
 pub(crate) mod types;
 
@@ -245,13 +246,27 @@ impl OpenAIProvider {
 
         let content_blocks = transform::parse_sse_response(&response_text)?;
 
+        // A function_call in the output means the model wants to use a tool.
+        let stop_reason = if content_blocks.iter().any(|b| {
+            matches!(
+                b,
+                crate::providers::ContentBlock::Known(
+                    crate::providers::KnownContentBlock::ToolUse { .. }
+                )
+            )
+        }) {
+            "tool_use"
+        } else {
+            "end_turn"
+        };
+
         Ok(ProviderResponse {
             id: "sse-response".to_string(),
             r#type: "message".to_string(),
             role: "assistant".to_string(),
             content: content_blocks,
             model: request.model.clone(),
-            stop_reason: Some("end_turn".to_string()),
+            stop_reason: Some(stop_reason.to_string()),
             stop_sequence: None,
             usage: Usage {
                 input_tokens: 0,

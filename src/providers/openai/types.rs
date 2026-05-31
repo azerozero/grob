@@ -62,22 +62,48 @@ pub(crate) struct OpenAIResponsesRequest {
     pub store: bool,
     /// Enable streaming responses
     pub stream: bool,
+    /// Tool definitions in Responses-API (flattened `function`) shape.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<serde_json::Value>>,
+    /// Tool selection strategy (`"auto"`, `"required"`, or a named function).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<serde_json::Value>,
+    /// Whether the model may emit several tool calls in one turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parallel_tool_calls: Option<bool>,
 }
 
-/// Input for Responses API can be string or array of messages
-// Both variants used by serde serialization depending on context
+/// Input for Responses API is an array of typed items.
+// Single-variant untagged enum so it serializes as a bare JSON array.
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub(crate) enum OpenAIResponsesInput {
-    Messages(Vec<OpenAIResponsesMessage>),
+    Items(Vec<OpenAIResponsesItem>),
 }
 
-/// Message format for Responses API
+/// One item in a Responses API `input[]` array.
+///
+/// Alongside plain `message` items, the ChatGPT Codex backend accepts the
+/// `function_call` / `function_call_output` items that carry tool-use history
+/// so multi-turn agent loops survive the Anthropic ⇄ Responses translation.
 #[derive(Debug, Serialize)]
-pub(crate) struct OpenAIResponsesMessage {
-    pub role: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(crate) enum OpenAIResponsesItem {
+    /// A conversational message; `content` is plain text.
+    Message {
+        role: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        content: Option<String>,
+    },
+    /// An assistant tool call replayed from history.
+    FunctionCall {
+        call_id: String,
+        name: String,
+        /// JSON-encoded arguments string.
+        arguments: String,
+    },
+    /// The output of a tool call, fed back to the model.
+    FunctionCallOutput { call_id: String, output: String },
 }
 
 /// Content can be string or array of content parts
@@ -253,4 +279,17 @@ pub(crate) struct StreamTransformState {
     pub stream_ended: bool,
     /// Did this response include any tool calls? (for correct stop_reason)
     pub had_tool_calls: bool,
+    /// Pending assistant text awaiting a leaked-tool-call scan.
+    ///
+    /// Text deltas are buffered here so a `<tool_call>` marker split across
+    /// streamed fragments can still be detected before the text is forwarded.
+    /// See [`crate::providers::openai::tool_salvage`].
+    pub text_buffer: String,
+    /// Count of tool calls salvaged from leaked text, used to mint unique ids.
+    pub salvaged_tool_count: u32,
+    /// Responses-API function-call output index → Anthropic content block index.
+    ///
+    /// Tracks structured Codex `function_call` items as they stream so argument
+    /// deltas land on the right `tool_use` block.
+    pub responses_fc_blocks: std::collections::HashMap<u64, u32>,
 }

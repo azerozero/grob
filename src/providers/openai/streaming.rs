@@ -1,3 +1,4 @@
+use super::tool_salvage::{drain_buffer, salvage_complete, SalvageEvent, SalvagedToolCall};
 use super::types::{OpenAIStreamChunk, StreamTransformState};
 
 /// Transform an OpenAI streaming chunk to Anthropic SSE format.
@@ -32,7 +33,7 @@ pub(crate) fn transform_openai_chunk_to_anthropic_sse(
 
         if let Some(text) = choice.delta.content.as_ref() {
             if !text.is_empty() {
-                emit_text_delta(&mut output, state, text);
+                push_text(&mut output, state, text);
             }
         }
 
@@ -141,6 +142,96 @@ fn emit_text_delta(output: &mut String, state: &mut StreamTransformState, text: 
     output.push_str(&format!("event: content_block_delta\ndata: {}\n\n", delta));
 }
 
+/// Buffers assistant text and emits complete text / salvaged tool-call events.
+///
+/// Routing text through the salvage scanner lets a `<tool_call>` block that the
+/// model leaked into plain content be recovered as a real `tool_use` block. A
+/// trailing fragment that might continue a split marker stays in
+/// `state.text_buffer` until the next delta. See
+/// [`crate::providers::openai::tool_salvage`].
+fn push_text(output: &mut String, state: &mut StreamTransformState, text: &str) {
+    state.text_buffer.push_str(text);
+    let events = drain_buffer(&mut state.text_buffer);
+    apply_salvage_events(output, state, events);
+}
+
+/// Flushes any buffered text at stream end, treating an unterminated marker as text.
+fn flush_text_buffer(output: &mut String, state: &mut StreamTransformState) {
+    if state.text_buffer.is_empty() {
+        return;
+    }
+    let remaining = std::mem::take(&mut state.text_buffer);
+    let events = salvage_complete(&remaining);
+    apply_salvage_events(output, state, events);
+}
+
+/// Emits the SSE for an ordered list of salvage events.
+fn apply_salvage_events(
+    output: &mut String,
+    state: &mut StreamTransformState,
+    events: Vec<SalvageEvent>,
+) {
+    for event in events {
+        match event {
+            SalvageEvent::Text(text) => emit_text_delta(output, state, &text),
+            SalvageEvent::ToolCall(call) => emit_salvaged_tool_use(output, state, &call),
+        }
+    }
+}
+
+/// Emits a complete `tool_use` content block for a tool call recovered from text.
+///
+/// Unlike [`emit_tool_call_deltas`], the salvaged call is fully known up front,
+/// so the block is opened, filled, and closed in one shot. Setting
+/// `had_tool_calls` forces `stop_reason="tool_use"` so the client runs the tool.
+fn emit_salvaged_tool_use(
+    output: &mut String,
+    state: &mut StreamTransformState,
+    call: &SalvagedToolCall,
+) {
+    close_open_blocks(output, state);
+
+    let block_index = state.next_block_index;
+    state.next_block_index += 1;
+    state.salvaged_tool_count += 1;
+    state.had_tool_calls = true;
+    let tool_id = format!("toolu_salvaged_{}", state.salvaged_tool_count);
+
+    tracing::info!(
+        "Salvaged leaked tool call '{}' as tool_use block {} (id {})",
+        call.name,
+        block_index,
+        tool_id
+    );
+
+    let block_start = serde_json::json!({
+        "type": "content_block_start",
+        "index": block_index,
+        "content_block": {
+            "type": "tool_use",
+            "id": tool_id,
+            "name": call.name,
+            "input": {}
+        }
+    });
+    output.push_str(&format!(
+        "event: content_block_start\ndata: {}\n\n",
+        block_start
+    ));
+
+    let input_delta = serde_json::json!({
+        "type": "content_block_delta",
+        "index": block_index,
+        "delta": { "type": "input_json_delta", "partial_json": call.input.to_string() }
+    });
+    output.push_str(&format!(
+        "event: content_block_delta\ndata: {}\n\n",
+        input_delta
+    ));
+
+    emit_block_stop(output, block_index);
+}
+
 fn emit_tool_call_deltas(
     output: &mut String,
     state: &mut StreamTransformState,
@@ -229,6 +320,108 @@ fn emit_tool_call_deltas(
     }
 }
 
+/// Opens an Anthropic `tool_use` block for a streaming Codex `function_call` item.
+///
+/// Codex streams a structured tool call as `output_item.added` (the call shell),
+/// then `function_call_arguments.delta` chunks, then `output_item.done`. The
+/// block is keyed by the Responses `output_index` so argument deltas correlate.
+fn emit_responses_fc_start(
+    output: &mut String,
+    state: &mut StreamTransformState,
+    json: &serde_json::Value,
+    item: &serde_json::Value,
+) {
+    let output_index = json
+        .get("output_index")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if state.responses_fc_blocks.contains_key(&output_index) {
+        return;
+    }
+
+    close_open_blocks(output, state);
+
+    let call_id = item
+        .get("call_id")
+        .or_else(|| item.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("call_0");
+    let name = item
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+
+    let block_index = state.next_block_index;
+    state.next_block_index += 1;
+    state.responses_fc_blocks.insert(output_index, block_index);
+    state.had_tool_calls = true;
+
+    let block_start = serde_json::json!({
+        "type": "content_block_start",
+        "index": block_index,
+        "content_block": { "type": "tool_use", "id": call_id, "name": name, "input": {} }
+    });
+    output.push_str(&format!(
+        "event: content_block_start\ndata: {}\n\n",
+        block_start
+    ));
+
+    // `output_item.added` sometimes already carries the full arguments.
+    if let Some(args) = item.get("arguments").and_then(|v| v.as_str()) {
+        if !args.is_empty() {
+            emit_responses_fc_input(output, block_index, args);
+        }
+    }
+}
+
+/// Emits an `input_json_delta` for a streaming Codex function-call argument chunk.
+fn emit_responses_fc_args(
+    output: &mut String,
+    state: &mut StreamTransformState,
+    json: &serde_json::Value,
+    delta: &str,
+) {
+    let output_index = json
+        .get("output_index")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if let Some(&block_index) = state.responses_fc_blocks.get(&output_index) {
+        emit_responses_fc_input(output, block_index, delta);
+    }
+}
+
+/// Closes a streaming Codex function-call block on `output_item.done`.
+///
+/// If the `added`/`delta` events were never seen (a fully-buffered call), the
+/// block is opened and filled from the complete item before closing.
+fn emit_responses_fc_done(
+    output: &mut String,
+    state: &mut StreamTransformState,
+    json: &serde_json::Value,
+    item: &serde_json::Value,
+) {
+    let output_index = json
+        .get("output_index")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    if !state.responses_fc_blocks.contains_key(&output_index) {
+        emit_responses_fc_start(output, state, json, item);
+    }
+    if let Some(block_index) = state.responses_fc_blocks.remove(&output_index) {
+        emit_block_stop(output, block_index);
+    }
+}
+
+/// Emits a tool-use `input_json_delta` carrying a partial arguments string.
+fn emit_responses_fc_input(output: &mut String, block_index: u32, partial_json: &str) {
+    let delta = serde_json::json!({
+        "type": "content_block_delta",
+        "index": block_index,
+        "delta": { "type": "input_json_delta", "partial_json": partial_json }
+    });
+    output.push_str(&format!("event: content_block_delta\ndata: {}\n\n", delta));
+}
+
 fn emit_stream_end(
     output: &mut String,
     state: &mut StreamTransformState,
@@ -236,6 +429,7 @@ fn emit_stream_end(
     reason: &str,
 ) {
     state.stream_ended = true;
+    flush_text_buffer(output, state);
 
     if state.thinking_block_open {
         emit_block_stop(output, state.thinking_block_index);
@@ -330,7 +524,7 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
             ensure_message_started(&mut output, state, message_id, model);
             if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
                 if !delta.is_empty() {
-                    emit_text_delta(&mut output, state, delta);
+                    push_text(&mut output, state, delta);
                 }
             }
         }
@@ -339,6 +533,26 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
             if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
                 if !delta.is_empty() {
                     emit_reasoning_delta(&mut output, state, delta);
+                }
+            }
+        }
+        "response.output_item.added" => {
+            if let Some(item) = json.get("item") {
+                if item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
+                    ensure_message_started(&mut output, state, message_id, model);
+                    emit_responses_fc_start(&mut output, state, &json, item);
+                }
+            }
+        }
+        ty if ty.ends_with("function_call_arguments.delta") => {
+            if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                emit_responses_fc_args(&mut output, state, &json, delta);
+            }
+        }
+        "response.output_item.done" => {
+            if let Some(item) = json.get("item") {
+                if item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
+                    emit_responses_fc_done(&mut output, state, &json, item);
                 }
             }
         }
@@ -363,9 +577,14 @@ fn emit_codex_stream_end(
         return;
     }
     state.stream_ended = true;
+    flush_text_buffer(output, state);
 
     close_open_blocks(output, state);
     for block_index in state.tool_blocks.values() {
+        emit_block_stop(output, *block_index);
+    }
+    // Close any function-call blocks whose `output_item.done` never arrived.
+    for block_index in state.responses_fc_blocks.values() {
         emit_block_stop(output, *block_index);
     }
 
@@ -460,6 +679,55 @@ mod codex_stream_tests {
             r#"{"type":"response.incomplete","response":{"status":"incomplete"}}"#,
         ]);
         assert!(out.contains("max_tokens"));
+    }
+
+    #[test]
+    fn leaked_tool_call_in_text_is_salvaged_as_tool_use() {
+        // The tool_call marker and JSON are split across deltas to exercise the
+        // streaming buffer.
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_text.delta","delta":"sure, running <tool_"}"#,
+            r#"{"type":"response.output_text.delta","delta":"call>{\"name\":\"Bash\","}"#,
+            r#"{"type":"response.output_text.delta","delta":"\"arguments\":{\"command\":\"ls\"}}</tool_call>"}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        // The pre-marker text is still forwarded.
+        assert!(out.contains(r#""text":"sure, running ""#));
+        // A tool_use block is opened with the recovered name.
+        assert!(out.contains(r#""type":"tool_use""#));
+        assert!(out.contains(r#""name":"Bash""#));
+        // Its input arrives as an input_json_delta.
+        assert!(out.contains("input_json_delta"));
+        assert!(out.contains(r#"command\":\"ls"#));
+        // The leaked marker itself must not leak through as text.
+        assert!(!out.contains("tool_call>"));
+        // Salvaging forces stop_reason=tool_use so the client runs the tool.
+        assert!(out.contains(r#""stop_reason":"tool_use""#));
+    }
+
+    #[test]
+    fn structured_function_call_streams_as_tool_use() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_abc","name":"Bash","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","output_index":0,"delta":"{\"command\":\""}"#,
+            r#"{"type":"response.function_call_arguments.delta","output_index":0,"delta":"ls\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_abc","name":"Bash","arguments":"{\"command\":\"ls\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        // A single tool_use block opened with the call's id and name.
+        assert_eq!(out.matches(r#""type":"tool_use""#).count(), 1);
+        assert!(out.contains(r#""id":"call_abc""#));
+        assert!(out.contains(r#""name":"Bash""#));
+        // Arguments arrive incrementally as input_json_delta, not text.
+        assert!(out.contains("input_json_delta"));
+        assert!(!out.contains("text_delta"));
+        // The block is closed and the turn ends with tool_use.
+        assert!(out.contains("event: content_block_stop"));
+        assert!(out.contains(r#""stop_reason":"tool_use""#));
     }
 
     #[test]
