@@ -645,29 +645,45 @@ pub(crate) fn transform_to_responses_request(
 /// `reasoning_effort` request extension (e.g. from a Codex CLI client),
 /// otherwise the effort is auto-mapped from the request's extended-thinking
 /// setting so simple turns stay fast while deliberate thinking turns get more
-/// reasoning. Returns `None` for unrecognised effort strings, leaving the
-/// backend default in place.
+/// reasoning.
+///
+/// An operator- or client-supplied effort passes through verbatim — the backend
+/// validates it — so newer tiers (e.g. `xhigh`) work without a grob release; an
+/// invalid value surfaces a backend error rather than being silently dropped.
+/// Only the auto-mapped value is constrained, since it must be a known-safe tier.
 fn resolve_reasoning_effort(request: &CanonicalRequest, forced: Option<&str>) -> Option<String> {
-    let candidate = forced
+    let supplied = forced
         .map(str::to_string)
         .or_else(|| request.extensions.reasoning_effort.clone())
-        .unwrap_or_else(|| auto_map_thinking_effort(request));
-    // Guard against typos slipping through to the backend.
-    matches!(candidate.as_str(), "minimal" | "low" | "medium" | "high").then_some(candidate)
+        .filter(|s| !s.is_empty());
+    Some(supplied.unwrap_or_else(|| auto_map_thinking_effort(request)))
 }
 
 /// Maps Anthropic extended-thinking config to a Codex reasoning-effort tier.
 ///
-/// No thinking (or `disabled`) maps to `low` for snappy responses; enabled
-/// thinking scales with the token budget — a large budget signals the client
-/// wants deeper reasoning.
+/// No thinking (or an explicitly `disabled` block) maps to `low` for snappy
+/// responses. Any other thinking block means the client asked for extended
+/// reasoning, so it maps to a higher tier: a large explicit budget scales up
+/// (`>=24k` → `xhigh`, the backend max; `>=16k` → `high`), and Claude Code's
+/// adaptive mode (`type: "adaptive"`, no budget) maps to `high`. Effort tiers:
+/// `low` < `medium` < `high` < `xhigh` (`max` is rejected by the backend).
+///
+/// Note: Claude Code's `/effort` slider is client-internal and never reaches the
+/// API, so it cannot be mapped here — only the `think`/`ultrathink` keywords,
+/// which set a thinking block, do.
 fn auto_map_thinking_effort(request: &CanonicalRequest) -> String {
-    match request.thinking.as_ref() {
-        Some(t) if t.r#type == "enabled" => match t.budget_tokens {
-            Some(budget) if budget >= 16_000 => "high",
-            Some(_) | None => "medium",
-        },
-        _ => "low",
+    let Some(thinking) = request.thinking.as_ref() else {
+        return "low".to_string();
+    };
+    if thinking.r#type == "disabled" {
+        return "low".to_string();
+    }
+    match thinking.budget_tokens {
+        Some(budget) if budget >= 24_000 => "xhigh",
+        Some(budget) if budget >= 16_000 => "high",
+        Some(_) => "medium",
+        // Adaptive thinking (no explicit budget) — let it reason hard.
+        None => "high",
     }
     .to_string()
 }
@@ -923,7 +939,29 @@ mod tests {
         });
         assert_eq!(effort(&req, None), serde_json::json!("medium"));
 
+        // A very large budget (ultrathink ~32k) → xhigh, the backend max tier.
+        req.thinking = Some(ThinkingConfig {
+            r#type: "enabled".to_string(),
+            budget_tokens: Some(32_000),
+        });
+        assert_eq!(effort(&req, None), serde_json::json!("xhigh"));
+
+        // Claude Code's adaptive thinking (no budget) → high.
+        req.thinking = Some(ThinkingConfig {
+            r#type: "adaptive".to_string(),
+            budget_tokens: None,
+        });
+        assert_eq!(effort(&req, None), serde_json::json!("high"));
+
+        // An explicitly disabled thinking block → low.
+        req.thinking = Some(ThinkingConfig {
+            r#type: "disabled".to_string(),
+            budget_tokens: None,
+        });
+        assert_eq!(effort(&req, None), serde_json::json!("low"));
+
         // Provider-forced effort overrides the auto-mapping.
+        req.thinking = None;
         assert_eq!(effort(&req, Some("minimal")), serde_json::json!("minimal"));
 
         // A request extension forces effort when no provider override is set.
@@ -931,11 +969,13 @@ mod tests {
         req.extensions.reasoning_effort = Some("high".to_string());
         assert_eq!(effort(&req, None), serde_json::json!("high"));
 
-        // An unrecognised effort is dropped (backend default kept).
-        req.extensions.reasoning_effort = Some("turbo".to_string());
-        let out =
-            serde_json::to_value(transform_to_responses_request(&req, "X", None).unwrap()).unwrap();
-        assert!(out.get("reasoning").is_none() || out["reasoning"].is_null());
+        // A supplied effort passes through verbatim (the backend validates it),
+        // so newer tiers like "xhigh" reach Codex without a grob release.
+        assert_eq!(effort(&req, Some("xhigh")), serde_json::json!("xhigh"));
+
+        // An empty forced effort falls back to the auto-map rather than being sent.
+        req.extensions.reasoning_effort = None;
+        assert_eq!(effort(&req, Some("")), serde_json::json!("low"));
     }
 
     #[test]
