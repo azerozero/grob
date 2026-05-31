@@ -234,9 +234,13 @@ Detects per-session tool-call spikes so a misbehaving agent cannot exhaust provi
 
 ```toml
 [security]
-tool_spike_warn_per_min = 100     # log + metric above this (default: 100)
-tool_spike_block_per_min = 500    # return HTTP 429 above this (default: 500)
+tool_spike_warn_per_min = 500     # log + metric above this (default: 500)
+tool_spike_block_per_min = 2000   # return HTTP 429 above this (default: 2000)
 ```
+
+> Counting includes both `tool_use` and the `tool_result` echoed back, so one
+> tool round-trip scores ~2. The defaults are sized for agentic clients (Claude
+> Code, multi-skill runs); lower them for stricter quota protection.
 
 ### Behavior
 

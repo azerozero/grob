@@ -53,8 +53,8 @@ pub struct ToolSpikeConfig {
 impl Default for ToolSpikeConfig {
     fn default() -> Self {
         Self {
-            warn_per_min: 100,
-            block_per_min: 500,
+            warn_per_min: 500,
+            block_per_min: 2000,
         }
     }
 }

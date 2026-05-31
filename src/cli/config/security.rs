@@ -67,14 +67,14 @@ pub struct SecurityConfig {
     /// keyed on a non-anonymous tenant id.
     #[serde(default)]
     pub strict_tenant: bool,
-    /// Tool-call spike: warn threshold per session per minute (default 100).
+    /// Tool-call spike: warn threshold per session per minute (default 500).
     ///
     /// Crossing this rolling 60s count logs a warning and emits a
     /// metric without rejecting the request. Set to `0` to disable
     /// warnings.
     #[serde(default = "default_tool_spike_warn_per_min")]
     pub tool_spike_warn_per_min: u32,
-    /// Tool-call spike: block threshold per session per minute (default 500).
+    /// Tool-call spike: block threshold per session per minute (default 2000).
     ///
     /// Crossing this rolling 60s count returns HTTP 429, writes a
     /// signed audit entry, and emits a metric. Set to `0` to disable
@@ -147,17 +147,21 @@ fn default_scoring_decay_rate() -> f64 {
     0.001
 }
 
-// NOTE: 100 tool calls/min/session is roughly the upper bound for a busy
-// build run (Claude Code reading ~2 files/sec while exploring a tree).
-// Above this we want a paper trail but still let the request through.
+// NOTE: The detector counts both `tool_use` blocks and the `tool_result`
+// blocks echoed back, so a single tool round-trip scores ~2. Agentic clients
+// (Claude Code, multi-skill orchestrations like `/cli-cycle`) legitimately burst
+// to several hundred tool events/min, so the warn level is the early signal for
+// that band — a paper trail without rejecting the request.
 fn default_tool_spike_warn_per_min() -> u32 {
-    100
+    500
 }
 
-// NOTE: 500 tool calls/min/session is firmly anomalous — >8/sec sustained,
-// which only a runaway loop produces. Blocks dispatch and audit-logs.
+// NOTE: 2000 tool events/min/session (~33/sec counting both directions, i.e.
+// ~16 round-trips/sec) is firmly anomalous — only a runaway loop sustains it,
+// while heavy-but-legitimate agentic runs stay below it. Blocks and audit-logs.
+// (The previous 500 throttled real multi-skill workloads with HTTP 429.)
 fn default_tool_spike_block_per_min() -> u32 {
-    500
+    2000
 }
 
 /// EU AI Act compliance configuration
