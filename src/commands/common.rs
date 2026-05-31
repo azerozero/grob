@@ -151,6 +151,28 @@ pub fn daemon_log_path() -> Option<std::path::PathBuf> {
     crate::grob_home().map(|h| h.join("grob.log"))
 }
 
+/// Builds the argument vector for the detached daemon, in clap-acceptable order.
+///
+/// `-c/--config` is a global flag on the top-level [`crate::cli::args::Cli`], not
+/// on the `start` subcommand, so clap only accepts it *before* the subcommand —
+/// emitting it after `start` makes the child abort with "unexpected argument
+/// '--config'" and the daemon never binds. The order is therefore: global flags,
+/// subcommand, then subcommand flags (`--port`). Returning the args as a vector
+/// keeps this ordering unit-testable without spawning a process.
+fn daemon_command_args(port: Option<u16>, config: Option<String>) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(config) = config {
+        args.push("--config".to_string());
+        args.push(config);
+    }
+    args.push("start".to_string());
+    if let Some(port) = port {
+        args.push("--port".to_string());
+        args.push(port.to_string());
+    }
+    args
+}
+
 /// Spawns the Grob server as a detached background process.
 ///
 /// The child's stdout and stderr are redirected to `~/.grob/grob.log` (append
@@ -165,14 +187,7 @@ pub fn spawn_background_service(
 
     let exe_path = std::env::current_exe()?;
     let mut cmd = Command::new(&exe_path);
-    cmd.arg("start");
-
-    if let Some(port) = port {
-        cmd.arg("--port").arg(port.to_string());
-    }
-    if let Some(config) = config {
-        cmd.arg("--config").arg(config);
-    }
+    cmd.args(daemon_command_args(port, config));
 
     #[cfg(all(unix, feature = "unix-signals"))]
     {
@@ -224,4 +239,55 @@ pub fn spawn_background_service(
 
     cmd.spawn()?;
     Ok(if captured { log_path } else { None })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::daemon_command_args;
+    use crate::cli::args::{Cli, Commands};
+    use clap::Parser;
+
+    /// Re-parses the daemon args through clap to prove the child can start.
+    ///
+    /// This is the exact failure mode of the original bug: `--config` was
+    /// emitted after `start`, which clap rejects because `config` is a global
+    /// flag on the top-level [`Cli`], not on the `start` subcommand.
+    fn parse(args: &[String]) -> Cli {
+        let argv = std::iter::once("grob".to_string()).chain(args.iter().cloned());
+        Cli::try_parse_from(argv).expect("daemon args must parse as a valid grob invocation")
+    }
+
+    #[test]
+    fn daemon_args_with_config_parse_back_into_clap() {
+        let args = daemon_command_args(Some(13456), Some("/tmp/grob.toml".to_string()));
+
+        // The global flag must precede the subcommand.
+        let start_idx = args.iter().position(|a| a == "start").unwrap();
+        let config_idx = args.iter().position(|a| a == "--config").unwrap();
+        assert!(
+            config_idx < start_idx,
+            "--config must come before the start subcommand, got {args:?}"
+        );
+
+        let cli = parse(&args);
+        assert_eq!(cli.config.as_deref(), Some("/tmp/grob.toml"));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Start {
+                port: Some(13456),
+                detach: false
+            })
+        ));
+    }
+
+    #[test]
+    fn daemon_args_without_config_parse_back_into_clap() {
+        let args = daemon_command_args(None, None);
+        let cli = parse(&args);
+        assert_eq!(cli.config, None);
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Start { port: None, .. })
+        ));
+    }
 }
