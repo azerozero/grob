@@ -790,9 +790,9 @@ fn anthropic_to_responses_input_array_format() {
 
 #[test]
 fn anthropic_to_responses_with_tools_array() {
-    // The Responses API uses a flat tools schema (no nested "function" wrapper).
-    // The provider-side outbound translator currently does not attach tools to
-    // the Codex request body — verify this contract so any change is loud.
+    // The Responses API uses a flat tools schema (no nested "function" wrapper):
+    // each tool is {type:"function", name, description, parameters}. The outbound
+    // translator forwards the request's tools so Codex can call them.
     let mut req = base_canonical("gpt-5.3-codex");
     req.tools = Some(vec![Tool {
         r#type: Some("function".to_string()),
@@ -803,13 +803,25 @@ fn anthropic_to_responses_with_tools_array() {
     req.messages = vec![user_text("What's there?")];
 
     let out = anthropic_to_responses_request(&req, "X").expect("transform succeeds");
-    // This is a contract pin: today the outbound Responses request omits tools,
-    // so changing that is a feature requiring an explicit test update.
+
+    let tools = out["tools"]
+        .as_array()
+        .expect("Codex outbound must forward the request's tools as an array");
+    assert_eq!(tools.len(), 1);
+    // Flat schema: name/description/parameters at the top level, never nested
+    // under a "function" key (that is the Chat Completions shape).
+    assert_eq!(tools[0]["type"], json!("function"));
+    assert_eq!(tools[0]["name"], json!("ls"));
+    assert_eq!(tools[0]["description"], json!("List files"));
+    assert!(tools[0]["parameters"].is_object());
     assert!(
-        out.get("tools").is_none() || out["tools"].is_null(),
-        "Codex outbound currently does not forward tools; if that changes, update this test. Got: {}",
-        out
+        tools[0].get("function").is_none(),
+        "Responses tools must be flat (no nested 'function' wrapper): {}",
+        tools[0]
     );
+    // Forwarding tools swaps the full Codex CLI prompt for the tool-deferring
+    // preamble, so the passed-in instructions are intentionally overridden.
+    assert_ne!(out["instructions"], json!("X"));
 }
 
 #[test]

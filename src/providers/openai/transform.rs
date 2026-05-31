@@ -364,6 +364,7 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
     };
 
     let mut content_blocks = Vec::new();
+    let mut salvaged_tool_count = 0u32;
 
     // Add reasoning as thinking block
     if let Some(reasoning) = choice.message.reasoning {
@@ -391,8 +392,28 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
         None => String::new(),
     };
 
+    // Scan the text for tool calls the model leaked as plain content (Codex
+    // sometimes does this) and re-emit them as structured tool_use blocks.
+    let mut salvaged_tool = false;
     if !text.is_empty() {
-        content_blocks.push(ContentBlock::text(text, None));
+        for event in super::tool_salvage::salvage_complete(&text) {
+            match event {
+                super::tool_salvage::SalvageEvent::Text(t) => {
+                    if !t.is_empty() {
+                        content_blocks.push(ContentBlock::text(t, None));
+                    }
+                }
+                super::tool_salvage::SalvageEvent::ToolCall(call) => {
+                    salvaged_tool = true;
+                    salvaged_tool_count += 1;
+                    content_blocks.push(ContentBlock::tool_use(
+                        format!("toolu_salvaged_{salvaged_tool_count}"),
+                        call.name,
+                        call.input,
+                    ));
+                }
+            }
+        }
     }
 
     // Transform tool_calls to tool_use content blocks
@@ -408,8 +429,10 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
         }
     }
 
-    // Map OpenAI finish_reason to Anthropic stop_reason
+    // Map OpenAI finish_reason to Anthropic stop_reason. A salvaged tool call
+    // overrides a plain "stop" so the client runs the recovered tool.
     let stop_reason = choice.finish_reason.map(|reason| match reason.as_str() {
+        "stop" if salvaged_tool => "tool_use".to_string(),
         "stop" => "end_turn".to_string(),
         "length" => "max_tokens".to_string(),
         "tool_calls" => "tool_use".to_string(),
@@ -497,9 +520,31 @@ pub(crate) fn parse_sse_response(sse_text: &str) -> Result<Vec<ContentBlock>, Pr
     })
 }
 
-/// Maps a Codex `output[]` item (`reasoning` or `message`) to the corresponding Anthropic thinking or text block.
+/// Maps a Codex `output[]` item to the corresponding Anthropic content block.
+///
+/// Handles `function_call` (→ `tool_use`), `reasoning` (→ `thinking`), and
+/// `message` (→ `text`) items; anything else yields `None`.
 fn extract_codex_output_block(item: &serde_json::Value) -> Option<ContentBlock> {
     let output_type = item.get("type").and_then(|v| v.as_str())?;
+
+    if output_type == "function_call" {
+        let name = item.get("name").and_then(|v| v.as_str())?;
+        let call_id = item
+            .get("call_id")
+            .or_else(|| item.get("id"))
+            .and_then(|v| v.as_str())?;
+        let input = item
+            .get("arguments")
+            .and_then(|v| v.as_str())
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        return Some(ContentBlock::tool_use(
+            call_id.to_string(),
+            name.to_string(),
+            input,
+        ));
+    }
+
     // `message` items carry text under `content[]`; `reasoning` items carry it
     // under `summary[]`. Accept whichever is present.
     let text = item
@@ -519,52 +564,175 @@ fn extract_codex_output_block(item: &serde_json::Value) -> Option<ContentBlock> 
     }
 }
 
+/// Instructions used when the client forwards its own tools.
+///
+/// The full Codex CLI prompt describes built-in `shell`/`apply_patch`/`update_plan`
+/// tools that do not exist when a client like Claude Code provides its own tool
+/// set — that mismatch makes the model invent tool calls (often leaked as text).
+/// This minimal preamble keeps the backend-expected "Codex" identity but defers
+/// all tool behavior to the request's tools and the client's own system prompt.
+const CODEX_TOOL_INSTRUCTIONS: &str = "You are Codex, based on GPT-5, operating as a coding agent. \
+The harness provides its own system prompt and a set of tools in this request. Use ONLY those \
+provided tools through the function-calling interface to take actions — do not assume any built-in \
+`shell`, `apply_patch`, or `update_plan` tool exists, and never emit a tool call as plain text or \
+inside a code block. When you need to run a command, read, or edit, call the matching provided tool \
+with its required arguments.";
+
 /// Transform Anthropic request to OpenAI Responses API format.
 pub(crate) fn transform_to_responses_request(
     request: &CanonicalRequest,
     codex_instructions: &str,
 ) -> Result<OpenAIResponsesRequest, ProviderError> {
-    let instructions = codex_instructions.to_string();
-    let mut messages = Vec::new();
+    let tools = transform_responses_tools(request);
 
-    // Add system message as user message (Codex doesn't have separate system role)
+    // Forwarding tools and the Codex CLI prompt at once makes the model call
+    // non-existent built-in tools, so swap to a tool-deferring preamble.
+    let instructions = if tools.is_some() {
+        CODEX_TOOL_INSTRUCTIONS.to_string()
+    } else {
+        codex_instructions.to_string()
+    };
+
+    let mut items = Vec::new();
+
+    // Codex has no separate system role; hoist the system prompt to a user item.
     if let Some(ref system) = request.system {
-        messages.push(OpenAIResponsesMessage {
+        items.push(OpenAIResponsesItem::Message {
             role: "user".to_string(),
             content: Some(system.to_text()),
         });
     }
 
     for msg in &request.messages {
-        let content = match &msg.content {
-            MessageContent::Text(text) => text.clone(),
-            MessageContent::Blocks(blocks) => {
-                let text = blocks
-                    .iter()
-                    .filter_map(|block| block.as_text().map(|s| s.to_string()))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if text.is_empty() {
-                    String::new()
-                } else {
-                    text
-                }
-            }
+        // The ChatGPT Codex backend rejects `system`-role items ("System messages
+        // are not allowed") — system guidance belongs in `instructions`. Fold any
+        // system-role message (e.g. Claude Code `<system-reminder>` turns) into a
+        // user item so its content survives.
+        let role = if msg.role == "system" {
+            "user"
+        } else {
+            msg.role.as_str()
         };
-
-        messages.push(OpenAIResponsesMessage {
-            role: msg.role.clone(),
-            content: Some(content),
-        });
+        match &msg.content {
+            MessageContent::Text(text) => items.push(OpenAIResponsesItem::Message {
+                role: role.to_string(),
+                content: Some(text.clone()),
+            }),
+            MessageContent::Blocks(blocks) => {
+                push_blocks_as_items(&mut items, role, blocks)?;
+            }
+        }
     }
 
     Ok(OpenAIResponsesRequest {
         model: request.model.clone(),
-        input: OpenAIResponsesInput::Messages(messages),
+        input: OpenAIResponsesInput::Items(items),
         instructions,
         store: false,
         stream: true,
+        tool_choice: tools.as_ref().and(transform_responses_tool_choice(request)),
+        parallel_tool_calls: tools.as_ref().map(|_| true),
+        tools,
     })
+}
+
+/// Expands a message's content blocks into Responses items, preserving order.
+///
+/// Text and image blocks collapse into `message` items; `tool_use` blocks become
+/// `function_call` items and `tool_result` blocks become `function_call_output`
+/// items, keyed by the shared Anthropic tool-use id so the round-trip stays
+/// correlated. Thinking blocks are dropped.
+fn push_blocks_as_items(
+    items: &mut Vec<OpenAIResponsesItem>,
+    role: &str,
+    blocks: &[ContentBlock],
+) -> Result<(), ProviderError> {
+    let mut text = String::new();
+
+    for block in blocks {
+        match block {
+            ContentBlock::Known(KnownContentBlock::Text { text: t, .. }) => {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(t);
+            }
+            ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input }) => {
+                flush_text_item(items, role, &mut text);
+                let arguments = serialize_tool_input(input, name)?;
+                items.push(OpenAIResponsesItem::FunctionCall {
+                    call_id: id.clone(),
+                    name: name.clone(),
+                    arguments,
+                });
+            }
+            ContentBlock::Known(KnownContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                ..
+            }) => {
+                flush_text_item(items, role, &mut text);
+                items.push(OpenAIResponsesItem::FunctionCallOutput {
+                    call_id: tool_use_id.clone(),
+                    output: content.to_string(),
+                });
+            }
+            _ => {}
+        }
+    }
+
+    flush_text_item(items, role, &mut text);
+    Ok(())
+}
+
+/// Pushes accumulated text as a `message` item and clears the buffer.
+fn flush_text_item(items: &mut Vec<OpenAIResponsesItem>, role: &str, text: &mut String) {
+    if !text.is_empty() {
+        items.push(OpenAIResponsesItem::Message {
+            role: role.to_string(),
+            content: Some(std::mem::take(text)),
+        });
+    }
+}
+
+/// Transforms Anthropic tool definitions into Responses-API (flattened) tools.
+fn transform_responses_tools(request: &CanonicalRequest) -> Option<Vec<serde_json::Value>> {
+    let tools: Vec<serde_json::Value> = request
+        .tools
+        .as_ref()?
+        .iter()
+        .filter_map(|tool| {
+            let name = tool.name.as_ref()?;
+            let mut entry = serde_json::json!({
+                "type": "function",
+                "name": name,
+                "parameters": tool
+                    .input_schema
+                    .clone()
+                    .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} })),
+            });
+            if let Some(description) = &tool.description {
+                entry["description"] = serde_json::Value::String(description.clone());
+            }
+            Some(entry)
+        })
+        .collect();
+
+    (!tools.is_empty()).then_some(tools)
+}
+
+/// Transforms Anthropic `tool_choice` into the Responses-API shape.
+fn transform_responses_tool_choice(request: &CanonicalRequest) -> Option<serde_json::Value> {
+    let tc = request.tool_choice.as_ref()?;
+    match tc.get("type").and_then(|v| v.as_str()).unwrap_or("") {
+        "auto" => Some(serde_json::json!("auto")),
+        "any" => Some(serde_json::json!("required")),
+        "tool" => {
+            let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            Some(serde_json::json!({ "type": "function", "name": name }))
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -592,6 +760,111 @@ mod tests {
             tool_choice: None,
             extensions: Default::default(),
         }
+    }
+
+    #[test]
+    fn responses_request_forwards_tools_and_tool_history() {
+        use crate::models::{Message, Tool, ToolResultContent};
+
+        let mut request = base_request();
+        request.model = "gpt-5.5".to_string();
+        request.tools = Some(vec![Tool {
+            r#type: Some("function".to_string()),
+            name: Some("Bash".to_string()),
+            description: Some("Run a shell command".to_string()),
+            input_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": { "command": { "type": "string" } }
+            })),
+        }]);
+        request.messages = vec![
+            Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("list files".to_string()),
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: MessageContent::Blocks(vec![
+                    ContentBlock::text("Running ls".to_string(), None),
+                    ContentBlock::tool_use(
+                        "toolu_1".to_string(),
+                        "Bash".to_string(),
+                        serde_json::json!({ "command": "ls" }),
+                    ),
+                ]),
+            },
+            Message {
+                role: "user".to_string(),
+                content: MessageContent::Blocks(vec![ContentBlock::Known(
+                    KnownContentBlock::ToolResult {
+                        tool_use_id: "toolu_1".to_string(),
+                        content: ToolResultContent::Text("file1\nfile2".to_string()),
+                        is_error: false,
+                        cache_control: None,
+                    },
+                )]),
+            },
+        ];
+
+        let req = transform_to_responses_request(&request, "FULL CODEX PROMPT").unwrap();
+        let json = serde_json::to_value(&req).unwrap();
+
+        // Tools are forwarded in the flattened Responses shape.
+        assert_eq!(json["tools"][0]["type"], "function");
+        assert_eq!(json["tools"][0]["name"], "Bash");
+        assert!(json["tools"][0]["parameters"]["properties"]["command"].is_object());
+        assert_eq!(json["parallel_tool_calls"], true);
+
+        // The full Codex prompt is swapped for the tool-deferring preamble.
+        let instructions = json["instructions"].as_str().unwrap();
+        assert!(instructions.contains("provided tools"));
+        assert!(!instructions.contains("FULL CODEX PROMPT"));
+
+        // History carries the tool call and its output, correlated by id.
+        let input = json["input"].as_array().unwrap();
+        assert!(input.iter().any(|i| i["type"] == "function_call"
+            && i["call_id"] == "toolu_1"
+            && i["name"] == "Bash"));
+        assert!(input.iter().any(|i| i["type"] == "function_call_output"
+            && i["call_id"] == "toolu_1"
+            && i["output"] == "file1\nfile2"));
+        // The assistant's narration survives as a message item before the call.
+        assert!(input
+            .iter()
+            .any(|i| i["type"] == "message" && i["role"] == "assistant"));
+    }
+
+    #[test]
+    fn responses_request_folds_system_role_into_user() {
+        use crate::models::Message;
+
+        let mut request = base_request();
+        request.system = None;
+        request.messages = vec![Message {
+            role: "system".to_string(),
+            content: MessageContent::Text("be terse".to_string()),
+        }];
+
+        let req = transform_to_responses_request(&request, "FULL").unwrap();
+        let json = serde_json::to_value(&req).unwrap();
+        let input = json["input"].as_array().unwrap();
+
+        // No system-role items survive (the Codex backend rejects them)...
+        assert!(input.iter().all(|i| i["role"] != "system"));
+        // ...but the content is preserved as a user item.
+        assert!(input
+            .iter()
+            .any(|i| i["role"] == "user" && i["content"] == "be terse"));
+    }
+
+    #[test]
+    fn responses_request_without_tools_keeps_full_instructions() {
+        let mut request = base_request();
+        request.system = None;
+        let req = transform_to_responses_request(&request, "FULL CODEX PROMPT").unwrap();
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["instructions"], "FULL CODEX PROMPT");
+        assert!(json.get("tools").is_none() || json["tools"].is_null());
     }
 
     #[test]
