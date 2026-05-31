@@ -94,6 +94,12 @@ pub struct ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
 
+    /// Codex processing tier — `"priority"` enables faster ("1.5x") handling on
+    /// eligible plans, `"default"` is standard. Sent verbatim (backend
+    /// validates). Only affects the OpenAI Responses (Codex) path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+
     /// Path to PEM client certificate for mTLS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tls_cert: Option<String>,

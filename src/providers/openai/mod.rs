@@ -64,7 +64,7 @@ pub mod test_api {
         request: &CanonicalRequest,
         instructions: &str,
     ) -> Result<serde_json::Value, String> {
-        let resp_req = transform::transform_to_responses_request(request, instructions, None)
+        let resp_req = transform::transform_to_responses_request(request, instructions, None, None)
             .map_err(|e| e.to_string())?;
         serde_json::to_value(&resp_req).map_err(|e| e.to_string())
     }
@@ -203,6 +203,7 @@ impl OpenAIProvider {
             request,
             CODEX_INSTRUCTIONS,
             self.base.reasoning_effort.as_deref(),
+            self.base.service_tier.as_deref(),
         )?;
 
         let endpoint = if self.base.is_oauth() {
@@ -390,6 +391,7 @@ impl LlmProvider for OpenAIProvider {
                 &request,
                 CODEX_INSTRUCTIONS,
                 self.base.reasoning_effort.as_deref(),
+                self.base.service_tier.as_deref(),
             )?;
             let body = serde_json::to_value(&responses_request)
                 .map_err(ProviderError::SerializationError)?;
