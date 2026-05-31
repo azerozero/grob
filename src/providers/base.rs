@@ -25,6 +25,7 @@ pub(crate) struct ProviderBase {
     pub pass_through: bool,
     pub key_pool: Option<Arc<KeyPool>>,
     pub reasoning_effort: Option<String>,
+    pub service_tier: Option<String>,
 }
 
 impl ProviderBase {
@@ -45,6 +46,7 @@ impl ProviderBase {
             pass_through: params.pass_through,
             key_pool: params.key_pool,
             reasoning_effort: params.reasoning_effort,
+            service_tier: params.service_tier,
         }
     }
 

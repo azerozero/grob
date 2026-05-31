@@ -224,6 +224,8 @@ pub struct ProviderParams {
     pub key_pool: Option<std::sync::Arc<key_pool::KeyPool>>,
     /// Forced Codex reasoning effort, overriding per-request auto-mapping.
     pub reasoning_effort: Option<String>,
+    /// Forced Codex processing tier (e.g. `"priority"` for faster handling).
+    pub service_tier: Option<String>,
 }
 
 // Re-export config types that were moved to cli::config to break the

@@ -583,6 +583,7 @@ pub(crate) fn transform_to_responses_request(
     request: &CanonicalRequest,
     codex_instructions: &str,
     forced_effort: Option<&str>,
+    forced_service_tier: Option<&str>,
 ) -> Result<OpenAIResponsesRequest, ProviderError> {
     let tools = transform_responses_tools(request);
 
@@ -636,7 +637,20 @@ pub(crate) fn transform_to_responses_request(
         tools,
         reasoning: resolve_reasoning_effort(request, forced_effort)
             .map(|effort| serde_json::json!({ "effort": effort })),
+        service_tier: resolve_service_tier(request, forced_service_tier),
     })
+}
+
+/// Resolves the Codex `service_tier` (processing speed) for a request.
+///
+/// A provider-config value wins, then a `service_tier` request extension. The
+/// value passes through verbatim — the backend validates it — so `"priority"`
+/// (faster handling) works without a whitelist. `None` leaves the field unset.
+fn resolve_service_tier(request: &CanonicalRequest, forced: Option<&str>) -> Option<String> {
+    forced
+        .map(str::to_string)
+        .or_else(|| request.extensions.service_tier.clone())
+        .filter(|s| !s.is_empty())
 }
 
 /// Resolves the Codex reasoning effort for a request.
@@ -858,7 +872,8 @@ mod tests {
             },
         ];
 
-        let req = transform_to_responses_request(&request, "FULL CODEX PROMPT", None).unwrap();
+        let req =
+            transform_to_responses_request(&request, "FULL CODEX PROMPT", None, None).unwrap();
         let json = serde_json::to_value(&req).unwrap();
 
         // Tools are forwarded in the flattened Responses shape.
@@ -897,7 +912,7 @@ mod tests {
             content: MessageContent::Text("be terse".to_string()),
         }];
 
-        let req = transform_to_responses_request(&request, "FULL", None).unwrap();
+        let req = transform_to_responses_request(&request, "FULL", None, None).unwrap();
         let json = serde_json::to_value(&req).unwrap();
         let input = json["input"].as_array().unwrap();
 
@@ -914,8 +929,8 @@ mod tests {
         use crate::models::ThinkingConfig;
 
         let effort = |req: &CanonicalRequest, forced: Option<&str>| {
-            serde_json::to_value(transform_to_responses_request(req, "X", forced).unwrap()).unwrap()
-                ["reasoning"]["effort"]
+            serde_json::to_value(transform_to_responses_request(req, "X", forced, None).unwrap())
+                .unwrap()["reasoning"]["effort"]
                 .clone()
         };
 
@@ -973,10 +988,37 @@ mod tests {
     }
 
     #[test]
+    fn service_tier_is_forwarded_from_config_and_extension() {
+        let tier = |req: &CanonicalRequest, forced: Option<&str>| {
+            serde_json::to_value(transform_to_responses_request(req, "X", None, forced).unwrap())
+                .unwrap()["service_tier"]
+                .clone()
+        };
+
+        let mut req = base_request();
+        req.system = None;
+
+        // Unset by default.
+        assert_eq!(tier(&req, None), serde_json::Value::Null);
+
+        // Provider config forces it (verbatim — backend validates "priority").
+        assert_eq!(tier(&req, Some("priority")), serde_json::json!("priority"));
+
+        // A request extension supplies it when no config override is set.
+        req.extensions.service_tier = Some("priority".to_string());
+        assert_eq!(tier(&req, None), serde_json::json!("priority"));
+
+        // An empty forced value falls back to unset, not an empty string.
+        req.extensions.service_tier = None;
+        assert_eq!(tier(&req, Some("")), serde_json::Value::Null);
+    }
+
+    #[test]
     fn responses_request_without_tools_keeps_full_instructions() {
         let mut request = base_request();
         request.system = None;
-        let req = transform_to_responses_request(&request, "FULL CODEX PROMPT", None).unwrap();
+        let req =
+            transform_to_responses_request(&request, "FULL CODEX PROMPT", None, None).unwrap();
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["instructions"], "FULL CODEX PROMPT");
         assert!(json.get("tools").is_none() || json["tools"].is_null());

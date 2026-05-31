@@ -74,6 +74,9 @@ pub(crate) struct OpenAIResponsesRequest {
     /// Reasoning controls, e.g. `{"effort": "low"}`. Lower effort cuts latency.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<serde_json::Value>,
+    /// Processing tier, e.g. `"priority"` for faster handling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
 }
 
 /// Input for Responses API is an array of typed items.
