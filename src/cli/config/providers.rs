@@ -94,9 +94,11 @@ pub struct ProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
 
-    /// Codex processing tier — `"priority"` enables faster ("1.5x") handling on
-    /// eligible plans, `"default"` is standard. Sent verbatim (backend
-    /// validates). Only affects the OpenAI Responses (Codex) path.
+    /// Codex processing tier — `"priority"` enables faster ("1.5x") handling,
+    /// `"default"` is standard. Only affects the OpenAI Responses (Codex) path.
+    /// `"priority"` is applied only to models that offer it (`gpt-5.5`,
+    /// `gpt-5.4`) and silently dropped for others (codex/mini) that would reject
+    /// it. Omit this field (or leave it unset) to disable — nothing is sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
 
