@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.61](https://github.com/azerozero/grob/compare/v0.36.60...v0.36.61) - 2026-06-01
+
+### Added
+
+- *(openai)* make Codex priority models and reasoning effort configurable
+- *(security)* disable rate limit, body size, and tool-spike caps by default
+
+### Other
+
+- *(security)* update integration assertions for off-by-default limits
+- *(examples)* default the Codex example to the priority (1.5x) tier
+
 ## [0.36.60](https://github.com/azerozero/grob/compare/v0.36.59...v0.36.60) - 2026-06-01
 
 ### Fixed
