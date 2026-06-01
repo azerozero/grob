@@ -11,7 +11,7 @@ pub use config::parse_duration;
 #[cfg(feature = "harness")]
 pub use config::HarnessConfig;
 pub use config::{
-    AcmeConfig, AuthType, BudgetConfig, CacheConfig, CircuitBreakerProviderConfig,
+    AcmeConfig, AuthType, BudgetConfig, CacheConfig, CircuitBreakerProviderConfig, CodexOptions,
     ComplianceConfig, EnforcementMode, FanOutConfig, FanOutMode, FipsConfig,
     HealthCheckProviderConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig, PoolConfig,
     PoolStrategy, PresetConfig, PricingConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,

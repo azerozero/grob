@@ -1,7 +1,7 @@
 use super::types::*;
 use crate::models::{CanonicalRequest, MessageContent};
 use crate::providers::error::ProviderError;
-use crate::providers::{ContentBlock, KnownContentBlock, ProviderResponse, Usage};
+use crate::providers::{CodexOptions, ContentBlock, KnownContentBlock, ProviderResponse, Usage};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -578,12 +578,47 @@ provided tools through the function-calling interface to take actions — do not
 inside a code block. When you need to run a command, read, or edit, call the matching provided tool \
 with its required arguments.";
 
+/// Per-call knobs for the Codex (OpenAI Responses API) transform.
+///
+/// Bundles the operator-forced overrides with the provider's [`CodexOptions`]
+/// so the resolver functions stay parameterised instead of reaching for global
+/// state. Build it with [`CodexTuning::from_options`].
+#[derive(Clone, Copy)]
+pub(crate) struct CodexTuning<'a> {
+    /// Operator-forced reasoning effort (highest precedence). `None` = auto.
+    pub forced_effort: Option<&'a str>,
+    /// Operator-forced service tier (e.g. `"priority"`). `None` = request/none.
+    pub forced_service_tier: Option<&'a str>,
+    /// Models eligible for the `priority` tier and default `xhigh` effort.
+    pub priority_models: &'a [String],
+    /// When `true`, map the extended-thinking budget → effort (opt-in).
+    pub reasoning_auto_map: bool,
+    /// Thinking budget at/above which auto-map selects `xhigh` (else `medium`).
+    pub reasoning_xhigh_min_budget: u32,
+}
+
+impl<'a> CodexTuning<'a> {
+    /// Borrows a provider's [`CodexOptions`] alongside any forced overrides.
+    pub(crate) fn from_options(
+        opts: &'a CodexOptions,
+        forced_effort: Option<&'a str>,
+        forced_service_tier: Option<&'a str>,
+    ) -> Self {
+        Self {
+            forced_effort,
+            forced_service_tier,
+            priority_models: &opts.priority_models,
+            reasoning_auto_map: opts.reasoning_auto_map,
+            reasoning_xhigh_min_budget: opts.reasoning_xhigh_min_budget,
+        }
+    }
+}
+
 /// Transform Anthropic request to OpenAI Responses API format.
 pub(crate) fn transform_to_responses_request(
     request: &CanonicalRequest,
     codex_instructions: &str,
-    forced_effort: Option<&str>,
-    forced_service_tier: Option<&str>,
+    tuning: &CodexTuning<'_>,
 ) -> Result<OpenAIResponsesRequest, ProviderError> {
     let tools = transform_responses_tools(request);
 
@@ -635,9 +670,9 @@ pub(crate) fn transform_to_responses_request(
         tool_choice: tools.as_ref().and(transform_responses_tool_choice(request)),
         parallel_tool_calls: tools.as_ref().map(|_| true),
         tools,
-        reasoning: resolve_reasoning_effort(request, forced_effort)
+        reasoning: resolve_reasoning_effort(request, tuning)
             .map(|effort| serde_json::json!({ "effort": effort })),
-        service_tier: resolve_service_tier(request, forced_service_tier),
+        service_tier: resolve_service_tier(request, tuning),
     })
 }
 
@@ -646,16 +681,18 @@ pub(crate) fn transform_to_responses_request(
 /// A provider-config value wins, then a `service_tier` request extension. The
 /// value passes through verbatim — the backend validates it — so `"priority"`
 /// (faster handling) works without a whitelist. `None` leaves the field unset.
-fn resolve_service_tier(request: &CanonicalRequest, forced: Option<&str>) -> Option<String> {
-    let tier = forced
+fn resolve_service_tier(request: &CanonicalRequest, tuning: &CodexTuning<'_>) -> Option<String> {
+    let tier = tuning
+        .forced_service_tier
         .map(str::to_string)
         .or_else(|| request.extensions.service_tier.clone())
         .filter(|s| !s.is_empty())?;
-    // The "priority" (1.5x) tier exists only on some models (gpt-5.5, gpt-5.4);
-    // others reject it with a 400. Drop it for unsupported models so a provider
-    // forcing `service_tier = "priority"` does not break `think`/`background`
-    // routes (which resolve to codex/mini models). Other tiers pass through.
-    if tier == "priority" && !priority_tier_supported(&request.model) {
+    // The "priority" (1.5x) tier exists only on some models (by default gpt-5.5
+    // and gpt-5.4 — see `CodexOptions::priority_models`); others reject it with a
+    // 400. Drop it for unsupported models so a provider forcing
+    // `service_tier = "priority"` does not break `think`/`background` routes
+    // (which resolve to codex/mini models). Other tiers pass through.
+    if tier == "priority" && !priority_tier_supported(&request.model, tuning.priority_models) {
         return None;
     }
     Some(tier)
@@ -663,47 +700,70 @@ fn resolve_service_tier(request: &CanonicalRequest, forced: Option<&str>) -> Opt
 
 /// Returns whether the model offers the Codex `priority` (1.5x) service tier.
 ///
-/// Per the Codex model catalog only `gpt-5.5` and `gpt-5.4` (not `-mini`) expose
-/// it; everything else (`gpt-5.4-mini`, `gpt-5.3-codex`, …) is standard-only.
-fn priority_tier_supported(model: &str) -> bool {
+/// The eligible set is configurable via [`CodexOptions::priority_models`]
+/// (default `["gpt-5.5", "gpt-5.4"]`). An entry matches the model by exact name
+/// or as a prefix; a prefix match excludes `-mini` fast-tier variants unless the
+/// model is listed verbatim. The same set also gates the default `xhigh` effort.
+fn priority_tier_supported(model: &str, priority_models: &[String]) -> bool {
     let m = model.to_ascii_lowercase();
-    m.starts_with("gpt-5.5") || (m.starts_with("gpt-5.4") && !m.contains("mini"))
+    priority_models.iter().any(|entry| {
+        let p = entry.to_ascii_lowercase();
+        m == p || (m.starts_with(&p) && !m.contains("mini"))
+    })
 }
 
 /// Resolves the Codex reasoning effort for a request.
 ///
-/// Precedence: a provider-config `forced_effort` wins, then an explicit
-/// `reasoning_effort` request extension (e.g. from a Codex CLI client),
-/// otherwise the effort is auto-mapped from the request's extended-thinking
-/// setting so simple turns stay fast while deliberate thinking turns get more
-/// reasoning.
-///
-/// An operator- or client-supplied effort passes through verbatim — the backend
-/// validates it — so newer tiers (e.g. `xhigh`) work without a grob release; an
-/// invalid value surfaces a backend error rather than being silently dropped.
-/// Only the auto-mapped value is constrained, since it must be a known-safe tier.
-fn resolve_reasoning_effort(request: &CanonicalRequest, forced: Option<&str>) -> Option<String> {
-    let supplied = forced
+/// Precedence:
+/// 1. A provider-config `forced_effort` or an explicit `reasoning_effort`
+///    request extension (e.g. from a Codex CLI client) — passed through verbatim
+///    so newer tiers (e.g. `xhigh`) work without a grob release.
+/// 2. If `reasoning_auto_map` is enabled, the effort auto-maps from the
+///    request's extended-thinking budget (legacy behavior).
+/// 3. Otherwise the flat default: `xhigh` for the priority/flagship models
+///    (see [`priority_tier_supported`]), and `None` for the rest so the backend
+///    applies its own default effort.
+fn resolve_reasoning_effort(
+    request: &CanonicalRequest,
+    tuning: &CodexTuning<'_>,
+) -> Option<String> {
+    let supplied = tuning
+        .forced_effort
         .map(str::to_string)
         .or_else(|| request.extensions.reasoning_effort.clone())
         .filter(|s| !s.is_empty());
-    Some(supplied.unwrap_or_else(|| auto_map_thinking_effort(request)))
+    if let Some(effort) = supplied {
+        return Some(effort);
+    }
+    if tuning.reasoning_auto_map {
+        return Some(auto_map_thinking_effort(
+            request,
+            tuning.reasoning_xhigh_min_budget,
+        ));
+    }
+    // Flat default: max out the flagship models, leave the rest to the backend.
+    if priority_tier_supported(&request.model, tuning.priority_models) {
+        Some("xhigh".to_string())
+    } else {
+        None
+    }
 }
 
 /// Maps Anthropic extended-thinking config to a Codex reasoning-effort tier.
 ///
-/// No thinking (or an explicitly `disabled` block) maps to `low` for snappy
-/// responses. Any other thinking block means the client opted into extended
-/// reasoning, so it maps high: Claude Code's adaptive mode (`type: "adaptive"`,
-/// no budget — the same for every `think`/`think hard`/`ultrathink` keyword, so
-/// they cannot be told apart) maps to `xhigh`, the backend's max tier; a small
-/// explicit budget maps to `medium`. Effort tiers: `low` < `medium` < `high` <
-/// `xhigh` (`max` is rejected by the backend).
+/// Only used in the opt-in `reasoning_auto_map` mode. No thinking (or an
+/// explicitly `disabled` block) maps to `low` for snappy responses. Any other
+/// thinking block means the client opted into extended reasoning, so it maps
+/// high: Claude Code's adaptive mode (`type: "adaptive"`, no budget — the same
+/// for every `think`/`think hard`/`ultrathink` keyword, so they cannot be told
+/// apart) maps to `xhigh`, the backend's max tier; an explicit budget maps to
+/// `xhigh` at/above `xhigh_min_budget`, else `medium`. Effort tiers:
+/// `low` < `medium` < `high` < `xhigh` (`max` is rejected by the backend).
 ///
 /// Note: Claude Code's `/effort` slider is client-internal and never reaches the
 /// API, so it cannot be mapped here — only the thinking keywords, which set a
 /// thinking block, do.
-fn auto_map_thinking_effort(request: &CanonicalRequest) -> String {
+fn auto_map_thinking_effort(request: &CanonicalRequest, xhigh_min_budget: u32) -> String {
     let Some(thinking) = request.thinking.as_ref() else {
         return "low".to_string();
     };
@@ -711,7 +771,7 @@ fn auto_map_thinking_effort(request: &CanonicalRequest) -> String {
         return "low".to_string();
     }
     match thinking.budget_tokens {
-        Some(budget) if budget >= 16_000 => "xhigh",
+        Some(budget) if budget >= xhigh_min_budget => "xhigh",
         Some(_) => "medium",
         // Adaptive thinking (no budget) is opt-in deep reasoning — give it the max.
         None => "xhigh",
@@ -889,8 +949,13 @@ mod tests {
             },
         ];
 
-        let req =
-            transform_to_responses_request(&request, "FULL CODEX PROMPT", None, None).unwrap();
+        let opts = CodexOptions::default();
+        let req = transform_to_responses_request(
+            &request,
+            "FULL CODEX PROMPT",
+            &CodexTuning::from_options(&opts, None, None),
+        )
+        .unwrap();
         let json = serde_json::to_value(&req).unwrap();
 
         // Tools are forwarded in the flattened Responses shape.
@@ -929,7 +994,13 @@ mod tests {
             content: MessageContent::Text("be terse".to_string()),
         }];
 
-        let req = transform_to_responses_request(&request, "FULL", None, None).unwrap();
+        let opts = CodexOptions::default();
+        let req = transform_to_responses_request(
+            &request,
+            "FULL",
+            &CodexTuning::from_options(&opts, None, None),
+        )
+        .unwrap();
         let json = serde_json::to_value(&req).unwrap();
         let input = json["input"].as_array().unwrap();
 
@@ -942,72 +1013,122 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_effort_auto_maps_and_respects_overrides() {
-        use crate::models::ThinkingConfig;
-
-        let effort = |req: &CanonicalRequest, forced: Option<&str>| {
-            serde_json::to_value(transform_to_responses_request(req, "X", forced, None).unwrap())
+    fn reasoning_effort_default_is_xhigh_for_priority_models() {
+        // Default mode (auto_map off): flagship/priority models get xhigh, other
+        // models are left unset so the backend applies its own default. A forced
+        // or extension effort always wins.
+        let opts = CodexOptions::default();
+        let effort = |model: &str, forced: Option<&str>, ext: Option<&str>| {
+            let mut req = base_request();
+            req.system = None;
+            req.model = model.to_string();
+            req.extensions.reasoning_effort = ext.map(str::to_string);
+            let tuning = CodexTuning::from_options(&opts, forced, None);
+            serde_json::to_value(transform_to_responses_request(&req, "X", &tuning).unwrap())
                 .unwrap()["reasoning"]["effort"]
                 .clone()
         };
 
-        let mut req = base_request();
-        req.system = None;
-
-        // No thinking → low (snappy).
-        assert_eq!(effort(&req, None), serde_json::json!("low"));
-
-        // Thinking enabled with a large explicit budget → xhigh, the max tier.
-        req.thinking = Some(ThinkingConfig {
-            r#type: "enabled".to_string(),
-            budget_tokens: Some(20_000),
-        });
-        assert_eq!(effort(&req, None), serde_json::json!("xhigh"));
-
-        // Smaller budget → medium.
-        req.thinking = Some(ThinkingConfig {
-            r#type: "enabled".to_string(),
-            budget_tokens: Some(4_000),
-        });
-        assert_eq!(effort(&req, None), serde_json::json!("medium"));
-
-        // Claude Code's adaptive thinking (no budget — every think/ultrathink
-        // keyword looks identical) → xhigh, since thinking is opt-in.
-        req.thinking = Some(ThinkingConfig {
-            r#type: "adaptive".to_string(),
-            budget_tokens: None,
-        });
-        assert_eq!(effort(&req, None), serde_json::json!("xhigh"));
-
-        // An explicitly disabled thinking block → low.
-        req.thinking = Some(ThinkingConfig {
-            r#type: "disabled".to_string(),
-            budget_tokens: None,
-        });
-        assert_eq!(effort(&req, None), serde_json::json!("low"));
-
-        // Provider-forced effort overrides the auto-mapping.
-        req.thinking = None;
-        assert_eq!(effort(&req, Some("minimal")), serde_json::json!("minimal"));
-
+        // Priority/flagship model → xhigh by default (thinking ignored here).
+        assert_eq!(effort("gpt-5.5", None, None), serde_json::json!("xhigh"));
+        // Non-priority model → unset (the backend picks its own effort).
+        assert_eq!(effort("gpt-5.3-codex", None, None), serde_json::Value::Null);
+        // A forced effort wins on any model.
+        assert_eq!(
+            effort("gpt-5.5", Some("low"), None),
+            serde_json::json!("low")
+        );
+        assert_eq!(
+            effort("gpt-5.3-codex", Some("high"), None),
+            serde_json::json!("high")
+        );
         // A request extension forces effort when no provider override is set.
-        req.thinking = None;
-        req.extensions.reasoning_effort = Some("high".to_string());
-        assert_eq!(effort(&req, None), serde_json::json!("high"));
+        assert_eq!(
+            effort("gpt-4o", None, Some("medium")),
+            serde_json::json!("medium")
+        );
+        // An empty forced effort falls back to the default (xhigh for priority).
+        assert_eq!(
+            effort("gpt-5.5", Some(""), None),
+            serde_json::json!("xhigh")
+        );
+    }
 
-        // A supplied effort passes through verbatim (the backend validates it),
-        // so newer tiers like "xhigh" reach Codex without a grob release.
-        assert_eq!(effort(&req, Some("xhigh")), serde_json::json!("xhigh"));
+    #[test]
+    fn reasoning_auto_map_maps_thinking_budget_when_enabled() {
+        use crate::models::ThinkingConfig;
 
-        // An empty forced effort falls back to the auto-map rather than being sent.
-        req.extensions.reasoning_effort = None;
-        assert_eq!(effort(&req, Some("")), serde_json::json!("low"));
+        // Opt-in mode: effort follows the extended-thinking budget (legacy).
+        let opts = CodexOptions {
+            reasoning_auto_map: true,
+            ..CodexOptions::default()
+        };
+        let effort = |thinking: Option<ThinkingConfig>, forced: Option<&str>| {
+            let mut req = base_request();
+            req.system = None;
+            req.thinking = thinking;
+            let tuning = CodexTuning::from_options(&opts, forced, None);
+            serde_json::to_value(transform_to_responses_request(&req, "X", &tuning).unwrap())
+                .unwrap()["reasoning"]["effort"]
+                .clone()
+        };
+        let enabled = |b: u32| {
+            Some(ThinkingConfig {
+                r#type: "enabled".to_string(),
+                budget_tokens: Some(b),
+            })
+        };
+        let typed = |t: &str| {
+            Some(ThinkingConfig {
+                r#type: t.to_string(),
+                budget_tokens: None,
+            })
+        };
+
+        // No thinking → low; large budget → xhigh; smaller → medium.
+        assert_eq!(effort(None, None), serde_json::json!("low"));
+        assert_eq!(effort(enabled(20_000), None), serde_json::json!("xhigh"));
+        assert_eq!(effort(enabled(4_000), None), serde_json::json!("medium"));
+        // Adaptive (no budget) → xhigh; explicitly disabled → low.
+        assert_eq!(effort(typed("adaptive"), None), serde_json::json!("xhigh"));
+        assert_eq!(effort(typed("disabled"), None), serde_json::json!("low"));
+        // A forced effort still wins over the auto-map.
+        assert_eq!(effort(None, Some("minimal")), serde_json::json!("minimal"));
+    }
+
+    #[test]
+    fn reasoning_xhigh_min_budget_is_configurable() {
+        use crate::models::ThinkingConfig;
+
+        // The auto-map xhigh threshold is parametrable, not hard-coded at 16000.
+        let opts = CodexOptions {
+            reasoning_auto_map: true,
+            reasoning_xhigh_min_budget: 5_000,
+            ..CodexOptions::default()
+        };
+        let effort = |budget: u32| {
+            let mut req = base_request();
+            req.system = None;
+            req.thinking = Some(ThinkingConfig {
+                r#type: "enabled".to_string(),
+                budget_tokens: Some(budget),
+            });
+            let tuning = CodexTuning::from_options(&opts, None, None);
+            serde_json::to_value(transform_to_responses_request(&req, "X", &tuning).unwrap())
+                .unwrap()["reasoning"]["effort"]
+                .clone()
+        };
+
+        assert_eq!(effort(4_999), serde_json::json!("medium"));
+        assert_eq!(effort(5_000), serde_json::json!("xhigh"));
     }
 
     #[test]
     fn service_tier_is_forwarded_from_config_and_extension() {
+        let opts = CodexOptions::default();
         let tier = |req: &CanonicalRequest, forced: Option<&str>| {
-            serde_json::to_value(transform_to_responses_request(req, "X", None, forced).unwrap())
+            let tuning = CodexTuning::from_options(&opts, None, forced);
+            serde_json::to_value(transform_to_responses_request(req, "X", &tuning).unwrap())
                 .unwrap()["service_tier"]
                 .clone()
         };
@@ -1041,11 +1162,44 @@ mod tests {
     }
 
     #[test]
+    fn priority_models_list_is_configurable() {
+        // Adding a model to `priority_models` enables the priority tier (and the
+        // xhigh default) for it; removing the built-ins disables them — all
+        // without a grob release.
+        let opts = CodexOptions {
+            priority_models: vec!["gpt-5.3-codex".to_string()],
+            ..CodexOptions::default()
+        };
+        let resolve = |model: &str| {
+            let mut req = base_request();
+            req.system = None;
+            req.model = model.to_string();
+            let tuning = CodexTuning::from_options(&opts, None, Some("priority"));
+            serde_json::to_value(transform_to_responses_request(&req, "X", &tuning).unwrap())
+                .unwrap()
+        };
+
+        // The newly-listed model now gets priority and the default xhigh effort.
+        let codex = resolve("gpt-5.3-codex");
+        assert_eq!(codex["service_tier"], serde_json::json!("priority"));
+        assert_eq!(codex["reasoning"]["effort"], serde_json::json!("xhigh"));
+
+        // A model dropped from the list loses priority (silent no-op).
+        let flagship = resolve("gpt-5.5");
+        assert_eq!(flagship["service_tier"], serde_json::Value::Null);
+    }
+
+    #[test]
     fn responses_request_without_tools_keeps_full_instructions() {
         let mut request = base_request();
         request.system = None;
-        let req =
-            transform_to_responses_request(&request, "FULL CODEX PROMPT", None, None).unwrap();
+        let opts = CodexOptions::default();
+        let req = transform_to_responses_request(
+            &request,
+            "FULL CODEX PROMPT",
+            &CodexTuning::from_options(&opts, None, None),
+        )
+        .unwrap();
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["instructions"], "FULL CODEX PROMPT");
         assert!(json.get("tools").is_none() || json["tools"].is_null());

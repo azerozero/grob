@@ -174,6 +174,7 @@ impl ProviderRegistry {
             key_pool,
             reasoning_effort: config.reasoning_effort.clone(),
             service_tier: config.service_tier.clone(),
+            codex: config.codex.clone(),
         }
     }
 
@@ -623,6 +624,7 @@ mod tests {
                 pool: None,
                 reasoning_effort: None,
                 service_tier: None,
+                codex: crate::cli::CodexOptions::default(),
                 circuit_breaker: None,
 
                 health_check: None,
@@ -649,6 +651,7 @@ mod tests {
                 pool: None,
                 reasoning_effort: None,
                 service_tier: None,
+                codex: crate::cli::CodexOptions::default(),
                 circuit_breaker: None,
 
                 health_check: None,
@@ -764,6 +767,7 @@ mod tests {
             pool: None,
             reasoning_effort: None,
             service_tier: None,
+            codex: crate::cli::CodexOptions::default(),
             circuit_breaker: None,
             health_check: None,
             max_retries: None,

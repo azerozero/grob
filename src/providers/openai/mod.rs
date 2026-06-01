@@ -64,7 +64,9 @@ pub mod test_api {
         request: &CanonicalRequest,
         instructions: &str,
     ) -> Result<serde_json::Value, String> {
-        let resp_req = transform::transform_to_responses_request(request, instructions, None, None)
+        let codex = crate::providers::CodexOptions::default();
+        let tuning = transform::CodexTuning::from_options(&codex, None, None);
+        let resp_req = transform::transform_to_responses_request(request, instructions, &tuning)
             .map_err(|e| e.to_string())?;
         serde_json::to_value(&resp_req).map_err(|e| e.to_string())
     }
@@ -199,12 +201,13 @@ impl OpenAIProvider {
         auth_value: &str,
         base_url: &str,
     ) -> Result<ProviderResponse, ProviderError> {
-        let responses_request = transform::transform_to_responses_request(
-            request,
-            CODEX_INSTRUCTIONS,
+        let tuning = transform::CodexTuning::from_options(
+            &self.base.codex,
             self.base.reasoning_effort.as_deref(),
             self.base.service_tier.as_deref(),
-        )?;
+        );
+        let responses_request =
+            transform::transform_to_responses_request(request, CODEX_INSTRUCTIONS, &tuning)?;
 
         let endpoint = if self.base.is_oauth() {
             "/codex/responses"
@@ -387,12 +390,13 @@ impl LlmProvider for OpenAIProvider {
                 endpoint,
                 request.model
             );
-            let responses_request = transform::transform_to_responses_request(
-                &request,
-                CODEX_INSTRUCTIONS,
+            let tuning = transform::CodexTuning::from_options(
+                &self.base.codex,
                 self.base.reasoning_effort.as_deref(),
                 self.base.service_tier.as_deref(),
-            )?;
+            );
+            let responses_request =
+                transform::transform_to_responses_request(&request, CODEX_INSTRUCTIONS, &tuning)?;
             let body = serde_json::to_value(&responses_request)
                 .map_err(ProviderError::SerializationError)?;
             (format!("{}{}", base_url, endpoint), body)

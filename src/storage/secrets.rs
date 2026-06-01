@@ -311,6 +311,7 @@ mod tests {
             pool: None,
             reasoning_effort: None,
             service_tier: None,
+            codex: crate::cli::CodexOptions::default(),
             circuit_breaker: None,
             health_check: None,
             max_retries: None,

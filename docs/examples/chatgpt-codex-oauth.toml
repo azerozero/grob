@@ -39,6 +39,21 @@ service_tier = "priority"     # "Fast" tier (~1.5x speed). Applied only to model
                               # that support it (gpt-5.5/gpt-5.4); ignored for the
                               # rest. Remove this line for the standard tier.
 
+# Advanced Codex tuning (optional). The inline values below are the DEFAULTS,
+# shown for reference — omit the whole line to use them. Only affects the
+# OpenAI Responses (Codex) path.
+#   priority_models            Models that get the "priority" tier AND `xhigh`
+#                              reasoning effort by default. Prefix-matched;
+#                              `-mini` variants are excluded unless listed verbatim.
+#                              Add new flagship names here — no grob release needed.
+#   reasoning_auto_map         false → flat default effort (xhigh for the models
+#                              above, unset otherwise). true → map the request's
+#                              extended-thinking budget → effort (legacy).
+#   reasoning_xhigh_min_budget Thinking-budget threshold for `xhigh` in auto-map
+#                              mode (ignored when reasoning_auto_map = false).
+# An explicit `reasoning_effort = "low"|"medium"|"high"|"xhigh"` overrides all of this.
+# codex = { priority_models = ["gpt-5.5", "gpt-5.4"], reasoning_auto_map = false, reasoning_xhigh_min_budget = 16000 }
+
 # Default dev model: gpt-5.5 (OpenAI's recommended Codex default).
 # To prefer the dedicated coding model, set `default = "codex"` under [router].
 [[models]]

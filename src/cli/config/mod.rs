@@ -38,7 +38,7 @@ pub use cache::CacheConfig;
 #[cfg(feature = "harness")]
 pub use harness::HarnessConfig;
 pub use pricing::{PricingConfig, TokenCountingMode};
-pub use providers::{AuthType, PoolConfig, PoolStrategy, ProviderConfig};
+pub use providers::{AuthType, CodexOptions, PoolConfig, PoolStrategy, ProviderConfig};
 pub use reliability::{parse_duration, CircuitBreakerProviderConfig, HealthCheckProviderConfig};
 pub use routing::{
     FanOutConfig, FanOutMode, ModelConfig, ModelMapping, ModelStrategy, ProjectConfig,
