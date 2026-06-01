@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.62](https://github.com/azerozero/grob/compare/v0.36.61...v0.36.62) - 2026-06-01
+
+### Added
+
+- *(openai)* match the Codex CLI request fingerprint on the OAuth path
+
 ## [0.36.61](https://github.com/azerozero/grob/compare/v0.36.60...v0.36.61) - 2026-06-01
 
 ### Added
