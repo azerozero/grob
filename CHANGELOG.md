@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.60](https://github.com/azerozero/grob/compare/v0.36.59...v0.36.60) - 2026-06-01
+
+### Fixed
+
+- *(openai)* apply Codex priority tier only to models that support it
+
 ## [0.36.59](https://github.com/azerozero/grob/compare/v0.36.58...v0.36.59) - 2026-05-31
 
 ### Fixed
