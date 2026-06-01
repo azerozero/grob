@@ -17,10 +17,12 @@ Setting `enabled = false` disables all security middleware (rate limiting, circu
 
 Token-bucket rate limiter keyed per tenant (from JWT `sub`/`tenant` claim, virtual key, or API key) with IP-address fallback.
 
+**Disabled by default.** `rate_limit_rps` defaults to `0`, which skips installing the limiter entirely — grob's primary use is single-user/local, where an autonomous agent easily exceeds any fixed rps and per-tenant throttling only risks 429-ing a legitimate burst. Enable it for multi-tenant deployments:
+
 ```toml
 [security]
-rate_limit_rps = 100    # requests per second (default: 100)
-rate_limit_burst = 200  # burst capacity (default: 200)
+rate_limit_rps = 100    # requests per second (default: 0 = disabled)
+rate_limit_burst = 200  # burst capacity (default: 0; ~2x rps is typical)
 ```
 
 ### Behavior
@@ -32,12 +34,12 @@ rate_limit_burst = 200  # burst capacity (default: 200)
 
 ### Capacity planning
 
-100 rps sustains roughly 10 concurrent Claude Code sessions (each bursting ~10 req/s during tool-use loops). The 2x burst factor absorbs short spikes without triggering 429s.
+When enabled, 100 rps sustains roughly 10 concurrent Claude Code sessions (each bursting ~10 req/s during tool-use loops). The 2x burst factor absorbs short spikes without triggering 429s.
 
 ### Edge cases
 
 - A new tenant gets a full burst allowance on its first request.
-- If `rate_limit_rps` is set to 0, no tokens ever refill and requests are blocked after the initial burst is consumed.
+- `rate_limit_rps = 0` (the default) disables the limiter: it is never installed and adds no per-request work. A positive `rps` with `burst = 0` would block after the (empty) burst is consumed, so set `burst` alongside `rps`.
 
 ## Circuit breakers
 
@@ -107,12 +109,14 @@ When Grob operates as a pure API proxy (the typical deployment), the `SecurityHe
 
 ## Request size limits
 
+**Disabled by default.** `max_body_size` defaults to `0` (unlimited): no `RequestBodyLimitLayer` is installed, so large agentic contexts are never rejected. Set a positive byte count to re-enable a bound (e.g. for multi-tenant deployments):
+
 ```toml
 [security]
-max_body_size = 10485760  # bytes, default: 10 MB (10 * 1024 * 1024)
+max_body_size = 10485760  # bytes (default: 0 = unlimited; e.g. 10 MiB here)
 ```
 
-Requests exceeding this limit are rejected with HTTP `413 Payload Too Large` before JSON parsing begins, preventing memory exhaustion from oversized payloads.
+When set, requests exceeding the limit are rejected with HTTP `413 Payload Too Large` before JSON parsing begins, preventing memory exhaustion from oversized payloads.
 
 ## Audit logging
 
@@ -232,15 +236,17 @@ Model mappings are sorted by `priority / adaptive_factor`. Providers with factor
 
 Detects per-session tool-call spikes so a misbehaving agent cannot exhaust provider quotas or trigger billing surprises. Runs in the dispatch pipeline after DLP scanning and before routing.
 
+**Disabled by default.** Both thresholds default to `0` — autonomous agentic clients (Claude Code, multi-agent runs) legitimately burst to thousands of tool events/min, so the detector produced more false positives than abuse protection for grob's single-user/local use. Enable it for multi-tenant quota protection:
+
 ```toml
 [security]
-tool_spike_warn_per_min = 500     # log + metric above this (default: 500)
-tool_spike_block_per_min = 2000   # return HTTP 429 above this (default: 2000)
+tool_spike_warn_per_min = 500     # log + metric above this (default: 0 = off)
+tool_spike_block_per_min = 2000   # return HTTP 429 above this (default: 0 = off)
 ```
 
 > Counting includes both `tool_use` and the `tool_result` echoed back, so one
-> tool round-trip scores ~2. The defaults are sized for agentic clients (Claude
-> Code, multi-skill runs); lower them for stricter quota protection.
+> tool round-trip scores ~2. The example values above (500/2000) suit a shared
+> deployment; raise them for heavier agentic workloads.
 
 ### Behavior
 
@@ -250,13 +256,13 @@ tool_spike_block_per_min = 2000   # return HTTP 429 above this (default: 2000)
 - **Warn**: crossing `tool_spike_warn_per_min` logs a `WARN` line and increments `grob_tool_spike_warn_total`. The request proceeds.
 - **Block**: crossing `tool_spike_block_per_min` increments `grob_tool_spike_blocked_total`, writes a signed `TOOL_SPIKE_BLOCKED` audit entry, and returns HTTP 429 with body type `rate_limited`. The block is terminal — it is **not** retried against a sibling provider.
 
-### Defaults
+### Choosing thresholds
 
-`100/min/session` is roughly the upper bound for a busy build run (an agent reading ~2 files/sec). `500/min` equals >8/sec sustained, which only a runaway loop produces.
+When enabled, `500/min/session` (warn) ≈ >8 tool events/sec sustained and `2000/min` (block) ≈ >33/sec — sized so heavy-but-legitimate agentic runs warn rather than block. For a single-user local proxy, leave the detector off (the default); a runaway loop there is a client bug, not an abuse vector.
 
-### Disabling
+### Enabling / disabling
 
-Set both thresholds to `0` to disable the detector entirely; it is then never installed and adds no per-request work. Setting only `tool_spike_block_per_min = 0` keeps warnings while disabling blocking.
+The detector is **off by default** (both thresholds `0`): it is never installed and adds no per-request work. Set `tool_spike_block_per_min` (and optionally `tool_spike_warn_per_min`) to a positive value to enable it. Setting only `tool_spike_warn_per_min` keeps a paper trail without ever blocking.
 
 ### Memory
 

@@ -7,9 +7,11 @@ use grob::cli::{AppConfig, SecurityConfig};
 fn test_security_config_defaults() {
     let config = SecurityConfig::default();
     assert!(config.enabled);
-    assert_eq!(config.rate_limit_rps, 100);
-    assert_eq!(config.rate_limit_burst, 200);
-    assert_eq!(config.max_body_size.value(), 10 * 1024 * 1024);
+    // Rate limiting and the body-size cap are disabled by default (agentic-friendly);
+    // re-enable per-deployment via `[security]`. See `default_rate_limit_rps`.
+    assert_eq!(config.rate_limit_rps, 0);
+    assert_eq!(config.rate_limit_burst, 0);
+    assert_eq!(config.max_body_size.value(), 0);
     assert!(config.security_headers);
     assert!(config.circuit_breaker);
     assert!(config.audit_dir.is_empty());
@@ -52,8 +54,8 @@ fn test_security_config_disabled() {
 
     let config: AppConfig = toml::from_str(toml_str).unwrap();
     assert!(!config.security.enabled);
-    // Defaults should still be present
-    assert_eq!(config.security.rate_limit_rps, 100);
+    // Defaults should still be present (rate limiting now defaults to disabled).
+    assert_eq!(config.security.rate_limit_rps, 0);
 }
 
 #[test]
@@ -99,8 +101,9 @@ fn test_config_without_security_section_uses_defaults() {
     "#;
 
     let config: AppConfig = toml::from_str(toml_str).unwrap();
-    // Should use defaults when [security] section is omitted
+    // Should use defaults when [security] section is omitted. Rate limiting is
+    // disabled by default (agentic-friendly); re-enable via [security].
     assert!(config.security.enabled);
-    assert_eq!(config.security.rate_limit_rps, 100);
-    assert_eq!(config.security.rate_limit_burst, 200);
+    assert_eq!(config.security.rate_limit_rps, 0);
+    assert_eq!(config.security.rate_limit_burst, 0);
 }

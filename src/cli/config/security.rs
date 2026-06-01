@@ -13,13 +13,19 @@ pub struct SecurityConfig {
     /// Master switch for security middleware
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Rate limit: requests per second per tenant/IP
+    /// Rate limit: requests per second per tenant/IP (default 0 = disabled).
+    ///
+    /// `0` skips the rate limiter entirely (no throttling). Set a positive value
+    /// (e.g. `100`) to enable per-tenant/IP throttling for multi-tenant deployments.
     #[serde(default = "default_rate_limit_rps")]
     pub rate_limit_rps: u32,
-    /// Rate limit: burst capacity
+    /// Rate limit: burst capacity (only used when `rate_limit_rps` > 0).
     #[serde(default = "default_rate_limit_burst")]
     pub rate_limit_burst: u32,
-    /// Maximum request body size in bytes (default: 10MB)
+    /// Maximum request body size in bytes (default 0 = unlimited).
+    ///
+    /// `0` disables the limit (no `RequestBodyLimitLayer` is installed). Set a
+    /// positive byte count (e.g. `10485760` for 10 MiB) to reject larger bodies.
     #[serde(default)]
     pub max_body_size: BodySizeLimit,
     /// Apply OWASP security headers to all responses
@@ -67,18 +73,17 @@ pub struct SecurityConfig {
     /// keyed on a non-anonymous tenant id.
     #[serde(default)]
     pub strict_tenant: bool,
-    /// Tool-call spike: warn threshold per session per minute (default 500).
+    /// Tool-call spike: warn threshold per session per minute (default 0 = off).
     ///
-    /// Crossing this rolling 60s count logs a warning and emits a
-    /// metric without rejecting the request. Set to `0` to disable
-    /// warnings.
+    /// Crossing this rolling 60s count logs a warning and emits a metric without
+    /// rejecting the request. Disabled by default; set a value to enable.
     #[serde(default = "default_tool_spike_warn_per_min")]
     pub tool_spike_warn_per_min: u32,
-    /// Tool-call spike: block threshold per session per minute (default 2000).
+    /// Tool-call spike: block threshold per session per minute (default 0 = off).
     ///
-    /// Crossing this rolling 60s count returns HTTP 429, writes a
-    /// signed audit entry, and emits a metric. Set to `0` to disable
-    /// blocking. Setting both thresholds to `0` disables the detector.
+    /// Crossing this rolling 60s count returns HTTP 429, writes a signed audit
+    /// entry, and emits a metric. Disabled by default (both thresholds `0`); set
+    /// a value to enable (e.g. 2000 for multi-tenant abuse protection).
     #[serde(default = "default_tool_spike_block_per_min")]
     pub tool_spike_block_per_min: u32,
 }
@@ -118,15 +123,19 @@ fn default_flush_interval_ms() -> u64 {
     5000
 }
 
-// NOTE: 100 rps sustains ~10 concurrent Claude Code sessions (each bursting
-// ~10 req/s during tool-use loops) while protecting providers from runaway clients.
+// NOTE: Disabled by default (0 = no rate limiting). grob's primary use is
+// single-user/local, where per-tenant request throttling only risks 429-ing a
+// legitimate burst (an autonomous agent easily exceeds any fixed rps). Re-enable
+// for multi-tenant deployments by setting `rate_limit_rps` (e.g. 100) in
+// `[security]`; a value of `0` skips installing the limiter entirely.
 fn default_rate_limit_rps() -> u32 {
-    100
+    0
 }
 
-// NOTE: 2x sustained rate allows short tool-use bursts without 429s.
+// NOTE: Paired with `rate_limit_rps`; only consulted when the limiter is enabled
+// (rps > 0). A typical multi-tenant setting is ~2x rps (e.g. 200) for short bursts.
 fn default_rate_limit_burst() -> u32 {
-    200
+    0
 }
 
 // NOTE: 0.3 gives ~70% weight to recent latency, ~30% to history. Standard
@@ -147,21 +156,20 @@ fn default_scoring_decay_rate() -> f64 {
     0.001
 }
 
-// NOTE: The detector counts both `tool_use` blocks and the `tool_result`
-// blocks echoed back, so a single tool round-trip scores ~2. Agentic clients
-// (Claude Code, multi-skill orchestrations like `/cli-cycle`) legitimately burst
-// to several hundred tool events/min, so the warn level is the early signal for
-// that band — a paper trail without rejecting the request.
+// NOTE: Disabled by default (0/0). Autonomous agentic clients (Claude Code,
+// multi-agent runs) legitimately burst to thousands of tool events/min, so the
+// detector produced more false positives than abuse protection for grob's
+// primary single-user/local use. It stays fully parametrable — set
+// `tool_spike_warn_per_min` / `tool_spike_block_per_min` in `[security]` to
+// re-enable (e.g. 500 / 2000 for multi-tenant deployments). The detector counts
+// both `tool_use` and the echoed `tool_result`, so one round-trip scores ~2.
 fn default_tool_spike_warn_per_min() -> u32 {
-    500
+    0
 }
 
-// NOTE: 2000 tool events/min/session (~33/sec counting both directions, i.e.
-// ~16 round-trips/sec) is firmly anomalous — only a runaway loop sustains it,
-// while heavy-but-legitimate agentic runs stay below it. Blocks and audit-logs.
-// (The previous 500 throttled real multi-skill workloads with HTTP 429.)
+// See `default_tool_spike_warn_per_min` — disabled by default, opt-in via config.
 fn default_tool_spike_block_per_min() -> u32 {
-    2000
+    0
 }
 
 /// EU AI Act compliance configuration

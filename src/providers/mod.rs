@@ -226,12 +226,14 @@ pub struct ProviderParams {
     pub reasoning_effort: Option<String>,
     /// Forced Codex processing tier (e.g. `"priority"` for faster handling).
     pub service_tier: Option<String>,
+    /// Codex (Responses API) tuning: priority-model list and reasoning auto-map.
+    pub codex: CodexOptions,
 }
 
 // Re-export config types that were moved to cli::config to break the
 // cli <-> providers dependency cycle. Downstream code using
 // `crate::providers::{AuthType, ProviderConfig}` keeps compiling.
-pub use crate::cli::{AuthType, ProviderConfig};
+pub use crate::cli::{AuthType, CodexOptions, ProviderConfig};
 
 pub use anthropic_compatible::AnthropicCompatibleProvider;
 pub use openai::OpenAIProvider;

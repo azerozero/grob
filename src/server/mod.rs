@@ -424,9 +424,15 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
         app
     };
 
-    let app = app.layer(RequestBodyLimitLayer::new(
-        config.security.max_body_size.value(),
-    ));
+    // A body-size limit of 0 means "unlimited" — skip the layer entirely so
+    // large agentic contexts are not rejected (see `BodySizeLimit`).
+    let app = if config.security.max_body_size.value() > 0 {
+        app.layer(RequestBodyLimitLayer::new(
+            config.security.max_body_size.value(),
+        ))
+    } else {
+        app
+    };
 
     // Audit middleware: captures every request lifecycle, including those
     // rejected by rate-limit / auth before reaching a handler. Layered

@@ -3,7 +3,9 @@
 //! Eliminates field and method duplication across OpenAI, Gemini,
 //! and Anthropic-compatible providers.
 
-use super::{build_provider_client, error::ProviderError, key_pool::KeyPool, ProviderParams};
+use super::{
+    build_provider_client, error::ProviderError, key_pool::KeyPool, CodexOptions, ProviderParams,
+};
 use crate::auth::{OAuthConfig, TokenStore};
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
@@ -26,6 +28,7 @@ pub(crate) struct ProviderBase {
     pub key_pool: Option<Arc<KeyPool>>,
     pub reasoning_effort: Option<String>,
     pub service_tier: Option<String>,
+    pub codex: CodexOptions,
 }
 
 impl ProviderBase {
@@ -47,6 +50,7 @@ impl ProviderBase {
             key_pool: params.key_pool,
             reasoning_effort: params.reasoning_effort,
             service_tier: params.service_tier,
+            codex: params.codex,
         }
     }
 

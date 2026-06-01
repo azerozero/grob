@@ -121,34 +121,29 @@ impl<'de> Deserialize<'de> for Port {
     }
 }
 
-/// Request body size limit in bytes. Rejects 0 at parse time, defaults to 10 MiB.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+/// Request body size limit in bytes. `0` means unlimited; defaults to unlimited.
+///
+/// The default is `0` (no limit): grob's primary use is single-user/local, where
+/// an agentic client legitimately sends large contexts, so a cap only risks
+/// rejecting a valid request. Set `max_body_size` to re-enable a bound.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Default)]
 #[serde(transparent)]
 pub struct BodySizeLimit(usize);
 
 impl BodySizeLimit {
-    /// Creates a new `BodySizeLimit`, returning an error if 0.
+    /// Creates a new `BodySizeLimit`. A value of `0` means "no limit".
     ///
     /// # Errors
     ///
-    /// Returns a `String` if `value` is zero.
+    /// Never returns an error; the `Result` is retained for call-site
+    /// compatibility (and to leave room for future bounds validation).
     pub fn new(value: usize) -> Result<Self, String> {
-        if value == 0 {
-            Err("max_body_size must be non-zero".to_string())
-        } else {
-            Ok(Self(value))
-        }
+        Ok(Self(value))
     }
 
-    /// Returns the inner byte count.
+    /// Returns the inner byte count (`0` = unlimited).
     pub fn value(self) -> usize {
         self.0
-    }
-}
-
-impl Default for BodySizeLimit {
-    fn default() -> Self {
-        Self(10 * 1024 * 1024) // 10 MiB
     }
 }
 

@@ -96,11 +96,21 @@ pub struct ProviderConfig {
 
     /// Codex processing tier — `"priority"` enables faster ("1.5x") handling,
     /// `"default"` is standard. Only affects the OpenAI Responses (Codex) path.
-    /// `"priority"` is applied only to models that offer it (`gpt-5.5`,
-    /// `gpt-5.4`) and silently dropped for others (codex/mini) that would reject
-    /// it. Omit this field (or leave it unset) to disable — nothing is sent.
+    /// `"priority"` is applied only to models that offer it (see
+    /// [`CodexOptions::priority_models`]) and silently dropped for others
+    /// (codex/mini) that would reject it. Omit this field (or leave it unset) to
+    /// disable — nothing is sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
+
+    /// Codex (OpenAI Responses API) tuning: which models support the `priority`
+    /// tier / default to `xhigh` effort, and the reasoning-effort auto-mapping.
+    ///
+    /// Optional — the defaults track the current ChatGPT Codex line-up, so most
+    /// configs omit it. Only affects the OpenAI Responses (Codex) path. See
+    /// [`CodexOptions`].
+    #[serde(default)]
+    pub codex: CodexOptions,
 
     /// Path to PEM client certificate for mTLS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -160,6 +170,64 @@ impl ProviderConfig {
     pub fn is_enabled(&self) -> bool {
         self.enabled.unwrap_or(true)
     }
+}
+
+/// Codex (OpenAI Responses API) tuning knobs.
+///
+/// Shapes how grob maps requests onto the Responses API for the ChatGPT Codex
+/// (OAuth) backend. Every field has a default matching OpenAI's current model
+/// line-up, so the whole block is optional.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodexOptions {
+    /// Models that support the `priority` (1.5x) service tier and receive the
+    /// `xhigh` reasoning effort by default.
+    ///
+    /// Each entry is matched case-insensitively against the resolved model name:
+    /// an exact match always qualifies, and a prefix match qualifies unless the
+    /// model name contains `mini` (the fast tier never gets priority/xhigh unless
+    /// listed verbatim). Defaults to `["gpt-5.5", "gpt-5.4"]`. Add new flagship
+    /// model names here when OpenAI ships them — no grob release required.
+    #[serde(default = "default_priority_models")]
+    pub priority_models: Vec<String>,
+
+    /// When `true`, the reasoning effort is auto-mapped from the request's
+    /// extended-thinking budget (`>= reasoning_xhigh_min_budget` → `xhigh`, else
+    /// `medium`; no thinking → `low`). When `false` (default), the effort is the
+    /// flat model-based default: `xhigh` for [`Self::priority_models`], otherwise
+    /// unset (the backend picks). An explicit `reasoning_effort` always wins.
+    #[serde(default)]
+    pub reasoning_auto_map: bool,
+
+    /// Thinking budget (tokens) at/above which auto-mapping selects `xhigh`
+    /// (below it, `medium`). Only consulted when `reasoning_auto_map` is `true`.
+    /// Defaults to 16000.
+    #[serde(default = "default_reasoning_xhigh_min_budget")]
+    pub reasoning_xhigh_min_budget: u32,
+}
+
+impl Default for CodexOptions {
+    fn default() -> Self {
+        Self {
+            priority_models: default_priority_models(),
+            reasoning_auto_map: false,
+            reasoning_xhigh_min_budget: default_reasoning_xhigh_min_budget(),
+        }
+    }
+}
+
+// NOTE: The flagship models that expose the `priority` (1.5x) tier per the Codex
+// catalog. Prefix-matched, so future point releases (e.g. `gpt-5.5-...`) inherit
+// it; `-mini` variants are excluded by the matcher as the fast/standard tier.
+fn default_priority_models() -> Vec<String> {
+    vec!["gpt-5.5".to_string(), "gpt-5.4".to_string()]
+}
+
+// NOTE: 16000 tokens is the threshold above which Claude Code's explicit-budget
+// thinking turns warrant the backend's max reasoning tier. Only used in the
+// opt-in `reasoning_auto_map` mode; the default flat mapping ignores it.
+fn default_reasoning_xhigh_min_budget() -> u32 {
+    16_000
 }
 
 /// Strategy for cycling through pooled API keys.

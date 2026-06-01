@@ -125,6 +125,7 @@ pub fn base_provider_config(name: &str) -> grob::providers::ProviderConfig {
         pool: None,
         reasoning_effort: None,
         service_tier: None,
+        codex: grob::providers::CodexOptions::default(),
         circuit_breaker: None,
 
         health_check: None,

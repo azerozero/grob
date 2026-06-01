@@ -42,21 +42,16 @@ pub enum SpikeAction {
 }
 
 /// Warn and block thresholds for the tool-spike detector.
-#[derive(Debug, Clone, Copy)]
+///
+/// Both default to `0`, which disables the detector — autonomous agentic clients
+/// legitimately burst past any fixed threshold, so it is opt-in via `[security]`.
+/// Setting a non-zero `warn_per_min`/`block_per_min` re-enables it.
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ToolSpikeConfig {
-    /// Per-key rolling-window count above which a warning fires (no block).
+    /// Per-key rolling-window count above which a warning fires (`0` = off).
     pub warn_per_min: u32,
-    /// Per-key rolling-window count above which the request is blocked.
+    /// Per-key rolling-window count above which the request is blocked (`0` = off).
     pub block_per_min: u32,
-}
-
-impl Default for ToolSpikeConfig {
-    fn default() -> Self {
-        Self {
-            warn_per_min: 500,
-            block_per_min: 2000,
-        }
-    }
 }
 
 impl ToolSpikeConfig {
