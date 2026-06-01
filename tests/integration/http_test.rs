@@ -235,11 +235,14 @@ api_key = "my-secret-key"
 
     #[test]
     fn test_metrics_body_limit_config() {
-        // Default max body size should be reasonable
+        // The body-size limit is disabled by default (0 = unlimited): grob's
+        // primary use is single-user/local, where large agentic contexts are
+        // legitimate. Set `max_body_size` to re-enable a bound.
         let config = SecurityConfig::default();
-        assert!(
-            config.max_body_size.value() > 0,
-            "max_body_size should be > 0"
+        assert_eq!(
+            config.max_body_size.value(),
+            0,
+            "max_body_size defaults to 0 (unlimited)"
         );
     }
 

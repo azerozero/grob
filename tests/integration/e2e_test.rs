@@ -101,8 +101,9 @@ fn test_config_without_security_section_uses_defaults() {
     "#;
 
     let config: AppConfig = toml::from_str(toml_str).unwrap();
-    // Should use defaults when [security] section is omitted
+    // Should use defaults when [security] section is omitted. Rate limiting is
+    // disabled by default (agentic-friendly); re-enable via [security].
     assert!(config.security.enabled);
-    assert_eq!(config.security.rate_limit_rps, 100);
-    assert_eq!(config.security.rate_limit_burst, 200);
+    assert_eq!(config.security.rate_limit_rps, 0);
+    assert_eq!(config.security.rate_limit_burst, 0);
 }
