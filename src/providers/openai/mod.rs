@@ -134,33 +134,51 @@ impl OpenAIProvider {
             return req_builder;
         };
 
-        let mut builder = req_builder
-            .header("chatgpt-account-id", account_id)
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            )
-            .header("Origin", "https://chatgpt.com")
-            .header("Referer", "https://chatgpt.com/")
-            .header(
-                "sec-ch-ua",
-                "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
-            )
-            .header("sec-ch-ua-mobile", "?0")
-            .header("sec-ch-ua-platform", "\"macOS\"")
-            .header("sec-fetch-dest", "empty")
-            .header("sec-fetch-mode", "cors")
-            .header("sec-fetch-site", "same-origin");
+        let mut builder = req_builder.header("chatgpt-account-id", account_id);
 
         if is_codex {
+            // Match the real Codex CLI request fingerprint: a `codex_cli_rs`
+            // User-Agent + `originator` and `x-codex-beta-features`, WITHOUT the
+            // browser headers (Origin/Referer/sec-*) or `OpenAI-Beta` that the
+            // CLI does not send. A browser User-Agent combined with
+            // `originator: codex_cli_rs` is an inconsistent fingerprint the
+            // backend can flag. OS/arch are derived from the build target.
+            let os = match std::env::consts::OS {
+                "macos" => "Mac OS",
+                "linux" => "Linux",
+                "windows" => "Windows",
+                other => other,
+            };
+            let arch = match std::env::consts::ARCH {
+                "aarch64" => "arm64",
+                other => other,
+            };
             builder = builder
-                .header("OpenAI-Beta", "responses=experimental")
-                .header("originator", "codex_cli_rs");
+                .header("User-Agent", format!("codex_cli_rs/0.136.0 ({os}; {arch})"))
+                .header("originator", "codex_cli_rs")
+                .header("x-codex-beta-features", "terminal_resize_reflow");
             tracing::debug!(
                 "Using OAuth Bearer token for ChatGPT Codex on {}",
                 provider_name
             );
         } else {
+            // Plain ChatGPT (web-app) path keeps a browser-style fingerprint.
+            builder = builder
+                .header(
+                    "User-Agent",
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                )
+                .header("Origin", "https://chatgpt.com")
+                .header("Referer", "https://chatgpt.com/")
+                .header(
+                    "sec-ch-ua",
+                    "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"",
+                )
+                .header("sec-ch-ua-mobile", "?0")
+                .header("sec-ch-ua-platform", "\"macOS\"")
+                .header("sec-fetch-dest", "empty")
+                .header("sec-fetch-mode", "cors")
+                .header("sec-fetch-site", "same-origin");
             tracing::debug!("Using OAuth Bearer token for ChatGPT on {}", provider_name);
         }
 
