@@ -262,20 +262,37 @@ pub(crate) async fn init_auth(
 /// Initializes rate limiter, circuit breakers, audit log, and cache.
 pub(crate) fn init_security(config: &AppConfig) -> anyhow::Result<SecurityServices> {
     let security_enabled = config.security.enabled;
-    let rate_limiter = if security_enabled {
+    // 0 = unlimited; render it as such instead of "0MB".
+    let body_limit_desc = if config.security.max_body_size.value() == 0 {
+        "unlimited".to_string()
+    } else {
+        format!(
+            "{}MB",
+            config.security.max_body_size.value() / (1024 * 1024)
+        )
+    };
+    // A rate_limit_rps of 0 disables throttling — don't install the limiter
+    // (rps=0 would otherwise starve the token bucket and reject every request).
+    let rate_limiter = if security_enabled && config.security.rate_limit_rps > 0 {
         let rl_config = RateLimitConfig {
             requests_per_second: config.security.rate_limit_rps,
             burst: config.security.rate_limit_burst,
         };
         info!(
-            "🛡️  Security: rate limit {}rps burst={}, body limit {}MB, headers={}, circuit_breaker={}",
+            "🛡️  Security: rate limit {}rps burst={}, body limit {}, headers={}, circuit_breaker={}",
             config.security.rate_limit_rps,
             config.security.rate_limit_burst,
-            config.security.max_body_size.value() / (1024 * 1024),
+            body_limit_desc,
             config.security.security_headers,
             config.security.circuit_breaker,
         );
         Some(Arc::new(RateLimiter::new(rl_config)))
+    } else if security_enabled {
+        info!(
+            "🛡️  Security: rate limit disabled, body limit {}, headers={}, circuit_breaker={}",
+            body_limit_desc, config.security.security_headers, config.security.circuit_breaker,
+        );
+        None
     } else {
         info!("🛡️  Security middleware disabled");
         None
