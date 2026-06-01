@@ -647,10 +647,27 @@ pub(crate) fn transform_to_responses_request(
 /// value passes through verbatim — the backend validates it — so `"priority"`
 /// (faster handling) works without a whitelist. `None` leaves the field unset.
 fn resolve_service_tier(request: &CanonicalRequest, forced: Option<&str>) -> Option<String> {
-    forced
+    let tier = forced
         .map(str::to_string)
         .or_else(|| request.extensions.service_tier.clone())
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty())?;
+    // The "priority" (1.5x) tier exists only on some models (gpt-5.5, gpt-5.4);
+    // others reject it with a 400. Drop it for unsupported models so a provider
+    // forcing `service_tier = "priority"` does not break `think`/`background`
+    // routes (which resolve to codex/mini models). Other tiers pass through.
+    if tier == "priority" && !priority_tier_supported(&request.model) {
+        return None;
+    }
+    Some(tier)
+}
+
+/// Returns whether the model offers the Codex `priority` (1.5x) service tier.
+///
+/// Per the Codex model catalog only `gpt-5.5` and `gpt-5.4` (not `-mini`) expose
+/// it; everything else (`gpt-5.4-mini`, `gpt-5.3-codex`, …) is standard-only.
+fn priority_tier_supported(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    m.starts_with("gpt-5.5") || (m.starts_with("gpt-5.4") && !m.contains("mini"))
 }
 
 /// Resolves the Codex reasoning effort for a request.
@@ -997,11 +1014,12 @@ mod tests {
 
         let mut req = base_request();
         req.system = None;
+        req.model = "gpt-5.5".to_string(); // supports the priority tier
 
         // Unset by default.
         assert_eq!(tier(&req, None), serde_json::Value::Null);
 
-        // Provider config forces it (verbatim — backend validates "priority").
+        // Provider config forces it on a supporting model.
         assert_eq!(tier(&req, Some("priority")), serde_json::json!("priority"));
 
         // A request extension supplies it when no config override is set.
@@ -1011,6 +1029,15 @@ mod tests {
         // An empty forced value falls back to unset, not an empty string.
         req.extensions.service_tier = None;
         assert_eq!(tier(&req, Some("")), serde_json::Value::Null);
+
+        // "priority" is dropped for models that don't offer it (would 400),
+        // so forcing it on a codex/mini route is a silent no-op rather than a
+        // failure. Other tiers still pass through on any model.
+        req.model = "gpt-5.3-codex".to_string();
+        assert_eq!(tier(&req, Some("priority")), serde_json::Value::Null);
+        assert_eq!(tier(&req, Some("default")), serde_json::json!("default"));
+        req.model = "gpt-5.4-mini".to_string();
+        assert_eq!(tier(&req, Some("priority")), serde_json::Value::Null);
     }
 
     #[test]
