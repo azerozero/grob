@@ -192,6 +192,42 @@ impl MessageTracer {
         self.write_trace(&trace, file_mutex);
     }
 
+    /// Traces a streaming response assembled from accumulated `text_delta` content.
+    ///
+    /// A streaming turn never yields a single [`ProviderResponse`], so the spend
+    /// wrapper accumulates the emitted text and provider usage as the SSE stream
+    /// flows and records the `res` entry here on termination.
+    pub fn trace_response_text(
+        &self,
+        id: &str,
+        text: String,
+        input_tokens: u32,
+        output_tokens: u32,
+        latency_ms: u64,
+    ) {
+        let Some(ref file_mutex) = self.file else {
+            return;
+        };
+
+        let trace = ResponseTrace {
+            ts: Utc::now(),
+            dir: "res",
+            id: id.to_string(),
+            latency_ms,
+            stop_reason: "end_turn".to_string(),
+            input_tokens,
+            output_tokens,
+            content: serde_json::json!([{ "type": "text", "text": text }]),
+        };
+
+        self.write_trace(&trace, file_mutex);
+    }
+
+    /// Returns `true` when tracing is active (the trace file is open).
+    pub fn is_enabled(&self) -> bool {
+        self.file.is_some()
+    }
+
     /// Traces an error.
     pub fn trace_error(&self, id: &str, error: &str) {
         let Some(ref file_mutex) = self.file else {
@@ -280,6 +316,21 @@ impl crate::traits::Tracer for MessageTracer {
 
     fn trace_error(&self, id: &str, error: &str) {
         self.trace_error(id, error);
+    }
+
+    fn trace_response_text(
+        &self,
+        id: &str,
+        text: String,
+        input_tokens: u32,
+        output_tokens: u32,
+        latency_ms: u64,
+    ) {
+        self.trace_response_text(id, text, input_tokens, output_tokens, latency_ms);
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.is_enabled()
     }
 }
 
