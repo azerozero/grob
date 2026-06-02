@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.66](https://github.com/azerozero/grob/compare/v0.36.65...v0.36.66) - 2026-06-02
+
+### Fixed
+
+- *(auth)* offer codex oauth during exec preflight
+
+### Other
+
+- Merge pull request #402 from azerozero/fix/exec-tool-credentials
+
 ## [0.36.65](https://github.com/azerozero/grob/compare/v0.36.64...v0.36.65) - 2026-06-02
 
 ### Added
