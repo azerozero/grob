@@ -6,6 +6,15 @@ consulted: []
 informed: []
 ---
 
+> **Implementation status (2026-06-02)**: the `ControlEngine` action model is
+> present in `src/control/engine.rs`, but the JSON-RPC surface is **not frozen**
+> to `server`, `model`, `provider`, and `budget`. The current tree also exposes
+> `grob/keys/*`, `grob/config/*`, `grob/tools/*`, `grob/hit/*`, and
+> `grob/pledge/*` through `src/server/rpc/`, and MCP control tools bridge back
+> to those RPC namespaces via `src/server/mcp_handlers/control_bridge.rs`.
+> Treat the "MCP-tools-first / frozen RPC" sections below as the target
+> direction, not as the delivered contract.
+
 # ADR-0011: ControlEngine Generic + MCP-Tools-First Configuration Surface
 
 ## Context and Problem Statement
@@ -31,7 +40,7 @@ This duplication has already caused drift:
 
 - **Single source of behavior** — one module decides what each action does; the surfaces are thin adapters.
 - **Testable in isolation** — the engine must be a pure function `(state, action) -> (new_state, effects)` with no I/O, so it can be property-tested and fuzzed.
-- **MCP-tools-first** — instead of extending the JSON-RPC namespace map indefinitely, new control surfaces are exposed as MCP tools. The JSON-RPC namespaces stay frozen at v1.
+- **MCP-tools-first target** — instead of extending the JSON-RPC namespace map indefinitely, new control surfaces should be exposed as MCP tools. The current implementation still uses JSON-RPC as the shared control backend for both RPC clients and MCP wrappers.
 - **Surface parity by construction** — adding an action to the engine automatically makes it reachable from all surfaces once each adapter routes the new action variant.
 - **No extension of JSON-RPC** — deliberately constrain the RPC namespace surface area. MCP covers the growth path.
 
@@ -66,9 +75,13 @@ This duplication has already caused drift:
 - **MCP adapter** (`src/features/mcp/`) — exposes the action variants as MCP tools (`wizard_setup_start`, `wizard_select_preset`, `grob_configure`, …). The MCP surface grows with the engine, not with the JSON-RPC namespace map.
 - **UI adapter** (future, B-1) — HTML + SSE + JWT embedded via `rust-embed`, consuming the same engine.
 
-### JSON-RPC namespaces: frozen
+### JSON-RPC namespaces: target freeze, current divergence
 
-The four v0.31 namespaces (`server`, `model`, `provider`, `budget`) remain. No new namespace will be added. The five namespaces originally planned in rescue ADR-001 (`keys`, `config`, `tools`, `hit`, `pledge`) are **not** implemented as RPC — they become MCP tools instead.
+Target contract: the four v0.31 namespaces (`server`, `model`, `provider`, `budget`) remain, and future growth goes through MCP tools rather than new raw RPC namespaces.
+
+Current code diverges from that target. `keys`, `config`, `tools`, `hit`, and `pledge` are implemented as JSON-RPC namespaces and MCP tool calls are thin wrappers over the same RPC dispatcher. This is pragmatic for shared auth, state reload, and tests, but it means this ADR must not be read as evidence that those namespaces are absent.
+
+Open product question: prototype a separate MCP proxy (stdio/http relay to an upstream such as `codex_apps`, in an isolated worktree), or keep Grob as the MCP server for its own control-plane only.
 
 ### Migration order
 
@@ -105,4 +118,4 @@ Sequenced: A-1 blocks A-2 / A-3 / B-1 (structural refactor, conflict risk).
 - [ADR-0009](0009-pledge-structural-tool-filtering.md), [ADR-0010](0010-universal-tool-layer.md) — modules that the engine orchestrates.
 - [ADR-0013](0013-storage-files-no-redb.md) — engine state persistence lands on the files backend.
 - Chantiers: A-1 (engine), A-2 (CLI thin), A-3 (MCP wizard extend) in the sprint menu.
-- Current code: `src/server/rpc/` (JSON-RPC namespaces), `src/features/mcp/` (MCP tools including `grob_configure` from PR #100).
+- Current code: `src/control/engine.rs` (action parsing/roles), `src/server/rpc/` (JSON-RPC namespaces), `src/server/mcp_handlers/control_bridge.rs` (MCP-to-RPC bridge), `src/features/mcp/` (MCP tool matrix and tooling).

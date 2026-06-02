@@ -12,7 +12,7 @@ related: [ADR-0018, ADR-0019]
 
 ## Implementation status
 
-Hedged requests remain proposed. No `src/routing/hedge.rs`, hedge config, cancellation-billing protocol document, or hedge provider preset is present in the current tree. Paths and commands below describe the target implementation and must not be read as available runtime features.
+Hedged requests remain proposed. No `src/routing/hedge.rs`, hedge config, or hedge provider preset is present in the current tree. A cancellation-billing verification protocol now exists at `docs/how-to/verify-hedge-cancellation-billing.md`; paths and commands below otherwise describe the target implementation and must not be read as available runtime features.
 
 ## Context and Problem Statement
 
@@ -39,6 +39,33 @@ Cost trade-off: occasionally pay 2× for one logical request. In practice, only 
 ## Decision Outcome
 
 **Chosen: opt-in per slot, hard-coded threshold initially, with adaptive variant deferred.**
+
+### Implementation gate: spend/audit protocol first
+
+Do not implement hedging in dispatch until the spend and audit protocol is
+explicitly represented in code and tests. The current dispatch loop performs a
+single budget check before one upstream attempt, then records spend after the
+non-streaming response or streaming termination. Hedging changes that invariant:
+one logical request may create two billable upstream legs.
+
+Required protocol:
+
+1. Assign a `hedge_group_id` to the logical request and a `leg_id` to every
+   upstream attempt.
+2. Reserve budget for the maximum allowed in-flight legs before firing a hedge,
+   or fail closed when the budget cannot cover the duplicate call.
+3. Emit audit records for both primary and secondary legs: provider, model,
+   dispatch time, first byte time, cancellation request time, winner flag,
+   terminal status, and observed usage.
+4. Record actual billed spend per leg. The losing leg is not silently free; its
+   spend behavior depends on the operator-verified provider billing class.
+5. Disable hedging for providers whose cancellation billing behavior is
+   `unknown` or `no_refund`, unless the operator explicitly forces it.
+6. For streaming, forward only the winning stream to the client while still
+   draining/cancelling and auditing the losing leg best-effort.
+
+This protocol is the boundary between useful hedging and uncontrolled duplicate
+spend. It must land before `tokio::select!`-based dispatch code.
 
 ### User-facing configuration
 
@@ -122,8 +149,11 @@ With hedging (after_ms = 2000):
 - Dispatch site: `src/server/dispatch/mod.rs` after the primary endpoint is selected.
 - Use `tokio::select!` over (primary_future, hedge_timer_then_dispatch_future).
 - Cancellation: `JoinHandle::abort()` for the loser, plus a `Drop` impl on the upstream HTTP request body to terminate streaming early.
-- Token-counting must NOT bill the loser (audit log records both, billing pipeline must filter `winner=false` hedge legs from `grob_input_tokens_total`).
-- Test: `tests/integration/hedge_test.rs` with mock providers configurable to delay.
+- Token-counting must distinguish client-visible usage from provider-billed
+  usage. Request metrics mark the winner as the served response; spend records
+  actual billed cost for every leg according to the verified provider
+  cancellation behavior.
+- Test: `tests/integration/hedge_test.rs` with mock providers configurable to delay, bill loser legs differently, and assert budget reservation/release semantics.
 
 ## Validation
 

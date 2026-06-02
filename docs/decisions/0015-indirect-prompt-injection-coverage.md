@@ -6,12 +6,13 @@ consulted: []
 informed: []
 ---
 
-> **Status note (2026-04-28)**: status reverted from `done` to `accepted`.
-> A-6 (indirect prompt injection coverage) implementation is deferred — no
-> production code merges yet. The framework design described here is final and
-> binding for the next implementation pass; only the implementation flag has
-> been corrected to reflect that the symmetric output-side scan is not yet wired
-> into the dispatch pipeline.
+> **Implementation status (2026-06-02)**: response-side and `tool_result`
+> indirect-injection scanning are implemented in `src/features/dlp/` and wired
+> into the dispatch pipeline. The active config is
+> `[dlp.prompt_injection] scan_responses`, `scan_tool_results`, and
+> `response_action`. The DecisionToken/Sokolsky emission described below has
+> not landed; detections currently surface through DLP reports, logs, blocking
+> errors, and the existing DLP telemetry path.
 
 # ADR-0015: Indirect Prompt Injection Coverage — Scan Responses and `tool_result` Blocks
 
@@ -76,14 +77,12 @@ Both scans run **before** the LLM is allowed to interpret the content. For a mul
 ### Configuration
 
 ```toml
-[dlp.injection_output]
+[dlp.prompt_injection]
 enabled = true
-action = "warn"          # warn | block | ignore
-scan_tool_results = true
+action = "warn"                 # request-side action
 scan_responses = true
-
-[dlp.injection_output.thresholds]
-# optional: fine-grained per-pattern actions
+scan_tool_results = true
+response_action = "warn"        # response/tool_result action
 ```
 
 Defaults:
@@ -119,7 +118,9 @@ The injection pattern set is a bounded DFA. Scanning a 10 KB response takes < 1 
 
 ### Audit trail
 
-Each scan emits a `DecisionToken` ([ADR-0016](0016-decision-tokens-transparent-routing.md)) with `reason_code = "injection_output"` or `reason_code = "injection_tool_result"`. These tokens are routed to the Sokolsky audit plane ([ADR-0017](0017-sokolsky-log-backend.md)) and are **not** visible to the boss or the agent.
+Target state: each scan emits a `DecisionToken` ([ADR-0016](0016-decision-tokens-transparent-routing.md)) with `reason_code = "injection_output"` or `reason_code = "injection_tool_result"`. These tokens are routed to the audit plane ([ADR-0017](0017-sokolsky-log-backend.md)) and are **not** visible to the boss or the agent.
+
+Current state: response and `tool_result` detections emit DLP action reports/logs and can block the response when `response_action = "block"`, but they do not yet produce DecisionToken records.
 
 ## Consequences
 
@@ -144,7 +145,7 @@ Each scan emits a `DecisionToken` ([ADR-0016](0016-decision-tokens-transparent-r
 
 ## Follow-ups and related ADRs
 
-- Chantier: **A-6 Indirect injection coverage**, `feat/dlp-indirect-injection`. Deferred until after the wizard-UX-fixes and validation pause.
+- Chantier: **A-6 Indirect injection coverage** — scanning is implemented; DecisionToken/audit-plane emission remains the follow-up.
 - [ADR-0009](0009-pledge-structural-tool-filtering.md) — Pledge removes dangerous tools; this ADR scans content returned by tools that are kept.
 - [ADR-0010](0010-universal-tool-layer.md) — the Tool Layer is where tools are managed; this ADR is where their outputs are inspected.
 - [ADR-0016](0016-decision-tokens-transparent-routing.md) — audit trail for each detection.

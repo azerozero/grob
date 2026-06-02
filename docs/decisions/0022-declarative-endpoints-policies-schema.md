@@ -12,7 +12,17 @@ related: [ADR-0018, ADR-0019, ADR-0020]
 
 ## Implementation status
 
-This schema rebuild remains proposed. The current `AppConfig` still uses `[[providers]]`, `[[models]]`, and `[[tiers]]`; no `endpoints` top-level field or `grob preset migrate-legacy` command is implemented. ADR-0021 was rejected before a standalone ADR file was created, so Thompson-sampling mentions below are historical design context rather than implemented or separately documented behavior.
+This schema rebuild remains proposed. The current `AppConfig` still uses
+`[[providers]]`, `[[models]]`, and `[[tiers]]`; no public `endpoints` top-level
+field or routing migration command is implemented. A read-only internal adapter
+now exists in `src/routing/endpoints.rs`: it derives an endpoint-shaped
+inventory and policy view from the legacy config without changing dispatch
+behavior. ADR-0021 was rejected before a standalone ADR file was created, so
+Thompson sampling is not part of this schema's current delivery plan.
+
+`[[endpoints]]` is useful conceptually, but it is a large migration. The first
+step is now the internal/read-only adapter; the next step is a realistic
+migration ADR with golden-file tests, not a complete cut-over.
 
 ## Context and Problem Statement
 
@@ -29,11 +39,11 @@ This was acceptable when grob had ~3 providers and 1 routing axis. With ADR-0018
 - "When session_id matches `enterprise-*`, only consider endpoints with SLA tags."
 - "Skip endpoints whose monthly quota is at 90%."
 
-ADR-0019 (EMA) and ADR-0020 (hedging) and ADR-0021 (Thompson) all bolt onto the existing schema with `[router]` sub-tables, but the underlying model — `[[providers]] × [[models]] × [[tiers]]` — is the wrong primitive set for richer policies.
+ADR-0019 (provider scoring) and ADR-0020 (hedging) can bolt onto the existing schema with local config, but the underlying model — `[[providers]] × [[models]] × [[tiers]]` — is the wrong primitive set for richer policies.
 
-The strategic question is: do we keep accreting `[router.X]` subsections to the existing schema, or do we cut over to a clean primitive set that scales?
+The strategic question is: do we keep accreting `[router.X]` subsections to the existing schema, or do we migrate toward a clean primitive set that scales?
 
-This ADR argues for the cut-over **with a 10-version auto-migration deprecation period** to protect the security-prevails audience that adopts grob mid-cycle.
+This ADR argues for a staged migration **with a 10-version deprecation period once the adapter exists** to protect the security-prevails audience that adopts grob mid-cycle.
 
 ## Decision Drivers
 
@@ -45,17 +55,22 @@ This ADR argues for the cut-over **with a 10-version auto-migration deprecation 
 ## Considered Options
 
 1. **Hard cut-over** (no backward compat, removed immediately). Rejected: any security-prevails adopter mid-flight gets locked out. Even with a migration tool, their compliance review cycle is months.
-2. **Auto-migration with 10-version deprecation period (chosen).** Both schemas parse for 10 minor releases. On startup, legacy configs are auto-converted in memory and the operator gets a deprecation warning pointing at the migration tool. After 10 minor releases, the legacy parser is removed and configs that haven't migrated fail fast at startup with a clear error.
+2. **Adapter-first migration with 10-version deprecation period (chosen target).** First add a read-only internal adapter that derives endpoint-like records from the legacy config. That adapter exists in `src/routing/endpoints.rs`. Only after it has broader golden-file tests should both schemas parse for 10 minor releases. On startup, legacy configs are auto-converted in memory and the operator gets a deprecation warning pointing at the migration tool. After 10 minor releases, the legacy parser is removed and configs that haven't migrated fail fast at startup with a clear error.
 3. **Indefinite co-existence.** Rejected: never gets the maintenance burden off the project. Test surface grows forever.
 4. **Stay on the old schema, push hard on `[router.*]` extensions.** Rejected: this is the path that produced the current sprawl.
 
 ## Decision Outcome
 
-**Chosen: 10-version auto-migration period.**
+**Chosen target: adapter-first migration, followed by a 10-version auto-migration period.**
 
-- Release N (next minor): both schemas parse. New schema is preferred internally; legacy is auto-converted in memory. Migration tool `grob preset migrate-legacy` available standalone.
+- Phase 0: build a read-only internal endpoint adapter from the existing
+  `[[providers]]`, `[[models]]`, and `[[tiers]]` config. Delivered in
+  `src/routing/endpoints.rs`. No new TOML syntax yet.
+- Release N (after adapter validation): both schemas parse. New schema is
+  preferred internally; legacy is auto-converted in memory. A routing migration
+  command is available standalone.
 - Releases N..N+9 (10 minor versions): legacy continues to auto-migrate. Each startup emits a single warn-level log line per legacy config, surfacing the operator-friendly migration command. Deprecation banner in `grob preset list`. Each release notes the remaining number of versions until removal.
-- Release N+10: legacy parser removed. Configs still in legacy format fail at startup with an actionable error: "your config uses the deprecated <feature>; run `grob preset migrate-legacy <path>` (deprecation announced in v<N>, see ADR-0022)".
+- Release N+10: legacy parser removed. Configs still in legacy format fail at startup with an actionable error that points at the routing migration command and ADR-0022.
 
 This gives security-prevails adopters ~12-18 calendar months (assuming monthly minor releases) to migrate, which fits typical compliance review cycles.
 
@@ -195,19 +210,36 @@ required_fields = ["jurisdiction", "data_classification", "certifications"]
 3. Apply `select` to filter [[endpoints]] to a candidate set.
 4. Apply `order_by` to sort the candidate set.
 5. Apply ADR-0019 EMA gate (skip endpoints below threshold).
-6. Apply ADR-0021 Thompson sampling (if enabled) within the sorted set.
-7. Dispatch to chosen endpoint. ADR-0020 hedge timer starts in parallel.
+6. Apply the deterministic load policy (`first`, `weighted`, `cheapest`, `fastest`, etc.).
+7. Dispatch to chosen endpoint. ADR-0020 hedge timer starts only if hedging is enabled and its spend/audit preconditions pass.
 ```
 
 ### Migration tool
 
-`grob preset migrate-legacy <input.toml> <output.toml>` converts a v0.36 config in-place:
+A future routing migration command converts a legacy config into the new schema:
 
 - For each `[[providers]]` with `models = [...]` → emit one `[[endpoints]]` per (provider, model) pair, defaults filled from a knowledge base shipped in the binary.
 - For each `[[models]]` priority chain → emit a `[[policies]]` with `when = { request.model_name = "..." }` and `select = { provider_in = [...] }` ordered by the original priorities.
 - For each `[[tiers]]` → emit a `[[policies]]` block with the tier's matchers as `when`.
 - `[endpoints.compliance]` blocks are NOT auto-populated (the legacy schema has no compliance metadata); migrated configs land with empty compliance blocks. The diff report calls this out so security-prevails ops can fill them in manually.
 - Print a diff report at the end: which signals were preserved, which require manual review (especially compliance blocks).
+
+### Phase 0 adapter semantics
+
+The internal adapter exposes two read-only collections:
+
+- `EndpointInventory.endpoints`: exact `(provider, actual_model)` endpoints
+  from `[[models.mappings]]`, exact provider inventory entries from legacy
+  `providers.models`, and wildcard pass-through endpoints for
+  `pass_through = true`.
+- `EndpointInventory.policies`: model policies with endpoint IDs in legacy
+  priority order, plus tier policies that preserve `providers` order and expose
+  known provider inventory.
+
+Tier policies deliberately keep `provider_order`: in the current resolver,
+`[[tiers]]` resolves the upstream model at request time by looking at the
+requested logical model and the selected provider. Pretending that every tier
+has fixed endpoint IDs would be a migration bug.
 
 ### Compliance metadata
 
@@ -274,15 +306,16 @@ This gives compliance teams a per-request proof that the routing decision satisf
 ### Added
 
 - **Routing schema** (ADR-0022): new `[[endpoints]]` and `[[policies]]`
-  primitives ship as the preferred routing config. Both schemas parse;
-  legacy is auto-converted in memory at startup.
+  primitives ship as the preferred routing config after the internal adapter
+  has been validated. Both schemas parse; legacy is auto-converted in memory
+  at startup.
 
 ### Deprecated
 
 - The legacy `[[models]]`, `[[tiers]]`, and per-provider `models = [...]`
   syntax are deprecated. Auto-migration runs at startup with a warn-level
   log line. Removal scheduled for the 10th minor release after this one.
-  Run `grob preset migrate-legacy ~/.grob/config.toml` to convert in place.
+  Run the routing migration command to convert in place.
 ```
 
 **Releases N+1..N+9 (intermediate, repeat the deprecation banner)**:
@@ -291,7 +324,7 @@ This gives compliance teams a per-request proof that the routing decision satisf
 ### Deprecated (reminder)
 
 - Legacy routing schema removal in **K minor releases** (where K = 9, 8, 7…).
-  Migration tool: `grob preset migrate-legacy`. See ADR-0022.
+  Migration tool: see ADR-0022.
 ```
 
 **Release N+10 (removal)**:
@@ -302,7 +335,7 @@ This gives compliance teams a per-request proof that the routing decision satisf
 - **Legacy routing schema removed** (ADR-0022, deprecated since release N).
   Configs still using `[[models]]` / `[[tiers]]` / `models = [...]` fail at
   startup with an actionable error. Migration tool unchanged:
-  `grob preset migrate-legacy ~/.grob/config.toml`. Operators who ignored
+  the routing migration command. Operators who ignored
   the 9 prior deprecation warnings: please open an issue with your config
   and we will prioritize your manual conversion.
 ```
@@ -326,7 +359,7 @@ This gives compliance teams a per-request proof that the routing decision satisf
 ## Implementation Notes
 
 - New module `src/routing/policy/` containing parsers, matchers, and dispatchers.
-- Migration tool: `src/preset/migrate_legacy.rs`, exposed via `grob preset migrate-legacy`.
+- Migration tool: not implemented. Proposed location and command name should be decided by the adapter/migration ADR, not hardcoded here.
 - Old code paths to remove: `src/server/helpers.rs::resolve_provider_mappings`, `src/routing/classify::tier_match`, the legacy `[[tiers]]` parser.
 - The 7 shipped presets (`perf`, `ultra-cheap`, `eu-eco`, `eu-pro`, `eu-max`, `gdpr`, `eu-ai-act`) must be rewritten to the new schema as part of this PR.
 - Snapshot tests in `tests/enterprise/preset_snapshot_test.rs` regenerate against the new schema.
@@ -342,7 +375,7 @@ This gives compliance teams a per-request proof that the routing decision satisf
 
 10-version auto-migration window:
 
-- **Release N** (announcement): both schemas parse. Legacy is auto-converted in memory at startup with a single warn-level log line per config. Migration tool `grob preset migrate-legacy` available standalone for operators who want to convert their on-disk config explicitly.
+- **Release N** (announcement): both schemas parse. Legacy is auto-converted in memory at startup with a single warn-level log line per config. A standalone routing migration command is available for operators who want to convert their on-disk config explicitly.
 - **Releases N+1..N+9**: legacy parser remains, deprecation warning repeats with the remaining version count. Each release notes the count in the CHANGELOG.
 - **Release N+10**: legacy parser removed. Configs still in legacy format fail at startup with an actionable error. The migration tool itself remains shipped indefinitely for late adopters who need to convert an old archived config.
 
@@ -351,7 +384,7 @@ Auto-migration behavior on legacy startup:
 ```
 [WARN grob::config] Your config uses the deprecated [[models]] / [[tiers]] schema.
                     Auto-migrating to [[endpoints]] / [[policies]] in memory for this run.
-                    Run `grob preset migrate-legacy ~/.grob/config.toml` to convert in place.
+                    Run the routing migration command to convert in place.
                     Legacy schema will be REMOVED in 9 minor releases (see ADR-0022).
 ```
 
@@ -430,7 +463,7 @@ Recommended trust setup: shipped trading-policy templates in `presets/trading.to
 The 10-version auto-migration window covers compliance review cycles. Mitigations baked into this ADR:
 
 - **Both schemas valid for ~12-18 calendar months** (10 minor releases at typical monthly cadence). Security teams have multiple validation cycles to test the new schema in staging against existing policies before the legacy parser is removed.
-- **Auto-migration is deterministic and verifiable** — the in-memory transformation must produce byte-identical routing decisions vs the legacy parser on a deterministic test corpus. CI gates this via a `grob preset migrate-legacy --verify` invocation that runs against a corpus stored at `tests/migration_corpus/`.
+- **Auto-migration is deterministic and verifiable** — the in-memory transformation must produce byte-identical routing decisions vs the legacy parser on a deterministic test corpus. CI gates this through the routing migration verifier against a corpus stored at `tests/migration_corpus/`.
 - **Audit-trail continuity**: requests previously logged under `tier=trivial` continue to log under `policy=trivial-cheapest-first` (or whatever the migrated policy name is). The migration tool emits a `routing_signal_mapping.toml` artifact that the audit-log post-processor uses to reconcile pre-migration and post-migration traffic in compliance reports.
 - **Structured `[endpoints.compliance]` block** (instead of a single `trust_zone` field): every endpoint declares 5 compliance dimensions in a typed sub-table — see *Compliance metadata* below.
 - **Compliance lint mode**: `grob policy validate --strict` rejects any policy whose `select` clause does not gate on at least one compliance field (the operator chooses which fields are mandatory via a configurable list; see *Compliance metadata*). Default off; enable in security-prevails deployments via `[router.compliance] strict = true`.
