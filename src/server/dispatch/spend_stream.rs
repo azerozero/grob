@@ -102,10 +102,31 @@ struct StreamUsage {
     /// ~4-chars/token heuristic is coarse enough that the ASCII-dominant SSE
     /// text makes the two effectively equal.
     output_bytes: usize,
-    /// Accumulated response text, captured ONLY when tracing is enabled (else
-    /// `None`, keeping the hot path allocation-free). Properly JSON-decoded from
-    /// each `text_delta` so escapes survive, unlike the coarse byte counter.
-    output_text: Option<String>,
+    /// Accumulated response content (text, `tool_use` calls, thinking) for the
+    /// `res` trace, captured ONLY when tracing is enabled (else `None`, keeping
+    /// the hot path allocation-free). Each block mirrors an Anthropic content
+    /// block so the streamed trace matches the non-streaming shape.
+    trace: Option<Vec<TraceBlock>>,
+}
+
+/// One outgoing content block accumulated for the streaming `res` trace.
+///
+/// Mirrors the Anthropic content-block variants so the assembled trace shows
+/// exactly what the model produced — prose, the edits/commands it asked the
+/// client to run (`tool_use`, which includes Claude Code's `WebSearch`), and its
+/// thinking — not just the prose.
+enum TraceBlock {
+    /// Assistant prose (`text_delta`).
+    Text(String),
+    /// Extended-thinking text (`thinking_delta`).
+    Thinking(String),
+    /// A tool call: `id`/`name` from `content_block_start`, arguments assembled
+    /// from the `input_json_delta` partial-JSON fragments.
+    ToolUse {
+        id: String,
+        name: String,
+        input: String,
+    },
 }
 
 /// Stream adapter that records spend on termination without altering bytes.
@@ -136,16 +157,16 @@ where
 {
     /// Wraps an inner SSE byte stream to record spend on completion.
     pub(crate) fn new(inner: S, ctx: SpendStreamContext) -> Self {
-        // Capture the response body only when tracing is active, so the common
+        // Capture the response content only when tracing is active, so the common
         // path stays allocation-free.
-        let output_text = (ctx.trace_id.is_some()
+        let trace: Option<Vec<TraceBlock>> = (ctx.trace_id.is_some()
             && ctx.state.observability.message_tracer.is_enabled())
-        .then(String::new);
+        .then(Vec::new);
         Self {
             inner,
             ctx,
             usage: StreamUsage {
-                output_text,
+                trace,
                 ..Default::default()
             },
             carry: String::new(),
@@ -193,7 +214,11 @@ fn scan_chunk(chunk: &str, carry: &mut String, usage: &mut StreamUsage) {
         // Output text accumulation: only `text_delta` deltas carry billable text.
         if memmem::find(complete.as_bytes(), b"text_delta").is_some() {
             accumulate_text_deltas(complete, usage);
-            collect_response_text(complete, usage);
+        }
+        // Trace capture (text + tool calls + thinking): only when tracing is on,
+        // so the common path never parses these events.
+        if usage.trace.is_some() {
+            collect_traced_content(complete, usage);
         }
         // Provider usage: present only in `message_start` / `message_delta`.
         if memmem::find(complete.as_bytes(), b"\"usage\"").is_some() {
@@ -221,57 +246,167 @@ fn flush_carry(carry: &mut String, usage: &mut StreamUsage) {
     let tail = std::mem::take(carry);
     if memmem::find(tail.as_bytes(), b"text_delta").is_some() {
         accumulate_text_deltas(&tail, usage);
-        collect_response_text(&tail, usage);
+    }
+    if usage.trace.is_some() {
+        collect_traced_content(&tail, usage);
     }
     if memmem::find(tail.as_bytes(), b"\"usage\"").is_some() {
         accumulate_usage_events(&tail, usage);
     }
 }
 
-/// Appends the JSON-decoded text of every `text_delta` event to the trace buffer.
+/// Accumulates the outgoing Anthropic SSE into ordered content blocks for tracing.
 ///
-/// Runs only when tracing is enabled (`usage.output_text` is `Some`). Unlike the
-/// coarse byte counter, it parses each event so escaped characters are preserved
-/// verbatim in the recorded response body.
-fn collect_response_text(buffer: &str, usage: &mut StreamUsage) {
-    let Some(buf) = usage.output_text.as_mut() else {
+/// Runs only when tracing is enabled (`usage.trace` is `Some`). Captures text,
+/// tool calls (`name` + arguments), and thinking, so the `res` trace shows
+/// exactly what the model produced — including the edits/commands it asked the
+/// client to run — not just the prose. Each event is JSON-parsed; acceptable
+/// because tracing is an opt-in debug feature off the production hot path.
+fn collect_traced_content(buffer: &str, usage: &mut StreamUsage) {
+    let Some(blocks) = usage.trace.as_mut() else {
         return;
     };
     for event in crate::providers::streaming::parse_sse_events(buffer) {
         let Ok(json) = serde_json::from_str::<serde_json::Value>(&event.data) else {
             continue;
         };
-        if json
-            .pointer("/delta/type")
-            .and_then(serde_json::Value::as_str)
-            == Some("text_delta")
-        {
-            if let Some(text) = json
-                .pointer("/delta/text")
-                .and_then(serde_json::Value::as_str)
-            {
-                buf.push_str(text);
+        // A missing index defaults to block 0 (single-block turns may omit it).
+        let index = json
+            .pointer("/index")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as usize;
+        match json.pointer("/type").and_then(serde_json::Value::as_str) {
+            Some("content_block_start") => {
+                let cb = json.pointer("/content_block");
+                let field = |name: &str| {
+                    cb.and_then(|c| c.pointer(name))
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                let block = match cb
+                    .and_then(|c| c.pointer("/type"))
+                    .and_then(serde_json::Value::as_str)
+                {
+                    // `server_tool_use` is the server-side variant (e.g. hosted
+                    // web search); record it the same as a client `tool_use`.
+                    Some("tool_use") | Some("server_tool_use") => TraceBlock::ToolUse {
+                        id: field("/id"),
+                        name: field("/name"),
+                        input: String::new(),
+                    },
+                    Some("thinking") => TraceBlock::Thinking(String::new()),
+                    _ => TraceBlock::Text(String::new()),
+                };
+                *ensure_block(blocks, index) = block;
+            }
+            Some("content_block_delta") => {
+                if let Some(delta) = json.pointer("/delta") {
+                    append_delta(ensure_block(blocks, index), delta);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Returns the block at `index`, growing the vec with empty text placeholders.
+///
+/// Anthropic emits blocks with sequential 0-based indices, so the index maps
+/// directly to a vec position; a placeholder covers a delta that races ahead of
+/// its `content_block_start` (not observed in practice, but keeps this total).
+fn ensure_block(blocks: &mut Vec<TraceBlock>, index: usize) -> &mut TraceBlock {
+    while blocks.len() <= index {
+        blocks.push(TraceBlock::Text(String::new()));
+    }
+    &mut blocks[index]
+}
+
+/// Appends a `content_block_delta` payload to its block, matched by delta type.
+///
+/// A delta whose type does not match the block variant is ignored (malformed
+/// stream); in a well-formed stream the `content_block_start` fixed the variant.
+fn append_delta(block: &mut TraceBlock, delta: &serde_json::Value) {
+    let delta_type = delta.pointer("/type").and_then(serde_json::Value::as_str);
+    let field = |name: &str| delta.pointer(name).and_then(serde_json::Value::as_str);
+    match block {
+        TraceBlock::Text(s) => {
+            if delta_type == Some("text_delta") {
+                if let Some(t) = field("/text") {
+                    s.push_str(t);
+                }
+            }
+        }
+        TraceBlock::Thinking(s) => {
+            if delta_type == Some("thinking_delta") {
+                if let Some(t) = field("/thinking") {
+                    s.push_str(t);
+                }
+            }
+        }
+        TraceBlock::ToolUse { input, .. } => {
+            if delta_type == Some("input_json_delta") {
+                if let Some(j) = field("/partial_json") {
+                    input.push_str(j);
+                }
             }
         }
     }
 }
 
-/// Writes the accumulated response body as a `res` trace entry on termination.
+/// Assembles accumulated blocks into the Anthropic-shaped `content` array.
 ///
-/// No-op unless tracing captured text (`output_text` is `Some`) and the context
+/// `tool_use` arguments are the concatenated `input_json_delta` fragments parsed
+/// back into a JSON value; a fragment that does not parse (empty or truncated) is
+/// preserved verbatim as a string so nothing the model emitted is lost.
+fn build_trace_content(blocks: &[TraceBlock]) -> serde_json::Value {
+    let arr: Vec<serde_json::Value> = blocks
+        .iter()
+        .map(|b| match b {
+            TraceBlock::Text(text) => serde_json::json!({ "type": "text", "text": text }),
+            TraceBlock::Thinking(thinking) => {
+                serde_json::json!({ "type": "thinking", "thinking": thinking })
+            }
+            TraceBlock::ToolUse { id, name, input } => {
+                let input_val = serde_json::from_str::<serde_json::Value>(input)
+                    .unwrap_or_else(|_| serde_json::Value::String(input.clone()));
+                serde_json::json!({ "type": "tool_use", "id": id, "name": name, "input": input_val })
+            }
+        })
+        .collect();
+    serde_json::Value::Array(arr)
+}
+
+/// Writes the accumulated response content as a `res` trace entry on termination.
+///
+/// No-op unless tracing captured blocks (`usage.trace` is `Some`) and the context
 /// carries a `trace_id` correlating it to the `req` entry.
 fn trace_stream_response(ctx: &SpendStreamContext, usage: &StreamUsage) {
-    let (Some(trace_id), Some(text)) = (ctx.trace_id.as_ref(), usage.output_text.as_ref()) else {
+    let (Some(trace_id), Some(blocks)) = (ctx.trace_id.as_ref(), usage.trace.as_ref()) else {
         return;
     };
     let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
-    ctx.state.observability.message_tracer.trace_response_text(
-        trace_id,
-        text.clone(),
-        usage.input_tokens,
-        usage.output_tokens,
-        latency_ms,
-    );
+    let content = build_trace_content(blocks);
+    // A turn that emitted any tool call stops on "tool_use"; otherwise end_turn.
+    let stop_reason = if blocks
+        .iter()
+        .any(|b| matches!(b, TraceBlock::ToolUse { .. }))
+    {
+        "tool_use"
+    } else {
+        "end_turn"
+    };
+    ctx.state
+        .observability
+        .message_tracer
+        .trace_response_stream(
+            trace_id,
+            content,
+            stop_reason,
+            usage.input_tokens,
+            usage.output_tokens,
+            latency_ms,
+        );
 }
 
 /// Sums the byte length of every `text_delta` text value in the buffer.
@@ -515,31 +650,84 @@ mod tests {
     }
 
     #[test]
-    fn collects_response_text_with_escapes_when_tracing() {
+    fn collects_text_with_escapes_when_tracing() {
         let sse = concat!(
             "event: content_block_delta\n",
-            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
             "event: content_block_delta\n",
-            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\" \\\"world\\\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\" \\\"world\\\"\"}}\n\n",
         );
         let mut usage = StreamUsage {
-            output_text: Some(String::new()),
+            trace: Some(Vec::new()),
             ..Default::default()
         };
         let mut carry = String::new();
         scan_chunk(sse, &mut carry, &mut usage);
         // Escapes are JSON-decoded into the trace, unlike the coarse byte counter.
-        assert_eq!(usage.output_text.as_deref(), Some("Hello \"world\""));
+        let content = build_trace_content(usage.trace.as_ref().unwrap());
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "Hello \"world\"");
     }
 
     #[test]
-    fn skips_text_collection_when_tracing_disabled() {
+    fn collects_tool_use_when_tracing() {
+        // Text, then an Edit tool call whose arguments are split across two
+        // input_json_delta fragments: the trace must show the tool name and the
+        // arguments reassembled into a parsed object.
+        let sse = concat!(
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"editing\"}}\n\n",
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"Edit\",\"input\":{}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"file_path\\\":\\\"a.rs\\\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"}\"}}\n\n",
+        );
+        let mut usage = StreamUsage {
+            trace: Some(Vec::new()),
+            ..Default::default()
+        };
+        let mut carry = String::new();
+        scan_chunk(sse, &mut carry, &mut usage);
+        let content = build_trace_content(usage.trace.as_ref().unwrap());
+        assert_eq!(content[0]["text"], "editing");
+        assert_eq!(content[1]["type"], "tool_use");
+        assert_eq!(content[1]["name"], "Edit");
+        assert_eq!(content[1]["id"], "toolu_1");
+        // Concatenated partial_json fragments parsed back into an object.
+        assert_eq!(content[1]["input"]["file_path"], "a.rs");
+    }
+
+    #[test]
+    fn collects_thinking_when_tracing() {
+        let sse = concat!(
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"hmm\"}}\n\n",
+        );
+        let mut usage = StreamUsage {
+            trace: Some(Vec::new()),
+            ..Default::default()
+        };
+        let mut carry = String::new();
+        scan_chunk(sse, &mut carry, &mut usage);
+        let content = build_trace_content(usage.trace.as_ref().unwrap());
+        assert_eq!(content[0]["type"], "thinking");
+        assert_eq!(content[0]["thinking"], "hmm");
+    }
+
+    #[test]
+    fn skips_trace_collection_when_disabled() {
         let sse = concat!(
             "event: content_block_delta\n",
             "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n",
         );
-        let usage = scan_all(sse); // output_text defaults to None
-        assert!(usage.output_text.is_none());
+        let usage = scan_all(sse); // trace defaults to None
+        assert!(usage.trace.is_none());
         assert_eq!(usage.output_bytes, 2); // byte counter still runs
     }
 
