@@ -24,8 +24,11 @@ pub async fn cmd_exec(
             {
                 let store = std::sync::Arc::new(store);
                 if let Ok(token_store) = crate::auth::TokenStore::with_store(store) {
-                    let statuses =
-                        crate::auth::auto_flow::detect_credentials(&config.providers, &token_store);
+                    let statuses = crate::auth::auto_flow::detect_exec_credentials(
+                        &config.providers,
+                        &token_store,
+                        &cmd,
+                    );
                     let has_missing = statuses
                         .iter()
                         .any(|s| !matches!(s, crate::auth::auto_flow::CredentialStatus::Ready));
