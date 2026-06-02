@@ -250,6 +250,7 @@ pub(super) async fn dispatch_streaming(
                 is_subscription: attempt.is_subscription,
                 estimated_input_tokens,
                 start_time: ctx.start_time,
+                trace_id: ctx.trace_id.clone(),
             };
             let accounted =
                 super::spend_stream::SpendStream::new(stream_response.stream, spend_ctx);

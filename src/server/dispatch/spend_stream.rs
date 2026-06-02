@@ -81,6 +81,10 @@ pub(crate) struct SpendStreamContext {
     pub estimated_input_tokens: u32,
     /// Wall-clock instant the request started, for the latency metric.
     pub start_time: std::time::Instant,
+    /// Trace-correlation id, set when request/response tracing is enabled. When
+    /// present (and the tracer is active), the accumulated response text is
+    /// written as a `res` trace entry on termination.
+    pub trace_id: Option<String>,
 }
 
 /// Usage observed while streaming, used to compute spend on termination.
@@ -98,6 +102,10 @@ struct StreamUsage {
     /// ~4-chars/token heuristic is coarse enough that the ASCII-dominant SSE
     /// text makes the two effectively equal.
     output_bytes: usize,
+    /// Accumulated response text, captured ONLY when tracing is enabled (else
+    /// `None`, keeping the hot path allocation-free). Properly JSON-decoded from
+    /// each `text_delta` so escapes survive, unlike the coarse byte counter.
+    output_text: Option<String>,
 }
 
 /// Stream adapter that records spend on termination without altering bytes.
@@ -128,10 +136,18 @@ where
 {
     /// Wraps an inner SSE byte stream to record spend on completion.
     pub(crate) fn new(inner: S, ctx: SpendStreamContext) -> Self {
+        // Capture the response body only when tracing is active, so the common
+        // path stays allocation-free.
+        let output_text = (ctx.trace_id.is_some()
+            && ctx.state.observability.message_tracer.is_enabled())
+        .then(String::new);
         Self {
             inner,
             ctx,
-            usage: StreamUsage::default(),
+            usage: StreamUsage {
+                output_text,
+                ..Default::default()
+            },
             carry: String::new(),
             recorded: false,
         }
@@ -177,6 +193,7 @@ fn scan_chunk(chunk: &str, carry: &mut String, usage: &mut StreamUsage) {
         // Output text accumulation: only `text_delta` deltas carry billable text.
         if memmem::find(complete.as_bytes(), b"text_delta").is_some() {
             accumulate_text_deltas(complete, usage);
+            collect_response_text(complete, usage);
         }
         // Provider usage: present only in `message_start` / `message_delta`.
         if memmem::find(complete.as_bytes(), b"\"usage\"").is_some() {
@@ -204,10 +221,57 @@ fn flush_carry(carry: &mut String, usage: &mut StreamUsage) {
     let tail = std::mem::take(carry);
     if memmem::find(tail.as_bytes(), b"text_delta").is_some() {
         accumulate_text_deltas(&tail, usage);
+        collect_response_text(&tail, usage);
     }
     if memmem::find(tail.as_bytes(), b"\"usage\"").is_some() {
         accumulate_usage_events(&tail, usage);
     }
+}
+
+/// Appends the JSON-decoded text of every `text_delta` event to the trace buffer.
+///
+/// Runs only when tracing is enabled (`usage.output_text` is `Some`). Unlike the
+/// coarse byte counter, it parses each event so escaped characters are preserved
+/// verbatim in the recorded response body.
+fn collect_response_text(buffer: &str, usage: &mut StreamUsage) {
+    let Some(buf) = usage.output_text.as_mut() else {
+        return;
+    };
+    for event in crate::providers::streaming::parse_sse_events(buffer) {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(&event.data) else {
+            continue;
+        };
+        if json
+            .pointer("/delta/type")
+            .and_then(serde_json::Value::as_str)
+            == Some("text_delta")
+        {
+            if let Some(text) = json
+                .pointer("/delta/text")
+                .and_then(serde_json::Value::as_str)
+            {
+                buf.push_str(text);
+            }
+        }
+    }
+}
+
+/// Writes the accumulated response body as a `res` trace entry on termination.
+///
+/// No-op unless tracing captured text (`output_text` is `Some`) and the context
+/// carries a `trace_id` correlating it to the `req` entry.
+fn trace_stream_response(ctx: &SpendStreamContext, usage: &StreamUsage) {
+    let (Some(trace_id), Some(text)) = (ctx.trace_id.as_ref(), usage.output_text.as_ref()) else {
+        return;
+    };
+    let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
+    ctx.state.observability.message_tracer.trace_response_text(
+        trace_id,
+        text.clone(),
+        usage.input_tokens,
+        usage.output_tokens,
+        latency_ms,
+    );
 }
 
 /// Sums the byte length of every `text_delta` text value in the buffer.
@@ -414,6 +478,7 @@ where
                     // termination is never blocked on the spend mutex / disk.
                     flush_carry(this.carry, this.usage);
                     record_stream_spend(this.ctx, this.usage);
+                    trace_stream_response(this.ctx, this.usage);
                 }
                 Poll::Ready(None)
             }
@@ -447,6 +512,35 @@ mod tests {
         assert!(usage.saw_usage);
         assert_eq!(usage.input_tokens, 42);
         assert_eq!(usage.output_tokens, 17);
+    }
+
+    #[test]
+    fn collects_response_text_with_escapes_when_tracing() {
+        let sse = concat!(
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\" \\\"world\\\"\"}}\n\n",
+        );
+        let mut usage = StreamUsage {
+            output_text: Some(String::new()),
+            ..Default::default()
+        };
+        let mut carry = String::new();
+        scan_chunk(sse, &mut carry, &mut usage);
+        // Escapes are JSON-decoded into the trace, unlike the coarse byte counter.
+        assert_eq!(usage.output_text.as_deref(), Some("Hello \"world\""));
+    }
+
+    #[test]
+    fn skips_text_collection_when_tracing_disabled() {
+        let sse = concat!(
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n",
+        );
+        let usage = scan_all(sse); // output_text defaults to None
+        assert!(usage.output_text.is_none());
+        assert_eq!(usage.output_bytes, 2); // byte counter still runs
     }
 
     #[test]
@@ -583,6 +677,7 @@ mod tests {
             output_tokens: 50,
             saw_usage: true,
             output_bytes: 9999,
+            ..Default::default()
         };
         assert_eq!(resolve_billed_tokens(&usage, true, 7), Some((100, 50)));
         assert_eq!(resolve_billed_tokens(&usage, false, 7), Some((100, 50)));

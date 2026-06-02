@@ -118,6 +118,24 @@ pub trait Tracer: Send + Sync {
 
     /// Records an error trace entry.
     fn trace_error(&self, id: &str, error: &str);
+
+    /// Records a streaming response assembled from accumulated text.
+    ///
+    /// Default no-op so non-file tracers (mocks) need not implement it.
+    fn trace_response_text(
+        &self,
+        _id: &str,
+        _text: String,
+        _input_tokens: u32,
+        _output_tokens: u32,
+        _latency_ms: u64,
+    ) {
+    }
+
+    /// Returns whether tracing is active. Default `false`.
+    fn is_enabled(&self) -> bool {
+        false
+    }
 }
 
 // ── Spend Tracking ──
