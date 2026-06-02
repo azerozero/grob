@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.65](https://github.com/azerozero/grob/compare/v0.36.64...v0.36.65) - 2026-06-02
+
+### Added
+
+- *(routing)* add endpoint inventory adapter
+
+### Fixed
+
+- converge routing and operational guardrails
+
 ## [0.36.64](https://github.com/azerozero/grob/compare/v0.36.63...v0.36.64) - 2026-06-02
 
 ### Added
