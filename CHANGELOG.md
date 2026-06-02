@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.63](https://github.com/azerozero/grob/compare/v0.36.62...v0.36.63) - 2026-06-02
+
+### Added
+
+- *(tracing)* trace streaming responses to the JSONL file
+
 ## [0.36.62](https://github.com/azerozero/grob/compare/v0.36.61...v0.36.62) - 2026-06-01
 
 ### Added
