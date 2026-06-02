@@ -8,6 +8,15 @@ use crate::providers::ProviderResponse;
 
 use super::types::*;
 
+fn internal_metadata(
+    metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+) -> Option<std::collections::HashMap<String, serde_json::Value>> {
+    metadata.and_then(|mut values| {
+        values.retain(|key, _| key == "grob_hint");
+        (!values.is_empty()).then_some(values)
+    })
+}
+
 /// Extracts text from [`InputContent`].
 fn extract_input_text(content: &InputContent) -> String {
     match content {
@@ -220,7 +229,7 @@ pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<Canonic
         top_k: None,
         stop_sequences: None,
         stream: req.stream,
-        metadata: None,
+        metadata: internal_metadata(req.metadata),
         system: system_prompt,
         tools: req.tools.as_ref().map(|t| convert_tools(t)),
         tool_choice: None,
@@ -313,6 +322,7 @@ mod tests {
             temperature: None,
             top_p: None,
             max_output_tokens: None,
+            metadata: None,
             previous_response_id: None,
             store: None,
             parallel_tool_calls: None,
@@ -356,6 +366,7 @@ mod tests {
             temperature: None,
             top_p: None,
             max_output_tokens: None,
+            metadata: None,
             previous_response_id: None,
             store: None,
             parallel_tool_calls: None,

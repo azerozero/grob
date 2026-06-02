@@ -10,6 +10,10 @@ related: [ADR-0018, ADR-0019]
 
 # ADR-0020: Hedged Requests — Tail-Latency Reduction via Speculative Duplication
 
+## Implementation status
+
+Hedged requests remain proposed. No `src/routing/hedge.rs`, hedge config, cancellation-billing protocol document, or hedge provider preset is present in the current tree. Paths and commands below describe the target implementation and must not be read as available runtime features.
+
 ## Context and Problem Statement
 
 Provider tail latency (P95 / P99) is the silent UX killer for interactive Claude Code sessions. The median DeepSeek V4-Flash response lands at ~700ms; the P99 lands at 8s+ when the provider's queue saturates. From the user's seat, a 8-second pause feels like the agent is stuck.

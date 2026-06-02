@@ -391,14 +391,27 @@ fn tenant_jwt_claim_is_authoritative() {
     assert_ne!(claims.tenant_id(), claims_sub_only.tenant_id());
 }
 
-#[ignore = "TODO: ToolSpikeDetector lands in PR #308 (feat/anomaly-detection-tool-spike) \
-            and is not yet on this branch. Re-enable once the detector is merged \
-            and exposes a per-tenant `record_tool_call` / `is_blocked` API."]
 #[test]
 fn tenant_anomaly_detector_is_per_tenant() {
-    // REGRESSION GUARD: tenant A spiking 600 tool calls/min MUST be blocked
-    // independently of tenant B's traffic (50/min). The detector must key
-    // on `tenant_id`, not on global counters, otherwise one noisy tenant
-    // takes down every other tenant's tool-calling capability.
-    panic!("ToolSpikeDetector not yet present on this branch");
+    // REGRESSION GUARD: tenant A spiking tool calls MUST be blocked
+    // independently of tenant B's traffic. The detector must key on
+    // `tenant_id`, not on global counters, otherwise one noisy tenant takes
+    // down every other tenant's tool-calling capability.
+    use grob::security::tool_spike::{
+        resolve_key, SpikeAction, ToolSpikeConfig, ToolSpikeDetector,
+    };
+
+    let detector = ToolSpikeDetector::new(ToolSpikeConfig {
+        warn_per_min: 5,
+        block_per_min: 10,
+    });
+    let req = shared_request();
+    let tenant_a_key = resolve_key(&req, Some("tenant_a"));
+    let tenant_b_key = resolve_key(&req, Some("tenant_b"));
+
+    assert_eq!(detector.observe(&tenant_a_key, 10), SpikeAction::Block);
+    assert_eq!(detector.current_total(&tenant_a_key), 10);
+    assert_eq!(detector.current_total(&tenant_b_key), 0);
+    assert_eq!(detector.observe(&tenant_b_key, 4), SpikeAction::Allow);
+    assert_eq!(detector.current_total(&tenant_b_key), 4);
 }

@@ -89,13 +89,17 @@ The build uses `cargo-chef` for dependency caching and produces a `scratch`-base
 ### Run
 
 ```bash
+podman volume create grob-data
 podman run -d \
   --name grob \
   -p 8080:8080 \
+  -e GROB_CONFIG=/etc/grob/config.toml \
+  -e GROB_HOME=/var/lib/grob \
   -e ANTHROPIC_API_KEY=sk-ant-xxx \
   -e OPENROUTER_API_KEY=sk-or-xxx \
-  -v ~/.grob/config.toml:/config.toml:ro \
-  grob run --json-logs --host 0.0.0.0 --port 8080 --config /config.toml
+  -v ~/.grob/config.toml:/etc/grob/config.toml:ro \
+  -v grob-data:/var/lib/grob \
+  grob:latest
 ```
 
 The default entrypoint is `grob run --json-logs --host 0.0.0.0 --port 8080`. The container runs as UID 65534 (nobody).

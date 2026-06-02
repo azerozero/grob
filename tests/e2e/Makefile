@@ -65,20 +65,28 @@ all: up wait-jwks init-proxies test down
 .PHONY: images
 images:
 	@echo "=== Building images ==="
-	@podman image exists localhost/grob:e2e 2>/dev/null || \
-		(echo "  pulling grob..." && podman pull ghcr.io/azerozero/grob:latest && \
-		 podman tag ghcr.io/azerozero/grob:latest localhost/grob:e2e)
-	@podman image exists localhost/vidaimock:e2e 2>/dev/null || \
-		(echo "  building vidaimock..." && podman build -q -t localhost/vidaimock:e2e $(E2E_DIR)/images/vidaimock)
-	@podman image exists $(RUNNER_IMG) 2>/dev/null || \
-		(echo "  building runner..." && podman build -q -t $(RUNNER_IMG) $(E2E_DIR)/images/runner)
+	@if ! podman image exists localhost/grob:e2e 2>/dev/null; then \
+		echo "  pulling grob..."; \
+		podman pull ghcr.io/azerozero/grob:latest; \
+		podman tag ghcr.io/azerozero/grob:latest localhost/grob:e2e; \
+	fi
+	@if ! podman image exists localhost/vidaimock:e2e 2>/dev/null; then \
+		echo "  building vidaimock..."; \
+		podman build -q -t localhost/vidaimock:e2e $(E2E_DIR)/images/vidaimock; \
+	fi
+	@if ! podman image exists $(RUNNER_IMG) 2>/dev/null; then \
+		echo "  building runner..."; \
+		podman build -q -t $(RUNNER_IMG) $(E2E_DIR)/images/runner; \
+	fi
 	@echo "  images ready"
 
 .PHONY: up
 up: images
 	@echo ""
 	@echo "=== Starting pod ==="
-	@podman pod exists e2e-pod 2>/dev/null && podman pod rm -f e2e-pod >/dev/null 2>&1 || true
+	@if podman pod exists e2e-pod 2>/dev/null; then \
+		podman pod rm -f e2e-pod >/dev/null 2>&1; \
+	fi
 	@rm -rf $(E2E_DIR)/auth/keys $(E2E_DIR)/auth/tokens $(E2E_DIR)/auth/jwks.json $(E2E_DIR)/auth/nginx.conf
 	@mkdir -p /tmp/grob-audit
 	@export E2E_DIR=$(E2E_DIR) && envsubst '$${E2E_DIR}' < $(POD_MANIFEST) | podman play kube - >/dev/null

@@ -8,6 +8,10 @@ informed: []
 
 # ADR-0017: Sokolsky LogBackend — Cross-Plane Audit with N-of-N Signatures
 
+## Implementation status
+
+This ADR records the Sokolsky target architecture. The current tree does not ship a `src/features/log_backend/` module; the implemented audit surface is the signed local audit log in `src/security/audit_log.rs` plus encrypted export support in `src/features/log_export/`. Treat the Sokolsky paths below as proposed target paths until a follow-up implementation ADR or PR restores them.
+
 ## Context and Problem Statement
 
 Grob's audit trail must satisfy three requirements that are in tension:

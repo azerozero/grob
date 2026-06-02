@@ -1,0 +1,69 @@
+# grob → Codex (OAuth) — VERSION "LOGGED" : trace TOUT le trafic request/response.
+#
+# Identique à grob-openai.toml, + [server.tracing] qui écrit le CORPS COMPLET de
+# chaque requête entrante ET de chaque réponse sortante (aller + retour) dans un
+# JSONL lisible.
+#
+# Activer (remplace la prod sur le même port 13456) :
+#   grob -c ./grob-openai.toml stop                 # ou kill du PID prod
+#   grob -c ./grob-openai-logged.toml start -d
+#
+# Lire les traces en direct :
+#   tail -f ~/.grob/trace.jsonl | jq .
+#   tail -f ~/.grob/trace.jsonl | jq '{dir:.direction, model:.model, body:.body}'
+
+[server]
+host = "127.0.0.1"
+port = 13456
+log_level = "debug"   # debug = routing/endpoints visibles aussi dans grob.log
+
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000
+
+# >>> LOG TOUT : corps complet des requêtes entrantes + réponses sortantes <<<
+[server.tracing]
+enabled = true              # écrit chaque request/response dans le JSONL
+omit_system_prompt = false  # inclut AUSSI les system prompts (sinon omis car énormes)
+path = "~/.grob/trace.jsonl"
+max_size_mb = 200           # rotation à 200 MB (dev intense = gros volume)
+max_files = 5               # garde 5 fichiers tournants
+compress = false            # rotés non compressés (lisibles directement)
+encrypt = false             # JSONL EN CLAIR → lisible avec jq/tail. Mets true pour
+                            # chiffrer au repos (lecture via `grob logs`).
+
+[[providers]]
+name = "chatgpt-codex"
+provider_type = "openai"
+auth_type = "oauth"
+oauth_provider = "openai-codex"
+enabled = true
+models = []
+service_tier = "priority"
+
+[[models]]
+name = "dev"
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.5"
+priority = 1
+
+[[models]]
+name = "codex"
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.3-codex"
+priority = 1
+
+[[models]]
+name = "fast"
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.4-mini"
+priority = 1
+
+[router]
+default = "dev"
+think = "codex"
+background = "fast"
+websearch = "dev"

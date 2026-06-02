@@ -23,9 +23,15 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const branch = context.payload.pull_request.head.ref;
-            const protectedPrefixes = ['main'];
-            if (protectedPrefixes.includes(branch)) {
+            const pr = context.payload.pull_request;
+            const branch = pr.head.ref;
+            const protectedNames = new Set(['main', 'master', 'develop', 'release']);
+            const protectedPrefixes = ['release/', 'hotfix/', 'dependabot/'];
+            if (pr.head.repo.full_name !== context.repo.owner + '/' + context.repo.repo) {
+              console.log(`Skipping branch from fork: ${pr.head.repo.full_name}:${branch}`);
+              return;
+            }
+            if (protectedNames.has(branch) || protectedPrefixes.some(prefix => branch.startsWith(prefix))) {
               console.log(`Skipping protected branch: ${branch}`);
               return;
             }
@@ -50,7 +56,8 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const protectedBranches = ['main'];
+            const protectedBranches = ['main', 'master', 'develop', 'release'];
+            const protectedPrefixes = ['release/', 'hotfix/', 'dependabot/'];
             // Patterns for branches that should be auto-cleaned.
             const stalePatterns = [/^release-plz-/, /^claude\//];
 
@@ -61,17 +68,18 @@ jobs:
             let deleted = 0;
             for (const branch of branches) {
               if (protectedBranches.includes(branch.name)) continue;
+              if (protectedPrefixes.some(prefix => branch.name.startsWith(prefix))) continue;
               if (!stalePatterns.some(p => p.test(branch.name))) continue;
 
               // Only delete if fully merged into main.
               try {
-                const { status } = await github.rest.repos.compareCommits({
+                const { data: comparison } = await github.rest.repos.compareCommits({
                   owner, repo,
                   base: 'main',
                   head: branch.name,
                 });
                 // ahead_by == 0 means all commits are in main.
-                if (status !== 'behind' && status !== 'identical') continue;
+                if (comparison.ahead_by !== 0) continue;
               } catch {
                 continue;
               }

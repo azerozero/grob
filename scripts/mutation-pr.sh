@@ -50,6 +50,20 @@ emit() {
   fi
 }
 
+select_timeout_bin() {
+  if command -v timeout >/dev/null 2>&1 && timeout --help 2>&1 | grep -q -- '--foreground'; then
+    printf 'timeout\n'
+    return 0
+  fi
+  if command -v gtimeout >/dev/null 2>&1; then
+    printf 'gtimeout\n'
+    return 0
+  fi
+
+  log "GNU timeout not found; install coreutils (gtimeout on macOS) to run mutation PR checks."
+  return 1
+}
+
 in_scope() {
   local file="$1" prefix
   for prefix in "${SCOPE_PREFIXES[@]}"; do
@@ -116,14 +130,19 @@ main() {
     mutants_args+=(--file "${f}")
   done
 
+  local timeout_bin
+  timeout_bin="$(select_timeout_bin)" || {
+    emit "status" "skipped-no-timeout"
+    exit 2
+  }
+
   local start_ts end_ts duration_s exit_code=0
   start_ts="$(date +%s)"
 
-  # `timeout --foreground` so SIGTERM propagates to cargo-mutants and its
-  # cargo subprocesses; `--preserve-status` so we can distinguish a real
-  # cargo-mutants failure from the wall-clock kill.
+  # GNU timeout's `--foreground` lets SIGTERM reach cargo-mutants and its cargo
+  # subprocesses. macOS runners use `gtimeout` from coreutils for the same CLI.
   set +e
-  timeout --foreground --preserve-status "${TIMEOUT_SECONDS}" \
+  "${timeout_bin}" --foreground --preserve-status "${TIMEOUT_SECONDS}" \
     cargo mutants \
       --package grob \
       --timeout "${PER_MUTANT_TIMEOUT}" \

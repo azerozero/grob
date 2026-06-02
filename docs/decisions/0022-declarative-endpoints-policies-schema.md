@@ -5,10 +5,14 @@ deciders: [azerozero]
 consulted: []
 informed: []
 supersedes: []
-related: [ADR-0018, ADR-0019, ADR-0020, ADR-0021]
+related: [ADR-0018, ADR-0019, ADR-0020]
 ---
 
 # ADR-0022: Declarative `[[endpoints]]` and `[[policies]]` — Routing Schema Rebuild
+
+## Implementation status
+
+This schema rebuild remains proposed. The current `AppConfig` still uses `[[providers]]`, `[[models]]`, and `[[tiers]]`; no `endpoints` top-level field or `grob preset migrate-legacy` command is implemented. ADR-0021 was rejected before a standalone ADR file was created, so Thompson-sampling mentions below are historical design context rather than implemented or separately documented behavior.
 
 ## Context and Problem Statement
 

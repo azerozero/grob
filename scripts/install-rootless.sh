@@ -8,6 +8,11 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 readonly SCRIPT_NAME
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+readonly REPO_ROOT
+readonly DEPLOY_DIR="${REPO_ROOT}/deploy"
 readonly GROB_DIR="${HOME}/.grob"
 readonly CONFIG_DIR="${GROB_DIR}/config"
 readonly DATA_DIR="${GROB_DIR}/data"
@@ -83,51 +88,42 @@ main() {
     echo "Creating default config..."
     cat > "${CONFIG_DIR}/config.toml" << 'EOF'
 # Grob Configuration
-# See docs/CONFIGURATION.md for full reference
+# See docs/reference/configuration.md for full reference.
 
 [server]
 host = "0.0.0.0"
 port = 8080
-metrics_port = 9090
+log_level = "info"
+
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000
 
 [auth]
-mode = "api_key"  # or "jwt" or "none"
+mode = "none"
+
+[router]
+default = "placeholder-model"
 
 [security]
-rate_limit_requests_per_second = 100
-rate_limit_burst = 200
-max_body_size = 10485760  # 10MB
+audit_dir = "/var/lib/grob/audit"
 
 [dlp]
 enabled = true
 scan_input = true
 scan_output = true
-
-[audit]
-enabled = true
-directory = "/var/lib/grob/audit"
-encrypt = true
-
-[log]
-level = "info"
-format = "json"
 EOF
   fi
 
   echo "Installing systemd unit files..."
-  if [ -f "grob.container" ]; then
-    cp grob.container "${QUADLET_DIR}/"
-  fi
-
-  if [ -f "grob.volume" ]; then
-    cp grob.volume "${QUADLET_DIR}/"
-  fi
+  cp "${DEPLOY_DIR}/grob.container" "${QUADLET_DIR}/"
+  cp "${DEPLOY_DIR}/grob.volume" "${QUADLET_DIR}/"
 
   echo "Reloading systemd..."
   systemctl --user daemon-reload
 
   echo "Enabling Grob service..."
-  systemctl --user enable grob 2>/dev/null || true
+  systemctl --user enable grob
 
   echo ""
   echo -e "${green}Installation complete!${nc}"

@@ -32,27 +32,40 @@ jobs:
             const SIGNATURES_PATH = 'signatures/cla.json';
             const SIGNATURES_BRANCH = 'cla-signatures';
 
-            // Determine PR number and author.
-            let prNumber, prAuthor;
-            if (context.eventName === 'issue_comment') {
-              // Only react to the magic phrase.
-              if (!context.payload.comment.body.trim().startsWith(CLA_SIGN_TEXT)) return;
-              if (!context.payload.issue.pull_request) return;
-              prNumber = context.payload.issue.number;
-              prAuthor = context.payload.comment.user.login;
-            } else {
-              prNumber = context.payload.pull_request.number;
-              prAuthor = context.payload.pull_request.user.login;
-            }
-
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+
+            // Determine PR number and author. Comment events must sign the PR
+            // author's CLA, not the commenter's, otherwise a third party could
+            // satisfy the status for someone else's contribution.
+            let prNumber, prAuthor, pr;
+            if (context.eventName === 'issue_comment') {
+              if (!context.payload.issue.pull_request) return;
+              const commentBody = context.payload.comment.body.trim();
+              if (commentBody !== CLA_SIGN_TEXT) return;
+
+              prNumber = context.payload.issue.number;
+              pr = (await github.rest.pulls.get({ owner, repo, pull_number: prNumber })).data;
+              prAuthor = pr.user.login;
+              const commenter = context.payload.comment.user.login;
+              if (commenter !== prAuthor) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: prNumber,
+                  body: `Thanks @${commenter}, but only the PR author (@${prAuthor}) can sign the CLA for this pull request.`,
+                });
+                return;
+              }
+            } else {
+              prNumber = context.payload.pull_request.number;
+              pr = context.payload.pull_request;
+              prAuthor = pr.user.login;
+            }
 
             // Check allowlist.
             if (ALLOWLIST.includes(prAuthor)) {
               await github.rest.repos.createCommitStatus({
                 owner, repo,
-                sha: (await github.rest.pulls.get({ owner, repo, pull_number: prNumber })).data.head.sha,
+                sha: pr.head.sha,
                 state: 'success',
                 context: 'CLA',
                 description: 'Allowlisted contributor',
@@ -126,7 +139,6 @@ jobs:
               });
 
               // Set success status.
-              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
               await github.rest.repos.createCommitStatus({
                 owner, repo,
                 sha: pr.head.sha,
@@ -138,7 +150,6 @@ jobs:
             }
 
             // Set status based on signature state.
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
             if (hasSigned) {
               await github.rest.repos.createCommitStatus({
                 owner, repo,

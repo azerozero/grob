@@ -14,10 +14,10 @@
 ## dispatch(ctx, request)
 
 **Module:** `src/server/dispatch/mod.rs`
-**Intention:** Execute the full request pipeline in a strict, ordered sequence: grob_hint harvesting (Step 0, header/MCP hint), DLP input scan, MCP tool calibration, pledge filtering, cache lookup, routing, provider mapping resolution (including Step 5.5 tier fan-out when a `[[tiers]]` matches), tool layer processing, cache hit check, fan-out (if configured), and finally the provider fallback loop. Returns either a streaming or complete response.
+**Intention:** Execute the full request pipeline in a strict, ordered sequence: grob_hint harvesting (Step 0: header/body/MCP hint), DLP input scan, tool-call spike guard, MCP tool calibration, pledge filtering, cache-key computation (salted with grob_hint when present), routing, grob_hint tier override, provider mapping resolution, tool layer processing, cache hit check, tier/model fan-out (if configured), and finally the provider fallback loop. Returns either a streaming or complete response.
 
 **Invariants:**
-- INV-1 (Pipeline order): Steps must execute in the documented order (Step 0 grob_hint -> DLP -> MCP -> pledge -> cache key -> route -> resolve mappings (+ Step 5.5 tier fan-out) -> tool layer -> cache hit -> fan-out -> provider loop). No step may be skipped except when gated by feature flags.
+- INV-1 (Pipeline order): Steps must execute in the documented order (Step 0 grob_hint -> DLP -> tool-spike guard -> MCP -> pledge -> cache key -> route -> grob_hint tier override -> resolve mappings -> tool layer -> cache hit -> tier/model fan-out -> provider loop). No step may be skipped except when gated by feature flags.
 - INV-2 (DLP before provider): DLP input scanning must always complete before any data is sent to an external provider. A DLP block must prevent the request from reaching any provider.
 - INV-3 (Fallback exhaustion): The provider loop must try all available mappings in order before returning an error. Circuit-broken providers are skipped, not retried.
 - INV-4 (Atomic routing): The routing decision is computed once and used for all provider attempts within a single dispatch. Re-routing mid-dispatch is not allowed.
@@ -28,12 +28,12 @@
 
 **Postconditions:**
 - On success: returns `DispatchResult` (Streaming, Complete, or FanOut)
-- On failure: returns `AppError` with a specific error variant
+- On failure: returns `RequestError` with a specific error variant
 - DLP events are emitted for every DLP action taken
 - Spend is recorded after a successful provider response. For **complete** responses this happens inline after the provider returns; for **streaming** responses the `SpendStream` wrapper records on stream termination (see `SpendStream::poll_next` below). Both paths record against the same tenant and routed model name.
 
 **Boundary behavior:**
-- No providers available: returns `AppError` (after exhausting all fallbacks)
+- No providers available: returns `RequestError` (after exhausting all fallbacks)
 - DLP blocks request: returns error before any provider is contacted
 - Cache hit on non-streaming: returns immediately without contacting provider
 
@@ -50,10 +50,10 @@
 ## Router::route(request)
 
 **Module:** `src/routing/classify/mod.rs`
-**Intention:** Classify an incoming request into a route type and resolve the target model name by evaluating rules in strict priority order: `grob_hint` header/MCP (Step 0) > WebSearch > Background > AutoMap > SubagentTag > PromptRules > Think > ComplexityTier (T-P1 classifier) > Default. Note: SubagentTag extracts a model from `<GROB-SUBAGENT-MODEL>` system prompt tags but returns `RouteType::Default` (no dedicated variant). The `complexity_tier` field on `RouteDecision` is populated when the stateless classifier matches, and feeds the tier fan-out layer downstream (Step 5.5 in `dispatch`).
+**Intention:** Classify an incoming request into a route type and resolve the target model name by evaluating rules in strict priority order: WebSearch > Background > AutoMap > SubagentTag > PromptRules > Think > ComplexityTier (T-P1 classifier) > Default. Note: SubagentTag extracts a model from `<GROB-SUBAGENT-MODEL>` system prompt tags but returns `RouteType::Default` (no dedicated variant). The `complexity_tier` field on `RouteDecision` is populated when the stateless classifier matches, then `dispatch` may override that tier from `grob_hint` before tier fan-out.
 
 **Invariants:**
-- INV-1 (Priority order): A higher-priority rule always wins. If a request matches both WebSearch and Think, WebSearch is returned. An explicit `grob_hint` always short-circuits classification.
+- INV-1 (Priority order): A higher-priority rule always wins. If a request matches both WebSearch and Think, WebSearch is returned. `grob_hint` is not evaluated inside `Router::route`; it is resolved in `dispatch` and overrides only the final `complexity_tier` after routing.
 - INV-2 (Determinism): Given the same request and config, `route()` always returns the same `RouteDecision`.
 - INV-3 (Auto-map mutation): Auto-mapping mutates `request.model` in place. This mutation must only happen if no higher-priority rule matched, and must happen before prompt-rule evaluation.
 - INV-4 (Single match): Exactly one route type is returned per call. The function never returns multiple matches.
@@ -96,6 +96,8 @@
 
 **Postconditions:**
 - Returns `Ok(CanonicalRequest)` with all messages converted
+- Preserves internal `metadata.grob_hint` until dispatch harvesting, while dropping unrelated client metadata before provider forwarding
+- Preserves OpenAI system/user/assistant message `name` fields in non-serialized request extensions for OpenAI provider roundtrips
 - Unsupported roles are skipped with a warning log
 
 **Boundary behavior:**
@@ -107,7 +109,7 @@
 - (none recorded yet)
 
 **Red flags to detect:**
-- New OpenAI field not mapped to canonical (silently dropped)
+- New OpenAI field not mapped to canonical or request extensions (silently dropped)
 - Tool message merge logic that breaks on non-consecutive tool messages
 - `unwrap()` on optional fields instead of graceful fallback
 

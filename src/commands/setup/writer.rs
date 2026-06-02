@@ -170,7 +170,8 @@ pub(in crate::commands::setup) fn apply_compliance(
             patch(config, "dlp", &[("enabled", true.into())])?;
         }
         Compliance::EuGdpr => {
-            std::fs::write(path, toml::to_string_pretty(config)?)?;
+            let serialized = toml::to_string_pretty(config)?;
+            crate::storage::atomic::write_atomic(path, serialized.as_bytes())?;
             crate::preset::overlay_compliance("eu-ai-act", path)?;
             return Ok(true);
         }
@@ -235,7 +236,8 @@ pub(in crate::commands::setup) fn write_config(choices: &Choices, path: &Path) -
         )?;
     }
 
-    std::fs::write(path, toml::to_string_pretty(&config)?)?;
+    let serialized = toml::to_string_pretty(&config)?;
+    crate::storage::atomic::write_atomic(path, serialized.as_bytes())?;
     Ok(())
 }
 

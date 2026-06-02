@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// OpenAI Chat Completions request format
 #[derive(Debug, Deserialize)]
@@ -28,6 +29,9 @@ pub struct OpenAIRequest {
     /// Controls how the model selects which tool to call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_choice: Option<serde_json::Value>,
+    /// Arbitrary request metadata, including internal routing hints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, serde_json::Value>>,
 
     // ── Extension fields (captured for lossless roundtrip) ──
     /// Structured output format (e.g. `json_schema`, `json_object`).

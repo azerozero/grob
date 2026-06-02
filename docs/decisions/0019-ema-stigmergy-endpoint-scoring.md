@@ -10,6 +10,10 @@ related: [ADR-0018]
 
 # ADR-0019: EMA Stigmergy — Adaptive Endpoint Health Scoring
 
+## Implementation status
+
+Adaptive scoring now lives in the security layer as `src/security/provider_scorer.rs`, configured by `[security] adaptive_scoring` and the `scoring_*` knobs in `src/cli/config/security.rs`. The earlier `[router.ema]` examples and `src/routing/ema.rs` path below are historical design notes, not the current operator-facing schema.
+
 ## Context and Problem Statement
 
 Grob currently routes via static priority chains in `[[models.mappings]]`. When a high-priority endpoint degrades — slow responses, sporadic 429s, regional outages — grob keeps hammering it on every request until the operator manually edits the config and reloads.

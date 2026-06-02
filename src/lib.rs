@@ -53,12 +53,13 @@ pub fn home_dir() -> Option<PathBuf> {
 ///
 /// ```
 /// use grob::expand_tilde;
+/// use std::path::PathBuf;
 ///
 /// // Absolute paths pass through unchanged.
-/// assert_eq!(grob::expand_tilde("/etc/grob.toml").to_str().unwrap(), "/etc/grob.toml");
+/// assert_eq!(expand_tilde("/etc/grob.toml"), PathBuf::from("/etc/grob.toml"));
 ///
 /// // Non-tilde relative paths pass through unchanged.
-/// assert_eq!(grob::expand_tilde("relative/path").to_str().unwrap(), "relative/path");
+/// assert_eq!(expand_tilde("relative/path"), PathBuf::from("relative/path"));
 /// ```
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {

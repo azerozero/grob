@@ -1,7 +1,9 @@
 # grob-kube.yml
 # Podman play kube compatible manifest for Grob LLM Proxy
-# Usage: podman play kube grob-kube.yml
-# Rootless: podman play kube --userns=keep-id grob-kube.yml
+# Usage: podman play kube deploy/grob-kube.yml
+# Rootless: podman play kube --userns=keep-id deploy/grob-kube.yml
+# Before using hostPath volumes, replace /var/lib/grob/* with absolute host paths.
+# Pre-create them and chown to UID/GID 65534; Kubernetes does not expand `~`.
 
 apiVersion: v1
 kind: Pod
@@ -10,11 +12,12 @@ metadata:
   labels:
     app: grob
 spec:
-  # Security context for rootless operation
+  # Security context matches the scratch image user (65534 = nobody). Pre-create
+  # hostPath directories and chown them to 65534 before running this manifest.
   securityContext:
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
     seccompProfile:
       type: RuntimeDefault
 
@@ -48,9 +51,9 @@ spec:
           cpu: "1000m"
 
       env:
-        - name: GROB_CONFIG_PATH
+        - name: GROB_CONFIG
           value: "/etc/grob/config.toml"
-        - name: GROB_DATA_DIR
+        - name: GROB_HOME
           value: "/var/lib/grob"
         - name: RUST_LOG
           value: "info"
@@ -101,21 +104,21 @@ spec:
         failureThreshold: 30
 
   volumes:
-    # Config from host (SELinux :Z for private unshared)
+    # Config from host. Replace with an absolute host path; `~` is not expanded.
     - name: config
       hostPath:
-        path: ~/.grob/config
-        type: DirectoryOrCreate
-    # Data directory
+        path: /var/lib/grob/config
+        type: Directory
+    # Data directory. Ensure UID/GID 65534 can write here.
     - name: data
       hostPath:
-        path: ~/.grob/data
-        type: DirectoryOrCreate
-    # Audit log directory (persistent)
+        path: /var/lib/grob/data
+        type: Directory
+    # Audit log directory (persistent). Ensure UID/GID 65534 can write here.
     - name: audit
       hostPath:
-        path: ~/.grob/audit
-        type: DirectoryOrCreate
+        path: /var/lib/grob/audit
+        type: Directory
     # Ephemeral tmp
     - name: tmp
       emptyDir: {}

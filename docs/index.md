@@ -128,6 +128,8 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Topic | File |
 |-------|------|
 | CI/CD release flow (PERT) | [`diagrams/ci-cd-pert.md`](diagrams/ci-cd-pert.md) |
+| Request/dispatch architecture | [`explanation/architecture.md`](explanation/architecture.md) |
+| DLP scanning pipeline | [`reference/dlp.md`](reference/dlp.md) |
 
 ## Version
 

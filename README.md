@@ -59,11 +59,11 @@ curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install
 
 Then:
 ```bash
-grob setup        # interactive wizard — picks providers + auth
+grob setup        # writes ~/.grob/config.toml (override with GROB_CONFIG or --config)
 grob exec -- claude
 ```
 
-That's it. Grob auto-starts, routes traffic, and stops when your tool exits.
+That's it. Grob auto-starts, routes traffic, and stops when your tool exits. To check a long-running instance, run `grob status` or `curl http://[::1]:13456/health`.
 
 ## DLP -- secrets never reach the provider
 
@@ -272,6 +272,7 @@ grob watch                Live traffic inspector (TUI dashboard)
 grob status               Service status + spend summary
 grob spend                Monthly spend breakdown
 grob key create/list/revoke  Manage virtual API keys
+grob secrets add/list/test    Manage encrypted upstream secrets
 grob validate             Test all providers with real API calls
 grob doctor               Run diagnostic checks
 grob preset list/apply    Manage presets
@@ -280,11 +281,19 @@ grob connect [provider]   Set up credentials interactively
 
 ## Container
 
+The image listens on container port `8080` and supports the same config path contract as the binary:
+
 ```bash
-docker run -e ANTHROPIC_API_KEY=sk-... ghcr.io/azerozero/grob:latest
+docker volume create grob-data
+docker run --rm -p 8080:8080 \
+  -v "$HOME/.grob/config.toml:/etc/grob/config.toml:ro" \
+  -v grob-data:/var/lib/grob \
+  -e GROB_CONFIG=/etc/grob/config.toml \
+  -e GROB_HOME=/var/lib/grob \
+  ghcr.io/azerozero/grob:latest
 ```
 
-6 MB image, `FROM scratch`, TLS bundled via rustls. No OS layer needed.
+Use `-p 13456:8080` if you want the native host default on the outside. 6 MB image, `FROM scratch`, TLS bundled via rustls. No OS layer needed.
 
 ## Project structure
 
@@ -314,8 +323,7 @@ src/
 │   ├── harness/         Record & replay sandwich testing
 │   ├── tool_layer/      Tool-calling abstraction layer
 │   ├── pledge/          Pledge-based capability restrictions
-│   ├── watch/           TUI dashboard (grob watch)
-│   ├── log_backend/     Structured audit log backend
+│   ├── watch/           TUI dashboard and live traffic inspector support
 │   └── log_export/      Encrypted audit log export
 ├── shared/              Cross-cutting modules (not tied to a single slice)
 │   ├── acme.rs          Automatic TLS certificate provisioning via ACME

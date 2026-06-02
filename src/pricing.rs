@@ -353,9 +353,13 @@ static PRICING_MAP: std::sync::LazyLock<
 ///
 /// ```
 /// use grob::pricing::pricing;
-/// let p = pricing("claude-opus-4-7").unwrap();
+///
+/// let Some(p) = pricing("claude-opus-4-7") else {
+///     return Err("known model should have pricing".into());
+/// };
 /// assert!(p.input_per_million > 0.0);
 /// assert!(pricing("unknown-model-xyz").is_none());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn pricing(model: &str) -> Option<&'static ModelPricing> {
     // Try exact match first (O(1), no allocation)

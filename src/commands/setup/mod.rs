@@ -375,7 +375,8 @@ async fn run_edit_section(config_path: &Path, section: &str, flags: &SetupFlags)
             let backup = config_path.with_extension("toml.backup");
             std::fs::copy(config_path, &backup)?;
         }
-        std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
+        let serialized = toml::to_string_pretty(&config)?;
+        crate::storage::atomic::write_atomic(config_path, serialized.as_bytes())?;
         println!("  Config updated: {}", config_path.display());
     } else {
         println!("  Dry run — no changes written.");

@@ -14,7 +14,7 @@ docker run -d \
   ghcr.io/azerozero/grob:latest
 ```
 
-The container runs `grob run --json-logs --host 0.0.0.0 --port 8080` by default.
+The container runs `grob run --json-logs --host 0.0.0.0 --port 8080` by default. Use `-p 13456:8080` if you want the native host default on the outside.
 
 ### With a config file
 
@@ -22,8 +22,9 @@ Mount your config:
 
 ```bash
 docker run -d \
-  -v ~/.grob/config.toml:/config.toml:ro \
-  -e GROB_CONFIG=/config.toml \
+  -v ~/.grob/config.toml:/etc/grob/config.toml:ro \
+  -e GROB_CONFIG=/etc/grob/config.toml \
+  -e GROB_HOME=/var/lib/grob \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   -p 8080:8080 \
   ghcr.io/azerozero/grob:latest
@@ -45,16 +46,21 @@ A sample manifest is provided in `deploy/grob-kube.yml`. Key points:
 
 - Use a Secret for API keys
 - Mount config via ConfigMap or use remote config URL
+- Set `GROB_CONFIG=/etc/grob/config.toml` and `GROB_HOME=/var/lib/grob`
 - The health endpoint is `GET /health` (returns 200 with PID)
 - Metrics are at `GET /metrics` (Prometheus format)
-- The container runs as non-root (UID 65534)
+- The container runs as non-root (UID/GID 65534); hostPath volumes must be writable by that user
 
 ```yaml
 livenessProbe:
   httpGet:
-    path: /health
+    path: /live
     port: 8080
 readinessProbe:
+  httpGet:
+    path: /ready
+    port: 8080
+startupProbe:
   httpGet:
     path: /health
     port: 8080

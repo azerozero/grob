@@ -23,9 +23,10 @@ use serde::{Deserialize, Serialize};
 /// use grob::cli::parse_duration;
 /// use std::time::Duration;
 ///
-/// assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
-/// assert_eq!(parse_duration("500ms").unwrap(), Duration::from_millis(500));
-/// assert_eq!(parse_duration("2m").unwrap(), Duration::from_secs(120));
+/// assert_eq!(parse_duration("30s")?, Duration::from_secs(30));
+/// assert_eq!(parse_duration("500ms")?, Duration::from_millis(500));
+/// assert_eq!(parse_duration("2m")?, Duration::from_secs(120));
+/// # Ok::<(), String>(())
 /// ```
 pub fn parse_duration(input: &str) -> Result<std::time::Duration, String> {
     let trimmed = input.trim();
