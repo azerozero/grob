@@ -1,6 +1,6 @@
 # grob.container
 # Quadlet systemd container unit for rootless Podman
-# Install: cp grob.container ~/.config/containers/systemd/
+# Install: cp deploy/grob.container deploy/grob.volume ~/.config/containers/systemd/
 # Enable: systemctl --user daemon-reload && systemctl --user enable --now grob
 
 [Unit]
@@ -18,29 +18,29 @@ Pull=never
 PublishPort=8080:8080
 PublishPort=9090:9090
 
-# User/Group (rootless)
-User=1000
-Group=1000
+# User/Group matches the scratch image user (65534 = nobody). The data bind
+# mount below uses :U so rootless Podman makes it writable for this UID.
+User=65534
+Group=65534
 
 # Security options
 NoNewPrivileges=true
 DropCapabilities=ALL
-AddCapability=NET_BIND_SERVICE
 SecurityLabelType=container_runtime_t
 ReadOnly=true
 
 # Environment
 Environment=RUST_LOG=info
-Environment=GROB_CONFIG_PATH=/etc/grob/config.toml
-Environment=GROB_DATA_DIR=/var/lib/grob
+Environment=GROB_CONFIG=/etc/grob/config.toml
+Environment=GROB_HOME=/var/lib/grob
 
 # Volumes (host:container)
 Volume=%h/.grob/config:/etc/grob:ro,Z
-Volume=%h/.grob/data:/var/lib/grob:Z
+Volume=%h/.grob/data:/var/lib/grob:Z,U
 Volume=grob-tmp:/tmp
 
 # Health check
-HealthCmd=/grob status --format json
+HealthCmd=/grob status
 HealthInterval=30s
 HealthTimeout=5s
 HealthStartPeriod=5s

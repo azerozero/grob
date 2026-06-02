@@ -34,4 +34,8 @@ pub struct RequestExtensions {
     pub top_logprobs: Option<u32>,
     /// Requested service tier (`"auto"`, `"default"`, `"flex"`).
     pub service_tier: Option<String>,
+    /// Optional author name for the hoisted OpenAI system message.
+    pub openai_system_name: Option<String>,
+    /// Optional author names for canonical messages, indexed by message position.
+    pub openai_message_names: Vec<Option<String>>,
 }

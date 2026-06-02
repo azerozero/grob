@@ -1,8 +1,9 @@
 # Use grob_hint to override request complexity
 
-Skip the heuristic classifier when the client already knows how complex
-a request is. `grob_hint` declares a complexity tier for a single
-request, bypassing scoring and feeding directly into provider selection.
+Override the heuristic complexity tier when the client already knows how
+complex a request is. `grob_hint` declares a tier for a single request;
+Grob still runs normal routing, then replaces the computed complexity tier
+before tier fan-out/provider selection.
 
 Three surfaces are equivalent and supported:
 
@@ -86,10 +87,11 @@ the tool **before** the request you want to influence:
 }
 ```
 
-The hint is stored in a one-shot slot on the server and consumed by
-the next dispatch from the same MCP session. After consumption the slot
-is cleared automatically — you must call `grob_hint` again to influence
-a subsequent request.
+The hint is stored in a process-wide one-shot slot on the server and
+consumed by the next dispatch that does not carry a header/body hint. If
+a header or body hint wins for another request, the MCP slot remains
+pending for the next request without its own hint. After consumption you
+must call `grob_hint` again to influence a subsequent request.
 
 ## When to use each surface
 

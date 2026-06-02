@@ -1,5 +1,5 @@
 use super::common::is_grob_healthy;
-use crate::{cli, storage};
+use crate::{auth, cli, storage};
 
 /// Runs diagnostic checks on config, providers, storage, and service health.
 ///
@@ -39,22 +39,47 @@ pub async fn cmd_doctor(config: &cli::AppConfig, config_source: &cli::ConfigSour
     // 3. Providers with credentials
     let enabled_providers: Vec<_> = config.providers.iter().filter(|p| p.is_enabled()).collect();
     let total = enabled_providers.len();
-    let with_keys = enabled_providers
+    let token_store = storage::GrobStore::open(&storage::GrobStore::default_path())
+        .ok()
+        .and_then(|store| auth::TokenStore::with_store(std::sync::Arc::new(store)).ok())
+        .unwrap_or_else(auth::TokenStore::new_empty);
+    let credential_statuses = auth::auto_flow::detect_credentials(&config.providers, &token_store);
+    let ready = credential_statuses
         .iter()
-        .filter(|p| p.api_key.is_some() || p.oauth_provider.is_some())
+        .filter(|s| matches!(s, auth::auto_flow::CredentialStatus::Ready))
         .count();
     if total == 0 {
         println!("  ❌ No providers configured");
         println!("     → run: grob setup --edit providers");
         errors += 1;
-    } else if with_keys < total {
-        println!("  ⚠️  Providers: {}/{} have credentials", with_keys, total);
+    } else if ready < total {
+        println!(
+            "  ⚠️  Providers: {}/{} have usable credentials",
+            ready, total
+        );
+        for status in &credential_statuses {
+            match status {
+                auth::auto_flow::CredentialStatus::MissingOAuth {
+                    provider_name,
+                    oauth_provider_id,
+                    ..
+                } => println!(
+                    "     - {}: OAuth token '{}' missing, expired, or needs re-auth",
+                    provider_name, oauth_provider_id
+                ),
+                auth::auto_flow::CredentialStatus::MissingApiKey {
+                    provider_name,
+                    env_var,
+                } => println!("     - {}: ${} not set", provider_name, env_var),
+                auth::auto_flow::CredentialStatus::Ready => {}
+            }
+        }
         println!("     → run: grob connect");
         warnings += 1;
     } else {
         println!(
-            "  ✅ Providers: {}/{} configured with credentials",
-            with_keys, total
+            "  ✅ Providers: {}/{} configured with usable credentials",
+            ready, total
         );
     }
 

@@ -232,28 +232,31 @@ The following diagram illustrates the full DLP scan pipeline from request ingest
 
 ```mermaid
 flowchart TB
-    req["Incoming Request"] --> secrets["Secret Scanner<br/>(25 builtin rules, Aho-Corasick DFA)"]
-    secrets -->|"found"| action1{"Action?"}
-    action1 -->|redact| redact["Replace with [REDACTED]<br/>+ inject canary token"]
-    action1 -->|block| block["Return 400"]
-    action1 -->|warn| warn["Log + continue"]
-    secrets -->|"clean"| pii["PII Scanner<br/>(email, phone, credit card, IBAN)"]
-    pii --> names["Name Pseudonymizer<br/>(reversible HMAC mapping)"]
-    names --> injection["Injection Detector<br/>(28 languages)"]
-    injection -->|"detected"| block2["Block or warn"]
-    injection -->|"clean"| provider["Forward to provider"]
-    provider --> resp["Response"]
-    resp --> url["URL Exfiltration Scanner"]
-    url --> entropy["Entropy Detector (SPRT)"]
-    entropy --> client["Return to client"]
+    req["Incoming Request"] --> injection["Prompt/tool-result injection checks"]
+    injection -->|"block"| block["Return 400"]
+    injection -->|"continue"| url_in["URL exfiltration block checks"]
+    url_in -->|"block"| block
+    url_in --> names["Name anonymization"]
+    names --> secrets["Secret scanner<br/>(25 builtin rules, Aho-Corasick DFA)"]
+    secrets --> pii["PII scanner<br/>(credit card, IBAN, BIC)"]
+    pii --> provider["Forward sanitized request to provider"]
+    provider --> resp["Provider response"]
+    resp --> denames["Name de-anonymization"]
+    denames --> out_secrets["Response secret scanner"]
+    out_secrets --> out_pii["Response PII scanner"]
+    out_pii --> url_out["URL exfiltration scanner"]
+    url_out --> indirect["Indirect injection scan"]
+    indirect --> client["Return sanitized response to client"]
 ```
 
 ### Request path (input)
 
-1. **Prompt injection detection** (if enabled, `action = block` short-circuits)
-2. **Name anonymization** (real names to pseudonyms)
-3. **Secret scanning** (DFA prefix gate, then regex)
-4. **PII scanning** (credit cards, IBAN, BIC with mathematical validation)
+1. **Prompt injection detection** on request prompts (`action = block` short-circuits)
+2. **Indirect injection detection** on request `tool_result` blocks (`response_action = block` short-circuits)
+3. **URL exfiltration block checks** for request-side links/data URIs
+4. **Name anonymization** (real names to pseudonyms)
+5. **Secret scanning** (DFA prefix gate, then regex)
+6. **PII scanning** (credit cards, IBAN, BIC with mathematical validation)
 
 ### Response path (output)
 
@@ -261,6 +264,7 @@ flowchart TB
 2. **Secret scanning** (catches LLM-generated secrets)
 3. **PII scanning** (catches LLM-generated PII)
 4. **URL exfiltration scanning** (Markdown images/links, data URIs)
+5. **Indirect injection scanning** on response content
 
 ### Streaming path
 

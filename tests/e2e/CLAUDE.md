@@ -51,6 +51,15 @@ GROB_SIEGE_GEMINI_KEY      real Gemini API key
 Live tests live under `tests/live/` and are skipped unless the corresponding
 variable is set.
 
+## Release Policy
+
+- The mock-backed Hurl suites are the CI/release gate. They run without live
+  provider credentials and must stay deterministic.
+- Load tests under `load/` are manual or separately scheduled capacity checks;
+  they do not block releases unless CI explicitly promotes them.
+- Live-provider tests are env-gated and informational by default. Missing keys
+  must skip, not fail, so release health is not coupled to external accounts.
+
 ## Quick Start
 
 ```bash

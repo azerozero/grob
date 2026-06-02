@@ -141,9 +141,21 @@ if [ -f "$AUDIT_FILE" ]; then
     has_tokens=$(echo "$line" | python3 -c "import json,sys; e=json.load(sys.stdin); print('yes' if e.get('input_tokens') is not None else 'no')" 2>/dev/null || echo "no")
     has_tenant=$(echo "$line" | python3 -c "import json,sys; e=json.load(sys.stdin); print('yes' if e.get('tenant_id') else 'no')" 2>/dev/null || echo "no")
 
-    [ "$has_model" = "yes" ] && pass "S4a — model_name in audit (Art. 12)" || fail "S4a — missing model_name"
-    [ "$has_tokens" = "yes" ] && pass "S4b — token counts in audit (Art. 12)" || fail "S4b — missing token counts"
-    [ "$has_tenant" = "yes" ] && pass "S4c — tenant_id in audit" || fail "S4c — missing tenant_id"
+    if [ "$has_model" = "yes" ]; then
+        pass "S4a — model_name in audit (Art. 12)"
+    else
+        fail "S4a — missing model_name"
+    fi
+    if [ "$has_tokens" = "yes" ]; then
+        pass "S4b — token counts in audit (Art. 12)"
+    else
+        fail "S4b — missing token counts"
+    fi
+    if [ "$has_tenant" = "yes" ]; then
+        pass "S4c — tenant_id in audit"
+    else
+        fail "S4c — missing tenant_id"
+    fi
 else
     skip "S4 — no audit file"
 fi
@@ -153,7 +165,11 @@ echo ""
 echo "--- S5: HIT Gateway endpoint ---"
 
 if curl -sf "http://127.0.0.1:8102/v1/models" >/dev/null 2>&1; then
-    bash "$(dirname "$0")/S5-hit-flow.sh" && pass "S5" || skip "S5 — HIT flow incomplete"
+    if bash "$(dirname "$0")/S5-hit-flow.sh"; then
+        pass "S5"
+    else
+        skip "S5 — HIT flow incomplete"
+    fi
 else
     skip "S5 — vidaimock-tool (port 8102) not available"
 fi
@@ -168,7 +184,11 @@ scores_status=$(curl -sf -o /dev/null -w '%{http_code}' "http://$HOST/api/scores
 if [ "$scores_status" = "200" ]; then
     has_scores=$(curl -sf "http://$HOST/api/scores" -H "Authorization: Bearer $JWT" 2>/dev/null \
         | python3 -c "import json,sys; d=json.load(sys.stdin); print('yes' if d.get('scores') else 'no')" 2>/dev/null || echo "no")
-    [ "$has_scores" = "yes" ] && pass "S6 — adaptive scores endpoint with data" || pass "S6 — scores endpoint exists"
+    if [ "$has_scores" = "yes" ]; then
+        pass "S6 — adaptive scores endpoint with data"
+    else
+        pass "S6 — scores endpoint exists"
+    fi
 else
     skip "S6 — /api/scores returned $scores_status"
 fi
@@ -177,7 +197,11 @@ fi
 echo ""
 echo "--- S7: Output-side DLP ---"
 if curl -sf "http://127.0.0.1:8101/v1/models" >/dev/null 2>&1; then
-    bash "$(dirname "$0")/S7-output-dlp.sh" && pass "S7" || fail "S7"
+    if bash "$(dirname "$0")/S7-output-dlp.sh"; then
+        pass "S7"
+    else
+        fail "S7"
+    fi
 else
     skip "S7 — vidaimock-url (port 8101) not available"
 fi
@@ -186,7 +210,11 @@ fi
 echo ""
 echo "--- S8: HIT Gateway + tool_use ---"
 if curl -sf "http://127.0.0.1:8102/v1/models" >/dev/null 2>&1; then
-    bash "$(dirname "$0")/S8-hit-gateway.sh" && pass "S8" || fail "S8"
+    if bash "$(dirname "$0")/S8-hit-gateway.sh"; then
+        pass "S8"
+    else
+        fail "S8"
+    fi
 else
     skip "S8 — vidaimock-tool (port 8102) not available"
 fi

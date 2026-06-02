@@ -16,6 +16,14 @@ informed: []
 > parent. ADR-0021 (Thompson sampling) was rejected before drafting because
 > probabilistic exploration is incompatible with both audiences' demands for
 > predictable routing.
+>
+> **Implementation status (2026-06-02)**: passive circuit breaker and active
+> health-check modules exist in `src/routing/`; adaptive scoring is implemented
+> as a provider-level v1 scorer under `[security] adaptive_scoring` (ADR-0019).
+> Hedging remains proposed, and `[[endpoints]]` / `[[policies]]` are not public
+> `AppConfig` fields. A read-only internal endpoint adapter exists in
+> `src/routing/endpoints.rs` for ADR-0022 phase 0. Thompson sampling remains
+> rejected/deferred; it is not a shipped or planned near-term routing primitive.
 
 # ADR-0018: Nature-Inspired Routing — Topology vs Policy, Caddy-KISS, Biomimetic Primitives
 
@@ -48,34 +56,34 @@ Grob's positioning includes a "bio-inspired" thread ([Sécurité Bio-inspirée](
 | Active health probing with cooldown + half-open | Half-open circuit breaker | Immune response — test an antigen with a few cells before full recommitment |
 | EMA of success-rate / latency per endpoint | Exponential moving average | Ant stigmergy — pheromone trails evaporate, good paths get reinforced |
 | Hedged requests on p95 latency | Google "Tail at Scale" (2013) | Fish shoaling — redundant swimmers for resilience |
-| Weighted bandit with Thompson sampling | Multi-armed bandit exploration | Scout bees — ε-greedy exploration of unknown sources |
+| Weighted bandit with Thompson sampling | Deferred / rejected for now | Scout-bee analogy kept as rejected design context only |
 
-The analogues are **explanatory**, not mystical. Every primitive has a clear engineering semantic, a bounded LoC budget, and a test plan. If the biomimetic label is distracting, read it as "Caddy + Envoy + Google tail-at-scale + Thompson sampling on top".
+The analogues are **explanatory**, not mystical. Every primitive has a clear engineering semantic, a bounded LoC budget, and a test plan. If the biomimetic label is distracting, read it as "Caddy + Envoy + Google tail-at-scale, with Thompson sampling documented only as a rejected/deferred option".
 
 ## Decision Drivers
 
 - **Kill the dual-schema class of bugs.** One system, one hierarchy, one way to express "where does this go".
 - **Separate topology from policy.** Borrowed from Envoy: physical endpoints (identity, cost, region, capabilities) are one axis; how to choose among them is a separate axis. A topology change (new provider) should not require rewriting policy.
 - **Zero-config KISS.** The minimum useful config must be ~3 lines of TOML, matching Caddy's `reverse_proxy` ergonomics. Grob ships with sane defaults for load balancing, fallback, circuit breaking, and health checks.
-- **Progressive opt-in.** Every advanced primitive (CB, health check, hedging, bandit) is off by default. A new concern = one knob. You never pay for what you don't use.
+- **Progressive opt-in.** Every advanced primitive (CB, health check, hedging) is off by default. A new concern = one knob. You never pay for what you don't use. Bandit exploration is not in the near-term opt-in set.
 - **No distributed state.** Grob stays a single binary. No Redis, no etcd, no sidecar. All routing state fits in RAM + optional persisted JSONL (see [ADR-0013](0013-storage-files-no-redb.md)).
-- **No breaking change without grace.** We are not in a vacuum. Users have configs in production. Coexistence `[[models]]`/`[[tiers]]` with the new `[[endpoints]]`/`[[policies]]` for ~6 months, explicit deprecation warnings, `grob config migrate` tooling, removal gated behind `v1.0`.
+- **No breaking change without grace.** We are not in a vacuum. Users have configs in production. Coexistence `[[models]]`/`[[tiers]]` with the new `[[endpoints]]`/`[[policies]]` requires explicit deprecation warnings, migration tooling, and removal gated behind `v1.0`.
 - **Independently shippable phases.** The RE roadmap breaks into phases RE-0..RE-8, each of which delivers standalone value. RE-1a (passive CB) is useful even without any of RE-2..RE-8. We do not ship an 8-phase big bang.
-- **Observable and testable.** Every new primitive has a metric path, a `grob stats endpoints` surface, and at minimum unit tests with deterministic fixtures.
+- **Observable and testable.** Every new primitive needs a metric path and deterministic tests. Endpoint-specific operator surfaces such as `grob stats endpoints` wait until the endpoint schema/adapter exists.
 
 ## Considered Options
 
 1. **Do nothing.** Leave `[[models]]`/`[[tiers]]` as-is. Patch B-05 (T-B05 landed this sprint) and move on.
 2. **Patch the dual schema into a hierarchy.** Keep the two tables but define a strict precedence (`tiers` > `models` > defaults) and log every override. No new schema, no migration.
 3. **Big-bang rewrite in v1.0.** Remove `[[models]]`/`[[tiers]]` in one release, ship `[[endpoints]]`/`[[policies]]`. Users migrate their config manually.
-4. **Incremental rewrite with coexistence.** Ship `[[endpoints]]`/`[[policies]]` alongside the legacy schema, deprecation warnings, `grob config migrate` tool, removal in v1.0 after ~6 months coexistence. (**Chosen.**)
+4. **Incremental rewrite with coexistence.** Ship an adapter/migration path first, then `[[endpoints]]`/`[[policies]]` alongside the legacy schema with deprecation warnings and migration tooling before removal in v1.0. (**Chosen.**)
 5. **Adopt an existing routing library / sidecar (Envoy, LiteLLM, APISIX, Portkey).** Replace Grob's routing layer with an external dependency.
 
 ## Decision Outcome
 
 **Chosen: option 4 — incremental rewrite with coexistence.**
 
-The rewrite targets a schema structured along the **topology vs policy** axis borrowed from Envoy, with ergonomics borrowed from Caddy's `reverse_proxy` directive, and a catalogue of nature-inspired primitives (passive CB, active health check, cooldown half-open, EMA stats, hedged requests, Thompson sampling) layered as **opt-in** modules.
+The rewrite targets a schema structured along the **topology vs policy** axis borrowed from Envoy, with ergonomics borrowed from Caddy's `reverse_proxy` directive, and a catalogue of nature-inspired primitives (passive CB, active health check, cooldown half-open, adaptive scoring, hedged requests) layered as **opt-in** modules. Thompson sampling remains a rejected/deferred option, not part of the current implementation catalogue.
 
 ### Principle 1 — Topology vs policy
 
@@ -114,7 +122,7 @@ This ergonomic target is directly lifted from Caddy's `reverse_proxy example.com
 
 ### Principle 3 — Nature-inspired primitives as opt-in layers
 
-Each primitive below is **standalone and opt-in**. Turning it on is a few lines of TOML. None of them is required for the baseline to function. The order below matches the implementation phases RE-1..RE-4.
+Each primitive below is **standalone and opt-in**. Turning it on is a few lines of TOML. None of them is required for the baseline to function. The order below matches the implementation phases RE-1..RE-3; former RE-4 is retained only as rejected/deferred design context.
 
 #### Passive circuit breaker (RE-1a, Caddy-inspired)
 
@@ -153,23 +161,27 @@ This is a standard half-open circuit breaker pattern (see Martin Fowler, [Circui
 
 ~100 LoC. Sprint S6 or later.
 
-#### EMA stats per-endpoint (RE-2, ant stigmergy)
+#### Adaptive scoring (RE-2, ant stigmergy)
 
-Exponential moving average of three quantities per endpoint:
+Current implementation: provider-level adaptive scoring in
+`src/security/provider_scorer.rs` (ADR-0019), tracking rolling success rate,
+latency EWMA, and recency per provider. Metrics are `grob_provider_*`.
 
-- `success_rate_ema` (decay ~1h).
-- `latency_p95_ema` (decay ~1h).
-- `cost_actual_ema` (decay ~24h; tracks live pricing drifts without full reconfig).
+Deferred target: per-endpoint EMA can track `success_rate_ema`,
+`latency_p95_ema`, and `cost_actual_ema` only after stable endpoint identities
+exist. Do not add `~/.grob/routing/endpoints.jsonl` or `grob stats endpoints`
+until ADR-0022 has an adapter/migration path.
 
-Stored in RAM, periodically persisted to `~/.grob/routing/endpoints.jsonl` (see [ADR-0013](0013-storage-files-no-redb.md)). Exposed via `grob stats endpoints`.
+The biological framing: **good paths accumulate pheromone**. Ants don't centrally decide which trail is best; each success reinforces the trail for future ants, each failure lets the trail evaporate. EMA with exponential decay is the engineering form of this. The point is not romance — it is that **online, local, per-request feedback can drive good global behaviour without a central coordinator**. In the current tree this is provider-level adaptive scoring (ADR-0019), not endpoint-level EMA.
 
-The biological framing: **good paths accumulate pheromone**. Ants don't centrally decide which trail is best; each success reinforces the trail for future ants, each failure lets the trail evaporate. EMA with exponential decay is the engineering form of this. The point is not romance — it is that **online, local, per-request feedback can drive good global behaviour without a central coordinator**. This is what lets RE-4 (bandit) work without a database.
-
-~300 LoC. v0.39.
+Provider-level v1 is already shipped. Endpoint-level RE-2 remains deferred.
 
 #### Hedged requests (RE-3, fish shoaling / Google Tail at Scale)
 
-When a request to the primary endpoint exceeds the endpoint's `latency_p95_ema` (or a configured `hedging.p95_trigger_factor`), Grob fires a **second** request to the next-best endpoint. Whichever returns first wins; the other is cancelled.
+Target design: when a request to the primary provider/endpoint exceeds a fixed
+threshold or the future endpoint's `latency_p95_ema`, Grob fires a **second**
+request to the next-best eligible provider/endpoint. Whichever returns first
+wins; the other is cancelled and audited under ADR-0020's spend protocol.
 
 Core reference: Dean & Barroso, [The Tail at Scale](https://research.google/pubs/pub40801/), CACM 2013. The empirical result: hedging on p95 adds ~5% request amplification but reduces p99 latency by up to 10×. Cost `+50%` punctually ≪ cost of a timeout `+300%`. The biological analogue (redundant swimmers in a fish shoal) is illustrative; the engineering argument stands on its own.
 
@@ -177,19 +189,27 @@ Configuration: `hedging = { p95_trigger = true, p95_factor = 1.5 }`. Zone: `src/
 
 ~250 LoC. v0.39.
 
-#### Weighted bandit / Thompson sampling (RE-4, scout bees)
+#### Weighted bandit / Thompson sampling (rejected/deferred, scout bees)
 
-Replace the static `weight = 5` with a Beta(α, β) posterior per endpoint on its success rate. On each request:
+Thompson sampling remains design context, not an implementation phase. It would
+replace deterministic ordering with probabilistic exploration: sample a
+posterior for each endpoint, pick the highest draw, and update the posterior
+after the request.
 
-1. **Sample** a success-rate from each endpoint's posterior.
-2. **Pick** the endpoint with the highest sampled value.
-3. **Update** α on success, β on failure.
+That is useful in ad-serving-style optimization, but it conflicts with Grob's
+current constraints:
 
-This is standard Thompson sampling ([Russo et al., "A Tutorial on Thompson Sampling"](https://arxiv.org/abs/1707.02038)). The 5% ε-greedy knob forces occasional exploration to prevent lock-in on a locally-good endpoint when a genuinely-better one has zero sample.
+- The current schema has provider mappings, not stable endpoint identities.
+- Security-prevails deployments need predictable, auditable routing decisions.
+- Exploration can spend money on a worse provider by design, so it needs an
+  explicit spend reservation and audit protocol before it is acceptable.
+- ADR-0019 already provides a simpler provider-level scorer that handles the
+  immediate failure-recovery problem.
 
-The biological framing (scout bees exploring unknown nectar sources while foragers exploit the known good patches) is explanatory — the underlying math is a multi-armed bandit, widely-studied, battle-tested in ad serving and A/B testing.
-
-~500 LoC. v0.40. This is the "last heavy phase" before the schema refactor RE-5.
+If this is revisited, it needs a new ADR after ADR-0022 has an internal
+endpoint adapter and after hedging/spend audit semantics are proven. It should
+not be implemented as a quick `lb_policy = "bandit"` patch on the legacy
+`[[models]]` schema.
 
 ### Principle 4 — Migration path with 6-month coexistence
 
@@ -200,8 +220,8 @@ flowchart LR
     v037[v0.37<br/>RE-0 ADR]:::current
     v038[v0.38<br/>RE-1 CB + HC<br/>legacy still works]
     v039[v0.39<br/>RE-2 EMA + RE-3 hedge<br/>legacy still works]
-    v040[v0.40<br/>RE-4 bandit<br/>legacy still works]
-    v041[v0.41<br/>RE-5 new schema shipped<br/>coexistence begins]:::milestone
+    v040[v0.40<br/>RE-4 removed/deferred<br/>legacy still works]
+    v041[v0.41<br/>RE-5 schema adapter/migration<br/>coexistence begins]:::milestone
     v042[v0.42-v0.44<br/>coexistence<br/>warning log on startup<br/>if [[models]] detected]
     v045[v0.45<br/>legacy_routing feature flag<br/>defaults to false<br/>explicit opt-in required]
     v1[v1.0<br/>legacy removed]:::breaking
@@ -217,19 +237,19 @@ Key milestones:
 
 1. **v0.37 (this ADR, RE-0).** No code change to `[[models]]`/`[[tiers]]`. New routing concepts documented, no schema change yet. T-B05 (already landed in S5) patches the silent-override bug so coexistence is safe.
 2. **v0.38 (RE-1a + RE-1b).** Passive CB and active health checks land in the new `src/routing/` module. Wired into the existing dispatch layer (`src/server/dispatch/mod.rs`) without changing the schema. Both primitives are off by default. **Legacy schema untouched.**
-3. **v0.39 (RE-2 + RE-3).** EMA stats and hedged requests. Still no schema change. The existing `[[models]]` entries get implicit `latency_p95_ema` / `success_rate_ema` keyed by `(provider, model)`.
-4. **v0.40 (RE-4).** Thompson sampling. Opt-in via a new `lb_policy = "bandit"` value on existing `[[tiers]]` (or the new `[[policies]]` once RE-5 lands — whichever ships first).
-5. **v0.41 (RE-5).** `[[endpoints]]` and `[[policies]]` ship. **Both schemas are read** by the config loader. If both are present, a warning is logged and `[[endpoints]]` wins. `grob config migrate` generates a new-style config from a legacy one. No runtime behaviour change if the user does not touch their config.
+3. **v0.39 (RE-2 + RE-3).** Provider-level adaptive scoring is the delivered v1; hedged requests remain proposed until spend reservation, cancellation billing, and audit semantics are documented and tested.
+4. **v0.40 (former RE-4).** Thompson sampling is removed from the near-term roadmap. No `lb_policy = "bandit"` is added to the legacy schema.
+5. **v0.41 (RE-5).** `[[endpoints]]` and `[[policies]]` start as an adapter/migration path, not a cut-over. The read-only adapter exists in `src/routing/endpoints.rs`; both schemas may be read by the config loader only once golden-file migration tests and clear startup warnings exist.
 6. **v0.42–v0.44 (coexistence).** Each startup log emits:
 
    ```
    WARN routing: legacy [[models]]/[[tiers]] schema detected.
-        Run `grob config migrate` to generate an [[endpoints]]/[[policies]] config.
+       Run the routing migration command to generate an [[endpoints]]/[[policies]] config.
         Legacy schema support will be removed in v1.0.
    ```
 
 7. **v0.45 (opt-in legacy).** The legacy schema is gated behind `[features] legacy_routing = false` (default). Users who have not migrated hit a startup error that tells them exactly what to do. This is the "loud" phase — we want users to know.
-8. **v1.0 (hard removal).** `legacy_routing` feature flag removed. Legacy code paths deleted. `grob config migrate` kept for one more version as a convenience, then removed in v1.1.
+8. **v1.0 (hard removal).** `legacy_routing` feature flag removed. Legacy code paths deleted. The routing migration command is kept for one more version as a convenience, then removed in v1.1.
 
 The 6-month coexistence window (≈ v0.41 → v0.45 at Grob's current release cadence of ~1 minor/month) is a **deliberate choice**, not a compromise. It is long enough for enterprise users on quarterly-upgrade cycles to pick up at least one warning-only release before the opt-in phase.
 
@@ -301,7 +321,7 @@ The alternative — skip T-B05 and jump straight to RE-5 — was considered and 
 - Value ships in every RE-* phase independently.
 - Users migrate on their own schedule within the coexistence window.
 - Coexistence code is bounded (~200 LoC in `src/cli/config.rs` during v0.41–v0.45) and has a hard removal date.
-- `grob config migrate` is tested in production against real configs before v1.0.
+- The routing migration command is tested against real configs before v1.0.
 
 **Cons:**
 
@@ -336,9 +356,9 @@ Rejected on architectural grounds, not on quality of the external libraries.
 - **Envoy-shaped mental model.** Every experienced SRE already knows topology vs policy. No novel concepts to learn.
 - **Caddy-shaped ergonomics.** A Grob user who has used Caddy will write a correct config in 30 seconds.
 - **Each RE phase ships independently.** RE-1a (CB) is useful without any of the others. This is a real reduction in blast radius per release.
-- **Bio-inspired framing** gives the project a coherent narrative for a hard problem. It is not just decoration — each primitive has an engineering citation (Caddy, Envoy, Google Tail at Scale, Thompson sampling).
+- **Bio-inspired framing** gives the project a coherent narrative for a hard problem. It is not just decoration — each accepted primitive has an engineering citation (Caddy, Envoy, Google Tail at Scale), while Thompson sampling is kept as rejected/deferred context.
 - **6-month coexistence** is humane for users with production configs.
-- **`grob config migrate`** becomes a pattern we can reuse for future schema changes.
+- **A routing migration command** becomes a pattern we can reuse for future schema changes.
 
 ### Negative
 
@@ -346,15 +366,15 @@ Rejected on architectural grounds, not on quality of the external libraries.
 - **Coexistence code in `src/cli/config.rs`** for ~6 months. Bounded but non-zero maintenance cost.
 - **Two docs sections** during coexistence (legacy + new). We mitigate with a prominent banner on legacy pages.
 - **Risk of feature creep.** Each RE-* phase must stay scoped. The roadmap already defers RE-6 (expression objective) and RE-7 (CEL/Rego) explicitly because they are not needed for 95% of users.
-- **Risk of "bio-inspired label" being perceived as marketing.** Mitigated by citing the engineering sources (Caddy, Envoy, Dean & Barroso 2013, Thompson sampling tutorial) in every phase ADR.
+- **Risk of "bio-inspired label" being perceived as marketing.** Mitigated by citing the engineering sources (Caddy, Envoy, Dean & Barroso 2013) in every active phase ADR and keeping Thompson sampling clearly marked as rejected/deferred.
 
 ### Confirmation
 
 Compliance with this ADR will be verified by:
 
-1. **Per-phase ADRs** (0019 for RE-1a CB, 0020 for RE-1b HC, etc.) — each RE-* phase lands with its own ADR referencing this one.
+1. **Per-phase ADRs / status notes** — ADR-0019 documents provider scoring v1, ADR-0020 documents hedging as proposed, and ADR-0022 documents the endpoint-schema target plus the read-only adapter. Circuit breaker and health-check modules are already present and should get a follow-up ADR/status note if their shipped behavior becomes more than local implementation detail.
 2. **Tests** at every phase — unit tests for each primitive, integration tests for the coexistence loader in v0.41.
-3. **`grob config migrate` golden-file tests** — a fixture directory of legacy configs, each with an expected new-schema output.
+3. **Routing migration golden-file tests** — a fixture directory of legacy configs, each with an expected new-schema output.
 4. **Startup warning log** — explicit assertion in CI that v0.42+ logs the deprecation warning when `[[models]]` is present.
 5. **v1.0 grep check** — CI job that fails if any reference to `[[models]]` or `[[tiers]]` remains in the codebase after the v1.0 removal milestone.
 
@@ -363,7 +383,7 @@ Compliance with this ADR will be verified by:
 ### Internal references
 
 - [ADR-0003 — Regex routing engine](0003-regex-routing-engine.md) — the current routing model that this ADR supersedes for the endpoint-selection layer. The regex task-type classification in `src/routing/classify/mod.rs` is orthogonal and stays.
-- [ADR-0013 — Storage on atomic files + append-only journal](0013-storage-files-no-redb.md) — persistence substrate for EMA stats and CB state.
+- [ADR-0013 — Storage on atomic files + append-only journal](0013-storage-files-no-redb.md) — persistence substrate for any future endpoint-level EMA stats and CB state.
 - [ADR-0014 — Mesh networking WireGuard KISS](0014-mesh-wireguard-kiss.md) — the single-binary / no-sidecar constraint that forces an in-process routing layer.
 - [ADR-0016 — Decision Tokens](0016-decision-tokens-transparent-routing.md) — routing decisions emit tokens; the new schema does not change token format.
 - [ADR-0017 — Sokolsky LogBackend](0017-sokolsky-log-backend.md) — routing decisions go to the audit plane; unchanged by this ADR.
@@ -373,7 +393,7 @@ Compliance with this ADR will be verified by:
 - Matt Klein, [Envoy's architectural model](https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/intro/intro) — clusters (topology) vs listeners/filters (policy).
 - Matt Holt, [Caddy `reverse_proxy` directive](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy) — the ergonomic benchmark for this ADR. Every example we ship should be benchmarked against Caddy's equivalent in lines of config.
 - Jeffrey Dean & Luiz André Barroso, [The Tail at Scale](https://research.google/pubs/pub40801/), *Communications of the ACM*, Vol. 56, No. 2, 2013 — the canonical reference for hedged requests.
-- Daniel J. Russo, Benjamin Van Roy, Abbas Kazerouni, Ian Osband & Zheng Wen, [A Tutorial on Thompson Sampling](https://arxiv.org/abs/1707.02038), *Foundations and Trends in Machine Learning*, 2018 — Thompson sampling reference.
+- Daniel J. Russo, Benjamin Van Roy, Abbas Kazerouni, Ian Osband & Zheng Wen, [A Tutorial on Thompson Sampling](https://arxiv.org/abs/1707.02038), *Foundations and Trends in Machine Learning*, 2018 — retained as rejected/deferred design context, not an implementation dependency.
 - Martin Fowler, [CircuitBreaker](https://martinfowler.com/bliki/CircuitBreaker.html) — the half-open state pattern.
 - Leslie Lamport, [The Temporal Logic of Actions](https://lamport.azurewebsites.net/pubs/lamport-actions.pdf) — state-machine framing used informally to argue the CB primitive has no implicit states.
 - Marco Dorigo & Thomas Stützle, *Ant Colony Optimization*, MIT Press, 2004 — stigmergy as a distributed optimisation primitive.
@@ -450,10 +470,10 @@ flowchart TD
     RE1a["RE-1a — Passive CB<br/>~200 LoC<br/>v0.38"]
     RE1b["RE-1b — Active HC<br/>~150 LoC<br/>v0.38"]
     RE1c["RE-1c — Cooldown +<br/>half-open probes<br/>~100 LoC<br/>v0.39"]
-    RE2["RE-2 — EMA stats<br/>~300 LoC<br/>v0.39"]
+    RE2["RE-2 — Provider scoring v1<br/>shipped; endpoint EMA deferred"]
     RE3["RE-3 — Hedged requests<br/>~250 LoC<br/>v0.39"]
-    RE4["RE-4 — Thompson bandit<br/>~500 LoC<br/>v0.40"]
-    RE5["RE-5 — Schema refactor<br/>[[endpoints]] + [[policies]]<br/>~700 LoC<br/>v0.41"]:::milestone
+    RE4["RE-4 — Thompson bandit<br/>rejected/deferred"]:::deferred
+    RE5["RE-5 — Schema adapter/migration<br/>[[endpoints]] + [[policies]]<br/>~700 LoC<br/>v0.41+"]:::milestone
     RE6["RE-6 — Expression DSL<br/>(opt-in experts)<br/>~300 LoC<br/>v0.50+"]:::deferred
     RE7["RE-7 — CEL / Rego selector<br/>(opt-in, reporté)<br/>~1500 LoC<br/>v0.50+"]:::deferred
     RE8["RE-8 — Deprecation removal<br/>[[models]] / [[tiers]]<br/>XS<br/>v1.0"]:::breaking
@@ -463,8 +483,8 @@ flowchart TD
     RE1a --> RE1c
     RE1b --> RE2
     RE2 --> RE3
-    RE2 --> RE4
-    RE4 --> RE5
+    RE2 -. no near-term bandit .-> RE4
+    RE2 --> RE5
     RE5 --> RE6
     RE6 --> RE7
     RE5 --> RE8
@@ -483,14 +503,14 @@ flowchart TD
 | RE-1a | ~200 | v0.38 | S5 / S6 | yes |
 | RE-1b | ~150 | v0.38 | S5 / S6 | yes |
 | RE-1c | ~100 | v0.39 | S7 | no |
-| RE-2 | ~300 | v0.39 | S7 | yes |
+| RE-2 | shipped v1 / endpoint deferred | current | done for provider scoring | no |
 | RE-3 | ~250 | v0.39 | S7 | no |
-| RE-4 | ~500 | v0.40 | S8 | yes |
-| RE-5 | ~700 | v0.41 | S9 | yes (blocks v1.0) |
+| RE-4 | deferred | none | none | no |
+| RE-5 | ~700 | v0.41+ | S9+ | yes (blocks v1.0) |
 | RE-6 | ~300 | v0.50+ | deferred | no |
 | RE-7 | ~1500 | v0.50+ | deferred | no |
 | RE-8 | XS | v1.0 | ~S15 | yes |
-| **Total shipping** | **~2500** | **v0.37 → v1.0** | **~9 months** | |
+| **Total shipping** | **~2000** | **v0.37 -> v1.0** | **~9 months** | |
 
 Each phase is independently shippable. Stopping the project at any point after RE-1 leaves Grob strictly better off than today.
 
@@ -575,31 +595,21 @@ Properties:
 - `probe()` is a single HTTP call; no retries, no backoff. If the user wants retries they wrap the URI with a proxy that does retries.
 - Combined "is the endpoint up" check is `cb.is_up() && hc.last_ok.load()`.
 
-#### EMA stats (RE-2)
+#### Adaptive provider scoring (RE-2)
 
-```rust
-// src/routing/stats.rs
-pub struct EmaStats {
-    success_rate: AtomicF64,
-    latency_p95_ms: AtomicF64,
-    alpha: f64, // smoothing factor, e.g. 2 / (n + 1) where n is the effective window
-}
-
-impl EmaStats {
-    pub fn record(&self, success: bool, latency_ms: f64) {
-        let s = if success { 1.0 } else { 0.0 };
-        self.success_rate.fetch_ema(s, self.alpha);
-        self.latency_p95_ms.fetch_ema(latency_ms, self.alpha);
-    }
-}
-```
-
-(`fetch_ema` is a CAS loop. We can use a crate or implement inline — the unit is ~30 LoC.)
+The shipped v1 is `src/security/provider_scorer.rs`, not
+`src/routing/stats.rs`. It stores one provider score with a rolling success-rate
+window, latency EWMA, confidence decay, and circuit-breaker overlay. See
+ADR-0019 for formula and tests.
 
 Properties:
 
-- Constant-memory per endpoint (three f64 atomics).
-- No histograms, no reservoir sampling. The p95 is approximate — the EMA of the observed latencies weighted by α. Good enough for routing decisions; not good enough for SLO reporting (use Sokolsky for that).
+- Constant-memory per provider.
+- No endpoint identity required.
+- Metrics are `grob_provider_score`, `grob_provider_latency_ewma_ms`, and
+  `grob_provider_success_rate`.
+- Endpoint-level EMA is deferred until ADR-0022 has a stable adapter/migration
+  path.
 
 #### Hedged requests (RE-3)
 
@@ -632,52 +642,21 @@ Properties:
 - Whichever returns first wins. The other future is dropped (tokio cancels it).
 - Cost amplification is bounded by `p(primary > p95) ≈ 5%`, so hedge cost is `~5% × secondary_cost`.
 
-#### Thompson sampling (RE-4)
+#### Thompson sampling (former RE-4)
 
-```rust
-// src/routing/bandit.rs
-pub struct Beta {
-    alpha: AtomicF64, // successes + 1
-    beta: AtomicF64,  // failures + 1
-}
-
-impl Beta {
-    pub fn sample(&self, rng: &mut impl Rng) -> f64 {
-        // NOTE: illustrative snippet; the real implementation threads a
-        // recoverable error so a pathological (alpha, beta) pair cannot
-        // panic the dispatch hot path.
-        let a = self.alpha.load(Ordering::Relaxed).max(f64::EPSILON);
-        let b = self.beta.load(Ordering::Relaxed).max(f64::EPSILON);
-        rand_distr::Beta::new(a, b)
-            .map(|d| d.sample(rng))
-            .unwrap_or(0.5)
-    }
-}
-
-pub fn pick<'a>(endpoints: &'a [Endpoint], rng: &mut impl Rng) -> Option<&'a Endpoint> {
-    endpoints.iter().max_by(|a, b| {
-        a.beta
-            .sample(rng)
-            .partial_cmp(&b.beta.sample(rng))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    })
-}
-```
-
-Properties:
-
-- One sample per endpoint per request. For 10 endpoints, ~10 Beta samples = a few microseconds with `rand_distr`.
-- Naturally handles exploration (a new endpoint with Beta(1,1) has mean 0.5 and high variance → sometimes samples high → gets tried).
-- ε-greedy knob (default 5%) forces exploration even for mature endpoints: with probability ε, pick uniformly at random.
+No implementation sketch is retained for Thompson sampling. Keeping pseudo-code
+for `src/routing/bandit.rs` made the ADR read as an implementation plan even
+though the primitive is rejected/deferred. If revisited, it needs a new ADR with
+endpoint identity, spend reservation, audit, and deterministic test constraints.
 
 ### Glossary — biomimetic labels vs engineering primitives
 
 | Biomimetic label | Engineering primitive | Where it lives in Grob |
 |---|---|---|
 | Mammalian homeostasis | Half-open circuit breaker with cooldown | `src/routing/circuit_breaker.rs` (RE-1c) |
-| Ant stigmergy / pheromone | Exponential moving average per endpoint | `src/routing/stats.rs` (RE-2) |
+| Ant stigmergy / pheromone | Adaptive score from recent success/latency | `src/security/provider_scorer.rs` today; endpoint-level target deferred |
 | Fish shoaling / redundant swimmers | Hedged requests on p95 trigger | `src/server/dispatch/hedged.rs` (RE-3) |
-| Scout bees / exploration | Thompson sampling with ε-greedy exploration | `src/routing/bandit.rs` (RE-4) |
+| Scout bees / exploration | Thompson sampling with epsilon-greedy exploration | Rejected/deferred; no `src/routing/bandit.rs` |
 | Mycelium network | (Not used — misleading. Distributed consensus is not required here.) | — |
 | Swarm intelligence | (Not used — too vague. Every specific pattern above is named precisely.) | — |
 
@@ -707,7 +686,7 @@ match = { header = "x-env", value = "paper" }
 override = { provider = "deepseek", model = "deepseek-v3.2" }
 ```
 
-After (v0.41+ `~/.grob/config.toml`, after `grob config migrate`):
+After (v0.41+ `~/.grob/config.toml`, after the routing migration command):
 
 ```toml
 # Topology — the physical endpoints we can talk to.
@@ -779,7 +758,7 @@ The fields expected on `[[policies]]`:
 | `match` | string | **required** | Glob on the request model name (`"claude-sonnet-*"`, `"*"`). |
 | `when` | table | `{}` | Extra predicates: `region`, `capability`, `header`, `tenant`. |
 | `endpoints` | array of endpoint id | inferred | If omitted, all endpoints whose model matches `match`. |
-| `lb_policy` | enum | `"random"` | One of `random`, `round_robin`, `first`, `weighted`, `cheapest`, `fastest`, `bandit`. |
+| `lb_policy` | enum | `"random"` | One of `random`, `round_robin`, `first`, `weighted`, `cheapest`, `fastest`. |
 | `weights` | table `{ id = number }` | — | Required only when `lb_policy = "weighted"`. |
 | `fallback` | policy name | — | Nested fallback, Caddy-style. |
 | `fallback_trigger_codes` | array of int | `[429, 500, 502, 503, 504]` | HTTP codes that trigger fallback. |
@@ -793,9 +772,7 @@ The `lb_policy` values:
 - `first` — always the first endpoint in the list. Degenerate fallback.
 - `weighted` — classic weighted random, requires `weights`.
 - `cheapest` — pick the endpoint with lowest `cost_in + cost_out`.
-- `fastest` — pick the endpoint with lowest `latency_p95_ema` (requires RE-2).
-- `bandit` — Thompson sampling (requires RE-2 + RE-4).
-
+- `fastest` — pick the endpoint with lowest `latency_p95_ema` (requires deferred endpoint-level RE-2).
 A future `expression` policy (RE-6) would allow arbitrary arithmetic on fields like `0.6 * cost_in + 0.4 * latency_p95_ms`. Deferred; not in scope for this ADR.
 
 ### Why not just "config as code"?
@@ -820,7 +797,7 @@ This is a judgement call, not a mathematical derivation. A future ADR can shorte
 
 ### Open questions (not blocking this ADR)
 
-- **Endpoint identity across restarts.** EMA stats for endpoint `or-m25` need to survive a restart. How do we key the persisted JSONL — by `id`, by `(provider, model)`, by both? Decision deferred to RE-2 ADR.
+- **Endpoint identity across restarts.** Endpoint-level EMA stats need stable IDs before persistence makes sense. The keying decision is deferred to the ADR-0022 adapter/migration work, not to the provider-level scorer.
 - **Cost inference robustness.** The OpenRouter pricing API is rate-limited. What is the fallback if the lookup fails at startup? Probably: cache-first, hard-coded defaults for known providers, opt-in override in config. Decision deferred to RE-5 ADR.
 - **Policy ordering for overlapping matches.** If two `[[policies]]` both match a request, which wins? Current proposal: first match in TOML order, with a startup warning if overlaps detected. To be confirmed in RE-5 ADR.
 - **Hedging cost accounting.** A hedged request that loses the race is still billed by the provider. How do we surface this in `grob spend`? Decision deferred to RE-3 ADR.

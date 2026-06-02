@@ -71,6 +71,7 @@ mod tests {
             stream: None,
             tools: None,
             tool_choice: None,
+            metadata: None,
             response_format: None,
             reasoning_effort: None,
             seed: None,

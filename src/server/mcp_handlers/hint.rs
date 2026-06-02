@@ -6,10 +6,11 @@ use std::sync::Arc;
 
 /// Handles `grob_hint` — stores a one-shot complexity hint for the next dispatch.
 ///
-/// The hint is consumed (taken) by the next dispatch call, then cleared.
-/// Clients may also pass the hint inline via `X-Grob-Hint` header or
-/// `metadata.grob_hint` in the request body — this MCP tool is the third
-/// pathway, for MCP-native agents that cannot set custom HTTP headers.
+/// The process-wide hint is consumed (taken) by the next dispatch call that
+/// does not already carry a header/body hint, then cleared. Clients may also
+/// pass the hint inline via `X-Grob-Hint` header or `metadata.grob_hint` in
+/// the request body — this MCP tool is the third pathway, for MCP-native
+/// agents that cannot set custom HTTP headers.
 ///
 /// # Errors
 ///

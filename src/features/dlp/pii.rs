@@ -106,11 +106,14 @@ impl PiiScanner {
     /// use grob::features::dlp::config::PiiConfig;
     /// use grob::features::dlp::pii::PiiScanner;
     ///
-    /// let scanner = PiiScanner::from_config(&PiiConfig::default()).unwrap();
+    /// let Some(scanner) = PiiScanner::from_config(&PiiConfig::default()) else {
+    ///     return Ok::<(), Box<dyn std::error::Error>>(());
+    /// };
     /// // Digit run >= 8 → might contain a card number
     /// assert!(scanner.might_contain_pii("card 4111111111111111 here"));
     /// // Pure prose → rejected
     /// assert!(!scanner.might_contain_pii("hello world, no numbers"));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[inline]
     pub fn might_contain_pii(&self, text: &str) -> bool {

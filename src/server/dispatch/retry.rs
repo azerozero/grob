@@ -48,7 +48,7 @@ pub(super) enum ProviderLoopAction {
 /// `usage_limit_reached` with `resets_in_seconds`). Keeping status + body here
 /// lets the loop surface the true upstream cause when every mapping fails,
 /// rather than a misleading fallback or a generic 502.
-fn capture_upstream_error(provider: &str, err: &ProviderError) -> RequestError {
+pub(super) fn capture_upstream_error(provider: &str, err: &ProviderError) -> RequestError {
     match err {
         ProviderError::ApiError { status, message } => RequestError::ProviderUpstream {
             provider: provider.to_string(),

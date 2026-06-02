@@ -214,34 +214,68 @@ pub(crate) enum DispatchResult {
 #[cfg(feature = "mcp")]
 pub(crate) fn resolve_grob_hint(
     ctx: &DispatchContext<'_>,
-    request: &CanonicalRequest,
-) -> Option<ComplexityHint> {
+    request: &mut CanonicalRequest,
+) -> Result<Option<ComplexityHint>, RequestError> {
     // 1. Header: X-Grob-Hint
-    if let Some(hint) = ctx
-        .headers
-        .get("x-grob-hint")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| serde_json::from_value(serde_json::Value::String(s.to_string())).ok())
-    {
-        return Some(hint);
+    if let Some(value) = ctx.headers.get("x-grob-hint") {
+        let raw = value
+            .to_str()
+            .map_err(|_| RequestError::BadRequest("invalid X-Grob-Hint header".to_string()))?;
+        let hint = parse_complexity_hint(serde_json::Value::String(raw.to_string()))
+            .map_err(|msg| RequestError::BadRequest(format!("invalid X-Grob-Hint: {msg}")))?;
+        strip_grob_hint_metadata(request);
+        return Ok(Some(hint));
     }
 
     // 2. Body: metadata.grob_hint
-    if let Some(hint) = request
+    if let Some(value) = request
         .metadata
         .as_ref()
         .and_then(|m| m.get("grob_hint"))
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .cloned()
     {
-        return Some(hint);
+        let hint = parse_complexity_hint(value).map_err(|msg| {
+            RequestError::BadRequest(format!("invalid metadata.grob_hint: {msg}"))
+        })?;
+        strip_grob_hint_metadata(request);
+        return Ok(Some(hint));
     }
 
     // 3. MCP one-shot slot (consume on read)
-    ctx.state
+    Ok(ctx
+        .state
         .grob_hint
         .lock()
         .ok()
-        .and_then(|mut slot| slot.take())
+        .and_then(|mut slot| slot.take()))
+}
+
+#[cfg(feature = "mcp")]
+fn parse_complexity_hint(value: serde_json::Value) -> Result<ComplexityHint, String> {
+    serde_json::from_value(value)
+        .map_err(|_| "expected one of: trivial, medium, complex".to_string())
+}
+
+#[cfg(feature = "mcp")]
+fn strip_grob_hint_metadata(request: &mut CanonicalRequest) {
+    if let Some(metadata) = request.metadata.as_mut() {
+        metadata.remove("grob_hint");
+        if metadata.is_empty() {
+            request.metadata = None;
+        }
+    }
+}
+
+#[cfg(feature = "mcp")]
+fn salt_cache_key_with_grob_hint(
+    cache_key: Option<String>,
+    grob_hint: Option<ComplexityHint>,
+) -> Option<String> {
+    let key = cache_key?;
+    let Some(hint) = grob_hint else {
+        return Some(key);
+    };
+    Some(format!("{key}|grob_hint={hint}"))
 }
 
 /// Returns `true` when a configured tier name matches the request's tier.
@@ -271,10 +305,10 @@ pub(crate) async fn dispatch(
     request: &mut CanonicalRequest,
 ) -> Result<DispatchResult, RequestError> {
     // ── Step 0: Resolve complexity hint ──
-    // Resolved up-front (borrows `request` immutably) but applied post-routing
-    // so the client-declared tier overrides the algorithmic scorer.
+    // Resolved up-front but applied post-routing so the client-declared tier
+    // overrides the algorithmic scorer.
     #[cfg(feature = "mcp")]
-    let grob_hint = resolve_grob_hint(ctx, request);
+    let grob_hint = resolve_grob_hint(ctx, request)?;
 
     // ── Step 1: DLP input scanning ──
     scan_dlp_input(ctx, request)?;
@@ -315,6 +349,8 @@ pub(crate) async fn dispatch(
                 request,
             )
         });
+    #[cfg(feature = "mcp")]
+    let cache_key = salt_cache_key_with_grob_hint(cache_key, grob_hint);
 
     // ── Step 3: Route ──
     #[cfg_attr(not(feature = "mcp"), allow(unused_mut))]
@@ -782,5 +818,15 @@ mod tests {
         // `== ModelStrategy::FanOut`: the `==` → `!=` mutant inverts selection.
         assert!(is_fan_out_strategy(&ModelStrategy::FanOut));
         assert!(!is_fan_out_strategy(&ModelStrategy::Fallback));
+    }
+
+    #[cfg(feature = "mcp")]
+    #[test]
+    fn parse_complexity_hint_rejects_unknown_values() {
+        assert_eq!(
+            parse_complexity_hint(serde_json::json!("trivial")).expect("valid hint"),
+            ComplexityHint::Trivial
+        );
+        assert!(parse_complexity_hint(serde_json::json!("urgent")).is_err());
     }
 }

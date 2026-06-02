@@ -137,9 +137,15 @@ pub async fn persist_and_reload(
         super::RequestError::Internal(anyhow::anyhow!("Failed to serialize config: {e}"))
     })?;
 
-    tokio::fs::write(config_path, toml_str).await.map_err(|e| {
-        super::RequestError::Internal(anyhow::anyhow!("Failed to write config: {e}"))
-    })?;
+    let config_path_for_write = config_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        crate::storage::atomic::write_atomic(&config_path_for_write, toml_str.as_bytes())
+    })
+    .await
+    .map_err(|e| {
+        super::RequestError::Internal(anyhow::anyhow!("Failed to join config write task: {e}"))
+    })?
+    .map_err(|e| super::RequestError::Internal(anyhow::anyhow!("Failed to write config: {e}")))?;
 
     // 3. Hot-reload: rebuild router + provider registry from the new config
     reload_state(state, config.clone(), config_path)?;

@@ -236,9 +236,9 @@ Control rate limiting, security headers, body size limits, circuit breakers, and
 ```toml
 [security]
 enabled = true                  # Master switch for all security middleware (default: true)
-rate_limit_rps = 100            # Requests per second per tenant/IP (default: 100)
-rate_limit_burst = 200          # Burst allowance (default: 200)
-max_body_size = 10485760        # Max request body in bytes (default: 10MB)
+rate_limit_rps = 0              # Requests per second per tenant/IP (default: 0 = disabled)
+rate_limit_burst = 0            # Burst allowance (default: 0; used only when rate_limit_rps > 0)
+max_body_size = 0               # Max request body in bytes (default: 0 = unlimited)
 security_headers = true         # Apply OWASP security headers (default: true)
 circuit_breaker = true          # Enable circuit breaker per provider (default: true)
 audit_dir = ""                  # Audit log directory, empty = disabled (default: "")
@@ -250,14 +250,14 @@ adaptive_scoring = false        # Enable scoring-based provider ranking (default
 scoring_latency_alpha = 0.3     # EWMA alpha for latency smoothing, 0.0-1.0 (default: 0.3)
 scoring_window_size = 50        # Rolling window for success rate calculation (default: 50)
 scoring_decay_rate = 0.001      # Score decay per second of inactivity (default: 0.001)
-scoring_persist = false         # Persist scores across restarts (default: false)
+scoring_persist = false         # Reserved; score persistence is not implemented yet
 ```
 
 When `enabled = false`, rate limiting, security headers, and circuit breaker middleware are all skipped. Individual features can also be toggled independently.
 
 The circuit breaker opens after 5 consecutive failures (30s timeout, 3 successes to close). When open, requests skip the provider and fall through to the next mapping.
 
-When `adaptive_scoring = true`, Grob ranks providers by a composite score (success rate, latency, recency). Higher-scoring providers are tried first within the same priority level. Scores decay over time to prevent stale rankings.
+When `adaptive_scoring = true`, Grob ranks providers by a composite score (success rate, latency, recency) and computes `declared_priority / adaptive_factor` before the fallback loop. A degraded provider can move behind a lower-priority healthy provider. Scores are in-memory and decay over time to prevent stale rankings.
 
 ## Config versioning
 

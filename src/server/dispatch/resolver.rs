@@ -8,7 +8,8 @@
 
 use std::sync::Arc;
 
-use super::super::RequestError;
+use super::super::{is_auth_revoked_error, RequestError};
+use super::retry::{capture_upstream_error, is_upstream_rate_limit};
 use super::{DispatchContext, DispatchResult};
 use tracing::info;
 
@@ -113,10 +114,17 @@ pub(super) async fn try_direct_provider_lookup(
     let original_model = fallback_request.model.clone();
     fallback_request.model = model_name.to_string();
 
-    let mut response = provider
-        .send_message(fallback_request)
-        .await
-        .map_err(RequestError::from)?;
+    let mut response = provider.send_message(fallback_request).await.map_err(|e| {
+        if is_auth_revoked_error(&e) {
+            RequestError::AuthRevoked(e.to_string())
+        } else if matches!(&e, crate::providers::error::ProviderError::AuthError(_))
+            || is_upstream_rate_limit(&e)
+        {
+            RequestError::from(e)
+        } else {
+            capture_upstream_error(model_name, &e)
+        }
+    })?;
     response.model = original_model;
 
     Ok(Some(DispatchResult::Complete {

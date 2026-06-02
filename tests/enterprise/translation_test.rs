@@ -184,6 +184,7 @@ fn anthropic_to_openai_strips_duplicate_system_role_from_messages() {
         stream: None,
         tools: None,
         tool_choice: None,
+        metadata: None,
         response_format: None,
         reasoning_effort: None,
         seed: None,
@@ -595,6 +596,7 @@ fn openai_request_to_canonical_simple_user_message() {
         stream: None,
         tools: None,
         tool_choice: None,
+        metadata: None,
         response_format: None,
         reasoning_effort: None,
         seed: None,
@@ -612,6 +614,70 @@ fn openai_request_to_canonical_simple_user_message() {
     assert_eq!(canonical.max_tokens, 128);
     assert_eq!(canonical.messages.len(), 1);
     assert!(canonical.system.is_none());
+}
+
+#[test]
+fn openai_request_message_names_roundtrip_to_openai_provider() {
+    let req = OpenAIRequest {
+        model: "gpt-4o".to_string(),
+        messages: vec![
+            OpenAIMessage {
+                role: "system".to_string(),
+                content: Some(OpenAIContent::String("Follow policy".to_string())),
+                name: Some("planner".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            OpenAIMessage {
+                role: "user".to_string(),
+                content: Some(OpenAIContent::String("Hello".to_string())),
+                name: Some("alice".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            OpenAIMessage {
+                role: "assistant".to_string(),
+                content: Some(OpenAIContent::String("Hi".to_string())),
+                name: Some("bot".to_string()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+        ],
+        max_tokens: Some(64),
+        temperature: None,
+        top_p: None,
+        stop: None,
+        stream: None,
+        tools: None,
+        tool_choice: None,
+        metadata: None,
+        response_format: None,
+        reasoning_effort: None,
+        seed: None,
+        frequency_penalty: None,
+        presence_penalty: None,
+        parallel_tool_calls: None,
+        user: None,
+        logprobs: None,
+        top_logprobs: None,
+        service_tier: None,
+    };
+
+    let canonical = transform_openai_to_canonical(req).expect("transform must succeed");
+    assert_eq!(
+        canonical.extensions.openai_system_name.as_deref(),
+        Some("planner")
+    );
+    assert_eq!(
+        canonical.extensions.openai_message_names,
+        vec![Some("alice".to_string()), Some("bot".to_string())]
+    );
+
+    let out = anthropic_to_openai_request(&canonical).expect("provider transform succeeds");
+    let messages = out["messages"].as_array().expect("messages array");
+    assert_eq!(messages[0]["name"], json!("planner"));
+    assert_eq!(messages[1]["name"], json!("alice"));
+    assert_eq!(messages[2]["name"], json!("bot"));
 }
 
 #[test]
@@ -641,6 +707,7 @@ fn openai_request_to_canonical_with_image_url_part() {
         stream: None,
         tools: None,
         tool_choice: None,
+        metadata: None,
         response_format: None,
         reasoning_effort: None,
         seed: None,
@@ -706,6 +773,7 @@ fn openai_request_to_canonical_tool_call_followed_by_tool_result() {
         stream: None,
         tools: None,
         tool_choice: None,
+        metadata: None,
         response_format: None,
         reasoning_effort: None,
         seed: None,
@@ -931,6 +999,7 @@ fn transform_handles_empty_messages_array_gracefully() {
         stream: None,
         tools: None,
         tool_choice: None,
+        metadata: None,
         response_format: None,
         reasoning_effort: None,
         seed: None,

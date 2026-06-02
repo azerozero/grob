@@ -55,7 +55,7 @@ Exhaustive list of grob capabilities, extracted from the codebase. The current v
 | Secret scanning | API keys, tokens, PEM blocks, credentials (25 built-in rules + custom) | redact, block, warn | Request + Response |
 | PII detection | Email, phone, credit card (Luhn), IBAN/BIC | redact, block, warn | Request + Response |
 | Name pseudonymization | Reversible mapping (real names → consistent pseudonyms) | pseudonymize | Request (anonymize) / Response (de-anonymize) |
-| Prompt injection | Pattern-based detection (custom + built-in) | block, warn | Request |
+| Prompt injection | Pattern-based detection (custom + built-in), including indirect response/tool_result scans | block, warn | Request + Response |
 | URL exfiltration | Anti-EchoLeak: domain whitelist/blacklist filtering | block, warn | Response |
 | Canary tokens | Watermark redacted secrets for leak traceability | inject | Request |
 | Streaming DLP | Per-chunk SSE scanning with SPRT cross-boundary detection | redact, block | Streaming responses |

@@ -1,184 +1,163 @@
 ---
-status: proposed
+status: accepted
 date: 2026-04-28
 deciders: [azerozero]
 consulted: []
 informed: []
 supersedes: []
-related: [ADR-0018]
+related: [ADR-0018, ADR-0020, ADR-0022]
 ---
 
-# ADR-0019: EMA Stigmergy — Adaptive Endpoint Health Scoring
+# ADR-0019: Adaptive Provider Scoring v1 — Provider-Level Score Before `[[endpoints]]`
+
+## Implementation status
+
+Adaptive scoring is implemented as a provider-level scorer in
+`src/security/provider_scorer.rs`, initialized from
+`[security] adaptive_scoring` and the `scoring_*` fields in
+`src/cli/config/security.rs`.
+
+This ADR is **not** a delivered per-endpoint EMA under `[router.ema]`.
+There is no `src/routing/ema.rs`, no `[[endpoints]]` top-level schema, and no
+`grob_routing_endpoint_*` metric family in the current tree. The live metrics
+are:
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `grob_provider_score` | `provider` | Composite provider score |
+| `grob_provider_latency_ewma_ms` | `provider` | Provider latency EWMA |
+| `grob_provider_success_rate` | `provider` | Rolling provider success rate |
+
+The `scoring_persist` config field is parsed but score persistence is not wired
+yet; current scores are in-memory process state.
 
 ## Context and Problem Statement
 
-Grob currently routes via static priority chains in `[[models.mappings]]`. When a high-priority endpoint degrades — slow responses, sporadic 429s, regional outages — grob keeps hammering it on every request until the operator manually edits the config and reloads.
+Grob routes through logical `[[models]]` entries with priority-ordered provider
+mappings. That schema does not yet expose stable endpoint IDs. A full
+per-endpoint EMA therefore has no natural key, no migration path, and no clear
+operator surface until ADR-0022's `[[endpoints]]` / `[[policies]]` migration is
+ready.
 
-In practice this means:
-
-- A 5-minute DeepSeek hiccup causes ~300 retries-then-fallbacks for an active Claude Code session before any human notices.
-- An endpoint that has been struggling for an hour stays at p1 because no one is watching the metrics.
-- Conversely, an endpoint that was down yesterday and is fully healthy today stays artificially deprioritized in someone's manually-edited config until they remember to revert the change.
-
-The fix is **adaptive scoring**: each endpoint accumulates a health score from recent observed signals (success rate, latency percentiles, 429 rate) and the score gradually fades back to neutral over time. Inspired by ant pheromone trails — high-traffic-success paths leave stronger trails; failures evaporate without trace.
+The immediate operational need is still real: avoid repeatedly trying a provider
+that is failing, slow, or in a half-open circuit-breaker state when another
+configured provider can serve the same logical model.
 
 ## Decision Drivers
 
-- **Recovery from transient provider issues without operator intervention** (primary).
-- **Predictability for compliance audits** — the routing must remain explainable; "the model picked DeepSeek because its EMA score was 0.85 vs Anthropic's 0.42" is acceptable, "we ran a black-box ML model" is not.
-- **Transparent to client** — Claude Code (or any client) should not see the internal switching. It calls `claude-sonnet-4-6` and gets a response; whether the response came from p1 or p3 is not visible in the response shape.
-- **Visible in telemetry** — operators need clear metrics to debug routing decisions and audit fallbacks.
-- **Backward compatible** — installations that prefer static priorities must continue to work unchanged.
+- **Use the schema that exists.** Provider names are stable today; endpoint IDs
+  are not.
+- **Keep the feature opt-in.** Static priority chains remain the default.
+- **Preserve explainability.** The score is a simple formula using success rate,
+  latency, and recency, with circuit-breaker overlay.
+- **Avoid schema churn.** Do not ship `[router.ema]` or endpoint metrics before
+  the endpoint schema exists.
+- **Keep hedging separate.** Scoring can improve fallback order without firing
+  speculative duplicate requests.
 
 ## Considered Options
 
-1. **EMA per-endpoint with configurable α and decay (chosen).** Each endpoint maintains an exponentially-weighted moving average of (success_rate, p95_latency, error_429_rate). On each request, the router picks the highest-scoring endpoint among the eligible ones (within tier filter, within priority chain). Default off; opt-in via `[router] adaptive_scoring = "ema"`.
-2. **Median-of-N rolling window.** Keep last N samples per endpoint, take the median. Rejected: more memory (~N×size_of(sample) per endpoint), no smoothing of bursty error rates, harder to tune the recovery curve.
-3. **Kalman filter or Bayesian inference.** Rejected: overkill for this signal class, harder to explain in compliance audits, and the parameter tuning effort dwarfs the gain.
-4. **Stay static, document the failure mode.** Rejected: the operator burden compounds as the number of endpoints grows. With ultra-cheap preset shipping 7 enabled providers, manual rebalancing is not realistic.
+1. **Per-endpoint EMA under `[router.ema]`.** Rejected for the current branch:
+   it depends on ADR-0022's endpoint identity model and would create a second
+   routing schema before migration tooling exists.
+2. **Provider-level adaptive scorer under `[security]` (chosen).** Fits the
+   current config shape, integrates with the existing circuit breaker, and gives
+   operators useful self-healing without schema migration.
+3. **Thompson sampling / weighted bandit.** Deferred. Probabilistic exploration
+   is harder to audit, and there is no endpoint schema or spend/audit protocol
+   to constrain exploration safely.
+4. **Static priorities only.** Rejected because it leaves transient provider
+   degradation entirely on the operator.
 
 ## Decision Outcome
 
-**Chosen: EMA per-endpoint, opt-in, transparent to client, fully observable.**
+Keep the current provider-level scorer as **adaptive provider scoring v1**.
 
 ### User-facing configuration
 
 ```toml
-[router]
-# Default: "static" preserves the existing priority-chain behavior.
-# "ema" enables exponentially-weighted health scoring as a tie-breaker
-# within the priority chain (does not change the chain itself).
-adaptive_scoring = "static"  # or "ema"
-
-[router.ema]
-# Smoothing factor 0..1. Higher = faster reaction to changes.
-# 0.3 means roughly 3-4 consecutive failures shift the score noticeably.
-alpha = 0.3
-
-# Decay half-life. After this duration with no signal, the EMA score
-# returns halfway to neutral (1.0). Prevents stale-penalty issues.
-decay_half_life = "1h"
-
-# Signals tracked. Each contributes equally to the composite score
-# unless `weights` overrides.
-signals = ["success_rate", "p95_latency", "error_429_rate"]
-
-# Optional per-signal weights (default: equal).
-[router.ema.weights]
-success_rate = 1.0
-p95_latency = 0.5
-error_429_rate = 1.0
-
-# Optional minimum score threshold. Below this, an endpoint is skipped
-# entirely (treated as if circuit-breaker tripped). Default: no skip.
-# Useful for compliance: "never route to an endpoint scoring below 0.3".
-skip_below = 0.3
+[security]
+adaptive_scoring = false        # opt-in; static priority order by default
+scoring_latency_alpha = 0.3     # EWMA alpha for latency smoothing
+scoring_window_size = 50        # rolling success-rate window
+scoring_decay_rate = 0.001      # confidence decay per second of inactivity
+scoring_persist = false         # reserved; not implemented yet
 ```
 
 ### Scoring formula
 
-```
-For each signal s observed in a request:
-    score_s_new = α × signal_s + (1 - α) × score_s_prev
+For each provider:
 
-Composite endpoint score:
-    composite = Σ (weight_s × score_s) / Σ weight_s
-    range: [0.0, 1.0], with 1.0 = healthy
-
-Idle decay (every N seconds, no traffic):
-    score_s = 1.0 - (1.0 - score_s) × 0.5^(elapsed / decay_half_life)
+```text
+success_rate = successes / recorded_outcomes
+latency_factor = 1 / (1 + latency_ewma_ms / 1000)
+confidence = max(1 - decay_rate * seconds_since_last_use, 0.3)
+composite = success_rate * latency_factor * confidence
 ```
+
+The circuit breaker overlays the raw score:
+
+| Circuit state | Adaptive factor |
+|---|---|
+| Closed | Raw composite score |
+| HalfOpen | `min(raw_score, 0.1)` |
+| Open | `0.0` |
 
 ### Routing integration
 
-The chain is unchanged. Within the chain, EMA only acts as a **gate** and a **tie-breaker**:
+When `adaptive_scoring = true`, `dispatch_provider_loop` asks the scorer to
+re-sort the selected model mappings before the provider fallback loop starts.
+The effective order is:
 
-1. Tier filter applies first (existing logic).
-2. Priority chain is walked top-to-bottom (existing logic).
-3. For each candidate endpoint, **if `adaptive_scoring = "ema"` and score < `skip_below`**, skip to next.
-4. The first acceptable candidate wins (no global score-max search; preserves predictability).
+```text
+effective_priority = declared_priority / adaptive_factor
+```
 
-Recovery is automatic: as the EMA score climbs back toward 1.0 (either from positive signal or idle decay), the endpoint re-enters the chain at its declared priority position.
+Lower effective priority is tried first. A provider with factor `0.0` is pushed
+to the end. This can reorder providers across declared priorities; it is not
+only a same-priority tie-breaker.
 
-### Transparent client contract
+## Non-goals and Deferred Work
 
-- The HTTP response shape is unchanged. `model: "claude-sonnet-4-6"` in the request returns `model: "claude-sonnet-4-6"` in the response, regardless of which provider actually served it.
-- The `provider` and `actual_model` are surfaced only in:
-  - Trace log (`~/.grob/trace.jsonl` if tracing enabled)
-  - Prometheus metrics (`grob_requests_total{provider, model}`)
-  - Optional response header `X-Grob-Routing: provider=anthropic;score=0.85;reason=ema-skip-deepseek`
-- Client tools (Claude Code, Cursor, Aider) never need to know switching happened.
+- **Per-endpoint scoring.** Useful conceptually, but it should wait for a
+  read-only internal endpoint adapter or a realistic ADR-0022 migration plan,
+  not a complete cut-over.
+- **`[router.ema]`.** Do not add a second operator-facing scoring schema while
+  `[security] adaptive_scoring` is the live implementation.
+- **Bandit / Thompson sampling.** Deferred until routing decisions have endpoint
+  identity, spend constraints, audit records, and an explicit opt-in story for
+  probabilistic exploration.
+- **Score persistence.** The `scoring_persist` field needs implementation or
+  removal; today it is a reserved knob.
 
-### Telemetry
+## Consequences
 
-New metrics surface routing decisions:
+### Positive
 
-| Metric | Labels | Type | Purpose |
-|---|---|---|---|
-| `grob_routing_endpoint_score` | `provider, model` | Gauge | Current composite EMA score 0..1 |
-| `grob_routing_endpoint_score_signal` | `provider, model, signal` | Gauge | Per-signal EMA values (debug) |
-| `grob_routing_skips_total` | `provider, model, reason` | Counter | When an endpoint is skipped: `ema_below_threshold`, `circuit_open`, `quota_exceeded` |
-| `grob_routing_recoveries_total` | `provider, model` | Counter | When a previously-skipped endpoint re-enters the chain |
-| `grob_routing_decisions_total` | `from_priority, served_by_priority` | Counter | Histogram of "intended vs actual" priority used |
+- Provides self-healing provider ordering without waiting for the endpoint
+  schema migration.
+- Reuses the existing circuit-breaker state and tests.
+- Exposes metrics that match the actual implementation.
+- Keeps the default behavior static and predictable.
 
-A Grafana dashboard template `grob-routing-ema.json` ships in `dashboards/` — operators can drop it in their existing instance and see endpoint health curves at a glance.
+### Negative
 
-### Positive Consequences
-
-- **Self-healing**: a 5-minute provider hiccup is absorbed without operator action; recovery is automatic.
-- **Operator visibility**: clear metrics, no black box.
-- **Backward compatible**: `adaptive_scoring = "static"` (default) preserves byte-for-byte existing behavior.
-- **Compliance-friendly**: every routing decision is explainable from the EMA values logged to trace.
-
-### Negative Consequences
-
-- **More state per process**: ~200 bytes per endpoint × ~50 endpoints in a heavy preset ≈ 10KB. Negligible.
-- **One extra atomic load per request**: the EMA score lookup. Sub-microsecond.
-- **Test surface widens**: deterministic property tests needed to lock the EMA arithmetic and decay.
-- **Tuning burden** (mild): operators may want to adjust α and decay for their workload pattern. Defaults are conservative.
-
-## Implementation Notes
-
-- New module `src/routing/ema.rs` exposing `EmaScorer` with `record_signal(endpoint_id, signal, value)` and `score(endpoint_id) -> f32`.
-- State stored in `Arc<DashMap<EndpointId, EmaState>>` for lock-free reads on the dispatch hot path.
-- Decay applied lazily on `score()` call (read timestamp, apply exponential decay since last update).
-- Atomic snapshot via `arc-swap` for hot-reload of weights / alpha / decay.
-- Integration point: `src/server/dispatch/mod.rs` between tier filter and provider call. ~50 LoC.
+- Provider-level scoring is coarse: two different models behind the same
+  provider share one score.
+- Reordering by `priority / factor` can override declared priority more strongly
+  than a pure gate would. This is intentional for v1 but must stay documented.
+- Persistence is not implemented despite the parsed `scoring_persist` field.
 
 ## Validation
 
-- Unit tests with deterministic time injection: alpha=0.5, three failures, verify score falls to expected value.
-- Property test: idempotent under no-op time advance.
-- Integration test: simulate a 5-minute provider outage, verify ≥80% of subsequent requests bypass the failing endpoint within the first 10 requests.
-- Bench: routing decision latency must remain < 100ns p99 (compared to ~50ns static priority).
-- Production canary: ship behind `adaptive_scoring = "ema"` opt-in, observe Grafana dashboard for 1 week before recommending the default flip in v0.40+.
+Current unit tests in `src/security/provider_scorer.rs` cover:
 
-## Configurability principle
+- New providers default to full score.
+- Rolling success-rate windows.
+- Latency EWMA arithmetic.
+- Failure-heavy providers receive low scores.
+- Better-scoring providers can move ahead of worse-scoring providers.
+- Open circuit breakers force score `0.0`.
 
-**Every parameter shipped here is a configurable default, not a hardcoded constant.** Operators override any value via `[router.ema]` in `~/.grob/config.toml`. The defaults below are guidance based on conservative-for-the-median-workload analysis; trading desks and security-prevails deployments are expected to tune their own.
-
-The default flip from `adaptive_scoring = "static"` to `"ema"` is **not a code change** — it is a default value in the config schema. Operators who want EMA earlier set it explicitly; operators who never want it leave it on `"static"` regardless of the project's recommendation.
-
-## Migration
-
-- Initial release shipping ADR-0019 code: `adaptive_scoring` config field added, default `"static"`. No behavior change for existing users.
-- Subsequent releases: gather feedback, optionally refine the default. Any shift of the default value is announced in the CHANGELOG one release ahead, never silently.
-- Operators are never blocked: they can set `adaptive_scoring = "static"` in their config and stay on the existing routing semantics indefinitely.
-
-## Audience-specific notes
-
-### Trading bots / time-sensitive callers
-
-EMA is most valuable here. The 60s circuit-breaker cooldown is unacceptable in a market-data loop; EMA-driven gating recovers in 5–10 requests after a transient provider issue and avoids hammering a degrading endpoint. Recommended defaults for this audience:
-
-- `alpha = 0.4` (faster reaction)
-- `decay_half_life = "15m"` (faster forget)
-- `skip_below = 0.5` (more aggressive gating)
-
-### Security-prevails customers (defense, banks, OIV)
-
-EMA decisions must be explainable in a compliance audit. Recommended posture:
-
-- `adaptive_scoring = "ema"` enabled but `skip_below` set to a high threshold (`0.6`+) so endpoints either route normally or get visibly excluded — no fuzzy intermediate cases.
-- The Prometheus metric `grob_routing_skips_total{reason="ema_below_threshold"}` becomes the audit signal: any non-zero value means the operator must justify the skip in the post-incident report.
-- The optional `X-Grob-Routing` response header MUST be enabled for these deployments — it carries the EMA score that drove the decision into the per-request audit log.
+Future endpoint-level scoring must add integration tests against the
+`[[endpoints]]` migration adapter before replacing this v1 provider scorer.

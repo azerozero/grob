@@ -68,7 +68,8 @@ pub(in crate::commands::setup) fn write_migrated(path: &Path, value: &Value) -> 
         std::fs::copy(path, &backup).context("failed to back up config before migration")?;
     }
     let serialized = toml::to_string_pretty(value).context("failed to serialize migrated TOML")?;
-    std::fs::write(path, serialized).context("failed to write migrated config")?;
+    crate::storage::atomic::write_atomic(path, serialized.as_bytes())
+        .context("failed to write migrated config")?;
     Ok(())
 }
 

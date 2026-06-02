@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// OpenAI Responses API request format (`POST /v1/responses`).
 #[derive(Debug, Deserialize)]
@@ -31,6 +32,9 @@ pub struct ResponsesRequest {
     /// Upper bound on tokens in the response.
     #[serde(default)]
     pub max_output_tokens: Option<u32>,
+    /// Arbitrary request metadata, including internal routing hints.
+    #[serde(default)]
+    pub metadata: Option<HashMap<String, Value>>,
 
     // ── Ignored gracefully (accepted but not processed) ──
     /// Reference to a previous response for multi-turn (ignored by grob).

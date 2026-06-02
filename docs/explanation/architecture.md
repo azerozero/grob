@@ -75,11 +75,14 @@ flowchart TB
 
     client -->|"POST /v1/messages\nPOST /v1/chat/completions"| server
     server --> handler
-    handler --> routing
-    routing --> dispatch
+    handler --> dispatch
     dispatch --> dlp
-    dlp --> response
-    response --> client
+    dlp --> routing
+    routing --> dispatch
+    dispatch --> providers
+    providers --> response
+    response --> dlp
+    dlp --> client
 ```
 
 ## Module layout

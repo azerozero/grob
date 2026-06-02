@@ -20,6 +20,7 @@ Start here: **[Documentation Index](index.md)**
 - [Configure the SimHash Cache](how-to/configure-simhash-cache.md) -- Fuzzy response cache setup
 - [Use grob_hint](how-to/use-grob-hint.md) -- Override request complexity per call
 - [Troubleshooting](how-to/troubleshooting.md) -- Common errors and fixes
+- [Gemini Integration](how-to/gemini-integration.md) -- Gemini and Vertex AI setup specifics
 
 ## Reference (information-oriented)
 
@@ -36,7 +37,6 @@ Start here: **[Documentation Index](index.md)**
 - [Architecture](explanation/architecture.md) -- Request flow, module layout, design decisions
 - [Design Principles](explanation/design-principles.md) -- Philosophy and UX guidelines
 - [Security Model](explanation/security.md) -- Threat model, defense layers, TLS
-- [Gemini Integration](how-to/gemini-integration.md) -- Gemini and Vertex AI specifics
 - [Architecture Decision Records](decisions/) -- ADRs for key design choices
 
 ## Monitoring

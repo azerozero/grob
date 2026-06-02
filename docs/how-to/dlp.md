@@ -90,7 +90,7 @@ action = "block"
 languages = ["all"]
 ```
 
-Blocked requests return HTTP 400 with a DLP error. For monitoring before enforcement, use `action = "log"`.
+Blocked requests return HTTP 400 with a DLP error. For monitoring before enforcement, use `action = "log"`. Response and tool-result indirect injection uses `response_action`; set `response_action = "block"` if those paths should block too.
 
 To restrict scanning to specific languages:
 
@@ -120,7 +120,7 @@ When `whitelist_domains` is set, any URL with a domain NOT in the list is flagge
 
 ```toml
 whitelist_domains = []
-blacklist_domains = ["evil.com", "exfil.io"]
+blacklist_domains = ["evil.example", "exfil.invalid"]
 ```
 
 ## How to enable session isolation

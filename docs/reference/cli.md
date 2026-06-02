@@ -8,7 +8,7 @@
 | `--version` | | Print version |
 | `--help` | | Print help |
 
-Shorthand: `grob -- <cmd>` is equivalent to `grob exec -- <cmd>`.
+Use `grob exec -- <cmd>` to launch a command behind the proxy. A bare `grob -- <cmd>` is rejected with a hint so accidental shorthand use does not bypass subcommand parsing.
 
 ## Commands
 
@@ -126,7 +126,6 @@ grob exec -- claude              # Launch Claude Code
 grob exec -- aider               # Launch Aider
 grob exec -- opencode            # Launch OpenCode
 grob exec --no-stop -- my-tool   # Keep proxy running after exit
-grob -- claude                   # Shorthand (trailing args)
 ```
 
 ### `grob run`
@@ -300,12 +299,31 @@ grob logs decrypt --path <trace.jsonl>        # custom trace file
 grob logs decrypt --output <out.jsonl>        # write plaintext to file
 ```
 
-### `grob record` (harness)
+### `grob secrets`
 
-Record live traffic to a tape file for later replay. Counterpart to `grob replay` (not yet surfaced here). Part of the opt-in `harness` feature.
+Manage encrypted upstream provider secrets referenced as `secret:<name>` in provider config.
+
+| Subcommand | Description |
+|------------|-------------|
+| `grob secrets add <name>` | Read a secret value from stdin and store it encrypted |
+| `grob secrets list [--json]` | List stored secret names without revealing values |
+| `grob secrets show <name> [--unsafe-show]` | Show a redacted value unless explicitly revealed |
+| `grob secrets rm <name> [--force]` | Remove a secret |
+| `grob secrets test [name] [--json]` | Probe referencing providers' models endpoints |
 
 ```bash
-grob record --output <tape.jsonl>
+printf '%s\n' "$OPENAI_API_KEY" | grob secrets add openai
+grob secrets list
+grob secrets test openai
+```
+
+### `grob harness` (feature-gated)
+
+Record live traffic to a tape file for later replay. The command is available only when the binary is built with the `harness` feature.
+
+```bash
+grob harness record --output <tape.jsonl>
+grob harness replay --tape <tape.jsonl>
 ```
 
 ### `grob connect`

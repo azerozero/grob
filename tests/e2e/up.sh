@@ -17,12 +17,20 @@ if ! command -v podman &>/dev/null; then
 fi
 echo "→ podman $(podman --version)"
 
-# Ensure podman machine is running (macOS)
-if [[ "$(uname -s)" == "Darwin" ]]; then
-    if ! podman machine inspect podman-machine-default 2>/dev/null | grep -q '"State": "running"'; then
+# Ensure podman is usable before building or launching containers. On macOS
+# this may require starting the default podman machine; if startup fails, keep
+# the real error visible instead of continuing into opaque image/pod failures.
+if ! podman info >/dev/null 2>&1; then
+    if [[ "$(uname -s)" == "Darwin" ]]; then
         echo "→ Starting podman machine…"
-        podman machine start 2>/dev/null || true
+        podman machine start
     fi
+fi
+
+if ! podman info >/dev/null 2>&1; then
+    echo "ERROR: podman is installed but not running or not reachable." >&2
+    echo "Try 'podman machine start' on macOS, then rerun this script." >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -66,10 +74,10 @@ echo "→ Starting pod from ${POD_MANIFEST}"
 # Resolve ${E2E_DIR} in the manifest template to absolute path
 export E2E_DIR="${SCRIPT_DIR}"
 RESOLVED_MANIFEST="$(mktemp)"
-envsubst '${E2E_DIR}' < "${POD_MANIFEST}" > "${RESOLVED_MANIFEST}"
+trap 'rm -f "${RESOLVED_MANIFEST}"' EXIT
+envsubst "\${E2E_DIR}" < "${POD_MANIFEST}" > "${RESOLVED_MANIFEST}"
 cd "${SCRIPT_DIR}"
 podman play kube "${RESOLVED_MANIFEST}"
-rm -f "${RESOLVED_MANIFEST}"
 
 # ---------------------------------------------------------------------------
 # 5. Wait for Grob /health

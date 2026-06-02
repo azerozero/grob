@@ -145,6 +145,27 @@ If no providers remain after filtering, the request fails with a routing error:
 
 GDPR filtering also applies to pass-through providers (those with `pass_through = true`).
 
+## Adaptive Provider Scoring
+
+Provider fallback is static by default: mappings are tried by ascending
+`[[models.mappings]].priority`. When `[security] adaptive_scoring = true`, Grob
+re-sorts the selected mappings before dispatch using the provider scorer in
+`src/security/provider_scorer.rs`.
+
+The scorer tracks provider-level success rate, latency EWMA, and recency. It
+integrates with the circuit breaker: open circuits receive score `0.0`, and
+half-open circuits are capped at `0.1`.
+
+Effective ordering is:
+
+```text
+effective_priority = declared_priority / adaptive_factor
+```
+
+Lower values are tried first. This is provider-level scoring, not endpoint-level
+EMA: there is no `[[endpoints]]` schema or `[router.ema]` configuration in the
+current runtime.
+
 ## Full Configuration Example
 
 ```toml

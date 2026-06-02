@@ -31,6 +31,15 @@ fn parse_data_uri_image(url: &str) -> Option<ContentBlock> {
     }))
 }
 
+fn internal_metadata(
+    metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+) -> Option<std::collections::HashMap<String, serde_json::Value>> {
+    metadata.and_then(|mut values| {
+        values.retain(|key, _| key == "grob_hint");
+        (!values.is_empty()).then_some(values)
+    })
+}
+
 /// Converts OpenAI content (string or multi-part) to canonical [`MessageContent`].
 ///
 /// Handles plain text, multi-part text+image, and absent content.
@@ -197,13 +206,17 @@ pub fn transform_openai_to_canonical(
 ) -> Result<CanonicalRequest, String> {
     // Cap pre-allocation to prevent memory exhaustion from malicious input.
     let mut messages = Vec::with_capacity(openai_req.messages.len().min(1024));
+    let mut openai_message_names = Vec::with_capacity(openai_req.messages.len().min(1024));
     let mut system_prompt: Option<SystemPrompt> = None;
+    let mut openai_system_name: Option<String> = None;
 
     for msg in openai_req.messages {
+        let name = msg.name.clone();
         match msg.role.as_str() {
             "system" => {
                 if let Some(content) = msg.content {
                     system_prompt = Some(SystemPrompt::Text(extract_text(content)));
+                    openai_system_name = name;
                 }
             }
             "user" => {
@@ -211,9 +224,11 @@ pub fn transform_openai_to_canonical(
                     role: "user".to_string(),
                     content: openai_content_to_canonical(msg.content),
                 });
+                openai_message_names.push(name);
             }
             "assistant" => {
                 messages.push(convert_assistant_message(msg));
+                openai_message_names.push(name);
             }
             "tool" => {
                 let tool_use_id = msg.tool_call_id.unwrap_or_default();
@@ -241,6 +256,7 @@ pub fn transform_openai_to_canonical(
                     role: "user".to_string(),
                     content: MessageContent::Blocks(vec![block]),
                 });
+                openai_message_names.push(None);
             }
             _ => {
                 tracing::warn!("Skipping unsupported message role: {}", msg.role);
@@ -253,6 +269,7 @@ pub fn transform_openai_to_canonical(
         .unwrap_or_else(|| models::default_max_tokens(&openai_req.model));
 
     let extensions = crate::models::extensions::RequestExtensions {
+        client_beta: None,
         response_format: openai_req.response_format,
         reasoning_effort: openai_req.reasoning_effort,
         seed: openai_req.seed,
@@ -263,7 +280,8 @@ pub fn transform_openai_to_canonical(
         logprobs: openai_req.logprobs,
         top_logprobs: openai_req.top_logprobs,
         service_tier: openai_req.service_tier,
-        ..Default::default()
+        openai_system_name,
+        openai_message_names,
     };
 
     Ok(CanonicalRequest {
@@ -276,7 +294,7 @@ pub fn transform_openai_to_canonical(
         top_k: None,
         stop_sequences: openai_req.stop,
         stream: openai_req.stream,
-        metadata: None,
+        metadata: internal_metadata(openai_req.metadata),
         system: system_prompt,
         tools: openai_req.tools.as_ref().map(|tools| convert_tools(tools)),
         tool_choice: openai_req

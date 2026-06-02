@@ -8,7 +8,11 @@ set -euo pipefail
 
 SCRIPT_NAME="$(basename "$0")"
 readonly SCRIPT_NAME
-readonly CONTAINERFILE="Containerfile"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+readonly REPO_ROOT
+readonly CONTAINERFILE="${REPO_ROOT}/Containerfile"
 
 usage() {
   cat <<EOF
@@ -71,6 +75,7 @@ main() {
   echo -e "${green}Building Grob container image with Podman...${nc}"
   echo "Tag: ${tag}"
   echo "Containerfile: ${CONTAINERFILE}"
+  echo "Build context: ${REPO_ROOT}"
   echo ""
 
   if ! command -v podman &> /dev/null; then
@@ -81,8 +86,8 @@ main() {
     exit 1
   fi
 
-  if [ ! -f "Cargo.toml" ]; then
-    echo -e "${red}Error: Must run from project root${nc}"
+  if [ ! -f "${REPO_ROOT}/Cargo.toml" ]; then
+    echo -e "${red}Error: could not locate repository root at ${REPO_ROOT}${nc}"
     exit 1
   fi
 
@@ -92,7 +97,7 @@ main() {
     --file "${CONTAINERFILE}" \
     --format oci \
     --layers \
-    .
+    "${REPO_ROOT}"
 
   echo ""
   echo -e "${green}Build successful!${nc}"
@@ -100,12 +105,12 @@ main() {
   echo "Image: grob:${tag}"
   echo ""
   echo "To run (rootless):"
-  echo "  podman play kube grob-kube.yml"
+  echo "  podman play kube ${REPO_ROOT}/deploy/grob-kube.yml"
   echo ""
   echo "Or with Quadlet (systemd):"
   echo "  mkdir -p ~/.config/containers/systemd"
-  echo "  cp grob.container ~/.config/containers/systemd/"
-  echo "  cp grob.volume ~/.config/containers/systemd/"
+  echo "  cp ${REPO_ROOT}/deploy/grob.container ~/.config/containers/systemd/"
+  echo "  cp ${REPO_ROOT}/deploy/grob.volume ~/.config/containers/systemd/"
   echo "  systemctl --user daemon-reload"
   echo "  systemctl --user enable --now grob"
   echo ""

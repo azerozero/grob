@@ -6,12 +6,13 @@ consulted: []
 informed: []
 ---
 
-> **Status note (2026-04-28)**: status reverted from `done` to `accepted`.
-> redb persistence remains the active storage substrate in v0.36.x — `GrobStore`
-> in `src/storage/mod.rs` is still the live code path and `~/.grob/spend/*.jsonl`
-> has not yet been written. The A-7 storage refactor is deferred to v0.37+.
-> The decision recorded here remains binding; only the implementation flag has
-> been corrected to reflect that no production code matches the design yet.
+> **Implementation status (2026-06-02)**: the file-based storage substrate is
+> now the live code path. `src/storage/mod.rs` opens `GrobStore` on atomic files
+> and append-only JSONL journals, `src/storage/journal.rs` writes
+> `~/.grob/spend/YYYY-MM.jsonl`, and OAuth / virtual-key records are stored as
+> AES-256-GCM encrypted `*.json.enc` files. Legacy `grob.db` is detected and
+> warned about, but not migrated. The storage-cap / stdout-saturation fallback
+> described below remains target design, not current code.
 
 # ADR-0013: Storage on Atomic Files + Append-Only Journal — No redb
 
@@ -56,8 +57,8 @@ Decision D-03 of the 2026-04-08 architect brief explicitly said: "Storage = atom
 │   ├── 2026-03.jsonl.sealed     # prior month, sealed (one kept per D-04)
 │   └── index.json               # metadata + sealed-file hashes
 ├── tokens/
-│   ├── anthropic.json.age       # age-encrypted
-│   └── openai.json.age
+│   ├── anthropic.json.enc       # AES-256-GCM encrypted
+│   └── openai.json.enc
 ├── config/
 │   ├── grob.toml
 │   └── presets/
@@ -84,7 +85,7 @@ Invariants:
 
 Only the **current month** and **one sealed previous month** are kept unless `[compliance] retention_months > 1` is set. LRU purge deletes older sealed files first (never the current month).
 
-### Storage cap (D-09)
+### Storage cap (D-09, not yet implemented)
 
 `[compliance] max_storage_mb = 50` is the default. When `~/.grob/spend/` exceeds the cap:
 
@@ -134,6 +135,6 @@ Existing redb users lose their state on upgrade. This is acceptable because:
 
 - Linked chantier: **A-7 Storage refactor files**, blocked on validation pause after W-1..W-4 merges.
 - [ADR-0004](0004-persistent-spend-tracking.md) — superseded in spirit (same goal, different substrate). A cross-reference will be added there once A-7 lands.
-- [ADR-0017](0017-sokolsky-log-backend.md) — the production audit path writes to Sokolsky; the local `audit/*.jsonl` file is a fallback for dev.
+- [ADR-0017](0017-sokolsky-log-backend.md) — Sokolsky remains a target backend; the current implementation has local signed audit logs and structured log export, not a `src/features/log_backend/` Sokolsky writer.
 - Obsidian concept: `50 - Concepts/Storage Files Biomimetique.md`.
 - Architect decisions: D-03, D-04, D-09.

@@ -82,6 +82,7 @@ pub(crate) fn transform_request(
         openai_messages.push(OpenAIMessage {
             role: "system".to_string(),
             content: Some(OpenAIContent::String(system_text)),
+            name: request.extensions.openai_system_name.clone(),
             reasoning: None,
             tool_calls: None,
             tool_call_id: None,
@@ -95,7 +96,7 @@ pub(crate) fn transform_request(
     // messages array to prevent duplicate system messages in the OpenAI
     // payload (audit Bug #3 — clients may send `[user, system, assistant]`
     // and grob previously emitted two `role:"system"` messages).
-    for msg in &request.messages {
+    for (message_index, msg) in request.messages.iter().enumerate() {
         if msg.role == "system" {
             tracing::debug!(
                 "Dropping system-role message from canonical messages array (already hoisted to top-level system)"
@@ -107,13 +108,25 @@ pub(crate) fn transform_request(
                 openai_messages.push(OpenAIMessage {
                     role: msg.role.clone(),
                     content: Some(OpenAIContent::String(text.clone())),
+                    name: request
+                        .extensions
+                        .openai_message_names
+                        .get(message_index)
+                        .cloned()
+                        .flatten(),
                     reasoning: None,
                     tool_calls: None,
                     tool_call_id: None,
                 });
             }
             MessageContent::Blocks(blocks) => {
-                transform_block_message(&msg.role, blocks, &mut openai_messages)?;
+                let name = request
+                    .extensions
+                    .openai_message_names
+                    .get(message_index)
+                    .cloned()
+                    .flatten();
+                transform_block_message(&msg.role, name, blocks, &mut openai_messages)?;
             }
         }
     }
@@ -171,6 +184,7 @@ pub(crate) fn transform_request(
 /// Transform a message with content blocks into OpenAI messages.
 fn transform_block_message(
     role: &str,
+    name: Option<String>,
     blocks: &[ContentBlock],
     openai_messages: &mut Vec<OpenAIMessage>,
 ) -> Result<(), TransformError> {
@@ -183,6 +197,7 @@ fn transform_block_message(
         openai_messages.push(OpenAIMessage {
             role: "tool".to_string(),
             content: Some(OpenAIContent::String(result_content)),
+            name: None,
             reasoning: None,
             tool_calls: None,
             tool_call_id: Some(tool_use_id),
@@ -206,6 +221,7 @@ fn transform_block_message(
         openai_messages.push(OpenAIMessage {
             role: role.to_string(),
             content,
+            name,
             reasoning: None,
             tool_calls: if tool_calls.is_empty() {
                 None

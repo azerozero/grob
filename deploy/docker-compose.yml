@@ -15,9 +15,10 @@ services:
       context: ..
       dockerfile: Containerfile
 
-    # Default grob port is 13456 (IPv6 ::1 on host, 0.0.0.0 in container).
+    # Container mode listens on 8080. Set GROB_HOST_PORT=13456 if you
+    # want the native host default on the outside.
     ports:
-      - "13456:13456"
+      - "${GROB_HOST_PORT:-8080}:8080"
 
     # ── Security hardening ──
     read_only: true
@@ -26,8 +27,6 @@ services:
       - seccomp=seccomp.json
     cap_drop:
       - ALL
-    cap_add:
-      - NET_BIND_SERVICE    # Only if binding to port < 1024
     user: "65534:65534"
 
     # Writable scratch space (noexec for defense-in-depth)
@@ -35,13 +34,13 @@ services:
       - /tmp:noexec,nosuid,size=64m
 
     volumes:
-      # Config (read-only bind mount)
-      - ${GROB_CONFIG:-${HOME}/.grob/config}:/etc/grob:ro
+      # Config directory on the host (read-only bind mount)
+      - ${GROB_CONFIG_DIR:-${HOME}/.grob/config}:/etc/grob:ro
       # Persistent data (spend DB, encryption keys)
       - grob-data:/var/lib/grob
 
     environment:
-      - GROB_CONFIG_PATH=/etc/grob/config.toml
+      - GROB_CONFIG=/etc/grob/config.toml
       - GROB_HOME=/var/lib/grob
       - RUST_LOG=info
 

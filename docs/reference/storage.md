@@ -143,4 +143,4 @@ All sensitive files created by the storage layer have restricted permissions:
 
 No TOML configuration is needed for the storage layer. The storage directory is `~/.grob/` by default and is determined internally. The encryption key path is always derived from the base directory.
 
-For custom storage placement (e.g., in containers), the path is resolved from the `--data-dir` CLI flag or the `GROB_DATA_DIR` environment variable when available.
+For custom storage placement (e.g., in containers), set `GROB_HOME` to the desired base directory. The container examples use `GROB_HOME=/var/lib/grob`.

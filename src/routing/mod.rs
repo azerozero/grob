@@ -18,9 +18,10 @@
 //! Future phases (tracked in ADR-0018):
 //!
 //! - RE-1c cooldown + half-open probes.
-//! - RE-2 EMA stats per endpoint.
+//! - RE-2 provider scoring v1 (implemented in `security::provider_scorer`);
+//!   endpoint-level EMA is deferred until ADR-0022 migration.
 //! - RE-3 hedged requests.
-//! - RE-4 Thompson sampling bandit.
+//! - RE-4 Thompson sampling bandit (rejected/deferred).
 //!
 //! [adr]: ../../../docs/decisions/0018-nature-inspired-routing.md
 
@@ -30,8 +31,14 @@ pub mod classify;
 /// Passive per-endpoint circuit breaker (RE-1a, Caddy-style).
 pub mod circuit_breaker;
 
+/// Read-only endpoint-shaped adapter derived from legacy config (ADR-0022 phase 0).
+pub mod endpoints;
+
 /// Active per-provider health checker (RE-1b, Caddy-style).
 pub mod health_check;
 
 pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, EndpointId};
+pub use endpoints::{
+    DerivedEndpoint, DerivedPolicy, EndpointInventory, EndpointModel, EndpointSource, PolicySource,
+};
 pub use health_check::{HealthCheckConfig, HealthChecker, HealthStatus, StatusMatcher};

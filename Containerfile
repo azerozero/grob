@@ -25,8 +25,9 @@ RUN cargo chef cook --release --locked --target x86_64-unknown-linux-musl --reci
 COPY . .
 RUN cargo build --release --locked --target x86_64-unknown-linux-musl
 
-# Strip symbols for smaller binary
-RUN strip target/x86_64-unknown-linux-musl/release/grob
+# Strip symbols for smaller binary and create runtime-owned mount points.
+RUN strip target/x86_64-unknown-linux-musl/release/grob && \
+    mkdir -p /runtime/var/lib/grob /runtime/tmp
 
 # Stage 3: Runtime (scratch - empty base)
 FROM scratch
@@ -40,8 +41,10 @@ LABEL org.opencontainers.image.licenses="AGPL-3.0"
 # Copy CA certificates for TLS (from builder)
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
-# Copy binary
+# Copy binary and create writable mount points owned by the runtime UID.
 COPY --from=builder /usr/src/grob/target/x86_64-unknown-linux-musl/release/grob /grob
+COPY --from=builder --chown=65534:65534 /runtime/var/lib/grob /var/lib/grob
+COPY --from=builder --chown=65534:65534 /runtime/tmp /tmp
 
 # Create non-root user (65534 = nobody)
 USER 65534:65534

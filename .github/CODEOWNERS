@@ -1,0 +1,16 @@
+# Default owner for repository changes.
+* @azerozero
+
+# High-risk operational surfaces.
+/.github/** @azerozero
+/Containerfile @azerozero
+/deploy/** @azerozero
+/scripts/** @azerozero
+/tests/e2e/** @azerozero
+
+# Security-sensitive implementation areas.
+/src/auth/** @azerozero
+/src/features/dlp/** @azerozero
+/src/features/policies/** @azerozero
+/src/security/** @azerozero
+/src/storage/** @azerozero

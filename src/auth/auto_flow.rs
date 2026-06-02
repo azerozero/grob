@@ -76,7 +76,9 @@ pub fn detect_credentials(
             AuthType::OAuth => {
                 if let Some(ref oauth_id) = provider.oauth_provider {
                     let token = token_store.get(oauth_id);
-                    let has_valid_token = token.as_ref().is_some_and(|t| !t.is_expired());
+                    let has_valid_token = token
+                        .as_ref()
+                        .is_some_and(|t| !t.is_expired() && t.needs_reauth != Some(true));
                     if has_valid_token {
                         statuses.push(CredentialStatus::Ready);
                     } else {
