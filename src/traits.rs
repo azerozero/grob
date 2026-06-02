@@ -119,13 +119,16 @@ pub trait Tracer: Send + Sync {
     /// Records an error trace entry.
     fn trace_error(&self, id: &str, error: &str);
 
-    /// Records a streaming response assembled from accumulated text.
+    /// Records a streaming response assembled from accumulated content blocks.
     ///
+    /// `content` is the full Anthropic-shaped content array (text, `tool_use`,
+    /// and thinking), so a streamed `res` trace mirrors a non-streaming one.
     /// Default no-op so non-file tracers (mocks) need not implement it.
-    fn trace_response_text(
+    fn trace_response_stream(
         &self,
         _id: &str,
-        _text: String,
+        _content: serde_json::Value,
+        _stop_reason: &str,
         _input_tokens: u32,
         _output_tokens: u32,
         _latency_ms: u64,

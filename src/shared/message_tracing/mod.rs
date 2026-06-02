@@ -192,15 +192,18 @@ impl MessageTracer {
         self.write_trace(&trace, file_mutex);
     }
 
-    /// Traces a streaming response assembled from accumulated `text_delta` content.
+    /// Traces a streaming response assembled from accumulated content blocks.
     ///
     /// A streaming turn never yields a single [`ProviderResponse`], so the spend
-    /// wrapper accumulates the emitted text and provider usage as the SSE stream
-    /// flows and records the `res` entry here on termination.
-    pub fn trace_response_text(
+    /// wrapper accumulates the emitted content (text, `tool_use` calls, thinking)
+    /// and provider usage as the SSE stream flows and records the `res` entry here
+    /// on termination. `content` is the full Anthropic-shaped content array, so
+    /// the streamed trace mirrors the non-streaming [`Self::trace_response`] shape.
+    pub fn trace_response_stream(
         &self,
         id: &str,
-        text: String,
+        content: serde_json::Value,
+        stop_reason: &str,
         input_tokens: u32,
         output_tokens: u32,
         latency_ms: u64,
@@ -214,10 +217,10 @@ impl MessageTracer {
             dir: "res",
             id: id.to_string(),
             latency_ms,
-            stop_reason: "end_turn".to_string(),
+            stop_reason: stop_reason.to_string(),
             input_tokens,
             output_tokens,
-            content: serde_json::json!([{ "type": "text", "text": text }]),
+            content,
         };
 
         self.write_trace(&trace, file_mutex);
@@ -318,15 +321,23 @@ impl crate::traits::Tracer for MessageTracer {
         self.trace_error(id, error);
     }
 
-    fn trace_response_text(
+    fn trace_response_stream(
         &self,
         id: &str,
-        text: String,
+        content: serde_json::Value,
+        stop_reason: &str,
         input_tokens: u32,
         output_tokens: u32,
         latency_ms: u64,
     ) {
-        self.trace_response_text(id, text, input_tokens, output_tokens, latency_ms);
+        self.trace_response_stream(
+            id,
+            content,
+            stop_reason,
+            input_tokens,
+            output_tokens,
+            latency_ms,
+        );
     }
 
     fn is_enabled(&self) -> bool {
