@@ -40,10 +40,17 @@ pub enum CredentialStatus {
     },
 }
 
+/// Built-in OAuth identities that coding assistants commonly need behind
+/// Grob's Anthropic and OpenAI-compatible surfaces.
+const CODING_ASSISTANT_OAUTH: &[(&str, &str, &str)] = &[
+    ("anthropic", "anthropic-max", "max"),
+    ("openai", "openai-codex", "openai-codex"),
+];
+
 /// Mapping from oauth_provider_id to the oauth_type string used by OAuthConfig.
 fn oauth_type_for_provider_id(oauth_provider_id: &str) -> Option<&'static str> {
     match oauth_provider_id {
-        "anthropic-max" => Some("max"),
+        "anthropic-max" | "anthropic-pro" | "claude-max" | "anthropic-oauth" => Some("max"),
         "openai-codex" => Some("openai-codex"),
         "gemini" => Some("gemini"),
         _ => None,
@@ -115,6 +122,121 @@ pub fn detect_credentials(
     }
 
     statuses
+}
+
+/// Detects credentials for `grob exec -- <cmd>`.
+///
+/// `exec` exposes both Anthropic and OpenAI-compatible base URLs to coding
+/// assistants. For known assistant launchers, include the built-in Anthropic
+/// and OpenAI OAuth identities in the preflight even when the current config
+/// only declares one of them. This prevents `grob exec -- codex` from offering
+/// only Anthropic OAuth on a cold subscription-based setup.
+pub fn detect_exec_credentials(
+    providers: &[ProviderConfig],
+    token_store: &TokenStore,
+    cmd: &[String],
+) -> Vec<CredentialStatus> {
+    let mut statuses = detect_credentials(providers, token_store);
+
+    if !is_coding_assistant_command(cmd) {
+        return statuses;
+    }
+
+    for (provider_name, oauth_provider_id, oauth_type) in CODING_ASSISTANT_OAUTH {
+        if configured_oauth_covers_builtin(providers, provider_name, oauth_provider_id) {
+            continue;
+        }
+        push_missing_oauth_if_absent(
+            &mut statuses,
+            token_store,
+            provider_name,
+            oauth_provider_id,
+            oauth_type,
+        );
+    }
+
+    statuses
+}
+
+fn configured_oauth_covers_builtin(
+    providers: &[ProviderConfig],
+    provider_name: &str,
+    oauth_provider_id: &str,
+) -> bool {
+    providers.iter().any(|provider| {
+        if provider.enabled == Some(false) || provider.auth_type != AuthType::OAuth {
+            return false;
+        }
+
+        let Some(configured_id) = provider.oauth_provider.as_deref() else {
+            return false;
+        };
+
+        configured_id == oauth_provider_id
+            || match provider_name {
+                "anthropic" => {
+                    provider.provider_type == "anthropic"
+                        || configured_id.starts_with("anthropic-")
+                        || configured_id.starts_with("claude-")
+                }
+                "openai" => {
+                    provider.provider_type == "openai" || configured_id.starts_with("openai-")
+                }
+                _ => false,
+            }
+    })
+}
+
+fn push_missing_oauth_if_absent(
+    statuses: &mut Vec<CredentialStatus>,
+    token_store: &TokenStore,
+    provider_name: &str,
+    oauth_provider_id: &str,
+    oauth_type: &str,
+) {
+    if statuses
+        .iter()
+        .any(|status| matches!(status, CredentialStatus::MissingOAuth { oauth_provider_id: id, .. } if id == oauth_provider_id))
+    {
+        return;
+    }
+
+    let token = token_store.get(oauth_provider_id);
+    let has_valid_token = token.as_ref().is_some_and(|t| !t.is_expired());
+    if has_valid_token {
+        return;
+    }
+
+    statuses.push(CredentialStatus::MissingOAuth {
+        provider_name: provider_name.to_string(),
+        oauth_provider_id: oauth_provider_id.to_string(),
+        oauth_type: oauth_type.to_string(),
+    });
+}
+
+fn is_coding_assistant_command(cmd: &[String]) -> bool {
+    let Some(program) = cmd.first() else {
+        return false;
+    };
+    let Some(name) = std::path::Path::new(program)
+        .file_name()
+        .and_then(|name| name.to_str())
+    else {
+        return false;
+    };
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "aider"
+            | "claude"
+            | "claude-code"
+            | "code"
+            | "code-insiders"
+            | "codex"
+            | "codex-cli"
+            | "cursor"
+            | "forge"
+            | "opencode"
+    )
 }
 
 /// Prompts for any missing OAuth tokens or API keys and persists them, skipping providers the user declines.
@@ -423,4 +545,157 @@ async fn setup_api_key_interactive(
     eprintln!("      export {}={}", env_var, key);
     eprintln!();
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::token_store::{OAuthToken, TokenStore};
+    use chrono::Utc;
+    use secrecy::SecretString;
+    use serde::Deserialize;
+    use tempfile::TempDir;
+
+    #[derive(Deserialize)]
+    struct ProvidersFile {
+        providers: Vec<ProviderConfig>,
+    }
+
+    fn providers_from_toml(input: &str) -> Vec<ProviderConfig> {
+        toml::from_str::<ProvidersFile>(input).unwrap().providers
+    }
+
+    fn empty_store() -> (TempDir, TokenStore) {
+        let dir = TempDir::new().unwrap();
+        let store = TokenStore::new(dir.path().join("tokens.json")).unwrap();
+        (dir, store)
+    }
+
+    fn save_token(store: &TokenStore, provider_id: &str) {
+        store
+            .save(OAuthToken {
+                provider_id: provider_id.to_string(),
+                access_token: SecretString::new("access".into()),
+                refresh_token: SecretString::new("refresh".into()),
+                expires_at: Utc::now() + chrono::Duration::hours(1),
+                enterprise_url: None,
+                project_id: None,
+                needs_reauth: None,
+            })
+            .unwrap();
+    }
+
+    fn missing_oauth_ids(statuses: &[CredentialStatus]) -> Vec<String> {
+        let mut ids: Vec<_> = statuses
+            .iter()
+            .filter_map(|status| match status {
+                CredentialStatus::MissingOAuth {
+                    oauth_provider_id, ..
+                } => Some(oauth_provider_id.clone()),
+                CredentialStatus::Ready | CredentialStatus::MissingApiKey { .. } => None,
+            })
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    fn anthropic_only_providers() -> Vec<ProviderConfig> {
+        providers_from_toml(
+            r#"
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+auth_type = "oauth"
+oauth_provider = "anthropic-max"
+enabled = true
+models = []
+"#,
+        )
+    }
+
+    #[test]
+    fn exec_codex_includes_openai_oauth_on_anthropic_only_config() {
+        let providers = anthropic_only_providers();
+        let (_dir, store) = empty_store();
+        let statuses = detect_exec_credentials(&providers, &store, &["codex".to_string()]);
+
+        assert_eq!(
+            missing_oauth_ids(&statuses),
+            vec!["anthropic-max".to_string(), "openai-codex".to_string()]
+        );
+    }
+
+    #[test]
+    fn exec_unknown_command_keeps_config_credential_scope() {
+        let providers = anthropic_only_providers();
+        let (_dir, store) = empty_store();
+        let statuses = detect_exec_credentials(&providers, &store, &["curl".to_string()]);
+
+        assert_eq!(missing_oauth_ids(&statuses), vec!["anthropic-max"]);
+    }
+
+    #[test]
+    fn exec_oauth_hints_dedupe_configured_openai_provider() {
+        let providers = providers_from_toml(
+            r#"
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+auth_type = "oauth"
+oauth_provider = "anthropic-max"
+enabled = true
+models = []
+
+[[providers]]
+name = "chatgpt-codex"
+provider_type = "openai"
+auth_type = "oauth"
+oauth_provider = "openai-codex"
+enabled = true
+models = []
+"#,
+        );
+        let (_dir, store) = empty_store();
+        let statuses = detect_exec_credentials(&providers, &store, &["codex".to_string()]);
+
+        assert_eq!(
+            missing_oauth_ids(&statuses)
+                .iter()
+                .filter(|id| id.as_str() == "openai-codex")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn exec_oauth_hints_do_not_add_anthropic_max_when_anthropic_alias_configured() {
+        let providers = providers_from_toml(
+            r#"
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+auth_type = "oauth"
+oauth_provider = "anthropic-pro"
+enabled = true
+models = []
+"#,
+        );
+        let (_dir, store) = empty_store();
+        let statuses = detect_exec_credentials(&providers, &store, &["claude".to_string()]);
+
+        assert_eq!(
+            missing_oauth_ids(&statuses),
+            vec!["anthropic-pro".to_string(), "openai-codex".to_string()]
+        );
+    }
+
+    #[test]
+    fn exec_oauth_hints_skip_existing_openai_token() {
+        let providers = anthropic_only_providers();
+        let (_dir, store) = empty_store();
+        save_token(&store, "openai-codex");
+        let statuses = detect_exec_credentials(&providers, &store, &["codex".to_string()]);
+
+        assert_eq!(missing_oauth_ids(&statuses), vec!["anthropic-max"]);
+    }
 }
