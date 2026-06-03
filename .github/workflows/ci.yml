@@ -389,11 +389,13 @@ jobs:
     steps:
       - name: Check shard results
         run: |
-          if [[ "${{ needs.test-ubuntu.result }}" == "failure" || "${{ needs.test-ubuntu.result }}" == "cancelled" ]]; then
+          # Only a genuine "failure" blocks; a "cancelled" shard (concurrency
+          # auto-cancel / preemption) is non-fatal, mirroring the Required gate.
+          if [[ "${{ needs.test-ubuntu.result }}" == "failure" ]]; then
             echo "::error::Ubuntu test shards failed"
             exit 1
           fi
-          echo "All Ubuntu test shards passed."
+          echo "All Ubuntu test shards passed (or were cancelled benignly)."
 
   test-other:
     name: Test (${{ matrix.os }})
@@ -1133,7 +1135,10 @@ jobs:
           # path pruning skips them on non-Rust changes, causing eternal "pending".
           # See: https://github.com/azerozero/grob/pull/153
           #
-          # Fail if any required job failed (skipped is OK for pruned paths).
+          # Fail ONLY when a required job genuinely failed. "skipped" (path
+          # pruning) and "cancelled" (concurrency auto-cancel, runner
+          # preemption) are both non-fatal — a benign cancellation must never
+          # block a release. A real regression still surfaces as "failure".
           results=( \
             "${{ needs.fmt.result }}" \
             "${{ needs.clippy.result }}" \
@@ -1150,12 +1155,12 @@ jobs:
             "${{ needs.validate-yaml.result }}" \
           )
           for r in "${results[@]}"; do
-            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
-              echo "::error::Required job failed or was cancelled: $r"
+            if [[ "$r" == "failure" ]]; then
+              echo "::error::Required job failed: $r"
               exit 1
             fi
           done
-          echo "All required checks passed (or were skipped by path pruning)."
+          echo "All required checks passed (skipped/cancelled jobs are non-fatal)."
 
   # =========================================================================
   # Stage 10: Pipeline Summary
