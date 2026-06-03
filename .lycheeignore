@@ -2,3 +2,5 @@
 ^https?://[^/]+\.example\.(com|org|net)(/.*)?$
 ^https?://grob-(qa|prod|dev|staging)\.example\.com(/.*)?$
 ^https?://.*\.internal(/.*)?$
+# public.cyber.mil rate-limits/times out from GitHub runners (flaky, not broken).
+^https?://(public\.)?cyber\.mil(/.*)?$
