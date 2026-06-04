@@ -484,6 +484,14 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_protocol_error_is_not_retryable() {
+        let err =
+            crate::providers::error::ProviderError::ProtocolError("no content found".to_string());
+        assert!(!is_retryable(&err));
+        assert!(!is_auth_revoked_error(&err));
+    }
+
+    #[test]
     fn test_retry_delay_exponential_backoff() {
         let d0 = retry_delay(0);
         let d1 = retry_delay(1);

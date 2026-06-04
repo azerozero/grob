@@ -56,6 +56,10 @@ pub(super) fn capture_upstream_error(provider: &str, err: &ProviderError) -> Req
             status: *status,
             body: Some(message.clone()),
         },
+        ProviderError::ProtocolError(message) => RequestError::ProviderProtocol {
+            provider: provider.to_string(),
+            body: message.clone(),
+        },
         other => RequestError::ProviderUpstream {
             provider: provider.to_string(),
             status: 502,

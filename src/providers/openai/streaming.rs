@@ -1,5 +1,6 @@
 use super::tool_salvage::{drain_buffer, salvage_complete, SalvageEvent, SalvagedToolCall};
 use super::types::{OpenAIStreamChunk, StreamTransformState};
+use crate::providers::error::ProviderError;
 
 /// Transform an OpenAI streaming chunk to Anthropic SSE format.
 ///
@@ -512,7 +513,7 @@ fn emit_tool_input_delta(
     output.push_str(&format!("event: content_block_delta\ndata: {}\n\n", delta));
 }
 
-fn sanitize_tool_input_delta<'a>(
+pub(crate) fn sanitize_tool_input_delta<'a>(
     tool_name: &str,
     partial_json: &'a str,
 ) -> std::borrow::Cow<'a, str> {
@@ -872,16 +873,22 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
     message_id: &str,
     model: &str,
     state: &mut StreamTransformState,
-) -> String {
+) -> Result<String, ProviderError> {
     let mut output = String::new();
 
     if state.stream_ended {
-        return output;
+        return Ok(output);
     }
 
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
-        return output;
-    };
+    let json =
+        serde_json::from_str::<serde_json::Value>(data).map_err(|e| ProviderError::ApiError {
+            status: 502,
+            message: format!(
+                "OpenAI Responses stream emitted malformed JSON SSE payload ({} bytes): {}",
+                data.len(),
+                e
+            ),
+        })?;
     let event_type = json
         .get("type")
         .and_then(|v| v.as_str())
@@ -936,7 +943,7 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
         _ => {}
     }
 
-    output
+    Ok(output)
 }
 
 /// Closes any open content blocks and emits `message_delta` + `message_stop`
@@ -1039,7 +1046,7 @@ mod codex_stream_tests {
         let mut state = StreamTransformState::default();
         let mut out = String::new();
         for event in events {
-            out.push_str(&transform(event, "msg_test", "gpt-5.5", &mut state));
+            out.push_str(&transform(event, "msg_test", "gpt-5.5", &mut state).unwrap());
         }
         out
     }
@@ -1364,12 +1371,21 @@ mod codex_stream_tests {
     }
 
     #[test]
-    fn unknown_events_and_garbage_are_ignored() {
+    fn unknown_json_events_are_ignored() {
         let out = run(&[
-            "not json",
             r#"{"type":"response.in_progress"}"#,
             r#"{"type":"response.output_item.added","item":{"type":"message"}}"#,
         ]);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn malformed_response_event_returns_error() {
+        let mut state = StreamTransformState::default();
+        let err = transform("not json", "msg_test", "gpt-5.5", &mut state).unwrap_err();
+        let message = err.to_string();
+
+        assert!(message.contains("malformed JSON SSE payload"));
+        assert!(message.contains("8 bytes"));
     }
 }

@@ -24,9 +24,18 @@ pub enum ProviderError {
         message: String,
     },
 
+    /// Provider returned a syntactically successful response that Grob cannot
+    /// translate safely.
+    #[error("Provider protocol error: {0}")]
+    ProtocolError(String),
+
     /// Provider configuration is invalid or incomplete.
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    /// The caller supplied a request this provider cannot translate safely.
+    #[error("Invalid provider request: {0}")]
+    InvalidRequest(String),
 
     /// Authentication with the upstream provider failed.
     #[error("Authentication error: {0}")]

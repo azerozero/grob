@@ -50,7 +50,7 @@ pub mod test_api {
     ) -> Result<ProviderResponse, String> {
         let openai_resp: super::types::OpenAIResponse =
             serde_json::from_value(openai_json).map_err(|e| e.to_string())?;
-        Ok(transform::transform_response(openai_resp))
+        transform::transform_response(openai_resp).map_err(|e| e.to_string())
     }
 
     /// Outbound: translates a canonical request to the OpenAI Responses API
@@ -283,7 +283,7 @@ impl OpenAIProvider {
         }) {
             "tool_use"
         } else {
-            "end_turn"
+            parsed.stop_reason.as_deref().unwrap_or("end_turn")
         };
 
         Ok(ProviderResponse {
@@ -347,7 +347,7 @@ impl OpenAIProvider {
                 e
             })?;
 
-        Ok(transform::transform_response(openai_response))
+        transform::transform_response(openai_response)
     }
 }
 
@@ -552,13 +552,14 @@ fn process_codex_sse_event(
         return Ok(Bytes::new());
     }
 
-    let sse_output = streaming::transform_codex_event_to_anthropic_sse(
-        data,
-        message_id,
-        model,
-        &mut state.lock().unwrap_or_else(|e| e.into_inner()),
-    );
-    Ok(Bytes::from(sse_output))
+    let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+    match streaming::transform_codex_event_to_anthropic_sse(data, message_id, model, &mut state) {
+        Ok(sse_output) => Ok(Bytes::from(sse_output)),
+        Err(err) => {
+            state.stream_ended = true;
+            Err(err)
+        }
+    }
 }
 
 /// Transform a single OpenAI SSE event into Anthropic SSE format.
@@ -607,12 +608,24 @@ fn process_sse_event(
         }
         Err(e) => {
             tracing::warn!(
-                "{} failed to parse chunk: {} - Data: {}",
+                "{} failed to parse streaming JSON chunk: {} (payload_bytes={})",
                 provider_name,
                 e,
-                data
+                data.len()
             );
-            Ok(Bytes::new())
+            state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .stream_ended = true;
+            Err(ProviderError::ApiError {
+                status: 502,
+                message: format!(
+                    "{} emitted malformed JSON SSE payload ({} bytes): {}",
+                    provider_name,
+                    data.len(),
+                    e
+                ),
+            })
         }
     }
 }
@@ -620,6 +633,17 @@ fn process_sse_event(
 /// Build finalization SSE output for streams that ended without finish_reason.
 fn build_stream_finalization_output(state: &StreamTransformState) -> String {
     let mut output = String::new();
+
+    if state.thinking_block_open {
+        let block_stop = serde_json::json!({
+            "type": "content_block_stop",
+            "index": state.thinking_block_index
+        });
+        output.push_str(&format!(
+            "event: content_block_stop\ndata: {}\n\n",
+            block_stop
+        ));
+    }
 
     if state.text_block_open {
         let block_stop = serde_json::json!({
