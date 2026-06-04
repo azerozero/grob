@@ -25,6 +25,8 @@ fn extract_input_text(content: &InputContent) -> String {
             .iter()
             .map(|p| match p {
                 InputContentPart::InputText { text } => text.as_str(),
+                InputContentPart::OutputText { text } => text.as_str(),
+                InputContentPart::Other => "",
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -203,6 +205,14 @@ pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<Canonic
                             });
                         }
                     }
+                    InputItem::Reasoning { .. } => {
+                        // Model's internal reasoning trace: not part of the
+                        // canonical conversation; intentionally dropped.
+                    }
+                    InputItem::Other => {
+                        // Unmodelled item type (e.g. local_shell_call); skipped
+                        // for forward compatibility with richer Codex payloads.
+                    }
                 }
             }
         }
@@ -216,6 +226,9 @@ pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<Canonic
         reasoning_effort: req.reasoning.as_ref().and_then(|r| r.effort.clone()),
         parallel_tool_calls: req.parallel_tool_calls,
         service_tier: req.service_tier,
+        // This path only runs for Codex CLI (Responses API) requests, so its
+        // `instructions` are the authoritative Codex agent prompt.
+        codex_native: true,
         ..Default::default()
     };
 
@@ -378,6 +391,58 @@ mod tests {
         assert_eq!(canonical.messages[0].role, "user");
         assert_eq!(canonical.messages[1].role, "assistant");
         assert_eq!(canonical.messages[2].role, "user");
+    }
+
+    #[test]
+    fn codex_multiturn_items_are_tolerated_and_marked_native() {
+        let req: ResponsesRequest = serde_json::from_value(serde_json::json!({
+            "model": "gpt-5.5",
+            "instructions": "Codex agent prompt",
+            "input": [
+                {
+                    "type": "reasoning",
+                    "id": "rs_1",
+                    "summary": []
+                },
+                {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [
+                        { "type": "output_text", "text": "Previously said." }
+                    ]
+                },
+                {
+                    "type": "local_shell_call",
+                    "id": "call_local"
+                },
+                {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        { "type": "input_text", "text": "Continue." }
+                    ]
+                }
+            ],
+            "reasoning": { "effort": "xhigh" },
+            "parallel_tool_calls": true,
+            "service_tier": "priority"
+        }))
+        .unwrap();
+
+        let canonical = transform_responses_to_canonical(req).unwrap();
+        assert!(canonical.extensions.codex_native);
+        assert_eq!(
+            canonical.extensions.reasoning_effort.as_deref(),
+            Some("xhigh")
+        );
+        assert_eq!(canonical.extensions.parallel_tool_calls, Some(true));
+        assert_eq!(
+            canonical.extensions.service_tier.as_deref(),
+            Some("priority")
+        );
+        assert_eq!(canonical.messages.len(), 2);
+        assert_eq!(canonical.messages[0].role, "assistant");
+        assert_eq!(canonical.messages[1].role, "user");
     }
 
     #[test]

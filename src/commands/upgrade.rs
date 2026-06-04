@@ -51,14 +51,14 @@ async fn cmd_upgrade_unix(
     base_url: &str,
     old_pid: u32,
 ) -> anyhow::Result<()> {
-    spawn_background_service(Some(_config.server.port.value()), cli_config)?;
+    spawn_upgrade_background_service(Some(_config.server.port.value()), cli_config)?;
     println!("   Spawned new process, waiting for health...");
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(35);
     let new_pid = loop {
         if std::time::Instant::now() > deadline {
             eprintln!("❌ Timeout waiting for new process to become healthy");
-            return Ok(());
+            anyhow::bail!("new Grob process did not become healthy during upgrade");
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(HEALTH_POLL_INTERVAL_MS)).await;
 
@@ -86,7 +86,14 @@ async fn cmd_upgrade_unix(
         use nix::unistd::Pid;
         println!("   Sending SIGUSR1 to old process (PID: {})...", old_pid);
         if let Err(e) = kill(Pid::from_raw(old_pid as i32), Signal::SIGUSR1) {
-            eprintln!("   Warning: Failed to signal old process: {}", e);
+            if pid::is_process_running(old_pid) {
+                stop_new_process_after_failed_upgrade(
+                    new_pid,
+                    format!("failed to signal old Grob process {old_pid}: {e}"),
+                )
+                .await?;
+            }
+            eprintln!("   Old process (PID: {}) already exited", old_pid);
         }
     }
 
@@ -97,14 +104,27 @@ async fn cmd_upgrade_unix(
             break;
         }
         if std::time::Instant::now() > drain_deadline {
-            eprintln!("   Warning: Old process still running after 35s drain timeout");
-            break;
+            anyhow::bail!(
+                "old Grob process {} still running after 35s drain timeout; new Grob process {} is healthy and left active",
+                old_pid,
+                new_pid
+            );
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
 
     println!("✅ Upgrade complete! New PID: {}", new_pid);
     Ok(())
+}
+
+#[cfg(feature = "unix-signals")]
+async fn stop_new_process_after_failed_upgrade(new_pid: u32, reason: String) -> anyhow::Result<()> {
+    eprintln!("❌ {reason}");
+    eprintln!("   Stopping new process (PID: {new_pid}) to keep the old instance authoritative...");
+    if let Err(e) = stop_service(new_pid).await {
+        anyhow::bail!("{reason}; additionally failed to stop new process {new_pid}: {e}");
+    }
+    anyhow::bail!(reason)
 }
 
 #[cfg(windows)]
@@ -125,8 +145,10 @@ async fn cmd_upgrade_windows(
             break;
         }
         if std::time::Instant::now() > drain_deadline {
-            eprintln!("   Warning: Old process still running after 35s drain timeout");
-            break;
+            anyhow::bail!(
+                "old Grob process {} still running after 35s drain timeout",
+                old_pid
+            );
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
@@ -136,7 +158,7 @@ async fn cmd_upgrade_windows(
 
     if !poll_health(base_url, HEALTH_POLL_MAX_ATTEMPTS, HEALTH_POLL_INTERVAL_MS).await {
         eprintln!("❌ Timeout waiting for new process to become healthy");
-        return Ok(());
+        anyhow::bail!("new Grob process did not become healthy during upgrade");
     }
 
     let new_pid = instance::find_instance_pid(&config.server.host, config.server.port.value())

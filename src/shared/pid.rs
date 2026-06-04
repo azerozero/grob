@@ -58,9 +58,39 @@ pub fn cleanup_pid() -> io::Result<()> {
     Ok(())
 }
 
-/// Check if a grob process is running at the given PID.
-/// On Linux, additionally verifies via /proc that the process is actually grob
-/// (guards against stale PID files after PID reuse).
+/// Removes the PID file only if it still belongs to the current process.
+///
+/// Hot upgrades briefly run two Grob processes on the same port. The new process
+/// writes its PID before the old process finishes draining, so shutdown cleanup
+/// must not blindly delete a PID file that has already been claimed by the new
+/// instance.
+pub fn cleanup_pid_if_current() -> io::Result<()> {
+    let pid_file = pid_file_path();
+    let current_pid = std::process::id();
+
+    match read_pid() {
+        Ok(pid) if pid == current_pid => {
+            fs::remove_file(&pid_file)?;
+            tracing::info!("PID file removed: {:?}", pid_file);
+        }
+        Ok(pid) => {
+            tracing::debug!(
+                "PID file {:?} belongs to {}, not {}; leaving it in place",
+                pid_file,
+                pid,
+                current_pid
+            );
+        }
+        Err(e) if e.kind() == ErrorKind::NotFound => {}
+        Err(e) => return Err(e),
+    }
+
+    Ok(())
+}
+
+/// Check if a Grob process is running at the given PID.
+/// On Unix platforms, additionally verifies the command identity where the OS
+/// exposes it (guards against stale PID files after PID reuse).
 #[cfg(feature = "unix-signals")]
 pub fn is_process_running(pid: u32) -> bool {
     use nix::sys::signal::kill;
@@ -71,20 +101,60 @@ pub fn is_process_running(pid: u32) -> bool {
         return false;
     }
 
-    // On Linux, verify cmdline contains "grob" to detect PID reuse
     #[cfg(target_os = "linux")]
     {
         let cmdline_path = format!("/proc/{}/cmdline", pid);
         if let Ok(cmdline) = fs::read(&cmdline_path) {
-            // /proc/*/cmdline uses NUL separators; convert to readable string
             let cmdline_str = String::from_utf8_lossy(&cmdline);
-            if !cmdline_str.contains("grob") {
+            if !command_invokes_grob(&cmdline_str) {
                 return false;
             }
+        } else {
+            return false;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let output = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "command="])
+            .output();
+        match output {
+            Ok(output) if output.status.success() => {
+                let command = String::from_utf8_lossy(&output.stdout);
+                if !command_invokes_grob(&command) {
+                    return false;
+                }
+            }
+            _ => return false,
         }
     }
 
     true
+}
+
+#[cfg(feature = "unix-signals")]
+fn command_invokes_grob(command: &str) -> bool {
+    let first_arg = command
+        .split('\0')
+        .find(|part| !part.trim().is_empty())
+        .or_else(|| command.split_whitespace().next())
+        .unwrap_or_default()
+        .trim();
+    let executable = std::path::Path::new(first_arg)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or(first_arg);
+
+    if executable == "grob" {
+        return true;
+    }
+
+    std::env::current_exe()
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name.to_owned()))
+        .and_then(|name| name.to_str().map(str::to_owned))
+        .is_some_and(|current| executable == current)
 }
 
 /// Fallback when nix is unavailable: only our own PID is considered valid.
@@ -105,5 +175,20 @@ pub fn is_process_running(pid: u32) -> bool {
             !stdout.contains("No tasks")
         }
         Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "unix-signals")]
+    use super::command_invokes_grob;
+
+    #[cfg(feature = "unix-signals")]
+    #[test]
+    fn command_identity_accepts_only_grob_executable() {
+        assert!(command_invokes_grob("/Users/me/bin/grob\0start\0"));
+        assert!(!command_invokes_grob("/tmp/grob-upgrade --config x"));
+        assert!(!command_invokes_grob("/usr/bin/python /tmp/grob.py"));
+        assert!(!command_invokes_grob("/usr/bin/agrob-helper"));
     }
 }

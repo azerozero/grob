@@ -219,15 +219,7 @@ fn emit_salvaged_tool_use(
         block_start
     ));
 
-    let input_delta = serde_json::json!({
-        "type": "content_block_delta",
-        "index": block_index,
-        "delta": { "type": "input_json_delta", "partial_json": call.input.to_string() }
-    });
-    output.push_str(&format!(
-        "event: content_block_delta\ndata: {}\n\n",
-        input_delta
-    ));
+    emit_tool_input_delta(output, block_index, &call.name, &call.input.to_string());
 
     emit_block_stop(output, block_index);
 }
@@ -248,6 +240,13 @@ fn emit_tool_call_deltas(
             .and_then(|f| f.get("name"))
             .and_then(|n| n.as_str())
             .is_some();
+        if let Some(tool_name) = tool_call
+            .get("function")
+            .and_then(|f| f.get("name"))
+            .and_then(|n| n.as_str())
+        {
+            state.tool_names.insert(tool_index, tool_name.to_string());
+        }
 
         if has_id && has_name && !state.tool_blocks.contains_key(&tool_index) {
             let tool_id = tool_call
@@ -306,15 +305,13 @@ fn emit_tool_call_deltas(
                             idx
                         });
 
-                let input_delta = serde_json::json!({
-                    "type": "content_block_delta",
-                    "index": block_index,
-                    "delta": { "type": "input_json_delta", "partial_json": args }
-                });
-                output.push_str(&format!(
-                    "event: content_block_delta\ndata: {}\n\n",
-                    input_delta
-                ));
+                let tool_name = tool_call
+                    .get("function")
+                    .and_then(|f| f.get("name"))
+                    .and_then(|n| n.as_str())
+                    .or_else(|| state.tool_names.get(&tool_index).map(String::as_str))
+                    .unwrap_or("unknown");
+                emit_tool_input_delta(output, block_index, tool_name, args);
             }
         }
     }
@@ -325,16 +322,44 @@ fn emit_tool_call_deltas(
 /// Codex streams a structured tool call as `output_item.added` (the call shell),
 /// then `function_call_arguments.delta` chunks, then `output_item.done`. The
 /// block is keyed by the Responses `output_index` so argument deltas correlate.
+fn resolve_responses_fc_output_index(
+    state: &StreamTransformState,
+    json: &serde_json::Value,
+    item: Option<&serde_json::Value>,
+    fallback_to_single_open: bool,
+) -> Option<u64> {
+    if let Some(output_index) = json.get("output_index").and_then(|v| v.as_u64()) {
+        return Some(output_index);
+    }
+
+    for id in [
+        json.get("item_id").and_then(|v| v.as_str()),
+        item.and_then(|i| i.get("id")).and_then(|v| v.as_str()),
+        item.and_then(|i| i.get("call_id")).and_then(|v| v.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let Some(output_index) = state.responses_fc_item_indexes.get(id) {
+            return Some(*output_index);
+        }
+    }
+
+    if fallback_to_single_open && state.responses_fc_blocks.len() == 1 {
+        return state.responses_fc_blocks.keys().next().copied();
+    }
+
+    None
+}
+
 fn emit_responses_fc_start(
     output: &mut String,
     state: &mut StreamTransformState,
     json: &serde_json::Value,
     item: &serde_json::Value,
 ) {
-    let output_index = json
-        .get("output_index")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let output_index =
+        resolve_responses_fc_output_index(state, json, Some(item), false).unwrap_or(0);
     if state.responses_fc_blocks.contains_key(&output_index) {
         return;
     }
@@ -355,7 +380,24 @@ fn emit_responses_fc_start(
     state.next_block_index += 1;
     state.responses_fc_blocks.insert(output_index, block_index);
     state.had_tool_calls = true;
+    state.responses_fc_args.entry(output_index).or_default();
+    state
+        .responses_fc_names
+        .insert(output_index, name.to_string());
+    for id in [
+        item.get("id").and_then(|v| v.as_str()),
+        item.get("call_id").and_then(|v| v.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        state
+            .responses_fc_item_indexes
+            .insert(id.to_string(), output_index);
+    }
 
+    // Anthropic streams tool input incrementally: start with an empty object,
+    // then send the real arguments as input_json_delta events.
     let block_start = serde_json::json!({
         "type": "content_block_start",
         "index": block_index,
@@ -369,7 +411,12 @@ fn emit_responses_fc_start(
     // `output_item.added` sometimes already carries the full arguments.
     if let Some(args) = item.get("arguments").and_then(|v| v.as_str()) {
         if !args.is_empty() {
-            emit_responses_fc_input(output, block_index, args);
+            emit_tool_input_delta(output, block_index, name, args);
+            state
+                .responses_fc_args
+                .entry(output_index)
+                .or_default()
+                .push_str(args);
         }
     }
 }
@@ -381,12 +428,21 @@ fn emit_responses_fc_args(
     json: &serde_json::Value,
     delta: &str,
 ) {
-    let output_index = json
-        .get("output_index")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let Some(output_index) = resolve_responses_fc_output_index(state, json, None, true) else {
+        return;
+    };
     if let Some(&block_index) = state.responses_fc_blocks.get(&output_index) {
-        emit_responses_fc_input(output, block_index, delta);
+        let tool_name = state
+            .responses_fc_names
+            .get(&output_index)
+            .map(String::as_str)
+            .unwrap_or("unknown");
+        emit_tool_input_delta(output, block_index, tool_name, delta);
+        state
+            .responses_fc_args
+            .entry(output_index)
+            .or_default()
+            .push_str(delta);
     }
 }
 
@@ -400,26 +456,275 @@ fn emit_responses_fc_done(
     json: &serde_json::Value,
     item: &serde_json::Value,
 ) {
-    let output_index = json
-        .get("output_index")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let output_index =
+        resolve_responses_fc_output_index(state, json, Some(item), true).unwrap_or(0);
     if !state.responses_fc_blocks.contains_key(&output_index) {
         emit_responses_fc_start(output, state, json, item);
+    }
+    let emitted_args = state
+        .responses_fc_args
+        .get(&output_index)
+        .is_some_and(|args| !args.is_empty());
+    if !emitted_args {
+        if let Some(args) = item.get("arguments").and_then(|v| v.as_str()) {
+            if !args.is_empty() {
+                if let Some(&block_index) = state.responses_fc_blocks.get(&output_index) {
+                    let tool_name = state
+                        .responses_fc_names
+                        .get(&output_index)
+                        .map(String::as_str)
+                        .or_else(|| item.get("name").and_then(|v| v.as_str()))
+                        .unwrap_or("unknown");
+                    emit_tool_input_delta(output, block_index, tool_name, args);
+                }
+            }
+        }
     }
     if let Some(block_index) = state.responses_fc_blocks.remove(&output_index) {
         emit_block_stop(output, block_index);
     }
+    state.responses_fc_args.remove(&output_index);
+    for id in [
+        item.get("id").and_then(|v| v.as_str()),
+        item.get("call_id").and_then(|v| v.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        state.responses_fc_item_indexes.remove(id);
+    }
+    state.responses_fc_names.remove(&output_index);
 }
 
 /// Emits a tool-use `input_json_delta` carrying a partial arguments string.
-fn emit_responses_fc_input(output: &mut String, block_index: u32, partial_json: &str) {
+fn emit_tool_input_delta(
+    output: &mut String,
+    block_index: u32,
+    tool_name: &str,
+    partial_json: &str,
+) {
+    let partial_json = sanitize_tool_input_delta(tool_name, partial_json);
     let delta = serde_json::json!({
         "type": "content_block_delta",
         "index": block_index,
-        "delta": { "type": "input_json_delta", "partial_json": partial_json }
+        "delta": { "type": "input_json_delta", "partial_json": partial_json.as_ref() }
     });
     output.push_str(&format!("event: content_block_delta\ndata: {}\n\n", delta));
+}
+
+fn sanitize_tool_input_delta<'a>(
+    tool_name: &str,
+    partial_json: &'a str,
+) -> std::borrow::Cow<'a, str> {
+    if tool_name != "Read" || !has_read_tool_normalizable_field(partial_json) {
+        return std::borrow::Cow::Borrowed(partial_json);
+    }
+
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(partial_json) else {
+        return std::borrow::Cow::Borrowed(partial_json);
+    };
+    let Some(obj) = value.as_object_mut() else {
+        return std::borrow::Cow::Borrowed(partial_json);
+    };
+
+    let mut changed = apply_read_pages_normalization(obj);
+    changed |= apply_read_integer_normalization(obj, "offset", 0);
+    changed |= apply_read_integer_normalization(obj, "limit", 1);
+
+    if !changed {
+        return std::borrow::Cow::Borrowed(partial_json);
+    }
+
+    match serde_json::to_string(&value) {
+        Ok(sanitized) => {
+            tracing::debug!("Normalized Read tool arguments");
+            std::borrow::Cow::Owned(sanitized)
+        }
+        Err(_) => std::borrow::Cow::Borrowed(partial_json),
+    }
+}
+
+fn has_read_tool_normalizable_field(partial_json: &str) -> bool {
+    partial_json.contains("\"pages\"")
+        || partial_json.contains("\"offset\"")
+        || partial_json.contains("\"limit\"")
+}
+
+fn apply_read_pages_normalization(obj: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let Some(action) = normalize_read_pages(obj.get("pages")) else {
+        return false;
+    };
+
+    match action {
+        ReadPagesNormalization::Set(pages) => {
+            obj.insert("pages".to_string(), serde_json::Value::String(pages));
+        }
+        ReadPagesNormalization::Remove => {
+            obj.remove("pages");
+        }
+    }
+    true
+}
+
+enum ReadPagesNormalization {
+    Set(String),
+    Remove,
+}
+
+fn normalize_read_pages(value: Option<&serde_json::Value>) -> Option<ReadPagesNormalization> {
+    let value = value?;
+    match value {
+        serde_json::Value::String(raw) => normalize_read_pages_string(raw),
+        serde_json::Value::Number(number) => page_number_to_string(number)
+            .map(ReadPagesNormalization::Set)
+            .or(Some(ReadPagesNormalization::Remove)),
+        serde_json::Value::Array(items) => normalize_read_pages_array(items),
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Object(_) => {
+            Some(ReadPagesNormalization::Remove)
+        }
+    }
+}
+
+fn normalize_read_pages_string(raw: &str) -> Option<ReadPagesNormalization> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Some(ReadPagesNormalization::Remove);
+    }
+    if !is_valid_read_pages_spec(trimmed) {
+        return Some(ReadPagesNormalization::Remove);
+    }
+    if trimmed == raw {
+        None
+    } else {
+        Some(ReadPagesNormalization::Set(trimmed.to_string()))
+    }
+}
+
+fn normalize_read_pages_array(items: &[serde_json::Value]) -> Option<ReadPagesNormalization> {
+    match items {
+        [] => Some(ReadPagesNormalization::Remove),
+        [single] => page_value_to_string(single)
+            .map(ReadPagesNormalization::Set)
+            .or(Some(ReadPagesNormalization::Remove)),
+        [start, end] => match (page_value_to_u64(start), page_value_to_u64(end)) {
+            (Some(start), Some(end)) if start <= end => {
+                Some(ReadPagesNormalization::Set(format!("{start}-{end}")))
+            }
+            _ => Some(ReadPagesNormalization::Remove),
+        },
+        _ => Some(ReadPagesNormalization::Remove),
+    }
+}
+
+fn page_value_to_string(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(raw) if is_valid_read_pages_spec(raw.trim()) => {
+            Some(raw.trim().to_string())
+        }
+        serde_json::Value::Number(number) => page_number_to_string(number),
+        _ => None,
+    }
+}
+
+fn page_value_to_u64(value: &serde_json::Value) -> Option<u64> {
+    match value {
+        serde_json::Value::Number(number) => page_number_to_u64(number),
+        serde_json::Value::String(raw) => raw.trim().parse::<u64>().ok().filter(|page| *page > 0),
+        _ => None,
+    }
+}
+
+fn page_number_to_string(number: &serde_json::Number) -> Option<String> {
+    page_number_to_u64(number).map(|page| page.to_string())
+}
+
+fn page_number_to_u64(number: &serde_json::Number) -> Option<u64> {
+    if let Some(page) = number.as_u64() {
+        return (page > 0).then_some(page);
+    }
+    let page = number.as_f64()?;
+    if page.is_finite() && page.fract() == 0.0 && page > 0.0 && page <= u64::MAX as f64 {
+        Some(page as u64)
+    } else {
+        None
+    }
+}
+
+fn is_valid_read_pages_spec(spec: &str) -> bool {
+    if let Some((start, end)) = spec.split_once('-') {
+        match (start.parse::<u64>(), end.parse::<u64>()) {
+            (Ok(start), Ok(end)) => start > 0 && start <= end,
+            _ => false,
+        }
+    } else {
+        spec.parse::<u64>().is_ok_and(|page| page > 0)
+    }
+}
+
+fn apply_read_integer_normalization(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    min: u64,
+) -> bool {
+    let Some(action) = normalize_read_integer(obj.get(field), min) else {
+        return false;
+    };
+
+    match action {
+        ReadIntegerNormalization::Set(value) => {
+            obj.insert(field.to_string(), serde_json::Value::Number(value.into()));
+        }
+        ReadIntegerNormalization::Remove => {
+            obj.remove(field);
+        }
+    }
+    true
+}
+
+enum ReadIntegerNormalization {
+    Set(u64),
+    Remove,
+}
+
+fn normalize_read_integer(
+    value: Option<&serde_json::Value>,
+    min: u64,
+) -> Option<ReadIntegerNormalization> {
+    let value = value?;
+    match value {
+        serde_json::Value::String(raw) => parse_read_integer_string(raw, min)
+            .map(ReadIntegerNormalization::Set)
+            .or(Some(ReadIntegerNormalization::Remove)),
+        serde_json::Value::Number(number) => {
+            if number.as_u64().is_some_and(|value| value >= min) {
+                None
+            } else {
+                read_integer_number_to_u64(number, min)
+                    .map(ReadIntegerNormalization::Set)
+                    .or(Some(ReadIntegerNormalization::Remove))
+            }
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Array(_)
+        | serde_json::Value::Object(_) => Some(ReadIntegerNormalization::Remove),
+    }
+}
+
+fn parse_read_integer_string(raw: &str, min: u64) -> Option<u64> {
+    let trimmed = raw.trim();
+    let digits = trimmed.strip_prefix('+').unwrap_or(trimmed);
+    digits.parse::<u64>().ok().filter(|value| *value >= min)
+}
+
+fn read_integer_number_to_u64(number: &serde_json::Number, min: u64) -> Option<u64> {
+    let value = number.as_f64()?;
+    if value.is_finite() && value.fract() == 0.0 && value >= min as f64 && value <= u64::MAX as f64
+    {
+        Some(value as u64)
+    } else {
+        None
+    }
 }
 
 fn emit_stream_end(
@@ -510,6 +815,10 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
 ) -> String {
     let mut output = String::new();
 
+    if state.stream_ended {
+        return output;
+    }
+
     let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
         return output;
     };
@@ -556,9 +865,13 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
                 }
             }
         }
-        "response.completed" | "response.incomplete" | "response.failed" => {
+        "response.completed" | "response.incomplete" => {
             ensure_message_started(&mut output, state, message_id, model);
             emit_codex_stream_end(&mut output, state, &json);
+        }
+        "response.failed" => {
+            ensure_message_started(&mut output, state, message_id, model);
+            emit_codex_stream_failure(&mut output, state, &json);
         }
         _ => {}
     }
@@ -626,10 +939,47 @@ fn emit_codex_stream_end(
     ));
 }
 
+/// Emits an Anthropic-compatible stream error for a failed Responses-API event.
+fn emit_codex_stream_failure(
+    output: &mut String,
+    state: &mut StreamTransformState,
+    json: &serde_json::Value,
+) {
+    if state.stream_ended {
+        return;
+    }
+    state.stream_ended = true;
+    flush_text_buffer(output, state);
+
+    close_open_blocks(output, state);
+    for block_index in state.tool_blocks.values() {
+        emit_block_stop(output, *block_index);
+    }
+    for block_index in state.responses_fc_blocks.values() {
+        emit_block_stop(output, *block_index);
+    }
+
+    let message = json
+        .pointer("/response/error/message")
+        .or_else(|| json.pointer("/error/message"))
+        .or_else(|| json.get("detail"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Responses stream failed");
+    let event = serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": "api_error",
+            "message": message
+        }
+    });
+    output.push_str(&format!("event: error\ndata: {}\n\n", event));
+}
+
 #[cfg(test)]
 mod codex_stream_tests {
     use super::transform_codex_event_to_anthropic_sse as transform;
-    use crate::providers::openai::types::StreamTransformState;
+    use crate::providers::openai::types::{OpenAIStreamChunk, StreamTransformState};
+    use crate::providers::streaming::parse_sse_events;
 
     fn run(events: &[&str]) -> String {
         let mut state = StreamTransformState::default();
@@ -638,6 +988,48 @@ mod codex_stream_tests {
             out.push_str(&transform(event, "msg_test", "gpt-5.5", &mut state));
         }
         out
+    }
+
+    fn run_openai_chunks(chunks: &[&str]) -> String {
+        let mut state = StreamTransformState::default();
+        let mut out = String::new();
+        for chunk in chunks {
+            let chunk: OpenAIStreamChunk = serde_json::from_str(chunk).unwrap();
+            out.push_str(&super::transform_openai_chunk_to_anthropic_sse(
+                &chunk, "msg_test", &mut state,
+            ));
+        }
+        out
+    }
+
+    fn collected_tool_input(output: &str) -> String {
+        parse_sse_events(output)
+            .into_iter()
+            .filter(|event| event.event.as_deref() == Some("content_block_delta"))
+            .filter_map(|event| serde_json::from_str::<serde_json::Value>(&event.data).ok())
+            .filter(|json| json["delta"]["type"] == "input_json_delta")
+            .filter_map(|json| json["delta"]["partial_json"].as_str().map(str::to_string))
+            .collect::<String>()
+    }
+
+    #[test]
+    fn chat_completions_read_tool_empty_pages_argument_is_stripped() {
+        let out = run_openai_chunks(&[
+            r#"{"model":"gpt-4.1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_read","type":"function","function":{"name":"Read","arguments":""}}]},"finish_reason":null}]}"#,
+            r#"{"model":"gpt-4.1","choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"file_path\":\"/tmp/SKILL.md\",\"offset\":0,\"limit\":2000,\"pages\":\"\"}"}}]},"finish_reason":null}]}"#,
+            r#"{"model":"gpt-4.1","choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#,
+        ]);
+
+        assert!(out.contains(r#""type":"tool_use""#));
+        assert!(out.contains(r#""name":"Read""#));
+
+        let input = collected_tool_input(&out);
+        let json: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(json["file_path"], "/tmp/SKILL.md");
+        assert_eq!(json["offset"], 0);
+        assert_eq!(json["limit"], 2000);
+        assert!(json.get("pages").is_none());
+        assert!(out.contains(r#""stop_reason":"tool_use""#));
     }
 
     #[test]
@@ -679,6 +1071,32 @@ mod codex_stream_tests {
             r#"{"type":"response.incomplete","response":{"status":"incomplete"}}"#,
         ]);
         assert!(out.contains("max_tokens"));
+    }
+
+    #[test]
+    fn failed_status_emits_error_not_successful_stop() {
+        let out = run(&[
+            r#"{"type":"response.output_text.delta","delta":"partial"}"#,
+            r#"{"type":"response.failed","response":{"status":"failed","error":{"message":"boom"}}}"#,
+        ]);
+        assert!(out.contains("event: error"));
+        assert!(out.contains("boom"));
+        assert!(!out.contains("event: message_stop"));
+        assert!(!out.contains(r#""stop_reason":"end_turn""#));
+    }
+
+    #[test]
+    fn events_after_terminal_response_are_ignored() {
+        let out = run(&[
+            r#"{"type":"response.output_text.delta","delta":"before"}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+            r#"{"type":"response.output_text.delta","delta":"after"}"#,
+            r#"{"type":"response.failed","response":{"status":"failed","error":{"message":"late"}}}"#,
+        ]);
+        assert!(out.contains(r#""text":"before""#));
+        assert!(!out.contains(r#""text":"after""#));
+        assert!(!out.contains("late"));
+        assert_eq!(out.matches("event: message_stop").count(), 1);
     }
 
     #[test]
@@ -728,6 +1146,142 @@ mod codex_stream_tests {
         // The block is closed and the turn ends with tool_use.
         assert!(out.contains("event: content_block_stop"));
         assert!(out.contains(r#""stop_reason":"tool_use""#));
+    }
+
+    #[test]
+    fn structured_function_call_after_preamble_uses_its_output_index() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_text.delta","output_index":0,"delta":"I'll run that."}"#,
+            r#"{"type":"response.output_item.added","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_exec","name":"exec_command","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"{\"cmd\":\""}"#,
+            r#"{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"ls\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":1,"item":{"id":"fc_1","type":"function_call","call_id":"call_exec","name":"exec_command","arguments":"{\"cmd\":\"ls\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        assert!(out.contains(r#""text":"I'll run that.""#));
+        assert!(out.contains(r#""type":"tool_use""#));
+        assert!(out.contains(r#""id":"call_exec""#));
+        assert!(out.contains(r#""name":"exec_command""#));
+        assert_eq!(collected_tool_input(&out), r#"{"cmd":"ls"}"#);
+        assert!(out.contains(r#""stop_reason":"tool_use""#));
+    }
+
+    #[test]
+    fn structured_function_call_done_arguments_fill_missing_deltas() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_exec","name":"exec_command","arguments":""}}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_1","type":"function_call","call_id":"call_exec","name":"exec_command","arguments":"{\"cmd\":\"ls\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        assert!(out.contains(r#""type":"tool_use""#));
+        assert!(out.contains("input_json_delta"));
+        assert_eq!(collected_tool_input(&out), r#"{"cmd":"ls"}"#);
+        assert!(out.contains(r#""stop_reason":"tool_use""#));
+    }
+
+    #[test]
+    fn read_tool_empty_pages_argument_is_stripped() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","item_id":"fc_read","output_index":0,"delta":"{\"file_path\":\"/tmp/SKILL.md\",\"offset\":0,\"limit\":2000,\"pages\":\"\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":"{\"file_path\":\"/tmp/SKILL.md\",\"offset\":0,\"limit\":2000,\"pages\":\"\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        let input = collected_tool_input(&out);
+        let json: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(json["file_path"], "/tmp/SKILL.md");
+        assert_eq!(json["offset"], 0);
+        assert_eq!(json["limit"], 2000);
+        assert!(json.get("pages").is_none());
+        assert!(out.contains(r#""stop_reason":"tool_use""#));
+    }
+
+    #[test]
+    fn read_tool_numeric_pages_argument_is_converted() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","item_id":"fc_read","output_index":0,"delta":"{\"file_path\":\"/tmp/manual.pdf\",\"pages\":3}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":"{\"file_path\":\"/tmp/manual.pdf\",\"pages\":3}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        let input = collected_tool_input(&out);
+        let json: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(json["file_path"], "/tmp/manual.pdf");
+        assert_eq!(json["pages"], "3");
+    }
+
+    #[test]
+    fn read_tool_pages_array_range_argument_is_converted() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","item_id":"fc_read","output_index":0,"delta":"{\"file_path\":\"/tmp/manual.pdf\",\"pages\":[1,5]}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":"{\"file_path\":\"/tmp/manual.pdf\",\"pages\":[1,5]}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        let input = collected_tool_input(&out);
+        let json: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(json["file_path"], "/tmp/manual.pdf");
+        assert_eq!(json["pages"], "1-5");
+    }
+
+    #[test]
+    fn read_tool_invalid_pages_argument_is_stripped() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","item_id":"fc_read","output_index":0,"delta":"{\"file_path\":\"/tmp/manual.pdf\",\"pages\":\"0-2\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":"{\"file_path\":\"/tmp/manual.pdf\",\"pages\":\"0-2\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        let input = collected_tool_input(&out);
+        let json: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(json["file_path"], "/tmp/manual.pdf");
+        assert!(json.get("pages").is_none());
+    }
+
+    #[test]
+    fn read_tool_string_offset_and_limit_arguments_are_converted() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","item_id":"fc_read","output_index":0,"delta":"{\"file_path\":\"/tmp/SKILL.md\",\"offset\":\" +0 \",\"limit\":\"2000\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":"{\"file_path\":\"/tmp/SKILL.md\",\"offset\":\" +0 \",\"limit\":\"2000\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        let input = collected_tool_input(&out);
+        let json: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(json["file_path"], "/tmp/SKILL.md");
+        assert_eq!(json["offset"], 0);
+        assert_eq!(json["limit"], 2000);
+    }
+
+    #[test]
+    fn read_tool_invalid_offset_and_limit_arguments_are_stripped() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","item_id":"fc_read","output_index":0,"delta":"{\"file_path\":\"/tmp/SKILL.md\",\"offset\":-1,\"limit\":\"0\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"id":"fc_read","type":"function_call","call_id":"call_read","name":"Read","arguments":"{\"file_path\":\"/tmp/SKILL.md\",\"offset\":-1,\"limit\":\"0\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        let input = collected_tool_input(&out);
+        let json: serde_json::Value = serde_json::from_str(&input).unwrap();
+        assert_eq!(json["file_path"], "/tmp/SKILL.md");
+        assert!(json.get("offset").is_none());
+        assert!(json.get("limit").is_none());
     }
 
     #[test]

@@ -6,6 +6,7 @@
 use crate::cli::TracingConfig;
 use crate::models::{CanonicalRequest, RouteType};
 use crate::providers::ProviderResponse;
+use crate::traits::StreamTraceUsage;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use std::fs::{self, File, OpenOptions};
@@ -48,6 +49,35 @@ struct ResponseTrace {
     input_tokens: u32,
     output_tokens: u32,
     content: serde_json::Value,
+}
+
+/// A trace entry for a streamed response chunk.
+#[derive(Serialize)]
+struct StreamChunkTrace {
+    ts: DateTime<Utc>,
+    dir: &'static str,
+    id: String,
+    seq: u64,
+    bytes: usize,
+    data: String,
+}
+
+/// A trace entry for streamed response completion.
+#[derive(Serialize)]
+struct StreamEndTrace {
+    ts: DateTime<Utc>,
+    dir: &'static str,
+    id: String,
+    chunks: u64,
+    bytes: usize,
+    latency_ms: u64,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_tokens: Option<u32>,
 }
 
 /// A trace entry for an error
@@ -226,6 +256,54 @@ impl MessageTracer {
         self.write_trace(&trace, file_mutex);
     }
 
+    /// Traces one streamed response chunk.
+    pub fn trace_stream_chunk(&self, id: &str, seq: u64, chunk: &[u8]) {
+        let Some(ref file_mutex) = self.file else {
+            return;
+        };
+
+        let trace = StreamChunkTrace {
+            ts: Utc::now(),
+            dir: "res_chunk",
+            id: id.to_string(),
+            seq,
+            bytes: chunk.len(),
+            data: String::from_utf8_lossy(chunk).into_owned(),
+        };
+
+        self.write_trace(&trace, file_mutex);
+    }
+
+    /// Traces streamed response completion.
+    pub fn trace_stream_end(
+        &self,
+        id: &str,
+        chunk_count: u64,
+        byte_count: usize,
+        latency_ms: u64,
+        status: &str,
+        usage: Option<StreamTraceUsage>,
+    ) {
+        let Some(ref file_mutex) = self.file else {
+            return;
+        };
+
+        let trace = StreamEndTrace {
+            ts: Utc::now(),
+            dir: "res_end",
+            id: id.to_string(),
+            chunks: chunk_count,
+            bytes: byte_count,
+            latency_ms,
+            status: status.to_string(),
+            input_tokens: usage.map(|u| u.input_tokens),
+            output_tokens: usage.map(|u| u.output_tokens),
+            total_tokens: usage.map(StreamTraceUsage::total_tokens),
+        };
+
+        self.write_trace(&trace, file_mutex);
+    }
+
     /// Returns `true` when tracing is active (the trace file is open).
     pub fn is_enabled(&self) -> bool {
         self.file.is_some()
@@ -315,6 +393,22 @@ impl crate::traits::Tracer for MessageTracer {
         latency_ms: u64,
     ) {
         self.trace_response(id, response, latency_ms);
+    }
+
+    fn trace_stream_chunk(&self, id: &str, seq: u64, chunk: &[u8]) {
+        self.trace_stream_chunk(id, seq, chunk);
+    }
+
+    fn trace_stream_end(
+        &self,
+        id: &str,
+        chunk_count: u64,
+        byte_count: usize,
+        latency_ms: u64,
+        status: &str,
+        usage: Option<StreamTraceUsage>,
+    ) {
+        self.trace_stream_end(id, chunk_count, byte_count, latency_ms, status, usage);
     }
 
     fn trace_error(&self, id: &str, error: &str) {

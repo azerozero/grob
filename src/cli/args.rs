@@ -119,6 +119,9 @@ pub enum Commands {
         /// Run as a background daemon
         #[arg(short = 'd', long)]
         detach: bool,
+        /// Internal: allow binding beside an existing SO_REUSEPORT listener.
+        #[arg(long, hide = true)]
+        hot_upgrade: bool,
     },
     /// Stop the router service
     Stop,

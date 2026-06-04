@@ -7,6 +7,8 @@
 use super::{oauth_handlers, AppState};
 use crate::config::AppConfig;
 use axum::{routing::get, Router as AxumRouter};
+#[cfg(any(feature = "tls", feature = "acme"))]
+use std::future::Future;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
@@ -15,6 +17,14 @@ use tracing::{error, info, warn};
 /// The configured `server.oauth_callback_port` is attempt one; each later attempt
 /// increments the port by one.
 const OAUTH_CALLBACK_BIND_ATTEMPTS: u16 = crate::shared::net::DEFAULT_PORT_RETRY_ATTEMPTS;
+/// Number of short retries on the configured OAuth port before trying fallbacks.
+///
+/// During a hot upgrade the old process still owns the OAuth callback port until
+/// the new process becomes healthy and SIGUSR1 is sent. Retrying the preferred
+/// port prevents the new process from permanently falling back to an adjacent
+/// port that OpenAI Codex cannot use for its pinned redirect URI.
+const OAUTH_CALLBACK_PREFERRED_RETRIES: u32 = 100;
+const OAUTH_CALLBACK_PREFERRED_RETRY_INTERVAL_MS: u64 = 100;
 
 /// Binds the server socket and serves with optional TLS and graceful shutdown.
 pub(super) async fn bind_and_serve(
@@ -65,19 +75,23 @@ pub(super) async fn bind_and_serve(
     } else if tls_acme {
         #[cfg(feature = "acme")]
         {
+            let handle = axum_server::Handle::new();
+            spawn_axum_server_shutdown(shutdown_signal, handle.clone());
             let acceptor = crate::shared::acme::build_acme_acceptor(&config.server.tls.acme)?;
             info!("Server listening on {} (ACME TLS, {})", addr, REUSE_LABEL);
-            let listener = crate::shared::net::bind_reuseport(&addr).await?;
-            axum_server::Server::bind(addr.parse()?)
+            let std_listener = crate::shared::net::bind_reuseport_std(&addr)?;
+            axum_server::Server::from_tcp(std_listener)
                 .acceptor(acceptor)
+                .handle(handle)
                 .serve(app.into_make_service())
                 .await?;
-            drop(listener);
         }
     } else {
         #[cfg(feature = "tls")]
         {
             use axum_server::tls_rustls::RustlsConfig;
+            let handle = axum_server::Handle::new();
+            spawn_axum_server_shutdown(shutdown_signal, handle.clone());
             let rustls_config = RustlsConfig::from_pem_file(
                 &config.server.tls.cert_path,
                 &config.server.tls.key_path,
@@ -86,12 +100,24 @@ pub(super) async fn bind_and_serve(
             info!("Server listening on {} (TLS, {})", addr, REUSE_LABEL);
             let std_listener = crate::shared::net::bind_reuseport_std(&addr)?;
             axum_server::from_tcp_rustls(std_listener, rustls_config)
+                .handle(handle)
                 .serve(app.into_make_service())
                 .await?;
         }
     }
 
     Ok(())
+}
+
+#[cfg(any(feature = "tls", feature = "acme"))]
+fn spawn_axum_server_shutdown(
+    shutdown_signal: impl Future<Output = ()> + Send + 'static,
+    handle: axum_server::Handle,
+) {
+    tokio::spawn(async move {
+        shutdown_signal.await;
+        handle.graceful_shutdown(Some(std::time::Duration::from_secs(30)));
+    });
 }
 
 /// Waits for all active requests to complete or times out after 30 seconds.
@@ -138,13 +164,7 @@ pub(super) fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
             .route("/auth/callback", get(oauth_handlers::oauth_callback))
             .with_state(oauth_state.clone());
 
-        match crate::shared::net::bind_with_port_retry(
-            "127.0.0.1",
-            configured_port,
-            OAUTH_CALLBACK_BIND_ATTEMPTS,
-        )
-        .await
-        {
+        match bind_oauth_callback_listener(configured_port).await {
             Ok((oauth_listener, actual_port)) => {
                 oauth_state
                     .actual_oauth_callback_port
@@ -173,4 +193,31 @@ pub(super) fn spawn_oauth_callback(oauth_state: Arc<AppState>) {
             }
         }
     });
+}
+
+async fn bind_oauth_callback_listener(
+    configured_port: u16,
+) -> anyhow::Result<(tokio::net::TcpListener, u16)> {
+    let preferred_addr = format!("127.0.0.1:{configured_port}");
+    for _ in 0..OAUTH_CALLBACK_PREFERRED_RETRIES {
+        match tokio::net::TcpListener::bind(&preferred_addr).await {
+            Ok(listener) => return Ok((listener, configured_port)),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    OAUTH_CALLBACK_PREFERRED_RETRY_INTERVAL_MS,
+                ))
+                .await;
+            }
+            Err(e) => {
+                return Err(anyhow::Error::new(e).context(format!("bind {preferred_addr}")));
+            }
+        }
+    }
+
+    crate::shared::net::bind_with_port_retry(
+        "127.0.0.1",
+        configured_port,
+        OAUTH_CALLBACK_BIND_ATTEMPTS,
+    )
+    .await
 }

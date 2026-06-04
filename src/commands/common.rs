@@ -37,6 +37,10 @@ pub async fn poll_health(base_url: &str, max_attempts: u32, interval_ms: u64) ->
 pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
+    if !crate::shared::pid::is_process_running(pid) {
+        anyhow::bail!("refusing to stop PID {}: not a running Grob process", pid);
+    }
+
     let nix_pid = Pid::from_raw(pid as i32);
     kill(nix_pid, Signal::SIGTERM).map_err(|e| anyhow::anyhow!("Failed to stop service: {}", e))?;
 
@@ -44,8 +48,8 @@ pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
     // Check every 100ms for up to 5 seconds.
     for _ in 0..50 {
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        if kill(nix_pid, None).is_err() {
-            // Process is gone — signal 0 failed means PID doesn't exist.
+        if !crate::shared::pid::is_process_running(pid) {
+            // Process is gone, or the PID was reused by a non-Grob process.
             return Ok(());
         }
     }
@@ -55,11 +59,17 @@ pub async fn stop_service(pid: u32) -> anyhow::Result<()> {
         "Process {} did not exit after SIGTERM, sending SIGKILL",
         pid
     );
-    let _ = kill(nix_pid, Signal::SIGKILL);
+    if crate::shared::pid::is_process_running(pid) {
+        kill(nix_pid, Signal::SIGKILL)
+            .map_err(|e| anyhow::anyhow!("Failed to force stop service: {}", e))?;
+    }
     tokio::time::sleep(tokio::time::Duration::from_millis(
         PROCESS_TRANSITION_GRACE_MS,
     ))
     .await;
+    if crate::shared::pid::is_process_running(pid) {
+        anyhow::bail!("service PID {} is still running after SIGKILL", pid);
+    }
     Ok(())
 }
 
@@ -142,7 +152,7 @@ pub async fn start_foreground(
     };
 
     let result = crate::server::start_server(config, config_source, shutdown).await;
-    let _ = crate::shared::pid::cleanup_pid();
+    let _ = crate::shared::pid::cleanup_pid_if_current();
     result
 }
 
@@ -159,7 +169,11 @@ pub fn daemon_log_path() -> Option<std::path::PathBuf> {
 /// '--config'" and the daemon never binds. The order is therefore: global flags,
 /// subcommand, then subcommand flags (`--port`). Returning the args as a vector
 /// keeps this ordering unit-testable without spawning a process.
-fn daemon_command_args(port: Option<u16>, config: Option<String>) -> Vec<String> {
+fn daemon_command_args(
+    port: Option<u16>,
+    config: Option<String>,
+    hot_upgrade: bool,
+) -> Vec<String> {
     let mut args = Vec::new();
     if let Some(config) = config {
         args.push("--config".to_string());
@@ -169,6 +183,9 @@ fn daemon_command_args(port: Option<u16>, config: Option<String>) -> Vec<String>
     if let Some(port) = port {
         args.push("--port".to_string());
         args.push(port.to_string());
+    }
+    if hot_upgrade {
+        args.push("--hot-upgrade".to_string());
     }
     args
 }
@@ -183,11 +200,27 @@ pub fn spawn_background_service(
     port: Option<u16>,
     config: Option<String>,
 ) -> anyhow::Result<Option<std::path::PathBuf>> {
+    spawn_background_service_with_mode(port, config, false)
+}
+
+/// Spawns a detached daemon for zero-downtime upgrade.
+pub fn spawn_upgrade_background_service(
+    port: Option<u16>,
+    config: Option<String>,
+) -> anyhow::Result<Option<std::path::PathBuf>> {
+    spawn_background_service_with_mode(port, config, true)
+}
+
+fn spawn_background_service_with_mode(
+    port: Option<u16>,
+    config: Option<String>,
+    hot_upgrade: bool,
+) -> anyhow::Result<Option<std::path::PathBuf>> {
     use std::process::Stdio;
 
     let exe_path = std::env::current_exe()?;
     let mut cmd = Command::new(&exe_path);
-    cmd.args(daemon_command_args(port, config));
+    cmd.args(daemon_command_args(port, config, hot_upgrade));
 
     #[cfg(all(unix, feature = "unix-signals"))]
     {
@@ -259,7 +292,7 @@ mod tests {
 
     #[test]
     fn daemon_args_with_config_parse_back_into_clap() {
-        let args = daemon_command_args(Some(13456), Some("/tmp/grob.toml".to_string()));
+        let args = daemon_command_args(Some(13456), Some("/tmp/grob.toml".to_string()), false);
 
         // The global flag must precede the subcommand.
         let start_idx = args.iter().position(|a| a == "start").unwrap();
@@ -275,19 +308,37 @@ mod tests {
             cli.command,
             Some(Commands::Start {
                 port: Some(13456),
-                detach: false
+                detach: false,
+                hot_upgrade: false
             })
         ));
     }
 
     #[test]
     fn daemon_args_without_config_parse_back_into_clap() {
-        let args = daemon_command_args(None, None);
+        let args = daemon_command_args(None, None, false);
         let cli = parse(&args);
         assert_eq!(cli.config, None);
         assert!(matches!(
             cli.command,
             Some(Commands::Start { port: None, .. })
+        ));
+    }
+
+    #[test]
+    fn daemon_args_for_upgrade_parse_with_hot_upgrade_flag() {
+        let args = daemon_command_args(Some(13456), Some("/tmp/grob.toml".to_string()), true);
+        assert!(args.iter().any(|arg| arg == "--hot-upgrade"));
+
+        let cli = parse(&args);
+        assert_eq!(cli.config.as_deref(), Some("/tmp/grob.toml"));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Start {
+                port: Some(13456),
+                detach: false,
+                hot_upgrade: true
+            })
         ));
     }
 }

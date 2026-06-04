@@ -62,6 +62,17 @@ provider = "chatgpt-codex"
 actual_model = "gpt-5.4-mini"
 priority = 1
 
+# Codex CLI sends its real model slug; expose it so codex keeps full model
+# metadata (and its agentic tool loop) instead of falling back to "dev".
+# NOTE: name must be the CANONICAL form — grob canonicalizes the inbound model
+# (gpt-5.5 → gpt-5-5, dot→dash for known families) but NOT config names.
+[[models]]
+name = "gpt-5-5"
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.5"
+priority = 1
+
 [router]
 default = "dev"
 think = "codex"

@@ -6,8 +6,14 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use futures::stream::TryStreamExt;
-use std::sync::Arc;
+use bytes::Bytes;
+use futures::stream::{Stream, TryStreamExt};
+use std::{
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Instant,
+};
 use tracing::{debug, error};
 
 use super::middleware::AuditedAlready;
@@ -60,6 +66,206 @@ impl Drop for ActiveRequestGuard {
             .active_requests
             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
     }
+}
+
+#[derive(Default)]
+struct ResponseTraceUsage {
+    input_tokens: u32,
+    output_tokens: u32,
+    saw_usage: bool,
+}
+
+impl ResponseTraceUsage {
+    fn as_trace_usage(&self) -> Option<crate::traits::StreamTraceUsage> {
+        self.saw_usage.then_some(crate::traits::StreamTraceUsage {
+            input_tokens: self.input_tokens,
+            output_tokens: self.output_tokens,
+        })
+    }
+}
+
+const TRACE_USAGE_MAX_CARRY: usize = 8 * 1024;
+
+fn scan_response_trace_usage(chunk: &str, carry: &mut String, usage: &mut ResponseTraceUsage) {
+    let scan_owned;
+    let scan: &str = if carry.is_empty() {
+        chunk
+    } else {
+        carry.push_str(chunk);
+        scan_owned = std::mem::take(carry);
+        &scan_owned
+    };
+
+    let (complete, tail) = match scan.rfind("\n\n") {
+        Some(pos) => (&scan[..pos + 2], &scan[pos + 2..]),
+        None => ("", scan),
+    };
+
+    if complete.contains("\"usage\"") {
+        accumulate_response_trace_usage(complete, usage);
+    }
+
+    if !tail.is_empty() {
+        let start = tail.len().saturating_sub(TRACE_USAGE_MAX_CARRY);
+        carry.push_str(&tail[tail.ceil_char_boundary(start)..]);
+    }
+}
+
+fn flush_response_trace_usage(carry: &mut String, usage: &mut ResponseTraceUsage) {
+    if carry.is_empty() {
+        return;
+    }
+    let tail = std::mem::take(carry);
+    if tail.contains("\"usage\"") {
+        accumulate_response_trace_usage(&tail, usage);
+    }
+}
+
+fn accumulate_response_trace_usage(buffer: &str, usage: &mut ResponseTraceUsage) {
+    for event in crate::providers::streaming::parse_sse_events(buffer) {
+        match event.event.as_deref() {
+            Some("message_start") => {
+                parse_response_trace_usage_json(&event.data, "/message/usage", usage);
+            }
+            Some("message_delta") => {
+                parse_response_trace_usage_json(&event.data, "/usage", usage);
+            }
+            Some("response.completed") | Some("response.incomplete") | Some("response.failed") => {
+                parse_response_trace_usage_json(&event.data, "/response/usage", usage);
+            }
+            _ => {
+                parse_response_trace_usage_json(&event.data, "/usage", usage);
+            }
+        }
+    }
+}
+
+fn parse_response_trace_usage_json(data: &str, pointer: &str, usage: &mut ResponseTraceUsage) {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+        return;
+    };
+    let Some(value) = json.pointer(pointer) else {
+        return;
+    };
+    update_response_trace_usage(value, usage);
+}
+
+fn update_response_trace_usage(value: &serde_json::Value, usage: &mut ResponseTraceUsage) {
+    let input = value
+        .get("input_tokens")
+        .or_else(|| value.get("prompt_tokens"))
+        .and_then(serde_json::Value::as_u64);
+    if let Some(input) = input {
+        let input = u32::try_from(input).unwrap_or(u32::MAX);
+        if input > 0 || usage.input_tokens == 0 {
+            usage.input_tokens = input;
+        }
+        usage.saw_usage = true;
+    }
+
+    let output = value
+        .get("output_tokens")
+        .or_else(|| value.get("completion_tokens"))
+        .and_then(serde_json::Value::as_u64);
+    if let Some(output) = output {
+        usage.output_tokens = usage
+            .output_tokens
+            .max(u32::try_from(output).unwrap_or(u32::MAX));
+        usage.saw_usage = true;
+    }
+}
+
+struct ResponseTraceStream<S> {
+    inner: Pin<Box<S>>,
+    tracer: Arc<dyn crate::traits::Tracer>,
+    trace_id: String,
+    chunk_count: u64,
+    byte_count: usize,
+    usage: ResponseTraceUsage,
+    usage_carry: String,
+    start_time: Instant,
+    ended: bool,
+}
+
+impl<S> ResponseTraceStream<S> {
+    fn finish(&mut self, status: &str) {
+        if self.ended {
+            return;
+        }
+        self.ended = true;
+        flush_response_trace_usage(&mut self.usage_carry, &mut self.usage);
+        self.tracer.trace_stream_end(
+            &self.trace_id,
+            self.chunk_count,
+            self.byte_count,
+            self.start_time.elapsed().as_millis() as u64,
+            status,
+            self.usage.as_trace_usage(),
+        );
+    }
+}
+
+impl<S> Unpin for ResponseTraceStream<S> {}
+
+impl<S> Stream for ResponseTraceStream<S>
+where
+    S: Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
+{
+    type Item = Result<Bytes, std::io::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        match this.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => {
+                let seq = this.chunk_count;
+                this.chunk_count += 1;
+                this.byte_count += chunk.len();
+                let text = String::from_utf8_lossy(&chunk);
+                scan_response_trace_usage(&text, &mut this.usage_carry, &mut this.usage);
+                this.tracer
+                    .trace_stream_chunk(&this.trace_id, seq, chunk.as_ref());
+                Poll::Ready(Some(Ok(chunk)))
+            }
+            Poll::Ready(Some(Err(err))) => {
+                this.tracer
+                    .trace_error(&this.trace_id, &format!("stream error: {err}"));
+                this.finish("error");
+                Poll::Ready(Some(Err(err)))
+            }
+            Poll::Ready(None) => {
+                this.finish("complete");
+                Poll::Ready(None)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<S> Drop for ResponseTraceStream<S> {
+    fn drop(&mut self) {
+        self.finish("dropped");
+    }
+}
+
+fn trace_response_stream<S>(
+    stream: S,
+    tracer: Arc<dyn crate::traits::Tracer>,
+    trace_id: String,
+) -> Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>
+where
+    S: Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
+{
+    Box::pin(ResponseTraceStream {
+        inner: Box::pin(stream),
+        tracer,
+        trace_id,
+        chunk_count: 0,
+        byte_count: 0,
+        usage: ResponseTraceUsage::default(),
+        usage_carry: String::new(),
+        start_time: Instant::now(),
+        ended: false,
+    })
 }
 
 /// Build a JSON response with optional transparency headers.
@@ -262,6 +468,7 @@ pub(crate) async fn handle_openai_chat_completions(
     let is_streaming = openai_request.stream == Some(true);
 
     let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
+    let trace_id = state.observability.message_tracer.new_trace_id();
 
     // Transform OpenAI → Anthropic format
     let mut request =
@@ -286,7 +493,7 @@ pub(crate) async fn handle_openai_chat_completions(
         req_id: &request_id.0,
         start_time,
         headers: &headers,
-        trace_id: None,
+        trace_id: Some(trace_id.clone()),
         audited: audited_flag.clone(),
         #[cfg(feature = "policies")]
         resolved_policy,
@@ -302,6 +509,8 @@ pub(crate) async fn handle_openai_chat_completions(
     };
     let model_for_stream = model.clone();
     let model_for_fanout = model.clone();
+    let tracer_for_stream = Arc::clone(&state.observability.message_tracer);
+    let trace_id_for_stream = trace_id.clone();
 
     let mut response = finish_dispatch(
         result,
@@ -313,7 +522,12 @@ pub(crate) async fn handle_openai_chat_completions(
             let mapped = stream
                 .map_ok(move |bytes| transformer.transform_bytes(&bytes))
                 .try_filter(|b| futures::future::ready(!b.is_empty()));
-            Body::from_stream(mapped.map_err(|e| std::io::Error::other(e.to_string())))
+            let body_stream = mapped.map_err(|e| std::io::Error::other(e.to_string()));
+            Body::from_stream(trace_response_stream(
+                body_stream,
+                tracer_for_stream,
+                trace_id_for_stream,
+            ))
         },
         |resp| {
             let openai_response = openai_compat::transform_canonical_to_openai(resp, model.clone());
@@ -358,6 +572,7 @@ pub(crate) async fn handle_responses(
     );
 
     let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
+    let trace_id = state.observability.message_tracer.new_trace_id();
 
     // Transform Responses → canonical format
     let mut request = responses_compat::transform_responses_to_canonical(responses_request)
@@ -382,7 +597,7 @@ pub(crate) async fn handle_responses(
         req_id: &request_id.0,
         start_time,
         headers: &headers,
-        trace_id: None,
+        trace_id: Some(trace_id.clone()),
         audited: audited_flag.clone(),
         #[cfg(feature = "policies")]
         resolved_policy,
@@ -398,6 +613,8 @@ pub(crate) async fn handle_responses(
     };
     let model_for_stream = model.clone();
     let model_for_fanout = model.clone();
+    let tracer_for_stream = Arc::clone(&state.observability.message_tracer);
+    let trace_id_for_stream = trace_id.clone();
 
     let mut response = finish_dispatch(
         result,
@@ -410,7 +627,12 @@ pub(crate) async fn handle_responses(
             let mapped = stream
                 .map_ok(move |bytes| transformer.transform_bytes(&bytes))
                 .try_filter(|b| futures::future::ready(!b.is_empty()));
-            Body::from_stream(mapped.map_err(|e| std::io::Error::other(e.to_string())))
+            let body_stream = mapped.map_err(|e| std::io::Error::other(e.to_string()));
+            Body::from_stream(trace_response_stream(
+                body_stream,
+                tracer_for_stream,
+                trace_id_for_stream,
+            ))
         },
         |resp| {
             let responses_response =
@@ -501,7 +723,7 @@ pub(crate) async fn handle_messages(
         req_id,
         start_time,
         headers: &headers,
-        trace_id: Some(trace_id),
+        trace_id: Some(trace_id.clone()),
         audited: audited_flag.clone(),
         #[cfg(feature = "policies")]
         resolved_policy,
@@ -515,6 +737,8 @@ pub(crate) async fn handle_messages(
             return Ok(response);
         }
     };
+    let tracer_for_stream = Arc::clone(&state.observability.message_tracer);
+    let trace_id_for_stream = trace_id.clone();
 
     let mut response = finish_dispatch(
         result,
@@ -526,7 +750,11 @@ pub(crate) async fn handle_messages(
                 error!("Stream error: {}", e);
                 std::io::Error::other(e.to_string())
             });
-            Body::from_stream(body_stream)
+            Body::from_stream(trace_response_stream(
+                body_stream,
+                tracer_for_stream,
+                trace_id_for_stream,
+            ))
         },
         |resp| serialize_response(&resp),
         |resp| Json(resp).into_response(),

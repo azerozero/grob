@@ -202,9 +202,12 @@ fn auth_key_only(out: &mut Vec<AuthOverride>, name: &str, env_var: &str) {
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Guards the default GH_TOKEN-style skip behavior.
     #[test]
     fn env_skip_default_is_enabled() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("GROB_SETUP_NO_ENV_SKIP");
         assert!(env_skip_enabled());
     }
@@ -212,6 +215,7 @@ mod tests {
     /// `GROB_SETUP_NO_ENV_SKIP=1` must restore the legacy interactive prompt.
     #[test]
     fn env_skip_disabled_by_env_var() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("GROB_SETUP_NO_ENV_SKIP", "1");
         assert!(!env_skip_enabled());
         std::env::remove_var("GROB_SETUP_NO_ENV_SKIP");
@@ -220,6 +224,7 @@ mod tests {
     /// Values other than 1/true/yes are ignored.
     #[test]
     fn env_skip_ignores_garbage() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("GROB_SETUP_NO_ENV_SKIP", "maybe");
         assert!(env_skip_enabled());
         std::env::remove_var("GROB_SETUP_NO_ENV_SKIP");

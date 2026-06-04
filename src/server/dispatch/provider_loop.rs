@@ -181,12 +181,12 @@ pub(super) async fn dispatch_provider_loop(
         }
     }
 
-    // Backward-compat direct lookup — only when no mapping was actually
-    // attempted (a bare model name not in `[[models.mappings]]`). When a mapping
-    // *was* tried and failed, the router model name (e.g. `dev`) is not a real
-    // upstream model, so re-sending it just yields a misleading "model not
-    // supported" error that masks the true failure (`last_error`).
-    if last_error.is_none() {
+    // Backward-compat direct lookup — only when no mapping was resolved at all
+    // (a bare upstream model name handled by legacy provider model lists). When
+    // mappings exist, the router model name may be a local alias (e.g. `dev`).
+    // If those mappings are skipped by circuit breaker / endpoint health, direct
+    // lookup would bypass `actual_model` and send that alias upstream.
+    if should_try_direct_lookup(effective_mappings.len(), &last_error) {
         if let Some(result) = try_direct_provider_lookup(ctx, request, &decision.model_name).await?
         {
             return Ok(result);
@@ -237,6 +237,16 @@ pub(super) async fn dispatch_provider_loop(
 #[inline]
 fn next_mapping_index(idx: usize) -> usize {
     idx + 1
+}
+
+/// Returns whether the provider loop may use legacy direct model lookup.
+///
+/// Direct lookup is unsafe once a model resolved to mappings, even if no
+/// provider was attempted: the decision model may be a local alias whose
+/// upstream name lives only in [`crate::cli::ModelMapping::actual_model`].
+#[inline]
+fn should_try_direct_lookup(mapping_count: usize, last_error: &Option<RequestError>) -> bool {
+    mapping_count == 0 && last_error.is_none()
 }
 
 /// Returns the ` [n/total]` retry suffix, or an empty string for the first try.
@@ -360,6 +370,24 @@ mod tests {
         // mutant would return an empty string here instead.
         assert_eq!(retry_suffix(1, 3), " [2/3]");
         assert_eq!(retry_suffix(2, 3), " [3/3]");
+    }
+
+    #[test]
+    fn direct_lookup_allowed_only_without_mappings_or_errors() {
+        assert!(should_try_direct_lookup(0, &None));
+    }
+
+    #[test]
+    fn direct_lookup_skipped_when_mappings_exist_even_without_error() {
+        // Mappings may all be skipped by endpoint health or circuit breakers.
+        // In that case direct lookup would send the local tier name upstream.
+        assert!(!should_try_direct_lookup(1, &None));
+    }
+
+    #[test]
+    fn direct_lookup_skipped_after_upstream_error() {
+        let err = Some(RequestError::RoutingError("boom".to_string()));
+        assert!(!should_try_direct_lookup(0, &err));
     }
 
     #[test]

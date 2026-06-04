@@ -281,6 +281,11 @@ pub(crate) struct StreamTransformState {
     /// Tool call indices that have had content_block_start emitted
     /// Maps OpenAI tool_call index → Anthropic content_block index
     pub tool_blocks: std::collections::HashMap<u32, u32>,
+    /// OpenAI Chat Completions tool_call index -> tool name.
+    ///
+    /// Chat Completions streams often send the function name before later
+    /// argument chunks, so keep it for tool-specific argument normalization.
+    pub tool_names: std::collections::HashMap<u32, String>,
     /// Next available content block index
     pub next_block_index: u32,
     /// Has finish_reason been received?
@@ -300,4 +305,19 @@ pub(crate) struct StreamTransformState {
     /// Tracks structured Codex `function_call` items as they stream so argument
     /// deltas land on the right `tool_use` block.
     pub responses_fc_blocks: std::collections::HashMap<u64, u32>,
+    /// Responses-API function-call item id/call id to output index.
+    ///
+    /// Some Responses stream events key argument deltas by `item_id`; keep both
+    /// ids so deltas still route correctly if `output_index` is absent.
+    pub responses_fc_item_indexes: std::collections::HashMap<String, u64>,
+    /// Arguments already emitted for each Responses function-call output index.
+    ///
+    /// Used to avoid duplicating full arguments from `output_item.done` after
+    /// incremental `function_call_arguments.delta` chunks were already sent.
+    pub responses_fc_args: std::collections::HashMap<u64, String>,
+    /// Responses-API function-call output index -> tool name.
+    ///
+    /// Kept so argument deltas can be normalized with tool-specific rules even
+    /// when later delta events only carry `output_index` or `item_id`.
+    pub responses_fc_names: std::collections::HashMap<u64, String>,
 }

@@ -592,7 +592,8 @@ The harness provides its own system prompt and a set of tools in this request. U
 provided tools through the function-calling interface to take actions — do not assume any built-in \
 `shell`, `apply_patch`, or `update_plan` tool exists, and never emit a tool call as plain text or \
 inside a code block. When you need to run a command, read, or edit, call the matching provided tool \
-with its required arguments.";
+with its required arguments. Omit optional arguments that are unset; never send an empty string as a \
+placeholder for a missing optional argument.";
 
 /// Per-call knobs for the Codex (OpenAI Responses API) transform.
 ///
@@ -638,9 +639,22 @@ pub(crate) fn transform_to_responses_request(
 ) -> Result<OpenAIResponsesRequest, ProviderError> {
     let tools = transform_responses_tools(request);
 
-    // Forwarding tools and the Codex CLI prompt at once makes the model call
-    // non-existent built-in tools, so swap to a tool-deferring preamble.
-    let instructions = if tools.is_some() {
+    // Codex CLI requests carry their own authoritative Codex agent prompt as
+    // `instructions` (canonical `system`). Forward it verbatim as the
+    // top-level `instructions` so the backend stays in full agentic mode.
+    // Demoting it to a user item (the foreign-client path) makes the model emit
+    // a preamble and stop instead of calling the provided tools.
+    let codex_native = request.extensions.codex_native;
+
+    let instructions = if codex_native {
+        request
+            .system
+            .as_ref()
+            .map(|s| s.to_text())
+            .unwrap_or_else(|| codex_instructions.to_string())
+    } else if tools.is_some() {
+        // Forwarding tools and the full Codex CLI prompt at once makes a foreign
+        // client's model call non-existent built-in tools, so defer to a preamble.
         CODEX_TOOL_INSTRUCTIONS.to_string()
     } else {
         codex_instructions.to_string()
@@ -649,11 +663,15 @@ pub(crate) fn transform_to_responses_request(
     let mut items = Vec::new();
 
     // Codex has no separate system role; hoist the system prompt to a user item.
-    if let Some(ref system) = request.system {
-        items.push(OpenAIResponsesItem::Message {
-            role: "user".to_string(),
-            content: Some(system.to_text()),
-        });
+    // Skip on the codex-native path: the system is already the top-level
+    // `instructions` above, so re-adding it here would duplicate it.
+    if !codex_native {
+        if let Some(ref system) = request.system {
+            items.push(OpenAIResponsesItem::Message {
+                role: "user".to_string(),
+                content: Some(system.to_text()),
+            });
+        }
     }
 
     for msg in &request.messages {
@@ -681,6 +699,8 @@ pub(crate) fn transform_to_responses_request(
         model: request.model.clone(),
         input: OpenAIResponsesInput::Items(items),
         instructions,
+        // The ChatGPT Codex backend REQUIRES store=false (returns 400 "Store must
+        // be set to false" otherwise), so this is fixed for every path.
         store: false,
         stream: true,
         tool_choice: tools.as_ref().and(transform_responses_tool_choice(request)),
@@ -1026,6 +1046,49 @@ mod tests {
         assert!(input
             .iter()
             .any(|i| i["role"] == "user" && i["content"] == "be terse"));
+    }
+
+    #[test]
+    fn codex_native_request_forwards_system_as_instructions_once() {
+        use crate::models::Tool;
+
+        let mut request = base_request();
+        request.model = "gpt-5.5".to_string();
+        request.system = Some(SystemPrompt::Text("FULL CODEX CLI PROMPT".to_string()));
+        request.extensions.codex_native = true;
+        request.tools = Some(vec![Tool {
+            r#type: Some("function".to_string()),
+            name: Some("exec_command".to_string()),
+            description: Some("Run a command".to_string()),
+            input_schema: Some(serde_json::json!({
+                "type": "object",
+                "properties": { "cmd": { "type": "string" } }
+            })),
+        }]);
+        request.messages = vec![Message {
+            role: "user".to_string(),
+            content: MessageContent::Text("run ls".to_string()),
+        }];
+
+        let opts = CodexOptions::default();
+        let req = transform_to_responses_request(
+            &request,
+            "BUILTIN CODEX PROMPT",
+            &CodexTuning::from_options(&opts, None, None),
+        )
+        .unwrap();
+        let json = serde_json::to_value(&req).unwrap();
+
+        assert_eq!(json["instructions"], "FULL CODEX CLI PROMPT");
+        assert_eq!(json["tools"][0]["name"], "exec_command");
+
+        let input = json["input"].as_array().unwrap();
+        assert_eq!(input.len(), 1);
+        assert_eq!(input[0]["role"], "user");
+        assert_eq!(input[0]["content"], "run ls");
+        assert!(!input
+            .iter()
+            .any(|item| item["content"] == "FULL CODEX CLI PROMPT"));
     }
 
     #[test]

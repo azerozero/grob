@@ -282,6 +282,7 @@ pub fn transform_openai_to_canonical(
         service_tier: openai_req.service_tier,
         openai_system_name,
         openai_message_names,
+        codex_native: false,
     };
 
     Ok(CanonicalRequest {

@@ -98,6 +98,23 @@ pub trait RequestRouter: Send + Sync {
 
 // ── Tracer ──
 
+/// Provider-reported token usage observed at the end of a streamed response.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StreamTraceUsage {
+    /// Tokens consumed by the request input.
+    pub input_tokens: u32,
+    /// Tokens produced by the streamed response.
+    pub output_tokens: u32,
+}
+
+impl StreamTraceUsage {
+    /// Returns `input_tokens + output_tokens`, saturating on overflow.
+    #[must_use]
+    pub fn total_tokens(self) -> u32 {
+        self.input_tokens.saturating_add(self.output_tokens)
+    }
+}
+
 /// Traces requests/responses to a persistent log.
 pub trait Tracer: Send + Sync {
     /// Generates a new trace identifier.
@@ -115,6 +132,21 @@ pub trait Tracer: Send + Sync {
 
     /// Records a response trace entry.
     fn trace_response(&self, id: &str, response: &ProviderResponse, latency_ms: u64);
+
+    /// Records one streamed response chunk exactly as it is sent to the client.
+    fn trace_stream_chunk(&self, _id: &str, _seq: u64, _chunk: &[u8]) {}
+
+    /// Records streamed response completion.
+    fn trace_stream_end(
+        &self,
+        _id: &str,
+        _chunk_count: u64,
+        _byte_count: usize,
+        _latency_ms: u64,
+        _status: &str,
+        _usage: Option<StreamTraceUsage>,
+    ) {
+    }
 
     /// Records an error trace entry.
     fn trace_error(&self, id: &str, error: &str);

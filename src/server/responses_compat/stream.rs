@@ -4,22 +4,57 @@
 //! instead of the `data: {...}` format used by Chat Completions.
 
 use bytes::Bytes;
+use std::collections::HashMap;
 
 use crate::providers::streaming::{parse_sse_events, SseEvent};
+
+#[derive(Debug)]
+enum ActiveOutputItem {
+    Message {
+        item_id: String,
+        output_index: u32,
+        text: String,
+    },
+    FunctionCall {
+        item_id: String,
+        output_index: u32,
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+}
+
+#[derive(Debug, Default)]
+struct StreamUsage {
+    input_tokens: u32,
+    output_tokens: u32,
+}
+
+impl StreamUsage {
+    fn total_tokens(&self) -> u32 {
+        self.input_tokens.saturating_add(self.output_tokens)
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "total_tokens": self.total_tokens(),
+        })
+    }
+}
 
 /// State machine that transforms Anthropic SSE events → Responses API SSE events.
 pub struct AnthropicToResponsesStream {
     response_id: String,
     model: String,
-    output_index: u32,
-    content_index: u32,
-    current_item_id: String,
-    /// Text accumulated for the current message item, replayed in
-    /// `response.output_text.done` (the Responses client expects the full text).
-    current_text: String,
+    next_output_index: u32,
+    /// Active Anthropic content blocks keyed by their `index`.
+    active_items: HashMap<u32, ActiveOutputItem>,
     /// Completed output items, included in the final `response.completed` so the
     /// client can render the assistant message (Codex reads `response.output`).
-    output_items: Vec<serde_json::Value>,
+    output_items: Vec<(u32, serde_json::Value)>,
+    usage: StreamUsage,
 }
 
 impl AnthropicToResponsesStream {
@@ -28,11 +63,10 @@ impl AnthropicToResponsesStream {
         Self {
             response_id: format!("resp_{}", uuid::Uuid::new_v4().simple()),
             model,
-            output_index: 0,
-            content_index: 0,
-            current_item_id: String::new(),
-            current_text: String::new(),
+            next_output_index: 0,
+            active_items: HashMap::new(),
             output_items: Vec::new(),
+            usage: StreamUsage::default(),
         }
     }
 
@@ -69,6 +103,36 @@ impl AnthropicToResponsesStream {
         })
     }
 
+    fn completed_response_object(&self, output: serde_json::Value) -> serde_json::Value {
+        let mut response = self.response_object("completed", output);
+        if let Some(map) = response.as_object_mut() {
+            map.insert("usage".to_string(), self.usage.to_json());
+        }
+        response
+    }
+
+    fn capture_usage(&mut self, data: &str, pointer: &str) {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
+            return;
+        };
+        let Some(usage) = json.pointer(pointer) else {
+            return;
+        };
+
+        if let Some(input) = usage.get("input_tokens").and_then(|v| v.as_u64()) {
+            let input = u32::try_from(input).unwrap_or(u32::MAX);
+            if input > 0 || self.usage.input_tokens == 0 {
+                self.usage.input_tokens = input;
+            }
+        }
+        if let Some(output) = usage.get("output_tokens").and_then(|v| v.as_u64()) {
+            self.usage.output_tokens = self
+                .usage
+                .output_tokens
+                .max(u32::try_from(output).unwrap_or(u32::MAX));
+        }
+    }
+
     /// Formats the `response.created` event emitted at stream start.
     fn make_response_created(&self) -> Bytes {
         let data = serde_json::json!({
@@ -87,17 +151,22 @@ impl AnthropicToResponsesStream {
             return out;
         };
         let cb_type = cb.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let block_index = json
+            .get("index")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(self.next_output_index as u64) as u32;
+        let output_index = self.next_output_index;
+        self.next_output_index += 1;
 
         match cb_type {
             "text" => {
-                self.current_item_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
-                self.content_index = 0;
+                let item_id = format!("msg_{}", uuid::Uuid::new_v4().simple());
 
                 // response.output_item.added (message)
                 let item_added = serde_json::json!({
-                    "output_index": self.output_index,
+                    "output_index": output_index,
                     "item": {
-                        "id": self.current_item_id,
+                        "id": &item_id,
                         "type": "message",
                         "role": "assistant",
                         "content": [],
@@ -106,22 +175,29 @@ impl AnthropicToResponsesStream {
                 });
                 out.push(Self::make_event("response.output_item.added", &item_added));
 
-                self.current_text.clear();
-
                 // response.content_part.added
                 let part_added = serde_json::json!({
-                    "item_id": self.current_item_id,
-                    "output_index": self.output_index,
-                    "content_index": self.content_index,
+                    "item_id": &item_id,
+                    "output_index": output_index,
+                    "content_index": 0,
                     "part": {
                         "type": "output_text",
                         "text": "",
                     }
                 });
                 out.push(Self::make_event("response.content_part.added", &part_added));
+
+                self.active_items.insert(
+                    block_index,
+                    ActiveOutputItem::Message {
+                        item_id,
+                        output_index,
+                        text: String::new(),
+                    },
+                );
             }
             "tool_use" => {
-                self.current_item_id = format!("fc_{}", uuid::Uuid::new_v4().simple());
+                let item_id = format!("fc_{}", uuid::Uuid::new_v4().simple());
                 let call_id = cb
                     .get("id")
                     .and_then(|v| v.as_str())
@@ -132,19 +208,49 @@ impl AnthropicToResponsesStream {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
+                let initial_arguments = cb
+                    .get("input")
+                    .filter(|v| {
+                        !v.is_null() && !v.as_object().is_some_and(serde_json::Map::is_empty)
+                    })
+                    .and_then(|v| serde_json::to_string(v).ok())
+                    .unwrap_or_default();
 
                 let item_added = serde_json::json!({
-                    "output_index": self.output_index,
+                    "output_index": output_index,
                     "item": {
-                        "id": self.current_item_id,
+                        "id": &item_id,
                         "type": "function_call",
-                        "call_id": call_id,
-                        "name": name,
+                        "call_id": &call_id,
+                        "name": &name,
                         "arguments": "",
                         "status": "in_progress",
                     }
                 });
                 out.push(Self::make_event("response.output_item.added", &item_added));
+
+                if !initial_arguments.is_empty() {
+                    let event_data = serde_json::json!({
+                        "item_id": &item_id,
+                        "output_index": output_index,
+                        "delta": &initial_arguments,
+                    });
+                    out.push(Self::make_event(
+                        "response.function_call_arguments.delta",
+                        &event_data,
+                    ));
+                }
+
+                self.active_items.insert(
+                    block_index,
+                    ActiveOutputItem::FunctionCall {
+                        item_id,
+                        output_index,
+                        call_id,
+                        name,
+                        arguments: initial_arguments,
+                    },
+                );
             }
             _ => {}
         }
@@ -156,27 +262,44 @@ impl AnthropicToResponsesStream {
         let json: serde_json::Value = serde_json::from_str(data).ok()?;
         let delta = json.get("delta")?;
         let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let block_index = json.get("index").and_then(|v| v.as_u64())? as u32;
 
-        match delta_type {
-            "text_delta" => {
+        match (delta_type, self.active_items.get_mut(&block_index)?) {
+            (
+                "text_delta",
+                ActiveOutputItem::Message {
+                    item_id,
+                    output_index,
+                    text: current_text,
+                },
+            ) => {
                 let text = delta.get("text").and_then(|v| v.as_str()).unwrap_or("");
-                self.current_text.push_str(text);
+                current_text.push_str(text);
                 let event_data = serde_json::json!({
-                    "item_id": self.current_item_id,
-                    "output_index": self.output_index,
-                    "content_index": self.content_index,
+                    "item_id": &*item_id,
+                    "output_index": *output_index,
+                    "content_index": 0,
                     "delta": text,
                 });
                 Some(Self::make_event("response.output_text.delta", &event_data))
             }
-            "input_json_delta" => {
+            (
+                "input_json_delta",
+                ActiveOutputItem::FunctionCall {
+                    item_id,
+                    output_index,
+                    arguments,
+                    ..
+                },
+            ) => {
                 let partial = delta
                     .get("partial_json")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
+                arguments.push_str(partial);
                 let event_data = serde_json::json!({
-                    "item_id": self.current_item_id,
-                    "output_index": self.output_index,
+                    "item_id": &*item_id,
+                    "output_index": *output_index,
                     "delta": partial,
                 });
                 Some(Self::make_event(
@@ -188,67 +311,99 @@ impl AnthropicToResponsesStream {
         }
     }
 
-    fn handle_content_block_stop(&mut self, _data: &str) -> Vec<Bytes> {
+    fn handle_content_block_stop(&mut self, data: &str) -> Vec<Bytes> {
         let mut out = Vec::new();
-
-        // Determine if this was text or tool_use based on current_item_id prefix
-        if self.current_item_id.starts_with("msg_") {
-            // response.output_text.done — carries the full accumulated text.
-            let text_done = serde_json::json!({
-                "item_id": self.current_item_id,
-                "output_index": self.output_index,
-                "content_index": self.content_index,
-                "text": self.current_text,
-            });
-            out.push(Self::make_event("response.output_text.done", &text_done));
-
-            // response.content_part.done
-            let part_done = serde_json::json!({
-                "item_id": self.current_item_id,
-                "output_index": self.output_index,
-                "content_index": self.content_index,
-                "part": { "type": "output_text", "text": self.current_text },
-            });
-            out.push(Self::make_event("response.content_part.done", &part_done));
-        } else if self.current_item_id.starts_with("fc_") {
-            // response.function_call_arguments.done
-            let args_done = serde_json::json!({
-                "item_id": self.current_item_id,
-                "output_index": self.output_index,
-            });
-            out.push(Self::make_event(
-                "response.function_call_arguments.done",
-                &args_done,
-            ));
-        }
-
-        // Build the completed item once — carried both in `output_item.done` and
-        // in the final `response.output` so the client can render the message.
-        let item = if self.current_item_id.starts_with("fc_") {
-            serde_json::json!({
-                "id": self.current_item_id,
-                "type": "function_call",
-                "status": "completed",
-            })
-        } else {
-            serde_json::json!({
-                "id": self.current_item_id,
-                "type": "message",
-                "role": "assistant",
-                "status": "completed",
-                "content": [{ "type": "output_text", "text": self.current_text }],
-            })
+        let json: serde_json::Value = match serde_json::from_str(data) {
+            Ok(v) => v,
+            Err(_) => return out,
+        };
+        let Some(block_index) = json.get("index").and_then(|v| v.as_u64()).map(|v| v as u32) else {
+            return out;
+        };
+        let Some(item_state) = self.active_items.remove(&block_index) else {
+            return out;
         };
 
-        let item_done = serde_json::json!({
-            "output_index": self.output_index,
-            "item": item.clone(),
-        });
-        out.push(Self::make_event("response.output_item.done", &item_done));
-        self.output_items.push(item);
+        match item_state {
+            ActiveOutputItem::Message {
+                item_id,
+                output_index,
+                text,
+            } => {
+                // response.output_text.done — carries the full accumulated text.
+                let text_done = serde_json::json!({
+                    "item_id": &item_id,
+                    "output_index": output_index,
+                    "content_index": 0,
+                    "text": &text,
+                });
+                out.push(Self::make_event("response.output_text.done", &text_done));
 
-        self.output_index += 1;
-        self.current_text.clear();
+                // response.content_part.done
+                let part_done = serde_json::json!({
+                    "item_id": &item_id,
+                    "output_index": output_index,
+                    "content_index": 0,
+                    "part": { "type": "output_text", "text": &text },
+                });
+                out.push(Self::make_event("response.content_part.done", &part_done));
+
+                let item = serde_json::json!({
+                    "id": item_id,
+                    "type": "message",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{ "type": "output_text", "text": text }],
+                });
+                let item_done = serde_json::json!({
+                    "output_index": output_index,
+                    "item": item.clone(),
+                });
+                out.push(Self::make_event("response.output_item.done", &item_done));
+                self.output_items.push((output_index, item));
+            }
+            ActiveOutputItem::FunctionCall {
+                item_id,
+                output_index,
+                call_id,
+                name,
+                arguments,
+            } => {
+                let arguments = if arguments.is_empty() {
+                    "{}".to_string()
+                } else {
+                    arguments
+                };
+
+                // Codex finalizes the tool call from this event, so include the
+                // consolidated arguments, not just the item/index identifiers.
+                let args_done = serde_json::json!({
+                    "item_id": &item_id,
+                    "output_index": output_index,
+                    "arguments": &arguments,
+                });
+                out.push(Self::make_event(
+                    "response.function_call_arguments.done",
+                    &args_done,
+                ));
+
+                let item = serde_json::json!({
+                    "id": item_id,
+                    "type": "function_call",
+                    "call_id": call_id,
+                    "name": name,
+                    "arguments": arguments,
+                    "status": "completed",
+                });
+                let item_done = serde_json::json!({
+                    "output_index": output_index,
+                    "item": item.clone(),
+                });
+                out.push(Self::make_event("response.output_item.done", &item_done));
+                self.output_items.push((output_index, item));
+            }
+        }
+
         out
     }
 
@@ -260,6 +415,7 @@ impl AnthropicToResponsesStream {
 
         match event_type {
             "message_start" => {
+                self.capture_usage(&event.data, "/message/usage");
                 let in_progress = serde_json::json!({
                     "response": self.response_object("in_progress", serde_json::json!([])),
                 });
@@ -274,10 +430,18 @@ impl AnthropicToResponsesStream {
                 .into_iter()
                 .collect(),
             "content_block_stop" => self.handle_content_block_stop(&event.data),
+            "message_delta" => {
+                self.capture_usage(&event.data, "/usage");
+                Vec::new()
+            }
             "message_stop" => {
-                let output = serde_json::Value::Array(std::mem::take(&mut self.output_items));
+                let mut output_items = std::mem::take(&mut self.output_items);
+                output_items.sort_by_key(|(idx, _)| *idx);
+                let output = serde_json::Value::Array(
+                    output_items.into_iter().map(|(_, item)| item).collect(),
+                );
                 let completed =
-                    serde_json::json!({ "response": self.response_object("completed", output) });
+                    serde_json::json!({ "response": self.completed_response_object(output) });
                 vec![
                     Self::make_event("response.completed", &completed),
                     Bytes::from("data: [DONE]\n\n"),
@@ -307,6 +471,27 @@ impl AnthropicToResponsesStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn event(event: &str, data: &str) -> SseEvent {
+        SseEvent {
+            event: Some(event.to_string()),
+            data: data.to_string(),
+        }
+    }
+
+    fn append_events(out: &mut String, events: Vec<Bytes>) {
+        for bytes in events {
+            out.push_str(std::str::from_utf8(&bytes).unwrap());
+        }
+    }
+
+    fn json_events(output: &str, event_name: &str) -> Vec<serde_json::Value> {
+        parse_sse_events(output)
+            .into_iter()
+            .filter(|event| event.event.as_deref() == Some(event_name))
+            .map(|event| serde_json::from_str(&event.data).unwrap())
+            .collect()
+    }
 
     #[test]
     fn message_start_emits_response_created() {
@@ -347,6 +532,13 @@ mod tests {
     #[test]
     fn text_delta_emits_output_text_delta() {
         let mut stream = AnthropicToResponsesStream::new("gpt-5.4".to_string());
+        let start = SseEvent {
+            event: Some("content_block_start".to_string()),
+            data: r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#
+                .to_string(),
+        };
+        stream.transform_event(&start);
+
         let event = SseEvent {
             event: Some("content_block_delta".to_string()),
             data: r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#
@@ -388,6 +580,73 @@ mod tests {
     }
 
     #[test]
+    fn message_then_tool_call_preserves_arguments_in_done_and_completed() {
+        let mut stream = AnthropicToResponsesStream::new("gpt-5.5".to_string());
+        let mut out = String::new();
+
+        for ev in [
+            event(
+                "message_start",
+                r#"{"type":"message_start","message":{"id":"msg_1","model":"gpt-5.5"}}"#,
+            ),
+            event(
+                "content_block_start",
+                r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+            ),
+            event(
+                "content_block_delta",
+                r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I'll run that."}}"#,
+            ),
+            event(
+                "content_block_stop",
+                r#"{"type":"content_block_stop","index":0}"#,
+            ),
+            event(
+                "content_block_start",
+                r#"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call_exec","name":"exec_command","input":{}}}"#,
+            ),
+            event(
+                "content_block_delta",
+                r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"cmd\":\""}}"#,
+            ),
+            event(
+                "content_block_delta",
+                r#"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"ls\"}"}}"#,
+            ),
+            event(
+                "content_block_stop",
+                r#"{"type":"content_block_stop","index":1}"#,
+            ),
+            event("message_stop", r#"{"type":"message_stop"}"#),
+        ] {
+            append_events(&mut out, stream.transform_event(&ev));
+        }
+
+        let args_done = json_events(&out, "response.function_call_arguments.done");
+        assert_eq!(args_done.len(), 1);
+        assert_eq!(args_done[0]["output_index"], 1);
+        assert_eq!(args_done[0]["arguments"], r#"{"cmd":"ls"}"#);
+
+        let tool_done = json_events(&out, "response.output_item.done")
+            .into_iter()
+            .find(|event| event["item"]["type"] == "function_call")
+            .expect("function_call output_item.done");
+        assert_eq!(tool_done["output_index"], 1);
+        assert_eq!(tool_done["item"]["call_id"], "call_exec");
+        assert_eq!(tool_done["item"]["name"], "exec_command");
+        assert_eq!(tool_done["item"]["arguments"], r#"{"cmd":"ls"}"#);
+
+        let completed = json_events(&out, "response.completed")
+            .pop()
+            .expect("response.completed");
+        let output = completed["response"]["output"].as_array().unwrap();
+        assert_eq!(output[0]["type"], "message");
+        assert_eq!(output[1]["type"], "function_call");
+        assert_eq!(output[1]["call_id"], "call_exec");
+        assert_eq!(output[1]["arguments"], r#"{"cmd":"ls"}"#);
+    }
+
+    #[test]
     fn message_stop_emits_completed_and_done() {
         let mut stream = AnthropicToResponsesStream::new("gpt-5.4".to_string());
         let event = SseEvent {
@@ -400,5 +659,32 @@ mod tests {
         let s1 = std::str::from_utf8(&result[1]).unwrap();
         assert!(s0.contains("response.completed"));
         assert!(s1.contains("[DONE]"));
+    }
+
+    #[test]
+    fn response_completed_includes_usage_from_message_delta() {
+        let mut stream = AnthropicToResponsesStream::new("gpt-5.5".to_string());
+        let mut out = String::new();
+
+        for ev in [
+            event(
+                "message_start",
+                r#"{"type":"message_start","message":{"usage":{"input_tokens":123,"output_tokens":0}}}"#,
+            ),
+            event(
+                "message_delta",
+                r#"{"type":"message_delta","usage":{"input_tokens":456,"output_tokens":78}}"#,
+            ),
+            event("message_stop", r#"{"type":"message_stop"}"#),
+        ] {
+            append_events(&mut out, stream.transform_event(&ev));
+        }
+
+        let completed = json_events(&out, "response.completed")
+            .pop()
+            .expect("response.completed");
+        assert_eq!(completed["response"]["usage"]["input_tokens"], 456);
+        assert_eq!(completed["response"]["usage"]["output_tokens"], 78);
+        assert_eq!(completed["response"]["usage"]["total_tokens"], 534);
     }
 }

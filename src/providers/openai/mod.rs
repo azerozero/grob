@@ -647,9 +647,26 @@ fn build_stream_finalization_output(state: &StreamTransformState) -> String {
         ));
     }
 
+    for block_index in state.responses_fc_blocks.values() {
+        let block_stop = serde_json::json!({
+            "type": "content_block_stop",
+            "index": block_index
+        });
+        output.push_str(&format!(
+            "event: content_block_stop\ndata: {}\n\n",
+            block_stop
+        ));
+    }
+
+    let stop_reason = if state.had_tool_calls {
+        "tool_use"
+    } else {
+        "end_turn"
+    };
+
     let message_delta = serde_json::json!({
         "type": "message_delta",
-        "delta": { "stop_reason": "end_turn", "stop_sequence": null },
+        "delta": { "stop_reason": stop_reason, "stop_sequence": null },
         "usage": { "output_tokens": 0 }
     });
     output.push_str(&format!(
