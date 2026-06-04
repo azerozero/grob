@@ -440,7 +440,7 @@ default = "placeholder-model"
         Self::validate_acme(&self.server)?;
         Self::validate_auth_mode(&self.auth)?;
         Self::validate_fan_out(&self.models, &model_names)?;
-        Self::validate_tiers(&self.tiers, &provider_names)?;
+        Self::validate_tiers(&self.tiers, &provider_names, &model_names)?;
 
         Ok(())
     }
@@ -629,7 +629,7 @@ default = "placeholder-model"
         Ok(())
     }
 
-    /// Verifies every tier references a declared provider (skipped when none exist).
+    /// Verifies every tier references declared providers and models.
     ///
     /// # Errors
     ///
@@ -637,6 +637,7 @@ default = "placeholder-model"
     fn validate_tiers(
         tiers: &[TierConfig],
         provider_names: &std::collections::HashSet<&str>,
+        model_names: &std::collections::HashSet<&str>,
     ) -> Result<()> {
         // Skip when no providers are defined: an empty provider set means no
         // declared names to validate against, matching the original guard.
@@ -649,6 +650,20 @@ default = "placeholder-model"
                             tier.name,
                             prov,
                             provider_names.iter().collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+        }
+        if !model_names.is_empty() {
+            for tier in tiers {
+                if let Some(model) = tier.model.as_deref() {
+                    if !model_names.contains(model) {
+                        anyhow::bail!(
+                            "Tier '{}' references unknown model '{}'. Available: {:?}",
+                            tier.name,
+                            model,
+                            model_names.iter().collect::<Vec<_>>()
                         );
                     }
                 }

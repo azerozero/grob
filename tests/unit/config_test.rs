@@ -261,6 +261,7 @@ providers = ["cheap-provider"]
     fn test_tier_config_serialization() {
         let tier = TierConfig {
             name: "complex".to_string(),
+            model: None,
             providers: vec!["prov-a".to_string(), "prov-b".to_string()],
             fanout: true,
             match_conditions: None,

@@ -78,3 +78,14 @@ default = "dev"
 think = "codex"
 background = "fast"
 websearch = "dev"
+
+# Cost-aware agent-loop routing for debug/A-B runs.
+[[tiers]]
+name = "trivial"
+model = "fast"
+providers = ["chatgpt-codex"]
+
+[[tiers]]
+name = "medium"
+model = "codex"
+providers = ["chatgpt-codex"]

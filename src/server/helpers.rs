@@ -49,8 +49,16 @@ fn resolve_tier_mappings(
         tier_name
     );
 
+    let target_model = tier_cfg.model.as_deref().unwrap_or(&decision.model_name);
+    if target_model != decision.model_name {
+        info!(
+            "tier {} -> virtual model override {}",
+            tier_name, target_model
+        );
+    }
+
     // Look up [[models]] config once so we can pick actual_model per provider.
-    let model_config = inner.find_model(&decision.model_name);
+    let model_config = inner.find_model(target_model);
 
     let mut priority: u32 = 0;
     let mappings: Vec<crate::cli::ModelMapping> = tier_cfg
@@ -81,21 +89,20 @@ fn resolve_tier_mappings(
                 .iter()
                 .find(|p| p.name == *provider_name)
                 .map(|p| {
-                    p.models.iter().any(|m| m == &decision.model_name)
-                        || p.pass_through.unwrap_or(false)
+                    p.models.iter().any(|m| m == target_model) || p.pass_through.unwrap_or(false)
                 })
                 .unwrap_or(false);
 
             if provider_supports {
                 info!(
                     "tier {} -> provider {} -> actual_model {} (provider models list)",
-                    tier_name, provider_name, decision.model_name
+                    tier_name, provider_name, target_model
                 );
                 priority += 1;
                 return Some(crate::cli::ModelMapping {
                     priority,
                     provider: provider_name.clone(),
-                    actual_model: decision.model_name.clone(),
+                    actual_model: target_model.to_string(),
                     inject_continuation_prompt: false,
                 });
             }
@@ -103,7 +110,7 @@ fn resolve_tier_mappings(
             // Step 3: no resolution — skip this provider to avoid sending an unknown model name.
             info!(
                 "tier {} -> provider {} SKIP (no resolution for model '{}')",
-                tier_name, provider_name, decision.model_name
+                tier_name, provider_name, target_model
             );
             None
         })
@@ -413,6 +420,53 @@ priority = 1
         assert_eq!(mappings[0].provider, "openrouter");
         // Must use the actual_model from [[models.mappings]], not the raw model name.
         assert_eq!(mappings[0].actual_model, "anthropic/claude-sonnet-4-6");
+    }
+
+    // Case 1b: tier match + `model = "fast"` makes tier providers use the
+    // target virtual model mapping, not the original request model mapping.
+    #[test]
+    fn tier_model_override_uses_target_virtual_model_mapping() {
+        let toml = r#"
+[router]
+default = "dev"
+
+[[providers]]
+name = "chatgpt-codex"
+provider_type = "openai"
+models = []
+enabled = true
+
+[[tiers]]
+name = "trivial"
+model = "fast"
+providers = ["chatgpt-codex"]
+
+[[models]]
+name = "dev"
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.5"
+priority = 1
+
+[[models]]
+name = "fast"
+[[models.mappings]]
+provider = "chatgpt-codex"
+actual_model = "gpt-5.4-mini"
+priority = 1
+"#;
+        let state = make_state(toml);
+        let headers = HeaderMap::new();
+        let dec = decision(
+            "dev",
+            Some(crate::routing::classify::ComplexityTier::Trivial),
+        );
+
+        let mappings = resolve_provider_mappings(&state, &headers, &dec).expect("should resolve");
+
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].provider, "chatgpt-codex");
+        assert_eq!(mappings[0].actual_model, "gpt-5.4-mini");
     }
 
     // Cas 2: tier match + pas de [[models]] mapping mais provider liste le model → used as-is.

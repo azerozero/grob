@@ -391,6 +391,7 @@ mod tests {
             }],
             tiers: vec![TierConfig {
                 name: "trivial".to_string(),
+                model: None,
                 providers: vec!["openrouter".to_string(), "anthropic".to_string()],
                 fanout: true,
                 match_conditions: None,

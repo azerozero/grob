@@ -22,6 +22,7 @@ default = "my-model"
 
 [[tiers]]
 name = "trivial"
+model = "fast-model"
 providers = ["cheap-provider"]
 
 [[tiers]]
@@ -34,6 +35,7 @@ fanout = true
         assert_eq!(config.tiers.len(), 2);
 
         assert_eq!(config.tiers[0].name, "trivial");
+        assert_eq!(config.tiers[0].model.as_deref(), Some("fast-model"));
         assert_eq!(config.tiers[0].providers, vec!["cheap-provider"]);
         assert!(!config.tiers[0].fanout);
 
@@ -68,6 +70,7 @@ default = "my-model"
     ) -> Option<Vec<ModelMapping>> {
         let tier_name = tier.to_string();
         let tier_cfg = tiers.iter().find(|t| t.name == tier_name)?;
+        let actual_model = tier_cfg.model.as_deref().unwrap_or(model_name);
         let mappings: Vec<ModelMapping> = tier_cfg
             .providers
             .iter()
@@ -75,7 +78,7 @@ default = "my-model"
             .map(|(i, provider_name)| ModelMapping {
                 priority: (i as u32) + 1,
                 provider: provider_name.clone(),
-                actual_model: model_name.to_string(),
+                actual_model: actual_model.to_string(),
                 inject_continuation_prompt: false,
             })
             .collect();
@@ -91,12 +94,14 @@ default = "my-model"
         let tiers = vec![
             TierConfig {
                 name: "trivial".to_string(),
+                model: None,
                 providers: vec!["haiku-provider".to_string(), "flash-provider".to_string()],
                 fanout: false,
                 match_conditions: None,
             },
             TierConfig {
                 name: "complex".to_string(),
+                model: None,
                 providers: vec!["opus-provider".to_string()],
                 fanout: false,
                 match_conditions: None,
@@ -118,6 +123,7 @@ default = "my-model"
     fn tier_unknown_returns_none_for_fallback() {
         let tiers = vec![TierConfig {
             name: "trivial".to_string(),
+            model: None,
             providers: vec!["cheap".to_string()],
             fanout: false,
             match_conditions: None,
@@ -129,9 +135,25 @@ default = "my-model"
     }
 
     #[test]
+    fn tier_model_override_changes_actual_model() {
+        let tiers = vec![TierConfig {
+            name: "trivial".to_string(),
+            model: Some("fast-model".to_string()),
+            providers: vec!["cheap".to_string()],
+            fanout: false,
+            match_conditions: None,
+        }];
+
+        let mappings =
+            resolve_tier_providers(&tiers, &ComplexityTier::Trivial, "expensive-model").unwrap();
+        assert_eq!(mappings[0].actual_model, "fast-model");
+    }
+
+    #[test]
     fn tier_empty_providers_returns_none() {
         let tiers = vec![TierConfig {
             name: "trivial".to_string(),
+            model: None,
             providers: vec![],
             fanout: false,
             match_conditions: None,
@@ -148,12 +170,14 @@ default = "my-model"
         let tiers = [
             TierConfig {
                 name: "trivial".to_string(),
+                model: None,
                 providers: vec!["a".to_string()],
                 fanout: false,
                 match_conditions: None,
             },
             TierConfig {
                 name: "complex".to_string(),
+                model: None,
                 providers: vec!["b".to_string(), "c".to_string()],
                 fanout: true,
                 match_conditions: None,
@@ -190,6 +214,7 @@ providers = ["cheap"]
     fn route_decision_with_tier_selects_tier_providers() {
         let tiers = vec![TierConfig {
             name: "complex".to_string(),
+            model: None,
             providers: vec!["opus".to_string(), "sonnet".to_string()],
             fanout: false,
             match_conditions: None,

@@ -1317,6 +1317,7 @@ fn tier_max_tokens_below_filters_correctly_via_router() {
     let mut config = create_test_config();
     config.tiers = vec![TierConfig {
         name: "trivial".to_string(),
+        model: None,
         providers: vec![],
         fanout: false,
         match_conditions: Some(TierMatchCondition {
@@ -1357,6 +1358,7 @@ fn tier_keywords_match_in_last_message_via_router() {
     let mut config = create_test_config();
     config.tiers = vec![TierConfig {
         name: "complex".to_string(),
+        model: None,
         providers: vec![],
         fanout: false,
         match_conditions: Some(TierMatchCondition {
@@ -1383,6 +1385,7 @@ fn tier_first_matching_wins_when_multiple_match_via_router() {
     config.tiers = vec![
         TierConfig {
             name: "medium".to_string(),
+            model: None,
             providers: vec![],
             fanout: false,
             match_conditions: Some(TierMatchCondition {
@@ -1392,6 +1395,7 @@ fn tier_first_matching_wins_when_multiple_match_via_router() {
         },
         TierConfig {
             name: "complex".to_string(),
+            model: None,
             providers: vec![],
             fanout: false,
             match_conditions: Some(TierMatchCondition {
@@ -1420,6 +1424,7 @@ fn tier_unknown_name_skipped_with_warning() {
     let mut config = create_test_config();
     config.tiers = vec![TierConfig {
         name: "non-existent-tier".to_string(),
+        model: None,
         providers: vec![],
         fanout: false,
         match_conditions: Some(TierMatchCondition::default()),

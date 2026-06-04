@@ -7,7 +7,9 @@
 //!
 //! See `docs/how-to/auto-tune-routing.md` for tuning weights from trace data.
 
-use crate::models::{CanonicalRequest, MessageContent};
+use crate::models::{
+    CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent, ToolResultContent,
+};
 
 /// Complexity tier assigned by the heuristic scorer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -237,6 +239,211 @@ fn score_system_prompt(request: &CanonicalRequest) -> f32 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ToolUseRef<'a> {
+    name: &'a str,
+    input: &'a serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolResultView {
+    tool_use_id: String,
+    content: String,
+    is_error: bool,
+}
+
+/// Returns a conservative tier override for pure tool-result turns.
+///
+/// Coding agents often spend full-context requests on bookkeeping after a tool
+/// returns. These turns are safe to downgrade only when the last user message is
+/// made exclusively of successful, recognized tool results. Unknown outputs
+/// fall back to the normal weighted scorer.
+pub(crate) fn classify_tool_result_context(request: &CanonicalRequest) -> Option<ComplexityTier> {
+    let results = last_user_tool_results(request)?;
+    let mut selected = ComplexityTier::Trivial;
+
+    for result in &results {
+        if result.is_error || has_nonzero_exit_code(&result.content) {
+            return Some(ComplexityTier::Complex);
+        }
+
+        let tool_use = find_tool_use(request, &result.tool_use_id)?;
+        let tier = classify_single_tool_result(tool_use, &result.content)?;
+
+        if tier == ComplexityTier::Complex {
+            return Some(ComplexityTier::Complex);
+        }
+        if tier == ComplexityTier::Medium {
+            selected = ComplexityTier::Medium;
+        }
+    }
+
+    Some(selected)
+}
+
+fn classify_single_tool_result(tool_use: ToolUseRef<'_>, content: &str) -> Option<ComplexityTier> {
+    if is_task_create_success(tool_use, content) || is_task_update_in_progress(tool_use, content) {
+        return Some(ComplexityTier::Trivial);
+    }
+
+    if let Some(command) = command_from_tool_use(tool_use) {
+        if is_simple_status_command(command) && is_short_success(content) {
+            return Some(ComplexityTier::Trivial);
+        }
+        if is_successful_test_command(command, content) {
+            return Some(ComplexityTier::Medium);
+        }
+    }
+
+    None
+}
+
+fn last_user_tool_results(request: &CanonicalRequest) -> Option<Vec<ToolResultView>> {
+    let last_user = request.messages.iter().rev().find(|m| m.role == "user")?;
+    let MessageContent::Blocks(blocks) = &last_user.content else {
+        return None;
+    };
+
+    let mut results = Vec::new();
+    for block in blocks {
+        match block {
+            ContentBlock::Known(KnownContentBlock::ToolResult {
+                tool_use_id,
+                content,
+                is_error,
+                ..
+            }) => results.push(ToolResultView {
+                tool_use_id: tool_use_id.clone(),
+                content: tool_result_text(content),
+                is_error: *is_error,
+            }),
+            ContentBlock::Known(KnownContentBlock::Text { text, .. }) if text.trim().is_empty() => {
+            }
+            _ => return None,
+        }
+    }
+
+    if results.is_empty() {
+        None
+    } else {
+        Some(results)
+    }
+}
+
+fn tool_result_text(content: &ToolResultContent) -> String {
+    content.to_string()
+}
+
+fn find_tool_use<'a>(request: &'a CanonicalRequest, tool_use_id: &str) -> Option<ToolUseRef<'a>> {
+    request.messages.iter().rev().find_map(|message| {
+        if message.role != "assistant" {
+            return None;
+        }
+        let MessageContent::Blocks(blocks) = &message.content else {
+            return None;
+        };
+        blocks.iter().find_map(|block| match block {
+            ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input })
+                if id == tool_use_id =>
+            {
+                Some(ToolUseRef { name, input })
+            }
+            _ => None,
+        })
+    })
+}
+
+fn is_task_create_success(tool_use: ToolUseRef<'_>, content: &str) -> bool {
+    tool_use.name == "TaskCreate"
+        && content.starts_with("Task #")
+        && content.contains(" created successfully")
+}
+
+fn is_task_update_in_progress(tool_use: ToolUseRef<'_>, content: &str) -> bool {
+    tool_use.name == "TaskUpdate"
+        && tool_use
+            .input
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            == Some("in_progress")
+        && content.starts_with("Updated task #")
+}
+
+fn command_from_tool_use(tool_use: ToolUseRef<'_>) -> Option<&str> {
+    if !matches!(
+        tool_use.name,
+        "Bash" | "bash" | "exec_command" | "shell" | "functions.exec_command"
+    ) {
+        return None;
+    }
+    tool_use
+        .input
+        .get("cmd")
+        .or_else(|| tool_use.input.get("command"))
+        .and_then(serde_json::Value::as_str)
+}
+
+fn is_simple_status_command(command: &str) -> bool {
+    let command = command.trim();
+    command == "pwd"
+        || command == "date"
+        || is_git_status_command(command)
+        || is_git_metadata_command(command)
+}
+
+fn is_git_status_command(command: &str) -> bool {
+    command.starts_with("git ")
+        && (command.ends_with(" status --short")
+            || command.contains(" status --short ")
+            || command.ends_with(" diff --check")
+            || command.contains(" diff --check "))
+}
+
+fn is_git_metadata_command(command: &str) -> bool {
+    command.starts_with("git ")
+        && (command.ends_with(" branch --show-current")
+            || command.contains(" branch --show-current ")
+            || command.ends_with(" rev-parse --show-toplevel")
+            || command.contains(" rev-parse --show-toplevel "))
+}
+
+fn is_short_success(content: &str) -> bool {
+    content.len() <= 2_000 && !has_nonzero_exit_code(content)
+}
+
+fn is_successful_test_command(command: &str, content: &str) -> bool {
+    let command = command.trim();
+    let is_test_command = command.starts_with("cargo test")
+        || command.contains(" cargo test")
+        || command.starts_with("cargo nextest run")
+        || command.contains(" cargo nextest run");
+
+    is_test_command
+        && content.len() <= 8_000
+        && !has_nonzero_exit_code(content)
+        && (content.contains("test result: ok")
+            || content.contains(" 0 failed")
+            || content.contains(", 0 failed"))
+}
+
+fn has_nonzero_exit_code(content: &str) -> bool {
+    ["Process exited with code ", "Exit code: "]
+        .iter()
+        .filter_map(|marker| exit_code_after(content, marker))
+        .any(|code| code != 0)
+}
+
+fn exit_code_after(content: &str, marker: &str) -> Option<i32> {
+    let start = content.find(marker)? + marker.len();
+    let rest = content[start..].trim_start();
+    let len = rest
+        .char_indices()
+        .take_while(|(idx, ch)| ch.is_ascii_digit() || (*idx == 0 && *ch == '-'))
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .last()?;
+    rest[..len].parse().ok()
+}
+
 // ── Public API ───────────────────────────────────────────────────────
 
 /// Classifies request complexity as a pure, stateless function.
@@ -244,6 +451,10 @@ fn score_system_prompt(request: &CanonicalRequest) -> f32 {
 /// Computes a weighted sum of observable signals and maps it to a
 /// [`ComplexityTier`]. Target latency: < 0.1 ms per call.
 pub fn classify_complexity(request: &CanonicalRequest, config: &ScoringConfig) -> ComplexityTier {
+    if let Some(tier) = classify_tool_result_context(request) {
+        return tier;
+    }
+
     let w = &config.weights;
 
     let score = w.max_tokens * score_max_tokens(request.max_tokens)
@@ -264,7 +475,10 @@ pub fn classify_complexity(request: &CanonicalRequest, config: &ScoringConfig) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Message, MessageContent, SystemPrompt, Tool};
+    use crate::models::{
+        ContentBlock, KnownContentBlock, Message, MessageContent, SystemPrompt, Tool,
+        ToolResultContent,
+    };
 
     fn simple_request(text: &str, max_tokens: u32) -> CanonicalRequest {
         CanonicalRequest {
@@ -556,7 +770,166 @@ mod tests {
         assert_eq!(tier, ComplexityTier::Trivial);
     }
 
+    // ── 13. Tool-result-aware routing ──
+
+    #[test]
+    fn task_create_tool_result_is_trivial_despite_tools_and_high_tokens() {
+        let mut req = tool_result_request(
+            "TaskCreate",
+            serde_json::json!({"subject": "Discover the OpenAI audit slice"}),
+            "Task #35 created successfully: Discover the OpenAI audit slice",
+            false,
+            8_000,
+        );
+        req.tools = Some(vec![make_tool("Read"), make_tool("Bash")]);
+
+        let tier = classify_complexity(&req, &default_config());
+        assert_eq!(tier, ComplexityTier::Trivial);
+    }
+
+    #[test]
+    fn task_update_in_progress_tool_result_is_trivial() {
+        let mut req = tool_result_request(
+            "TaskUpdate",
+            serde_json::json!({"taskId": "37", "status": "in_progress"}),
+            "Updated task #37 status",
+            false,
+            8_000,
+        );
+        req.tools = Some(vec![make_tool("Read"), make_tool("Bash")]);
+
+        let tier = classify_complexity(&req, &default_config());
+        assert_eq!(tier, ComplexityTier::Trivial);
+    }
+
+    #[test]
+    fn task_update_completed_falls_back_to_weighted_scoring() {
+        let mut req = tool_result_request(
+            "TaskUpdate",
+            serde_json::json!({"taskId": "37", "status": "completed"}),
+            "Updated task #37 status",
+            false,
+            8_000,
+        );
+        req.tools = Some(vec![make_tool("Read"), make_tool("Bash")]);
+
+        let tier = classify_complexity(&req, &default_config());
+        assert_eq!(tier, ComplexityTier::Complex);
+    }
+
+    #[test]
+    fn tool_result_error_is_complex() {
+        let mut req = tool_result_request(
+            "Read",
+            serde_json::json!({"file_path": "/missing"}),
+            "File does not exist.",
+            true,
+            100,
+        );
+        req.tools = Some(vec![make_tool("Read")]);
+
+        let tier = classify_complexity(&req, &default_config());
+        assert_eq!(tier, ComplexityTier::Complex);
+    }
+
+    #[test]
+    fn git_status_success_tool_result_is_trivial() {
+        let mut req = tool_result_request(
+            "exec_command",
+            serde_json::json!({"cmd": "git -C /repo status --short"}),
+            "Chunk ID: abc\nWall time: 0.0000 seconds\nProcess exited with code 0\nOutput:\n",
+            false,
+            8_000,
+        );
+        req.tools = Some(vec![make_tool("exec_command")]);
+
+        let tier = classify_complexity(&req, &default_config());
+        assert_eq!(tier, ComplexityTier::Trivial);
+    }
+
+    #[test]
+    fn cargo_test_success_tool_result_is_medium() {
+        let mut req = tool_result_request(
+            "exec_command",
+            serde_json::json!({"cmd": "cargo test -q openai"}),
+            "running 82 tests\n\ntest result: ok. 82 passed; 0 failed; 0 ignored\nProcess exited with code 0",
+            false,
+            8_000,
+        );
+        req.tools = Some(vec![make_tool("exec_command")]);
+
+        let tier = classify_complexity(&req, &default_config());
+        assert_eq!(tier, ComplexityTier::Medium);
+    }
+
+    #[test]
+    fn file_read_tool_result_falls_back_to_weighted_scoring() {
+        let mut req = tool_result_request(
+            "exec_command",
+            serde_json::json!({"cmd": "sed -n '1,220p' src/lib.rs"}),
+            "Chunk ID: abc\nProcess exited with code 0\nOutput:\n".to_string()
+                + &"fn main() {}\n".repeat(300),
+            false,
+            8_000,
+        );
+        req.tools = Some(vec![make_tool("exec_command")]);
+
+        let tier = classify_complexity(&req, &default_config());
+        assert_eq!(tier, ComplexityTier::Complex);
+    }
+
     // ── helpers ──
+
+    fn tool_result_request(
+        tool_name: &str,
+        input: serde_json::Value,
+        result: impl Into<String>,
+        is_error: bool,
+        max_tokens: u32,
+    ) -> CanonicalRequest {
+        CanonicalRequest {
+            model: "test-model".to_string(),
+            messages: vec![
+                Message {
+                    role: "user".to_string(),
+                    content: MessageContent::Text("Run the next step".to_string()),
+                },
+                Message {
+                    role: "assistant".to_string(),
+                    content: MessageContent::Blocks(vec![ContentBlock::Known(
+                        KnownContentBlock::ToolUse {
+                            id: "tool_1".to_string(),
+                            name: tool_name.to_string(),
+                            input,
+                        },
+                    )]),
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: MessageContent::Blocks(vec![ContentBlock::Known(
+                        KnownContentBlock::ToolResult {
+                            tool_use_id: "tool_1".to_string(),
+                            content: ToolResultContent::Text(result.into()),
+                            is_error,
+                            cache_control: None,
+                        },
+                    )]),
+                },
+            ],
+            max_tokens,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            extensions: Default::default(),
+        }
+    }
 
     fn make_tool(name: &str) -> Tool {
         Tool {
