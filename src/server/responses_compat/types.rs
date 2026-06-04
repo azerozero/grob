@@ -95,6 +95,20 @@ pub enum InputItem {
         /// Function execution result as a string.
         output: String,
     },
+    /// Model reasoning trace echoed back on multi-turn requests (Codex, o-series).
+    ///
+    /// Carries the model's internal chain-of-thought, not user-visible content,
+    /// so it is dropped when mapping to the canonical conversation.
+    #[serde(rename = "reasoning")]
+    Reasoning {
+        /// Reasoning item identifier (e.g. "rs_..."); other fields are ignored.
+        #[serde(default)]
+        id: Option<String>,
+    },
+    /// Any other item type (e.g. `local_shell_call`) the canonical format does
+    /// not model. Tolerated and skipped so multi-turn Codex payloads do not 422.
+    #[serde(other)]
+    Other,
 }
 
 /// Content of an input message: plain text or structured parts.
@@ -117,6 +131,16 @@ pub enum InputContentPart {
         /// The text content.
         text: String,
     },
+    /// Assistant output text echoed back on multi-turn requests (Codex).
+    #[serde(rename = "output_text")]
+    OutputText {
+        /// The previously generated assistant text.
+        text: String,
+    },
+    /// Any other content part type (e.g. `input_image`) not modelled here.
+    /// Tolerated and skipped so multi-turn Codex payloads do not 422.
+    #[serde(other)]
+    Other,
 }
 
 /// Reasoning configuration for o-series and thinking models.

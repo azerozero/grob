@@ -24,6 +24,7 @@ pub async fn cmd_start(
     port: Option<u16>,
     detach: bool,
     cli_config: Option<String>,
+    hot_upgrade: bool,
 ) -> anyhow::Result<()> {
     print_startup_warnings(&config);
 
@@ -81,7 +82,9 @@ pub async fn cmd_start(
         config.server.port = Port::new(port).expect("valid port");
     }
 
-    if instance::is_instance_running(&config.server.host, config.server.port.value()).await {
+    if !hot_upgrade
+        && instance::is_instance_running(&config.server.host, config.server.port.value()).await
+    {
         if let Some(pid) =
             instance::find_instance_pid(&config.server.host, config.server.port.value()).await
         {

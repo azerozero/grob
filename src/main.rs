@@ -152,9 +152,20 @@ async fn main() -> anyhow::Result<()> {
     }
 
     match command {
-        Commands::Start { port, detach } => {
-            commands::start::cmd_start(config, config_source, port, detach, cli_args.config)
-                .await?;
+        Commands::Start {
+            port,
+            detach,
+            hot_upgrade,
+        } => {
+            commands::start::cmd_start(
+                config,
+                config_source,
+                port,
+                detach,
+                cli_args.config,
+                hot_upgrade,
+            )
+            .await?;
         }
         Commands::Stop => commands::stop::cmd_stop(&config).await?,
         Commands::Restart { detach } => {

@@ -13,6 +13,7 @@ use bytes::Bytes;
 use futures::stream::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{info, warn};
 
 use super::super::{is_auth_revoked_error, is_retryable, provider_max_retries, retry_delay};
@@ -80,6 +81,61 @@ pub(super) struct StreamingAttempt<'a> {
     pub mapping: &'a crate::cli::ModelMapping,
     pub decision: &'a crate::models::RouteDecision,
     pub is_subscription: bool,
+}
+
+/// Traces cancellation before a streaming response body exists.
+///
+/// Normal streams are traced by the response body wrapper in `handlers.rs`.
+/// This guard covers the earlier gap while waiting for upstream response
+/// headers: if the client disconnects there, no body wrapper is ever created.
+struct PreStreamTraceGuard {
+    tracer: Option<Arc<dyn crate::traits::Tracer>>,
+    trace_id: Option<String>,
+    start_time: Instant,
+}
+
+impl PreStreamTraceGuard {
+    fn new(ctx: &DispatchContext<'_>) -> Self {
+        let (tracer, trace_id) = match &ctx.trace_id {
+            Some(id) => (
+                Some(Arc::clone(&ctx.state.observability.message_tracer)),
+                Some(id.clone()),
+            ),
+            None => (None, None),
+        };
+
+        Self {
+            tracer,
+            trace_id,
+            start_time: ctx.start_time,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.tracer = None;
+        self.trace_id = None;
+    }
+
+    fn finish(&mut self, status: &str) {
+        let (Some(tracer), Some(trace_id)) = (self.tracer.take(), self.trace_id.take()) else {
+            return;
+        };
+
+        tracer.trace_stream_end(
+            &trace_id,
+            0,
+            0,
+            self.start_time.elapsed().as_millis() as u64,
+            status,
+            None,
+        );
+    }
+}
+
+impl Drop for PreStreamTraceGuard {
+    fn drop(&mut self) {
+        self.finish("dropped_before_stream");
+    }
 }
 
 /// Returns `true` when a provider error reports a 429 rate-limit upstream.
@@ -211,6 +267,7 @@ pub(super) async fn dispatch_streaming(
     attempt: &StreamingAttempt<'_>,
 ) -> Result<DispatchResult, ProviderLoopAction> {
     let mapping = attempt.mapping;
+    let mut pre_stream_trace = PreStreamTraceGuard::new(ctx);
 
     // Capture request body for tap before ownership moves.
     let tap_request_body = if ctx.state.security.tap_sender.is_some() {
@@ -230,6 +287,7 @@ pub(super) async fn dispatch_streaming(
 
     match provider.send_message_stream(provider_request).await {
         Ok(stream_response) => {
+            pre_stream_trace.disarm();
             // Overhead = time from request receipt to first SSE byte (before provider responded).
             let overhead_ms = ctx.start_time.elapsed().as_millis() as u64;
             let latency_ms = overhead_ms;
@@ -269,6 +327,7 @@ pub(super) async fn dispatch_streaming(
             })
         }
         Err(e) => {
+            pre_stream_trace.disarm();
             ctx.record_provider_failure(&mapping.provider).await;
             ctx.record_endpoint_failure(&mapping.provider, &mapping.actual_model);
             if let Some(ref trace_id) = ctx.trace_id {
@@ -669,7 +728,91 @@ fn build_encrypted_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{CanonicalRequest, RouteType};
+    use crate::providers::ProviderResponse;
+    use crate::traits::Tracer;
     use std::cell::Cell;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct RecordingTracer {
+        stream_ends: Mutex<Vec<(String, u64, usize, String)>>,
+    }
+
+    impl Tracer for RecordingTracer {
+        fn new_trace_id(&self) -> String {
+            "trace".to_string()
+        }
+
+        fn trace_request(
+            &self,
+            _id: &str,
+            _request: &CanonicalRequest,
+            _provider: &str,
+            _route_type: &RouteType,
+            _is_stream: bool,
+        ) {
+        }
+
+        fn trace_response(&self, _id: &str, _response: &ProviderResponse, _latency_ms: u64) {}
+
+        fn trace_stream_end(
+            &self,
+            id: &str,
+            chunk_count: u64,
+            byte_count: usize,
+            _latency_ms: u64,
+            status: &str,
+            _usage: Option<crate::traits::StreamTraceUsage>,
+        ) {
+            self.stream_ends.lock().unwrap().push((
+                id.to_string(),
+                chunk_count,
+                byte_count,
+                status.to_string(),
+            ));
+        }
+
+        fn trace_error(&self, _id: &str, _error: &str) {}
+    }
+
+    // ── pre-stream trace guard ──
+
+    #[test]
+    fn pre_stream_trace_guard_records_drop_before_stream() {
+        let tracer = Arc::new(RecordingTracer::default());
+
+        {
+            let _guard = PreStreamTraceGuard {
+                tracer: Some(tracer.clone()),
+                trace_id: Some("abc123".to_string()),
+                start_time: Instant::now(),
+            };
+        }
+
+        let events = tracer.stream_ends.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, "abc123");
+        assert_eq!(events[0].1, 0);
+        assert_eq!(events[0].2, 0);
+        assert_eq!(events[0].3, "dropped_before_stream");
+    }
+
+    #[test]
+    fn pre_stream_trace_guard_disarm_suppresses_drop_trace() {
+        let tracer = Arc::new(RecordingTracer::default());
+
+        {
+            let mut guard = PreStreamTraceGuard {
+                tracer: Some(tracer.clone()),
+                trace_id: Some("abc123".to_string()),
+                start_time: Instant::now(),
+            };
+            guard.disarm();
+        }
+
+        assert!(tracer.stream_ends.lock().unwrap().is_empty());
+    }
 
     // ── classify_and_handle_error retry decision ──
 

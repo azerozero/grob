@@ -38,4 +38,13 @@ pub struct RequestExtensions {
     pub openai_system_name: Option<String>,
     /// Optional author names for canonical messages, indexed by message position.
     pub openai_message_names: Vec<Option<String>>,
+
+    // Routing hints.
+    /// Set when the request originates from the Codex CLI (Responses API).
+    ///
+    /// Codex's own `instructions` ARE the authoritative Codex agent prompt, so
+    /// the OpenAI Responses transform forwards them as the top-level
+    /// `instructions` (keeping the backend in full agentic mode) instead of
+    /// swapping in the minimal tool-deferring preamble used for foreign clients.
+    pub codex_native: bool,
 }

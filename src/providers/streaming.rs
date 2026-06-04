@@ -240,10 +240,12 @@ impl<S> LoggingSseStream<S> {
                         .ok()
                         .and_then(|json| json.get("usage").cloned());
                     if let Some(usage) = usage {
-                        tracking.output_tokens += usage
-                            .get("output_tokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
+                        tracking.output_tokens = tracking.output_tokens.max(
+                            usage
+                                .get("output_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0),
+                        );
                         let input = usage
                             .get("input_tokens")
                             .and_then(|v| v.as_u64())
@@ -278,6 +280,7 @@ impl<S> LoggingSseStream<S> {
         };
 
         let total_input = tokens.input + tokens.cache_creation + tokens.cache_read;
+        let total_tokens = total_input.saturating_add(tokens.output);
 
         let cache_info = if tokens.cache_creation > 0 || tokens.cache_read > 0 {
             let cache_pct = (tokens.cache_read * 100)
@@ -309,12 +312,13 @@ impl<S> LoggingSseStream<S> {
         };
 
         tracing::info!(
-            "📊 {}:{} {}ms ttft:{}ms {:.1}t/s out:{} in:{}{}{}",
+            "📊 {}:{} {}ms ttft:{}ms {:.1}t/s total:{} out:{} in:{}{}{}",
             provider_name,
             model_display,
             total_time.as_millis(),
             ttft.as_millis(),
             tok_per_sec,
+            total_tokens,
             tokens.output,
             total_input,
             cache_info,
