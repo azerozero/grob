@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.67](https://github.com/azerozero/grob/compare/v0.36.66...v0.36.67) - 2026-06-04
+
+### Fixed
+
+- *(openai)* preserve codex streams through grob
+
+### Other
+
+- exclude flaky public.cyber.mil link from lychee check
+- don't block Required checks / test gate on cancelled jobs
+
 ## [0.36.66](https://github.com/azerozero/grob/compare/v0.36.65...v0.36.66) - 2026-06-02
 
 ### Fixed
