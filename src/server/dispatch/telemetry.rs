@@ -43,7 +43,7 @@ pub(crate) async fn calculate_and_record_metrics(
             );
             (outcome.estimated_input_tokens, estimated_output)
         } else {
-            (usage.input_tokens, usage.output_tokens)
+            (usage.billable_input_tokens(), usage.output_tokens)
         }
     };
 
@@ -57,12 +57,14 @@ pub(crate) async fn calculate_and_record_metrics(
     )
     .await;
     info!(
-        "📊 {}@{} {}ms {:.0}t/s {}tok ${:.4}{}",
+        "📊 {}@{} {}ms {:.0}t/s {}tok in:{} cached_in:{} ${:.4}{}",
         mapping.actual_model,
         mapping.provider,
         latency_ms,
         tok_s,
         output_tokens,
+        input_tokens,
+        response.usage.cache_read_tokens(),
         cost.estimated_cost_usd,
         if is_subscription {
             " (subscription)"
@@ -117,7 +119,10 @@ pub(crate) async fn record_success_telemetry(
         dlp_rules: vec![],
         duration_ms: latency_ms,
         model_name: Some(&mapping.actual_model),
-        token_counts: Some((response.usage.input_tokens, response.usage.output_tokens)),
+        token_counts: Some((
+            response.usage.billable_input_tokens(),
+            response.usage.output_tokens,
+        )),
         risk_level: Some(crate::security::audit_log::RiskLevel::Low),
         dlp_blocked: false,
         dlp_had_injection: false,

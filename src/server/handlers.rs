@@ -72,6 +72,8 @@ impl Drop for ActiveRequestGuard {
 struct ResponseTraceUsage {
     input_tokens: u32,
     output_tokens: u32,
+    cache_creation_input_tokens: u32,
+    cache_read_input_tokens: u32,
     saw_usage: bool,
 }
 
@@ -80,8 +82,14 @@ impl ResponseTraceUsage {
         self.saw_usage.then_some(crate::traits::StreamTraceUsage {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
+            cache_creation_input_tokens: nonzero(self.cache_creation_input_tokens),
+            cache_read_input_tokens: nonzero(self.cache_read_input_tokens),
         })
     }
+}
+
+fn nonzero(value: u32) -> Option<u32> {
+    (value > 0).then_some(value)
 }
 
 const TRACE_USAGE_MAX_CARRY: usize = 8 * 1024;
@@ -151,12 +159,22 @@ fn parse_response_trace_usage_json(data: &str, pointer: &str, usage: &mut Respon
 }
 
 fn update_response_trace_usage(value: &serde_json::Value, usage: &mut ResponseTraceUsage) {
+    let cache_read = value
+        .get("cache_read_input_tokens")
+        .or_else(|| value.pointer("/input_tokens_details/cached_tokens"))
+        .or_else(|| value.pointer("/prompt_tokens_details/cached_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX));
+
     let input = value
         .get("input_tokens")
         .or_else(|| value.get("prompt_tokens"))
         .and_then(serde_json::Value::as_u64);
     if let Some(input) = input {
-        let input = u32::try_from(input).unwrap_or(u32::MAX);
+        let mut input = u32::try_from(input).unwrap_or(u32::MAX);
+        if value.get("cache_read_input_tokens").is_none() {
+            input = input.saturating_sub(cache_read.unwrap_or(0));
+        }
         if input > 0 || usage.input_tokens == 0 {
             usage.input_tokens = input;
         }
@@ -171,6 +189,21 @@ fn update_response_trace_usage(value: &serde_json::Value, usage: &mut ResponseTr
         usage.output_tokens = usage
             .output_tokens
             .max(u32::try_from(output).unwrap_or(u32::MAX));
+        usage.saw_usage = true;
+    }
+
+    if let Some(cache_creation) = value
+        .get("cache_creation_input_tokens")
+        .and_then(serde_json::Value::as_u64)
+    {
+        usage.cache_creation_input_tokens = usage
+            .cache_creation_input_tokens
+            .max(u32::try_from(cache_creation).unwrap_or(u32::MAX));
+        usage.saw_usage = true;
+    }
+
+    if let Some(cache_read) = cache_read {
+        usage.cache_read_input_tokens = usage.cache_read_input_tokens.max(cache_read);
         usage.saw_usage = true;
     }
 }

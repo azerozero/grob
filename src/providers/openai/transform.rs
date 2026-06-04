@@ -358,6 +358,13 @@ fn transform_tool_choice(request: &CanonicalRequest) -> Option<serde_json::Value
 
 /// Transform OpenAI Chat Completions response to Anthropic Messages format.
 pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
+    let cached_tokens = response.usage.cached_tokens();
+    let usage = Usage {
+        input_tokens: response.usage.prompt_tokens.saturating_sub(cached_tokens),
+        output_tokens: response.usage.completion_tokens,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: (cached_tokens > 0).then_some(cached_tokens),
+    };
     let choice = match response.choices.into_iter().next() {
         Some(c) => c,
         None => {
@@ -369,12 +376,7 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
                 model: response.model,
                 stop_reason: Some("error".to_string()),
                 stop_sequence: None,
-                usage: Usage {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_creation_input_tokens: None,
-                    cache_read_input_tokens: None,
-                },
+                usage,
             };
         }
     };
@@ -463,12 +465,7 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
         model: response.model,
         stop_reason,
         stop_sequence: None,
-        usage: Usage {
-            input_tokens: response.usage.prompt_tokens,
-            output_tokens: response.usage.completion_tokens,
-            cache_creation_input_tokens: None,
-            cache_read_input_tokens: None,
-        },
+        usage,
     }
 }
 
@@ -479,11 +476,23 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
 /// empty, whereas the standard Responses API populates `output[]` in the
 /// `response.completed` event. Both layouts are handled: per-item events win,
 /// with the completed-event output as a fallback.
-pub(crate) fn parse_sse_response(sse_text: &str) -> Result<Vec<ContentBlock>, ProviderError> {
+#[derive(Debug)]
+pub(crate) struct ParsedSseResponse {
+    pub content: Vec<ContentBlock>,
+    pub usage: Usage,
+}
+
+pub(crate) fn parse_sse_response(sse_text: &str) -> Result<ParsedSseResponse, ProviderError> {
     let lines: Vec<&str> = sse_text.lines().collect();
 
     let mut item_blocks: Vec<ContentBlock> = Vec::new();
     let mut completed_blocks: Vec<ContentBlock> = Vec::new();
+    let mut usage = Usage {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: None,
+    };
 
     for (i, line) in lines.iter().enumerate() {
         let Some(event) = line.strip_prefix("event: ").map(str::trim) else {
@@ -508,6 +517,9 @@ pub(crate) fn parse_sse_response(sse_text: &str) -> Result<Vec<ContentBlock>, Pr
                 }
             }
             "response.completed" => {
+                if let Some(response_usage) = json.get("response").and_then(|r| r.get("usage")) {
+                    usage = parse_responses_usage(response_usage);
+                }
                 if let Some(output) = json
                     .get("response")
                     .and_then(|r| r.get("output"))
@@ -527,13 +539,42 @@ pub(crate) fn parse_sse_response(sse_text: &str) -> Result<Vec<ContentBlock>, Pr
     };
 
     if !content_blocks.is_empty() {
-        return Ok(content_blocks);
+        return Ok(ParsedSseResponse {
+            content: content_blocks,
+            usage,
+        });
     }
 
     Err(ProviderError::ApiError {
         status: 500,
         message: "Failed to parse SSE response: no content found".to_string(),
     })
+}
+
+fn parse_responses_usage(usage: &serde_json::Value) -> Usage {
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+        .unwrap_or(0);
+    let cached_tokens = usage
+        .pointer("/input_tokens_details/cached_tokens")
+        .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+        .unwrap_or(0);
+
+    Usage {
+        input_tokens: input_tokens.saturating_sub(cached_tokens),
+        output_tokens,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: (cached_tokens > 0).then_some(cached_tokens),
+    }
 }
 
 /// Maps a Codex `output[]` item to the corresponding Anthropic content block.
@@ -1446,7 +1487,8 @@ mod tests {
             "data: {\"type\":\"response.completed\",\"response\":{\"output\":null}}\n",
         );
 
-        let blocks = parse_sse_response(sse).expect("should extract content");
+        let parsed = parse_sse_response(sse).expect("should extract content");
+        let blocks = parsed.content;
         assert_eq!(blocks.len(), 1);
         let value = serde_json::to_value(&blocks[0]).expect("serialize block");
         assert_eq!(value["type"], "text");
@@ -1462,7 +1504,8 @@ mod tests {
             "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"final\"}]}]}}\n",
         );
 
-        let blocks = parse_sse_response(sse).expect("should extract content");
+        let parsed = parse_sse_response(sse).expect("should extract content");
+        let blocks = parsed.content;
         assert_eq!(blocks.len(), 1);
         let value = serde_json::to_value(&blocks[0]).expect("serialize block");
         assert_eq!(value["text"], "final");
@@ -1478,7 +1521,8 @@ mod tests {
             "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}}\n",
         );
 
-        let blocks = parse_sse_response(sse).expect("should extract content");
+        let parsed = parse_sse_response(sse).expect("should extract content");
+        let blocks = parsed.content;
         assert_eq!(blocks.len(), 2);
         let thinking = serde_json::to_value(&blocks[0]).expect("serialize block");
         assert_eq!(thinking["type"], "thinking");
@@ -1489,5 +1533,44 @@ mod tests {
     fn parse_sse_errors_when_no_content() {
         let sse = "event: response.created\ndata: {\"type\":\"response.created\"}\n";
         assert!(parse_sse_response(sse).is_err());
+    }
+
+    #[test]
+    fn parse_sse_preserves_responses_cached_tokens() {
+        let sse = concat!(
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1000,\"output_tokens\":42,\"input_tokens_details\":{\"cached_tokens\":700}},\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n",
+        );
+
+        let parsed = parse_sse_response(sse).expect("should extract content and usage");
+        assert_eq!(parsed.usage.input_tokens, 300);
+        assert_eq!(parsed.usage.output_tokens, 42);
+        assert_eq!(parsed.usage.cache_read_input_tokens, Some(700));
+        assert_eq!(parsed.usage.total_input_tokens(), 1000);
+    }
+
+    #[test]
+    fn transform_response_preserves_openai_cached_tokens() {
+        let response: OpenAIResponse = serde_json::from_value(serde_json::json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "model": "gpt-4.1",
+            "choices": [{
+                "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 42,
+                "prompt_tokens_details": {"cached_tokens": 700}
+            }
+        }))
+        .expect("valid response");
+
+        let transformed = transform_response(response);
+        assert_eq!(transformed.usage.input_tokens, 300);
+        assert_eq!(transformed.usage.output_tokens, 42);
+        assert_eq!(transformed.usage.cache_read_input_tokens, Some(700));
+        assert_eq!(transformed.usage.total_input_tokens(), 1000);
     }
 }

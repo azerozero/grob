@@ -301,6 +301,9 @@ pub fn transform_canonical_to_responses(
         });
     }
 
+    let input_tokens = response.usage.total_input_tokens();
+    let cached_tokens = response.usage.cache_read_tokens();
+
     ResponsesResponse {
         id: format!("resp_{}", uuid::Uuid::new_v4().simple()),
         object: "response",
@@ -312,9 +315,11 @@ pub fn transform_canonical_to_responses(
         output,
         status: "completed",
         usage: ResponsesUsage {
-            input_tokens: response.usage.input_tokens,
+            input_tokens,
             output_tokens: response.usage.output_tokens,
-            total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+            total_tokens: input_tokens.saturating_add(response.usage.output_tokens),
+            input_tokens_details: (cached_tokens > 0)
+                .then_some(ResponsesInputTokenDetails { cached_tokens }),
         },
     }
 }

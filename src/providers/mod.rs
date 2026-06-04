@@ -74,6 +74,36 @@ pub struct Usage {
     pub cache_read_input_tokens: Option<u32>,
 }
 
+impl Usage {
+    /// Tokens written to a provider prompt cache, or zero when absent.
+    pub fn cache_creation_tokens(&self) -> u32 {
+        self.cache_creation_input_tokens.unwrap_or(0)
+    }
+
+    /// Tokens read from a provider prompt cache, or zero when absent.
+    pub fn cache_read_tokens(&self) -> u32 {
+        self.cache_read_input_tokens.unwrap_or(0)
+    }
+
+    /// Input volume including cache reads and cache writes.
+    pub fn total_input_tokens(&self) -> u32 {
+        self.input_tokens
+            .saturating_add(self.cache_creation_tokens())
+            .saturating_add(self.cache_read_tokens())
+    }
+
+    /// Input tokens not served by a prompt-cache read.
+    pub fn billable_input_tokens(&self) -> u32 {
+        self.total_input_tokens()
+            .saturating_sub(self.cache_read_tokens())
+    }
+
+    /// Total provider-reported token volume, including cache reads and writes.
+    pub fn total_tokens(&self) -> u32 {
+        self.total_input_tokens().saturating_add(self.output_tokens)
+    }
+}
+
 /// Response from streaming request, includes headers for passthrough
 pub struct StreamResponse {
     /// The byte stream (SSE format)

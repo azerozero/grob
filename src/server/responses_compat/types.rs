@@ -225,4 +225,14 @@ pub struct ResponsesUsage {
     pub output_tokens: u32,
     /// Total tokens (input + output).
     pub total_tokens: u32,
+    /// Input-token cache details, when a provider reports them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens_details: Option<ResponsesInputTokenDetails>,
+}
+
+/// Detailed input-token usage.
+#[derive(Debug, Serialize)]
+pub struct ResponsesInputTokenDetails {
+    /// Tokens read from provider prompt cache.
+    pub cached_tokens: u32,
 }

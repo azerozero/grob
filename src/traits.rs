@@ -105,13 +105,27 @@ pub struct StreamTraceUsage {
     pub input_tokens: u32,
     /// Tokens produced by the streamed response.
     pub output_tokens: u32,
+    /// Tokens written to a provider prompt cache.
+    pub cache_creation_input_tokens: Option<u32>,
+    /// Tokens read from a provider prompt cache.
+    pub cache_read_input_tokens: Option<u32>,
 }
 
 impl StreamTraceUsage {
-    /// Returns `input_tokens + output_tokens`, saturating on overflow.
+    /// Returns total provider-reported token volume, saturating on overflow.
     #[must_use]
     pub fn total_tokens(self) -> u32 {
-        self.input_tokens.saturating_add(self.output_tokens)
+        self.input_tokens
+            .saturating_add(self.cache_creation_input_tokens.unwrap_or(0))
+            .saturating_add(self.cache_read_input_tokens.unwrap_or(0))
+            .saturating_add(self.output_tokens)
+    }
+
+    /// Returns input tokens not served by a prompt-cache read.
+    #[must_use]
+    pub fn billable_input_tokens(self) -> u32 {
+        self.input_tokens
+            .saturating_add(self.cache_creation_input_tokens.unwrap_or(0))
     }
 }
 
@@ -161,8 +175,7 @@ pub trait Tracer: Send + Sync {
         _id: &str,
         _content: serde_json::Value,
         _stop_reason: &str,
-        _input_tokens: u32,
-        _output_tokens: u32,
+        _usage: StreamTraceUsage,
         _latency_ms: u64,
     ) {
     }

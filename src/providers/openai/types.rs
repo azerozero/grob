@@ -206,6 +206,25 @@ pub(crate) struct OpenAIChoice {
 pub(crate) struct OpenAIUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
+    #[serde(default)]
+    pub prompt_tokens_details: Option<OpenAITokenDetails>,
+    #[serde(default)]
+    pub input_tokens_details: Option<OpenAITokenDetails>,
+}
+
+impl OpenAIUsage {
+    pub(crate) fn cached_tokens(&self) -> u32 {
+        self.prompt_tokens_details
+            .as_ref()
+            .or(self.input_tokens_details.as_ref())
+            .map_or(0, |details| details.cached_tokens)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct OpenAITokenDetails {
+    #[serde(default)]
+    pub cached_tokens: u32,
 }
 
 /// OpenAI Streaming Chunk (for SSE transformation)
@@ -226,6 +245,19 @@ pub(crate) struct OpenAIStreamChunk {
 pub(crate) struct OpenAIStreamUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
+    #[serde(default)]
+    pub prompt_tokens_details: Option<OpenAITokenDetails>,
+    #[serde(default)]
+    pub input_tokens_details: Option<OpenAITokenDetails>,
+}
+
+impl OpenAIStreamUsage {
+    pub(crate) fn cached_tokens(&self) -> u32 {
+        self.prompt_tokens_details
+            .as_ref()
+            .or(self.input_tokens_details.as_ref())
+            .map_or(0, |details| details.cached_tokens)
+    }
 }
 
 // Fields read by serde deserialization

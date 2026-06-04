@@ -73,7 +73,7 @@ pub mod test_api {
 }
 
 use super::{
-    base::ProviderBase, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse, Usage,
+    base::ProviderBase, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse,
 };
 use crate::auth::OAuthConfig;
 use crate::models::{CanonicalRequest, CountTokensRequest, CountTokensResponse};
@@ -269,7 +269,8 @@ impl OpenAIProvider {
             response_text.len()
         );
 
-        let content_blocks = transform::parse_sse_response(&response_text)?;
+        let parsed = transform::parse_sse_response(&response_text)?;
+        let content_blocks = parsed.content;
 
         // A function_call in the output means the model wants to use a tool.
         let stop_reason = if content_blocks.iter().any(|b| {
@@ -293,12 +294,7 @@ impl OpenAIProvider {
             model: request.model.clone(),
             stop_reason: Some(stop_reason.to_string()),
             stop_sequence: None,
-            usage: Usage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            },
+            usage: parsed.usage,
         })
     }
 

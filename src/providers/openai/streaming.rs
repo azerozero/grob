@@ -727,6 +727,57 @@ fn read_integer_number_to_u64(number: &serde_json::Number, min: u64) -> Option<u
     }
 }
 
+fn message_delta_with_usage(
+    stop_reason: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_input_tokens: u64,
+) -> serde_json::Value {
+    let mut usage = serde_json::json!({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    });
+    if cache_read_input_tokens > 0 {
+        if let Some(map) = usage.as_object_mut() {
+            map.insert(
+                "cache_read_input_tokens".to_string(),
+                serde_json::Value::Number(cache_read_input_tokens.into()),
+            );
+        }
+    }
+
+    serde_json::json!({
+        "type": "message_delta",
+        "delta": { "stop_reason": stop_reason, "stop_sequence": null },
+        "usage": usage
+    })
+}
+
+fn responses_usage_tokens(usage: Option<&serde_json::Value>) -> (u64, u64, u64) {
+    let Some(usage) = usage else {
+        return (0, 0, 0);
+    };
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let cached_tokens = usage
+        .pointer("/input_tokens_details/cached_tokens")
+        .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    (
+        input_tokens.saturating_sub(cached_tokens),
+        output_tokens,
+        cached_tokens,
+    )
+}
+
 fn emit_stream_end(
     output: &mut String,
     state: &mut StreamTransformState,
@@ -762,17 +813,26 @@ fn emit_stream_end(
         }
     };
 
-    let (input_tokens, output_tokens) = chunk
+    let (input_tokens, output_tokens, cache_read_input_tokens) = chunk
         .usage
         .as_ref()
-        .map(|u| (u.prompt_tokens, u.completion_tokens))
-        .unwrap_or((0, 0));
+        .map(|u| {
+            let cached = u.cached_tokens() as u64;
+            let prompt = u.prompt_tokens as u64;
+            (
+                prompt.saturating_sub(cached),
+                u.completion_tokens as u64,
+                cached,
+            )
+        })
+        .unwrap_or((0, 0, 0));
 
-    let message_delta = serde_json::json!({
-        "type": "message_delta",
-        "delta": { "stop_reason": stop_reason, "stop_sequence": null },
-        "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens }
-    });
+    let message_delta = message_delta_with_usage(
+        stop_reason,
+        input_tokens,
+        output_tokens,
+        cache_read_input_tokens,
+    );
     output.push_str(&format!(
         "event: message_delta\ndata: {}\n\n",
         message_delta
@@ -914,21 +974,15 @@ fn emit_codex_stream_end(
         "end_turn"
     };
 
-    let usage = response.and_then(|r| r.get("usage"));
-    let input_tokens = usage
-        .and_then(|u| u.get("input_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let output_tokens = usage
-        .and_then(|u| u.get("output_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let (input_tokens, output_tokens, cache_read_input_tokens) =
+        responses_usage_tokens(response.and_then(|r| r.get("usage")));
 
-    let message_delta = serde_json::json!({
-        "type": "message_delta",
-        "delta": { "stop_reason": stop_reason, "stop_sequence": null },
-        "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens }
-    });
+    let message_delta = message_delta_with_usage(
+        stop_reason,
+        input_tokens,
+        output_tokens,
+        cache_read_input_tokens,
+    );
     output.push_str(&format!(
         "event: message_delta\ndata: {}\n\n",
         message_delta
@@ -1033,6 +1087,18 @@ mod codex_stream_tests {
     }
 
     #[test]
+    fn chat_completions_stream_preserves_cached_token_usage() {
+        let out = run_openai_chunks(&[
+            r#"{"model":"gpt-4.1","choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#,
+            r#"{"model":"gpt-4.1","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":42,"prompt_tokens_details":{"cached_tokens":700}}}"#,
+        ]);
+
+        assert!(out.contains(r#""input_tokens":300"#));
+        assert!(out.contains(r#""output_tokens":42"#));
+        assert!(out.contains(r#""cache_read_input_tokens":700"#));
+    }
+
+    #[test]
     fn emits_message_start_then_incremental_text_then_stop() {
         let out = run(&[
             r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
@@ -1048,6 +1114,19 @@ mod codex_stream_tests {
         assert!(out.contains("end_turn"));
         assert_eq!(out.matches("event: message_stop").count(), 1);
         assert_eq!(out.matches("event: message_start").count(), 1);
+    }
+
+    #[test]
+    fn responses_stream_preserves_cached_token_usage() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_text.delta","delta":"ok"}"#,
+            r#"{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1000,"output_tokens":42,"input_tokens_details":{"cached_tokens":700}}}}"#,
+        ]);
+
+        assert!(out.contains(r#""input_tokens":300"#));
+        assert!(out.contains(r#""output_tokens":42"#));
+        assert!(out.contains(r#""cache_read_input_tokens":700"#));
     }
 
     #[test]

@@ -226,6 +226,8 @@ impl<S> LoggingSseStream<S> {
                                 .unwrap_or(0);
                             tracking.cache_read = usage
                                 .get("cache_read_input_tokens")
+                                .or_else(|| usage.pointer("/input_tokens_details/cached_tokens"))
+                                .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0);
                         }
@@ -252,6 +254,20 @@ impl<S> LoggingSseStream<S> {
                             .unwrap_or(0);
                         if input > 0 && tracking.input_tokens == 0 {
                             tracking.input_tokens = input;
+                        }
+                        if let Some(cache_create) = usage
+                            .get("cache_creation_input_tokens")
+                            .and_then(|v| v.as_u64())
+                        {
+                            tracking.cache_creation = tracking.cache_creation.max(cache_create);
+                        }
+                        if let Some(cache_read) = usage
+                            .get("cache_read_input_tokens")
+                            .or_else(|| usage.pointer("/input_tokens_details/cached_tokens"))
+                            .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+                            .and_then(|v| v.as_u64())
+                        {
+                            tracking.cache_read = tracking.cache_read.max(cache_read);
                         }
                     }
                 }
@@ -281,12 +297,16 @@ impl<S> LoggingSseStream<S> {
 
         let total_input = tokens.input + tokens.cache_creation + tokens.cache_read;
         let total_tokens = total_input.saturating_add(tokens.output);
+        let billable_input = tokens.input.saturating_add(tokens.cache_creation);
 
         let cache_info = if tokens.cache_creation > 0 || tokens.cache_read > 0 {
             let cache_pct = (tokens.cache_read * 100)
                 .checked_div(total_input)
                 .unwrap_or(0);
-            format!(" cache:{}%", cache_pct)
+            format!(
+                " billable_in:{} cached_in:{} cache_write:{} cache:{}%",
+                billable_input, tokens.cache_read, tokens.cache_creation, cache_pct
+            )
         } else {
             String::new()
         };
@@ -303,7 +323,7 @@ impl<S> LoggingSseStream<S> {
         };
 
         let cost = pricing(model_name)
-            .map(|p| p.calculate(total_input as u32, tokens.output as u32))
+            .map(|p| p.calculate(billable_input as u32, tokens.output as u32))
             .unwrap_or(0.0);
         let cost_info = if cost > 0.0 {
             format!(" ${:.4}", cost)
@@ -337,7 +357,7 @@ impl<S> LoggingSseStream<S> {
         metrics::counter!("grob_tokens_input_total",
             "model" => model_label.clone(), "provider" => provider_label.clone()
         )
-        .increment(total_input);
+        .increment(billable_input);
         metrics::counter!("grob_tokens_output_total",
             "model" => model_label.clone(), "provider" => provider_label.clone()
         )

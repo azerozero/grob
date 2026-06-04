@@ -210,4 +210,14 @@ pub struct OpenAIUsage {
     pub completion_tokens: u32,
     /// Sum of prompt and completion tokens.
     pub total_tokens: u32,
+    /// Prompt-token cache details, when a provider reports them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_tokens_details: Option<OpenAITokenDetails>,
+}
+
+/// Detailed prompt-token usage.
+#[derive(Debug, Serialize)]
+pub struct OpenAITokenDetails {
+    /// Tokens read from provider prompt cache.
+    pub cached_tokens: u32,
 }

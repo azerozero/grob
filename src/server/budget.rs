@@ -262,7 +262,7 @@ pub(crate) fn effective_token_counts(
         );
         (input, output)
     } else {
-        (usage.input_tokens, usage.output_tokens)
+        (usage.billable_input_tokens(), usage.output_tokens)
     }
 }
 
