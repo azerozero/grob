@@ -332,6 +332,14 @@ pub struct AuthConfig {
     /// JWT configuration (for mode = "jwt")
     #[serde(default)]
     pub jwt: JwtConfig,
+    /// Auto-adopt OAuth tokens from co-installed CLIs (Codex, Claude Code).
+    ///
+    /// When `true`, the refresh daemon mirrors the system credential into
+    /// grob's store and self-heals a revoked token by re-adopting it, instead
+    /// of marking it for manual re-authentication. See
+    /// [`crate::auth::system_creds`]. Defaults to `false` (opt-in).
+    #[serde(default)]
+    pub adopt_from_system: bool,
 }
 
 impl Default for AuthConfig {
@@ -340,6 +348,7 @@ impl Default for AuthConfig {
             mode: default_auth_mode(),
             api_key: None,
             jwt: JwtConfig::default(),
+            adopt_from_system: false,
         }
     }
 }
