@@ -757,6 +757,9 @@ async fn record_fan_out_costs(
     // Bill provider-reported usage, or a local estimate when usage is absent in
     // estimate mode (computed once for the shared fan-out response).
     let (input_tokens, output_tokens) = effective_token_counts(ctx.state, request, response);
+    // Cache reads bill separately from input (a fraction of the input rate),
+    // shared across the fan-out providers.
+    let cache_read_tokens = response.usage.cache_read_tokens();
     for (provider_name, actual_model) in provider_info {
         let is_subscription = is_provider_subscription(ctx.inner, provider_name);
         let counter = calculate_cost(
@@ -764,6 +767,7 @@ async fn record_fan_out_costs(
             actual_model,
             input_tokens,
             output_tokens,
+            cache_read_tokens,
             is_subscription,
         )
         .await;

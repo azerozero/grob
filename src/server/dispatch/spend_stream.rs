@@ -599,6 +599,14 @@ fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
     let route_type = ctx.route_type;
     let tenant_id = ctx.tenant_id.clone();
     let is_subscription = ctx.is_subscription;
+    // Cache reads are priced separately (a fraction of input), so they are not
+    // folded into the billed input count above; pass them through only when the
+    // provider reported real usage (the estimate path has no cache breakdown).
+    let cache_read_tokens = if usage.saw_usage {
+        usage.cache_read_input_tokens
+    } else {
+        0
+    };
 
     tokio::spawn(async move {
         let cost = calculate_cost(
@@ -606,6 +614,7 @@ fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
             &actual_model,
             input_tokens,
             output_tokens,
+            cache_read_tokens,
             is_subscription,
         )
         .await;

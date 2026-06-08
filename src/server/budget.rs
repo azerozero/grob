@@ -331,6 +331,7 @@ pub(crate) async fn calculate_cost(
     actual_model: &str,
     input_tokens: u32,
     output_tokens: u32,
+    cache_read_tokens: u32,
     is_subscription: bool,
 ) -> TokenCounter {
     let table = state.observability.pricing_table.read().await;
@@ -338,6 +339,7 @@ pub(crate) async fn calculate_cost(
         actual_model,
         input_tokens,
         output_tokens,
+        cache_read_tokens,
         is_subscription,
         Some(&table),
     )

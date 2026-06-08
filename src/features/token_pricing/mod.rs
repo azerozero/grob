@@ -206,6 +206,7 @@ impl TokenCounter {
         model: &str,
         input_tokens: u32,
         output_tokens: u32,
+        cache_read_tokens: u32,
         is_subscription: bool,
         pricing_table: Option<&PricingTable>,
     ) -> Self {
@@ -217,16 +218,28 @@ impl TokenCounter {
                 .map(|(inp, out)| {
                     (input_tokens as f64 / 1_000_000.0) * inp
                         + (output_tokens as f64 / 1_000_000.0) * out
+                        // Cache reads bill at a fraction of the input rate; the
+                        // dynamic feed carries no separate cache column, so derive
+                        // it from the input price (see `pricing::CACHE_READ_COST_RATIO`).
+                        + (cache_read_tokens as f64 / 1_000_000.0)
+                            * inp
+                            * crate::pricing::CACHE_READ_COST_RATIO
                 })
                 .unwrap_or_else(|| {
                     // Fall back to static table
                     pricing(model)
-                        .map(|p| p.calculate(input_tokens, output_tokens))
+                        .map(|p| {
+                            p.calculate(input_tokens, output_tokens)
+                                + p.calculate_cache_read(cache_read_tokens)
+                        })
                         .unwrap_or(0.0)
                 })
         } else {
             pricing(model)
-                .map(|p| p.calculate(input_tokens, output_tokens))
+                .map(|p| {
+                    p.calculate(input_tokens, output_tokens)
+                        + p.calculate_cache_read(cache_read_tokens)
+                })
                 .unwrap_or(0.0)
         };
 
@@ -282,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_subscription_zero_cost() {
-        let counter = TokenCounter::with_pricing("claude-opus-4-6", 10000, 5000, true, None);
+        let counter = TokenCounter::with_pricing("claude-opus-4-6", 10000, 5000, 0, true, None);
         assert_eq!(counter.estimated_cost_usd, 0.0);
     }
 
@@ -290,8 +303,30 @@ mod tests {
     fn test_with_pricing_table() {
         let table = PricingTable::from_known();
         let counter =
-            TokenCounter::with_pricing("claude-sonnet-4-6", 1000, 500, false, Some(&table));
+            TokenCounter::with_pricing("claude-sonnet-4-6", 1000, 500, 0, false, Some(&table));
         assert!(counter.estimated_cost_usd > 0.0);
+    }
+
+    #[test]
+    fn cache_read_tokens_are_billed_at_a_fraction_of_input() {
+        // sonnet-4-6 input = $3/1M. 1M cache-read tokens must cost
+        // 3.0 × CACHE_READ_COST_RATIO (0.1) = $0.30, not $0 (the old bug).
+        let table = PricingTable::from_known();
+        let with_cache =
+            TokenCounter::with_pricing("claude-sonnet-4-6", 0, 0, 1_000_000, false, Some(&table));
+        assert!(
+            (with_cache.estimated_cost_usd - 0.30).abs() < 1e-6,
+            "cache reads billed at {} (expected 0.30)",
+            with_cache.estimated_cost_usd
+        );
+        // And the static-fallback path (no dynamic table) agrees.
+        let fallback =
+            TokenCounter::with_pricing("claude-sonnet-4-6", 0, 0, 1_000_000, false, None);
+        assert!((fallback.estimated_cost_usd - 0.30).abs() < 1e-6);
+        // Subscription still overrides everything to $0.
+        let sub =
+            TokenCounter::with_pricing("claude-sonnet-4-6", 0, 0, 1_000_000, true, Some(&table));
+        assert_eq!(sub.estimated_cost_usd, 0.0);
     }
 
     #[tokio::test]

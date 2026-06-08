@@ -48,11 +48,15 @@ pub(crate) async fn calculate_and_record_metrics(
     };
 
     let tok_s = (output_tokens as f32 * 1000.0) / latency_ms as f32;
+    // Cache reads bill separately from input (a fraction of the input rate);
+    // absent/estimate usage yields 0.
+    let cache_read_tokens = response.usage.cache_read_tokens();
     let cost = calculate_cost(
         ctx.state,
         &mapping.actual_model,
         input_tokens,
         output_tokens,
+        cache_read_tokens,
         is_subscription,
     )
     .await;
