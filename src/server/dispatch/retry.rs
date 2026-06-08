@@ -222,45 +222,55 @@ fn handle_provider_error(
     );
 }
 
-/// Attempts key pool rotation and retry on rate limit.
+/// Rotates through the key pool, retrying once per remaining key on rate limit.
 ///
-/// Returns `Some(result)` if the retry succeeded, `None` if rotation was
-/// unavailable or the retry also failed.
+/// Each rotation gives the next pooled key its own retry budget. Returns
+/// `Some(result)` on the first success, or `None` when the pool is exhausted, a
+/// retry fails for a non-rate-limit reason, or no pool rotation is available.
 pub(super) async fn try_rotate_and_retry(
     ctx: &DispatchContext<'_>,
     request: &mut crate::models::CanonicalRequest,
     provider: &dyn crate::providers::LlmProvider,
     attempt: &ProviderAttempt<'_>,
 ) -> Option<DispatchResult> {
-    if rotation_unavailable(provider.rotate_key_pool()) {
-        return None;
-    }
-    info!(
-        "Provider {} rate-limited, rotated to next pooled key — retrying",
-        attempt.mapping.provider
-    );
-    let (retry_request, _) = super::provider_loop::prepare_provider_request(
-        ctx,
-        request,
-        attempt.mapping,
-        &attempt.decision.route_type,
-    );
-    let retry_result = if ctx.is_streaming {
-        dispatch_streaming(
+    // Walk the remaining pooled keys. `rotate_key_pool` marks the current key
+    // exhausted and advances to the next non-exhausted one, returning false once
+    // the whole pool is spent — so this loop is bounded by the pool size.
+    while !rotation_unavailable(provider.rotate_key_pool()) {
+        info!(
+            "Provider {} rate-limited, rotated to next pooled key — retrying",
+            attempt.mapping.provider
+        );
+        let (retry_request, _) = super::provider_loop::prepare_provider_request(
             ctx,
-            retry_request,
-            provider,
-            &StreamingAttempt {
-                mapping: attempt.mapping,
-                decision: attempt.decision,
-                is_subscription: attempt.is_subscription,
-            },
-        )
-        .await
-    } else {
-        dispatch_non_streaming(ctx, retry_request, provider, attempt).await
-    };
-    retry_result.ok()
+            request,
+            attempt.mapping,
+            &attempt.decision.route_type,
+        );
+        let retry_result = if ctx.is_streaming {
+            dispatch_streaming(
+                ctx,
+                retry_request,
+                provider,
+                &StreamingAttempt {
+                    mapping: attempt.mapping,
+                    decision: attempt.decision,
+                    is_subscription: attempt.is_subscription,
+                },
+            )
+            .await
+        } else {
+            dispatch_non_streaming(ctx, retry_request, provider, attempt).await
+        };
+        match retry_result {
+            Ok(result) => return Some(result),
+            // Still rate-limited on this key → rotate to the next one.
+            Err(ProviderLoopAction::RateLimited(_)) => continue,
+            // A non-rate-limit failure won't be fixed by trying another key.
+            Err(_) => return None,
+        }
+    }
+    None
 }
 
 /// Handle the streaming path for a single provider attempt.
