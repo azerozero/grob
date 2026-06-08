@@ -558,7 +558,11 @@ pub(super) async fn dispatch_non_streaming(
                         "Provider {} exhausted retries but rotated to next pooled key",
                         attempt.mapping.provider
                     );
-                    // Reset owned_request for another attempt cycle.
+                    // Retries are exhausted (this is reached only on the final
+                    // iteration): the rotation just advances the pool pointer so a
+                    // later request starts on a fresh key. `owned_request` was
+                    // already moved out on the last attempt; `continue` falls
+                    // through to the loop exit rather than starting a new attempt.
                     continue;
                 }
 

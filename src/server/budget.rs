@@ -343,7 +343,12 @@ pub(crate) async fn calculate_cost(
     )
 }
 
-/// Check if a provider error is retryable (429, 500, 502, 503, network errors).
+/// Check if a provider error is retryable (429, 500, 502, 503, 504, network errors).
+///
+/// The retryable status set is kept in lockstep with
+/// [`crate::server::error::RequestError::is_retryable`] — the documented single
+/// source of truth — so an upstream gateway timeout (504) is retried at every
+/// layer rather than only at the request level.
 ///
 /// Notably excludes 401 (`authentication_error`): a revoked OAuth token is a
 /// permanent failure that requires operator action (`grob connect
@@ -351,7 +356,7 @@ pub(crate) async fn calculate_cost(
 pub(crate) fn is_retryable(e: &crate::providers::error::ProviderError) -> bool {
     match e {
         crate::providers::error::ProviderError::ApiError { status, message } => match status {
-            429 | 500 | 502 | 503 => true,
+            429 | 500 | 502 | 503 | 504 => true,
             401 => is_rate_limit_payload(message),
             _ => false,
         },
@@ -392,10 +397,18 @@ const BASE_RETRY_MS: u64 = 200;
 /// NOTE: Factor of 4 (not 2) reduces collision probability with other clients
 /// hitting the same rate-limit window, per AWS exponential-backoff guidance.
 const RETRY_BACKOFF_FACTOR: u64 = 4;
+/// Ceiling (ms) applied to the exponential delay before jitter.
+/// NOTE: `max_retries` is an operator-supplied, unbounded `Option<u32>`; without
+/// a cap `200 * 4^attempt` overflows `u64` (~attempt 28) and blocks a request for
+/// an absurd duration. 30s keeps the longest single wait bounded.
+const MAX_RETRY_DELAY_MS: u64 = 30_000;
 
 /// Calculate retry delay with exponential backoff and jitter.
 pub(crate) fn retry_delay(attempt: u32) -> std::time::Duration {
-    let base_ms = BASE_RETRY_MS * RETRY_BACKOFF_FACTOR.pow(attempt);
+    // Saturating arithmetic + ceiling so a large `max_retries` can never overflow.
+    let base_ms = BASE_RETRY_MS
+        .saturating_mul(RETRY_BACKOFF_FACTOR.saturating_pow(attempt))
+        .min(MAX_RETRY_DELAY_MS);
     let jitter = rand::random::<u64>() % (base_ms / 2 + 1);
     std::time::Duration::from_millis(base_ms + jitter)
 }
@@ -423,12 +436,39 @@ mod tests {
     }
 
     #[test]
+    fn test_is_retryable_504() {
+        // A gateway timeout is transient — it must be retried at the provider
+        // level, in lockstep with RequestError::is_retryable.
+        let err = crate::providers::error::ProviderError::ApiError {
+            status: 504,
+            message: "gateway timeout".to_string(),
+        };
+        assert!(is_retryable(&err));
+    }
+
+    #[test]
     fn test_is_not_retryable_400() {
         let err = crate::providers::error::ProviderError::ApiError {
             status: 400,
             message: "bad request".to_string(),
         };
         assert!(!is_retryable(&err));
+    }
+
+    #[test]
+    fn test_retry_delay_is_bounded_for_large_attempts() {
+        // A high `max_retries` must neither overflow nor produce an unbounded
+        // wait; the delay is capped at MAX_RETRY_DELAY_MS + at most half-jitter.
+        let max_with_jitter = (MAX_RETRY_DELAY_MS + MAX_RETRY_DELAY_MS / 2 + 1) as u128;
+        for attempt in [0_u32, 5, 28, 50, u32::MAX] {
+            let delay = retry_delay(attempt).as_millis();
+            assert!(
+                delay <= max_with_jitter,
+                "attempt {attempt}: delay {delay}ms exceeded cap {max_with_jitter}ms"
+            );
+        }
+        // The first retry still uses the short base delay (no premature capping).
+        assert!(retry_delay(0).as_millis() <= (BASE_RETRY_MS + BASE_RETRY_MS / 2 + 1) as u128);
     }
 
     #[test]

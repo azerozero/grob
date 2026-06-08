@@ -1,3 +1,9 @@
+//! Provider-level error types.
+//!
+//! This is a thin `thiserror` enum with no behavior of its own; its retry and
+//! HTTP-status semantics are exercised through the conversion and classification
+//! tests in [`crate::server::error`] and [`crate::server::budget`].
+
 use thiserror::Error;
 
 /// Provider-specific errors
