@@ -617,6 +617,58 @@ mod tests {
         }
     }
 
+    fn usage(
+        input: u32,
+        output: u32,
+        creation: Option<u32>,
+        read: Option<u32>,
+    ) -> crate::providers::Usage {
+        crate::providers::Usage {
+            input_tokens: input,
+            output_tokens: output,
+            cache_creation_input_tokens: creation,
+            cache_read_input_tokens: read,
+        }
+    }
+
+    #[test]
+    fn cache_trace_fields_break_down_billable_and_total() {
+        let fields = cache_trace_fields(&usage(300, 42, Some(100), Some(700)));
+        assert_eq!(fields.cache_creation_input_tokens, Some(100));
+        assert_eq!(fields.cache_read_input_tokens, Some(700));
+        // billable = input + cache_creation (cache reads excluded from billing).
+        assert_eq!(fields.billable_input_tokens, Some(400));
+        // total_input = input + cache_creation + cache_read.
+        assert_eq!(fields.total_input_tokens, Some(1100));
+        // total = total_input + output.
+        assert_eq!(fields.total_tokens, Some(1142));
+    }
+
+    #[test]
+    fn cache_trace_fields_are_absent_without_caching() {
+        let fields = cache_trace_fields(&usage(500, 10, None, None));
+        assert_eq!(fields.cache_creation_input_tokens, None);
+        assert_eq!(fields.cache_read_input_tokens, None);
+        assert_eq!(fields.billable_input_tokens, None);
+        assert_eq!(fields.total_input_tokens, None);
+        assert_eq!(fields.total_tokens, None);
+    }
+
+    #[test]
+    fn stream_cache_trace_fields_match_the_non_stream_breakdown() {
+        let fields = stream_cache_trace_fields(crate::traits::StreamTraceUsage {
+            input_tokens: 300,
+            output_tokens: 42,
+            cache_creation_input_tokens: Some(100),
+            cache_read_input_tokens: Some(700),
+        });
+        assert_eq!(fields.cache_creation_input_tokens, Some(100));
+        assert_eq!(fields.cache_read_input_tokens, Some(700));
+        assert_eq!(fields.billable_input_tokens, Some(400));
+        assert_eq!(fields.total_input_tokens, Some(1100));
+        assert_eq!(fields.total_tokens, Some(1142));
+    }
+
     #[test]
     fn rotation_triggers_when_file_exceeds_max_size() {
         let tmp = tempfile::tempdir().unwrap();

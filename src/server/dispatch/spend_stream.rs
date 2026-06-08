@@ -963,4 +963,20 @@ mod tests {
         };
         assert_eq!(resolve_billed_tokens(&usage, false, 25), None);
     }
+
+    #[test]
+    fn resolve_billed_includes_cache_creation_but_excludes_cache_read() {
+        // Cache writes are billable input; cache reads are not. A regression that
+        // dropped cache_creation (or folded in cache_read) would misbill spend.
+        let usage = StreamUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 40,
+            cache_read_input_tokens: 700,
+            saw_usage: true,
+            ..Default::default()
+        };
+        // billed input = input (100) + cache_creation (40); cache_read excluded.
+        assert_eq!(resolve_billed_tokens(&usage, false, 0), Some((140, 50)));
+    }
 }

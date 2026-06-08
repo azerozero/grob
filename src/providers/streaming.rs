@@ -295,12 +295,17 @@ impl<S> LoggingSseStream<S> {
             0.0
         };
 
-        let total_input = tokens.input + tokens.cache_creation + tokens.cache_read;
+        let total_input = tokens
+            .input
+            .saturating_add(tokens.cache_creation)
+            .saturating_add(tokens.cache_read);
         let total_tokens = total_input.saturating_add(tokens.output);
         let billable_input = tokens.input.saturating_add(tokens.cache_creation);
 
         let cache_info = if tokens.cache_creation > 0 || tokens.cache_read > 0 {
-            let cache_pct = (tokens.cache_read * 100)
+            let cache_pct = tokens
+                .cache_read
+                .saturating_mul(100)
                 .checked_div(total_input)
                 .unwrap_or(0);
             format!(
@@ -323,7 +328,12 @@ impl<S> LoggingSseStream<S> {
         };
 
         let cost = pricing(model_name)
-            .map(|p| p.calculate(billable_input as u32, tokens.output as u32))
+            .map(|p| {
+                p.calculate(
+                    u32::try_from(billable_input).unwrap_or(u32::MAX),
+                    u32::try_from(tokens.output).unwrap_or(u32::MAX),
+                )
+            })
             .unwrap_or(0.0);
         let cost_info = if cost > 0.0 {
             format!(" ${:.4}", cost)
