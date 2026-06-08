@@ -9,5 +9,6 @@ mod http_test;
 mod multi_tenant_isolation_test;
 mod prompt_caching_comprehensive_test;
 mod prompt_caching_test;
+mod responses_e2e_test;
 mod security_test;
 mod server_test;
