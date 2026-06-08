@@ -816,6 +816,52 @@ mod tests {
     }
 
     #[test]
+    fn parallel_function_calls_without_output_index_are_not_dropped() {
+        // Two parallel function_calls whose `output_item.added` carries no
+        // `output_index`. Both previously collided on default index 0 — the
+        // second was dropped by the duplicate guard and its deltas leaked onto
+        // the first block. Each must now get its own tool_use block.
+        let upstream = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_up\",\"model\":\"gpt-5.5\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_a\",\"type\":\"function_call\",\"call_id\":\"call_a\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_b\",\"type\":\"function_call\",\"call_id\":\"call_b\",\"name\":\"read_file\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_a\",\"delta\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_b\",\"delta\":\"{\\\"path\\\":\\\"/tmp\\\"}\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item_id\":\"fc_a\",\"item\":{\"id\":\"fc_a\",\"type\":\"function_call\",\"call_id\":\"call_a\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"completed\"}}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item_id\":\"fc_b\",\"item\":{\"id\":\"fc_b\",\"type\":\"function_call\",\"call_id\":\"call_b\",\"name\":\"read_file\",\"arguments\":\"\",\"status\":\"completed\"}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_up\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let provider_state = Arc::new(Mutex::new(StreamTransformState::default()));
+        let mut anthropic = String::new();
+        for event in parse_sse_events(upstream) {
+            let bytes =
+                super::process_codex_sse_event(&event.data, &provider_state, "msg_test", "gpt-5.5")
+                    .unwrap();
+            anthropic.push_str(std::str::from_utf8(&bytes).unwrap());
+        }
+
+        // Both calls surface as distinct tool_use blocks (second not dropped)...
+        assert!(anthropic.contains(r#""id":"call_a""#), "first call missing");
+        assert!(
+            anthropic.contains(r#""id":"call_b""#),
+            "second parallel index-less call was dropped"
+        );
+        // ...and each carries its own arguments (no cross-block leakage).
+        assert!(anthropic.contains("cmd"), "first call args missing");
+        assert!(anthropic.contains("path"), "second call args missing");
+    }
+
+    #[test]
     fn test_tool_call_before_text_gets_distinct_indices() {
         let mut state = StreamTransformState::default();
         let id = "msg_test";

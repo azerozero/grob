@@ -363,14 +363,35 @@ fn resolve_responses_fc_output_index(
     None
 }
 
+/// Synthetic base for `function_call` blocks that arrive without an
+/// `output_index`, kept far above any real upstream index so a synthetic slot
+/// can never collide with a genuine `output_index`.
+const SYNTHETIC_FC_INDEX_BASE: u64 = 1 << 32;
+
+/// Picks the block slot for an index-less `function_call`: the default `0`, or a
+/// fresh synthetic index when `0` is already held by another index-less call.
+fn fc_default_output_index(state: &StreamTransformState) -> u64 {
+    if state.responses_fc_blocks.contains_key(&0) {
+        SYNTHETIC_FC_INDEX_BASE + state.responses_fc_blocks.len() as u64
+    } else {
+        0
+    }
+}
+
 fn emit_responses_fc_start(
     output: &mut String,
     state: &mut StreamTransformState,
     json: &serde_json::Value,
     item: &serde_json::Value,
 ) {
-    let output_index =
-        resolve_responses_fc_output_index(state, json, Some(item), false).unwrap_or(0);
+    let output_index = match resolve_responses_fc_output_index(state, json, Some(item), false) {
+        Some(idx) => idx,
+        // No `output_index` and no id match: use the default slot 0 unless it is
+        // already held by a *different* index-less call (parallel `function_call`s
+        // without an `output_index`), in which case allocate a fresh synthetic
+        // index so the second call isn't dropped by the duplicate guard below.
+        None => fc_default_output_index(state),
+    };
     if state.responses_fc_blocks.contains_key(&output_index) {
         return;
     }
