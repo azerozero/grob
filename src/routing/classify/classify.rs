@@ -407,8 +407,15 @@ fn is_git_metadata_command(command: &str) -> bool {
             || command.contains(" rev-parse --show-toplevel "))
 }
 
+/// Maximum byte length of a simple status result still treated as a trivial
+/// turn. Output beyond this likely carries real signal worth the larger model.
+const SHORT_SUCCESS_MAX_BYTES: usize = 2_000;
+/// Maximum byte length of a successful test result still downgraded to the
+/// medium tier. Larger output suggests a verbose or failing run.
+const TEST_OUTPUT_MAX_BYTES: usize = 8_000;
+
 fn is_short_success(content: &str) -> bool {
-    content.len() <= 2_000 && !has_nonzero_exit_code(content)
+    content.len() <= SHORT_SUCCESS_MAX_BYTES && !has_nonzero_exit_code(content)
 }
 
 fn is_successful_test_command(command: &str, content: &str) -> bool {
@@ -419,7 +426,7 @@ fn is_successful_test_command(command: &str, content: &str) -> bool {
         || command.contains(" cargo nextest run");
 
     is_test_command
-        && content.len() <= 8_000
+        && content.len() <= TEST_OUTPUT_MAX_BYTES
         && !has_nonzero_exit_code(content)
         && (content.contains("test result: ok")
             || content.contains(" 0 failed")
@@ -878,6 +885,209 @@ mod tests {
         assert_eq!(tier, ComplexityTier::Complex);
     }
 
+    // ── 13b. Multi-result aggregation ──
+
+    #[test]
+    fn multiple_trivial_tool_results_stay_trivial() {
+        let req = multi_tool_result_request(
+            &[
+                (
+                    "exec_command",
+                    serde_json::json!({"cmd": "git -C /repo status --short"}),
+                    "Process exited with code 0\n",
+                    false,
+                ),
+                (
+                    "Bash",
+                    serde_json::json!({"command": "pwd"}),
+                    "/repo\nProcess exited with code 0",
+                    false,
+                ),
+            ],
+            8_000,
+        );
+        assert_eq!(
+            classify_complexity(&req, &default_config()),
+            ComplexityTier::Trivial
+        );
+    }
+
+    #[test]
+    fn mixed_trivial_and_test_tool_results_escalate_to_medium() {
+        let req = multi_tool_result_request(
+            &[
+                (
+                    "exec_command",
+                    serde_json::json!({"cmd": "git status --short"}),
+                    "Process exited with code 0",
+                    false,
+                ),
+                (
+                    "exec_command",
+                    serde_json::json!({"cmd": "cargo test -q"}),
+                    "test result: ok. 5 passed; 0 failed\nProcess exited with code 0",
+                    false,
+                ),
+            ],
+            8_000,
+        );
+        assert_eq!(
+            classify_complexity(&req, &default_config()),
+            ComplexityTier::Medium
+        );
+    }
+
+    #[test]
+    fn medium_then_trivial_tool_results_do_not_downgrade() {
+        // A trivial result arriving after a medium one must keep the aggregate at
+        // the highest tier seen — never pull it back down to trivial.
+        let req = multi_tool_result_request(
+            &[
+                (
+                    "exec_command",
+                    serde_json::json!({"cmd": "cargo nextest run"}),
+                    "test result: ok\nProcess exited with code 0",
+                    false,
+                ),
+                (
+                    "exec_command",
+                    serde_json::json!({"cmd": "git status --short"}),
+                    "Process exited with code 0",
+                    false,
+                ),
+            ],
+            8_000,
+        );
+        assert_eq!(
+            classify_complexity(&req, &default_config()),
+            ComplexityTier::Medium
+        );
+    }
+
+    #[test]
+    fn error_in_later_tool_result_makes_turn_complex() {
+        let req = multi_tool_result_request(
+            &[
+                (
+                    "exec_command",
+                    serde_json::json!({"cmd": "git status --short"}),
+                    "Process exited with code 0",
+                    false,
+                ),
+                (
+                    "Read",
+                    serde_json::json!({"file_path": "/missing"}),
+                    "File does not exist.",
+                    true,
+                ),
+            ],
+            100,
+        );
+        assert_eq!(
+            classify_complexity(&req, &default_config()),
+            ComplexityTier::Complex
+        );
+    }
+
+    // ── 13c. Command variants & fallback branches ──
+
+    #[test]
+    fn simple_status_command_variants_are_trivial() {
+        let ok = "Process exited with code 0\n";
+        // Exercises both exec aliases and the `command` input key (vs `cmd`),
+        // plus each recognized status/metadata command.
+        let cases = [
+            ("Bash", "pwd"),
+            ("shell", "date"),
+            ("functions.exec_command", "git -C /r branch --show-current"),
+            ("bash", "git rev-parse --show-toplevel"),
+        ];
+        for (tool, cmd) in cases {
+            let mut req = tool_result_request(
+                tool,
+                serde_json::json!({ "command": cmd }),
+                ok,
+                false,
+                8_000,
+            );
+            req.tools = Some(vec![make_tool(tool)]);
+            assert_eq!(
+                classify_complexity(&req, &default_config()),
+                ComplexityTier::Trivial,
+                "command `{cmd}` via `{tool}` should be trivial"
+            );
+        }
+    }
+
+    #[test]
+    fn cargo_nextest_success_tool_result_is_medium() {
+        let mut req = tool_result_request(
+            "exec_command",
+            serde_json::json!({"cmd": "cargo nextest run -p grob"}),
+            "120 tests run: 120 passed, 0 failed\ntest result: ok\nProcess exited with code 0",
+            false,
+            8_000,
+        );
+        req.tools = Some(vec![make_tool("exec_command")]);
+        assert_eq!(
+            classify_complexity(&req, &default_config()),
+            ComplexityTier::Medium
+        );
+    }
+
+    #[test]
+    fn tool_result_with_orphan_id_falls_back_to_weighted_scoring() {
+        let mut req = tool_result_request(
+            "exec_command",
+            serde_json::json!({"cmd": "git status --short"}),
+            "Process exited with code 0\nOutput:\n".to_string() + &"context line\n".repeat(300),
+            false,
+            8_000,
+        );
+        // Orphan the result: rename the tool_use id so find_tool_use returns None.
+        if let MessageContent::Blocks(blocks) = &mut req.messages[1].content {
+            if let Some(ContentBlock::Known(KnownContentBlock::ToolUse { id, .. })) =
+                blocks.get_mut(0)
+            {
+                *id = "unrelated_id".to_string();
+            }
+        }
+        req.tools = Some(vec![make_tool("exec_command")]);
+        // A non-error, exit-0 result can only reach Complex via the weighted
+        // scorer, so this proves the override declined.
+        assert_eq!(
+            classify_complexity(&req, &default_config()),
+            ComplexityTier::Complex
+        );
+    }
+
+    #[test]
+    fn nonempty_text_alongside_tool_results_falls_back() {
+        let mut req = tool_result_request(
+            "exec_command",
+            serde_json::json!({"cmd": "git status --short"}),
+            "Process exited with code 0\nOutput:\n".to_string() + &"context line\n".repeat(300),
+            false,
+            8_000,
+        );
+        // A non-empty text block makes the turn no longer pure tool-results, so
+        // the downgrade declines and defers to the weighted scorer.
+        if let MessageContent::Blocks(blocks) = &mut req.messages[2].content {
+            blocks.insert(
+                0,
+                ContentBlock::Known(KnownContentBlock::Text {
+                    text: "Now summarize what changed.".to_string(),
+                    cache_control: None,
+                }),
+            );
+        }
+        req.tools = Some(vec![make_tool("exec_command")]);
+        assert_eq!(
+            classify_complexity(&req, &default_config()),
+            ComplexityTier::Complex
+        );
+    }
+
     // ── helpers ──
 
     fn tool_result_request(
@@ -926,6 +1136,66 @@ mod tests {
             metadata: None,
             system: None,
             tools: None,
+            tool_choice: None,
+            extensions: Default::default(),
+        }
+    }
+
+    /// Builds a single user turn carrying several tool results, each linked to a
+    /// matching assistant tool_use (`tool_1`, `tool_2`, …).
+    fn multi_tool_result_request(
+        steps: &[(&str, serde_json::Value, &str, bool)],
+        max_tokens: u32,
+    ) -> CanonicalRequest {
+        let tool_uses = steps
+            .iter()
+            .enumerate()
+            .map(|(i, (name, input, _, _))| {
+                ContentBlock::Known(KnownContentBlock::ToolUse {
+                    id: format!("tool_{}", i + 1),
+                    name: (*name).to_string(),
+                    input: input.clone(),
+                })
+            })
+            .collect();
+        let tool_results = steps
+            .iter()
+            .enumerate()
+            .map(|(i, (_, _, result, is_error))| {
+                ContentBlock::Known(KnownContentBlock::ToolResult {
+                    tool_use_id: format!("tool_{}", i + 1),
+                    content: ToolResultContent::Text((*result).to_string()),
+                    is_error: *is_error,
+                    cache_control: None,
+                })
+            })
+            .collect();
+        CanonicalRequest {
+            model: "test-model".to_string(),
+            messages: vec![
+                Message {
+                    role: "user".to_string(),
+                    content: MessageContent::Text("Run the next steps".to_string()),
+                },
+                Message {
+                    role: "assistant".to_string(),
+                    content: MessageContent::Blocks(tool_uses),
+                },
+                Message {
+                    role: "user".to_string(),
+                    content: MessageContent::Blocks(tool_results),
+                },
+            ],
+            max_tokens,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system: None,
+            tools: Some(vec![make_tool("Read"), make_tool("exec_command")]),
             tool_choice: None,
             extensions: Default::default(),
         }
