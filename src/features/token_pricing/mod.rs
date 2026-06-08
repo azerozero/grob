@@ -16,11 +16,14 @@ use tokio::sync::RwLock;
 // paths keep working without any downstream changes.
 pub use crate::pricing::{pricing, ModelPricing, KNOWN_PRICING};
 
-/// Dynamic pricing table with model -> (input_per_million, output_per_million) in USD
+/// Dynamic pricing table: model -> (input, output, cache_read) per 1M tokens (USD).
 #[derive(Debug, Clone)]
 pub struct PricingTable {
-    /// model_id -> (input_per_million, output_per_million) in USD
-    prices: HashMap<String, (f64, f64)>,
+    /// `model_id -> (input_per_million, output_per_million, cache_read_per_million)`.
+    /// The third element is the explicit prompt-cache *read* rate when the source
+    /// provides one (OpenRouter `input_cache_read`); `None` falls back to the
+    /// [`crate::pricing::CACHE_READ_COST_RATIO`] fraction of input at cost time.
+    prices: HashMap<String, (f64, f64, Option<f64>)>,
 }
 
 impl PricingTable {
@@ -30,7 +33,7 @@ impl PricingTable {
         for p in KNOWN_PRICING {
             prices.insert(
                 p.model.to_lowercase(),
-                (p.input_per_million, p.output_per_million),
+                (p.input_per_million, p.output_per_million, None),
             );
         }
         Self { prices }
@@ -61,7 +64,7 @@ impl PricingTable {
 
     /// Fetch pricing from OpenRouter API (no auth required)
     /// Returns model_id -> (input_per_million, output_per_million) in USD
-    async fn fetch_openrouter() -> anyhow::Result<HashMap<String, (f64, f64)>> {
+    async fn fetch_openrouter() -> anyhow::Result<HashMap<String, (f64, f64, Option<f64>)>> {
         let client = reqwest::Client::new();
         let resp = client
             .get("https://openrouter.ai/api/v1/models")
@@ -101,12 +104,28 @@ impl PricingTable {
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
 
+                // OpenRouter exposes the prompt-cache *read* rate for models that
+                // support caching; prefer it over the input-ratio approximation.
+                let cache_read_per_million = pricing
+                    .get("input_cache_read")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .filter(|p| *p > 0.0)
+                    .map(|p| p * 1_000_000.0);
+
                 // Convert per-token to per-million-tokens
                 let input_per_million = prompt_price * 1_000_000.0;
                 let output_per_million = completion_price * 1_000_000.0;
 
                 if input_per_million > 0.0 || output_per_million > 0.0 {
-                    prices.insert(id.to_string(), (input_per_million, output_per_million));
+                    prices.insert(
+                        id.to_string(),
+                        (
+                            input_per_million,
+                            output_per_million,
+                            cache_read_per_million,
+                        ),
+                    );
                 }
             }
         }
@@ -115,7 +134,7 @@ impl PricingTable {
     }
 
     /// Get price per million tokens for a model (case-insensitive, fuzzy match)
-    pub fn get(&self, model: &str) -> Option<(f64, f64)> {
+    pub fn get(&self, model: &str) -> Option<(f64, f64, Option<f64>)> {
         // Try exact (case-sensitive) first - zero allocation
         if let Some(prices) = self.prices.get(model) {
             return Some(*prices);
@@ -215,15 +234,14 @@ impl TokenCounter {
         } else if let Some(table) = pricing_table {
             table
                 .get(model)
-                .map(|(inp, out)| {
+                .map(|(inp, out, cache_read_rate)| {
+                    // Prefer the feed's explicit cache-read rate; otherwise derive
+                    // it from input (see `pricing::CACHE_READ_COST_RATIO`).
+                    let cache_read_rate =
+                        cache_read_rate.unwrap_or(inp * crate::pricing::CACHE_READ_COST_RATIO);
                     (input_tokens as f64 / 1_000_000.0) * inp
                         + (output_tokens as f64 / 1_000_000.0) * out
-                        // Cache reads bill at a fraction of the input rate; the
-                        // dynamic feed carries no separate cache column, so derive
-                        // it from the input price (see `pricing::CACHE_READ_COST_RATIO`).
-                        + (cache_read_tokens as f64 / 1_000_000.0)
-                            * inp
-                            * crate::pricing::CACHE_READ_COST_RATIO
+                        + (cache_read_tokens as f64 / 1_000_000.0) * cache_read_rate
                 })
                 .unwrap_or_else(|| {
                     // Fall back to static table
@@ -280,9 +298,11 @@ mod tests {
         assert!(!table.is_empty());
 
         // Exact match — Opus 4.6 moved to $5/$25 in early 2026 (was $15/$75).
-        let (inp, out) = table.get("claude-opus-4-6").unwrap();
+        let (inp, out, cache_read) = table.get("claude-opus-4-6").unwrap();
         assert_eq!(inp, 5.0);
         assert_eq!(out, 25.0);
+        // The static table carries no explicit cache-read rate (ratio fallback).
+        assert_eq!(cache_read, None);
     }
 
     #[test]
@@ -291,6 +311,23 @@ mod tests {
         // Fuzzy: model ID contains a known key
         let result = table.get("anthropic/claude-sonnet-4-6:beta");
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn explicit_feed_cache_read_rate_overrides_the_input_ratio() {
+        // A feed that reports an explicit input_cache_read rate must be billed
+        // verbatim, not via the 0.1× input approximation.
+        let mut prices = HashMap::new();
+        // input $10/1M, output $30/1M, explicit cache-read $0.50/1M.
+        prices.insert("widget-1".to_string(), (10.0, 30.0, Some(0.5)));
+        let table = PricingTable { prices };
+        let counter = TokenCounter::with_pricing("widget-1", 0, 0, 1_000_000, false, Some(&table));
+        // Explicit 0.50, NOT the ratio fallback 10.0 × 0.1 = 1.00.
+        assert!(
+            (counter.estimated_cost_usd - 0.50).abs() < 1e-9,
+            "explicit cache rate billed {} (expected 0.50)",
+            counter.estimated_cost_usd
+        );
     }
 
     #[test]
