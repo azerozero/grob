@@ -629,11 +629,14 @@ default = "placeholder-model"
         Ok(())
     }
 
-    /// Verifies every tier references declared providers and models.
+    /// Verifies every tier references a declared provider; warns on unknown models.
     ///
     /// # Errors
     ///
-    /// Returns an error naming the first tier whose provider is unknown.
+    /// Returns an error naming the first tier whose provider is unknown. An
+    /// unknown `model` only warns — it may be a pass-through model forwarded
+    /// verbatim to a `pass_through = true` provider and intentionally absent
+    /// from `[[models]]` (mirrors [`Self::warn_unknown_router_models`]).
     fn validate_tiers(
         tiers: &[TierConfig],
         provider_names: &std::collections::HashSet<&str>,
@@ -655,15 +658,19 @@ default = "placeholder-model"
                 }
             }
         }
+        // Unknown tier models are a warning, not a hard error: a tier may target
+        // a pass-through model — forwarded verbatim to a `pass_through = true`
+        // provider and intentionally absent from `[[models]]`. This matches
+        // `warn_unknown_router_models` and `validate_fan_out`, which also only
+        // warn. Providers (above) stay a hard error: a tier must reference a
+        // declared `[[providers]]` entry.
         if !model_names.is_empty() {
             for tier in tiers {
                 if let Some(model) = tier.model.as_deref() {
                     if !model_names.contains(model) {
-                        anyhow::bail!(
-                            "Tier '{}' references unknown model '{}'. Available: {:?}",
-                            tier.name,
-                            model,
-                            model_names.iter().collect::<Vec<_>>()
+                        eprintln!(
+                            "⚠️  Warning: tier '{}' model '{}' not found in [[models]] (ok for pass-through)",
+                            tier.name, model
                         );
                     }
                 }
@@ -782,5 +789,34 @@ think = "my-think-model"
         assert_eq!(config.server.port.value(), 3456);
         assert_eq!(config.router.default, "my-default-model");
         assert_eq!(config.router.think.as_deref(), Some("my-think-model"));
+    }
+
+    #[test]
+    fn validate_tiers_accepts_pass_through_model_but_rejects_unknown_provider() {
+        use std::collections::HashSet;
+        let providers: HashSet<&str> = ["chatgpt-codex"].into_iter().collect();
+        // Non-empty [[models]] that does NOT contain the tier's model.
+        let models: HashSet<&str> = ["dev"].into_iter().collect();
+
+        // A tier model absent from [[models]] is a pass-through target → warn,
+        // not error (mirrors router/fan_out validation).
+        let pass_through = vec![TierConfig {
+            name: "medium".to_string(),
+            model: Some("gpt-5.5-not-declared".to_string()),
+            providers: vec!["chatgpt-codex".to_string()],
+            fanout: false,
+            match_conditions: None,
+        }];
+        assert!(AppConfig::validate_tiers(&pass_through, &providers, &models).is_ok());
+
+        // An unknown provider stays a hard error.
+        let bad_provider = vec![TierConfig {
+            name: "medium".to_string(),
+            model: None,
+            providers: vec!["does-not-exist".to_string()],
+            fanout: false,
+            match_conditions: None,
+        }];
+        assert!(AppConfig::validate_tiers(&bad_provider, &providers, &models).is_err());
     }
 }
