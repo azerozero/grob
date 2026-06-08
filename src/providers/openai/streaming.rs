@@ -440,6 +440,13 @@ fn emit_responses_fc_args(
     delta: &str,
 ) {
     let Some(output_index) = resolve_responses_fc_output_index(state, json, None, true) else {
+        // Losing an argument delta empties the tool call and stalls the Codex
+        // turn (the exact failure class slice A fixed); surface drift instead of
+        // dropping it silently.
+        tracing::warn!(
+            item_id = ?json.get("item_id").and_then(|v| v.as_str()),
+            "Dropping function_call argument delta: no output_index resolvable"
+        );
         return;
     };
     if let Some(&block_index) = state.responses_fc_blocks.get(&output_index) {
@@ -454,6 +461,11 @@ fn emit_responses_fc_args(
             .entry(output_index)
             .or_default()
             .push_str(delta);
+    } else {
+        tracing::warn!(
+            output_index,
+            "Dropping function_call argument delta: no open block for output_index"
+        );
     }
 }
 
@@ -935,6 +947,11 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
                 emit_responses_fc_args(&mut output, state, &json, delta);
             }
         }
+        // NOTE: The consolidated `function_call_arguments.done` is deliberately
+        // ignored. Arguments are already streamed incrementally via the `.delta`
+        // events above and authoritatively confirmed by `output_item.done` below;
+        // re-emitting here would duplicate the `input_json_delta` payload.
+        ty if ty.ends_with("function_call_arguments.done") => {}
         "response.output_item.done" => {
             if let Some(item) = json.get("item") {
                 if item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
@@ -1275,6 +1292,28 @@ mod codex_stream_tests {
 
         assert!(out.contains(r#""type":"tool_use""#));
         assert!(out.contains("input_json_delta"));
+        assert_eq!(collected_tool_input(&out), r#"{"cmd":"ls"}"#);
+        assert!(out.contains(r#""stop_reason":"tool_use""#));
+    }
+
+    #[test]
+    fn structured_function_call_args_delta_without_ids_uses_single_open_block() {
+        // Some Codex shapes stream `function_call_arguments.delta` with neither an
+        // `item_id` nor an `output_index`. With exactly one function-call block
+        // open, the resolver must fall back to it instead of dropping the args.
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_exec","name":"exec_command","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","delta":"{\"cmd\":\""}"#,
+            r#"{"type":"response.function_call_arguments.delta","delta":"ls\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_exec","name":"exec_command","arguments":"{\"cmd\":\"ls\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        assert!(out.contains(r#""id":"call_exec""#));
+        assert!(out.contains(r#""name":"exec_command""#));
+        // The id-less deltas resolve to the single open block, so the arguments
+        // arrive intact rather than being silently dropped.
         assert_eq!(collected_tool_input(&out), r#"{"cmd":"ls"}"#);
         assert!(out.contains(r#""stop_reason":"tool_use""#));
     }
