@@ -458,6 +458,29 @@ mod tests {
     }
 
     #[test]
+    fn is_retryable_matches_the_documented_status_matrix() {
+        let api = |status: u16| crate::providers::error::ProviderError::ApiError {
+            status,
+            message: String::new(),
+        };
+        // Transient: 429 + the 5xx gateway/server set are retried at every layer.
+        for status in [429u16, 500, 502, 503, 504] {
+            assert!(is_retryable(&api(status)), "{status} should be retryable");
+        }
+        // Terminal client/auth errors must not retry.
+        for status in [400u16, 401, 403, 404, 409, 422, 501] {
+            assert!(!is_retryable(&api(status)), "{status} should not retry");
+        }
+        // 401 is the sole exception: retryable only when the payload is a
+        // rate-limit signal (some upstreams return 429-as-401).
+        let rate_limited_401 = crate::providers::error::ProviderError::ApiError {
+            status: 401,
+            message: r#"{"type":"rate_limit_error"}"#.to_string(),
+        };
+        assert!(is_retryable(&rate_limited_401));
+    }
+
+    #[test]
     fn test_retry_delay_is_bounded_for_large_attempts() {
         // A high `max_retries` must neither overflow nor produce an unbounded
         // wait; the delay is capped at MAX_RETRY_DELAY_MS + at most half-jitter.
