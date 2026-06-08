@@ -704,6 +704,8 @@ fn build_stream_finalization_output(state: &StreamTransformState) -> String {
 mod tests {
     use super::streaming::transform_openai_chunk_to_anthropic_sse;
     use super::types::*;
+    use crate::providers::streaming::parse_sse_events;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_parse_stream_error_response() {
@@ -738,6 +740,79 @@ mod tests {
     fn transform_chunk(json: &str, msg_id: &str, state: &mut StreamTransformState) -> String {
         let chunk: OpenAIStreamChunk = serde_json::from_str(json).unwrap();
         transform_openai_chunk_to_anthropic_sse(&chunk, msg_id, state)
+    }
+
+    fn anthropic_json_events(output: &str, event_name: &str) -> Vec<serde_json::Value> {
+        parse_sse_events(output)
+            .into_iter()
+            .filter(|event| event.event.as_deref() == Some(event_name))
+            .map(|event| serde_json::from_str(&event.data).unwrap())
+            .collect()
+    }
+
+    fn collected_tool_input(output: &str) -> String {
+        anthropic_json_events(output, "content_block_delta")
+            .into_iter()
+            .filter(|json| json["delta"]["type"] == "input_json_delta")
+            .filter_map(|json| json["delta"]["partial_json"].as_str().map(str::to_string))
+            .collect::<String>()
+    }
+
+    #[test]
+    fn responses_reencode_preserves_multi_item_function_call_arguments() {
+        let upstream = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_up\",\"model\":\"gpt-5.5\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.reasoning_summary_text.delta\n",
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs_1\",\"output_index\":0,\"delta\":\"Need a shell command.\"}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"status\":\"in_progress\"}}\n\n",
+            "event: response.content_part.added\n",
+            "data: {\"type\":\"response.content_part.added\",\"item_id\":\"msg_1\",\"output_index\":1,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":1,\"content_index\":0,\"delta\":\"Je lance la commande.\"}\n\n",
+            "event: response.output_text.done\n",
+            "data: {\"type\":\"response.output_text.done\",\"item_id\":\"msg_1\",\"output_index\":1,\"content_index\":0,\"text\":\"Je lance la commande.\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"Je lance la commande.\"}]}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_exec\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"output_index\":2,\"delta\":\"{\\\"cmd\\\":\"}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"output_index\":2,\"delta\":\"\\\"ls\"}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"output_index\":2,\"delta\":\"\\\"}\"}\n\n",
+            "event: response.function_call_arguments.done\n",
+            "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_1\",\"output_index\":2,\"arguments\":\"\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item_id\":\"fc_1\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_exec\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"completed\"}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_up\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let provider_state = Arc::new(Mutex::new(StreamTransformState::default()));
+        let mut anthropic = String::new();
+
+        for event in parse_sse_events(upstream) {
+            let bytes =
+                super::process_codex_sse_event(&event.data, &provider_state, "msg_test", "gpt-5.5")
+                    .unwrap();
+            anthropic.push_str(std::str::from_utf8(&bytes).unwrap());
+        }
+
+        assert!(anthropic.contains(r#""type":"tool_use""#));
+        assert!(anthropic.contains(r#""id":"call_exec""#));
+        assert!(anthropic.contains(r#""name":"exec_command""#));
+
+        let consolidated_delta = collected_tool_input(&anthropic);
+        assert!(
+            !consolidated_delta.is_empty(),
+            "function_call argument deltas must not be dropped when the function_call starts under one Responses index but later chunks use the real output_index"
+        );
+        assert_eq!(consolidated_delta, r#"{"cmd":"ls"}"#);
+        assert!(anthropic.contains(r#""stop_reason":"tool_use""#));
     }
 
     #[test]

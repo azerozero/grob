@@ -318,21 +318,27 @@ fn emit_tool_call_deltas(
     }
 }
 
-/// Opens an Anthropic `tool_use` block for a streaming Codex `function_call` item.
+/// Resolves the `output_index` a streaming `function_call` item was registered under.
 ///
 /// Codex streams a structured tool call as `output_item.added` (the call shell),
 /// then `function_call_arguments.delta` chunks, then `output_item.done`. The
-/// block is keyed by the Responses `output_index` so argument deltas correlate.
+/// block is registered on `added` and keyed by its `output_index`, so the
+/// follow-up deltas/done must resolve back to that same index.
+///
+/// The item's stable identity (`item_id` / `call_id`) is consulted **before** the
+/// event's raw `output_index`. When a preamble `message` precedes the call the
+/// upstream `output_index` can be absent on `added` (so the block registers under
+/// index `0`) yet present on the deltas (e.g. `2`), or otherwise drift across the
+/// three events. Trusting the raw `output_index` then resolves the deltas to an
+/// unregistered index and their arguments are silently dropped, leaving Codex
+/// with an empty-argument tool call. Keying on the call's identity rattaches each
+/// delta to the block its `added` opened, regardless of any `output_index` drift.
 fn resolve_responses_fc_output_index(
     state: &StreamTransformState,
     json: &serde_json::Value,
     item: Option<&serde_json::Value>,
     fallback_to_single_open: bool,
 ) -> Option<u64> {
-    if let Some(output_index) = json.get("output_index").and_then(|v| v.as_u64()) {
-        return Some(output_index);
-    }
-
     for id in [
         json.get("item_id").and_then(|v| v.as_str()),
         item.and_then(|i| i.get("id")).and_then(|v| v.as_str()),
@@ -344,6 +350,10 @@ fn resolve_responses_fc_output_index(
         if let Some(output_index) = state.responses_fc_item_indexes.get(id) {
             return Some(*output_index);
         }
+    }
+
+    if let Some(output_index) = json.get("output_index").and_then(|v| v.as_u64()) {
+        return Some(output_index);
     }
 
     if fallback_to_single_open && state.responses_fc_blocks.len() == 1 {
