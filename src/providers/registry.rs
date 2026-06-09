@@ -67,6 +67,15 @@ impl ProviderRegistry {
         }
     }
 
+    /// Inserts a provider under `name`, replacing any existing one.
+    ///
+    /// Test-only seam for building a registry with a mock provider without a
+    /// full config + secret backend.
+    #[cfg(test)]
+    pub(crate) fn insert_provider_for_test(&mut self, name: &str, provider: Arc<dyn LlmProvider>) {
+        self.providers.insert(name.to_string(), provider);
+    }
+
     /// Build standard ProviderParams from a config entry.
     ///
     /// When `GROB_MOCK_BACKEND` is set, overrides the base URL so all

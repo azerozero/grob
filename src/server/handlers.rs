@@ -339,6 +339,9 @@ struct DispatchPrelude {
     inner: Arc<super::ReloadableState>,
     dlp: Option<Arc<crate::features::dlp::DlpEngine>>,
     tenant_id: Option<String>,
+    /// Virtual-key model scope, threaded into dispatch so the post-routing
+    /// re-check can gate the resolved model. `None` for unscoped keys.
+    allowed_models: Option<Vec<String>>,
     peer_ip: String,
     transparency_enabled: bool,
     /// Set by the dispatch path when it has emitted an audit entry — used
@@ -355,13 +358,33 @@ fn mark_audited_if_set(audited: &Arc<std::sync::atomic::AtomicBool>, response: &
     }
 }
 
-/// Builds the shared pre-dispatch state common to all three handlers.
+/// Builds the shared pre-dispatch state common to the dispatch handlers.
+///
+/// Also enforces a virtual key's `allowed_models` scope: this is the single
+/// pre-dispatch choke point every generation surface (`/v1/messages`,
+/// `/v1/chat/completions`, `/v1/responses`) funnels through, so the check lives
+/// here rather than being duplicated — and forgotten — per handler.
+///
+/// # Errors
+///
+/// Returns [`RequestError::Forbidden`] when the key's `allowed_models` scope
+/// forbids `requested_model`.
 fn prepare_dispatch(
     state: &Arc<AppState>,
     claims: &Option<axum::Extension<crate::auth::GrobClaims>>,
     vk_ctx: &Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     headers: &HeaderMap,
-) -> DispatchPrelude {
+    requested_model: &str,
+) -> Result<DispatchPrelude, RequestError> {
+    // Fail fast before any provider work: reject a scoped key on the inbound
+    // model up front. The resolved model is re-checked post-routing in dispatch.
+    let allowed_models = vk_ctx
+        .as_ref()
+        .and_then(|axum::Extension(vk)| vk.allowed_models.clone());
+    if allowed_models.is_some() {
+        enforce_allowed_models(allowed_models.as_deref(), requested_model)?;
+    }
+
     let tenant_id = extract_tenant_id(vk_ctx, claims, headers);
     let peer_ip = extract_client_ip(headers);
     let inner = state.snapshot();
@@ -374,13 +397,59 @@ fn prepare_dispatch(
         .as_ref()
         .map(|mgr| mgr.engine_for(session_key));
     let transparency_enabled = should_apply_transparency(&inner.config);
-    DispatchPrelude {
+    Ok(DispatchPrelude {
         inner,
         dlp,
         tenant_id,
+        allowed_models,
         peer_ip,
         transparency_enabled,
         audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    })
+}
+
+/// Enforces a virtual key's `allowed_models` scope against the requested model.
+///
+/// Returns [`RequestError::Forbidden`] (HTTP 403) when the key carries a
+/// non-empty `allowed_models` list and `requested_model` is not in it. An empty
+/// or absent list disables the check, preserving the behaviour of unscoped keys
+/// (backward compatible).
+///
+/// Matching is **canonical-vs-canonical**: both the requested model and every
+/// allowed entry are normalised via [`canonicalize_model_name`] so dotted/dated
+/// aliases (e.g. `gpt-5.5` ↔ `gpt-5-5`) compare equal and never trip a false
+/// 403. A verbatim match is also accepted as a fast path.
+///
+/// The 403 body is deliberately generic and never echoes the allowed list, so a
+/// rejected caller cannot enumerate the key's scope.
+///
+/// # Note
+///
+/// This runs on the **inbound requested** model at the single pre-dispatch
+/// choke point. When routing overrides land (slice 3) and can rewrite the served
+/// model, re-invoke this on the rewritten model to close the cross-slice bypass.
+pub(crate) fn enforce_allowed_models(
+    allowed_models: Option<&[String]>,
+    requested_model: &str,
+) -> Result<(), RequestError> {
+    use crate::routing::classify::model_name::canonicalize_model_name;
+
+    let Some(allowed) = allowed_models.filter(|list| !list.is_empty()) else {
+        return Ok(());
+    };
+
+    let requested_canonical = canonicalize_model_name(requested_model);
+    let permitted = allowed.iter().any(|allowed_model| {
+        allowed_model == requested_model
+            || canonicalize_model_name(allowed_model) == requested_canonical
+    });
+
+    if permitted {
+        Ok(())
+    } else {
+        Err(RequestError::Forbidden(
+            "model not allowed for this key".to_string(),
+        ))
     }
 }
 
@@ -500,7 +569,7 @@ pub(crate) async fn handle_openai_chat_completions(
     let model = openai_request.model.clone();
     let is_streaming = openai_request.stream == Some(true);
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // Transform OpenAI → Anthropic format
@@ -522,6 +591,7 @@ pub(crate) async fn handle_openai_chat_completions(
         model: model.clone(),
         is_streaming,
         tenant_id: prelude.tenant_id,
+        allowed_models: prelude.allowed_models,
         peer_ip: prelude.peer_ip,
         req_id: &request_id.0,
         start_time,
@@ -604,7 +674,7 @@ pub(crate) async fn handle_responses(
         is_streaming,
     );
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // Transform Responses → canonical format
@@ -626,6 +696,7 @@ pub(crate) async fn handle_responses(
         model: model.clone(),
         is_streaming,
         tenant_id: prelude.tenant_id,
+        allowed_models: prelude.allowed_models,
         peer_ip: prelude.peer_ip,
         req_id: &request_id.0,
         start_time,
@@ -722,7 +793,7 @@ pub(crate) async fn handle_messages(
         .unwrap_or("unknown")
         .to_string();
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // DEBUG: Log request body for debugging (gate serialization on log level)
@@ -752,6 +823,7 @@ pub(crate) async fn handle_messages(
         model: model.clone(),
         is_streaming,
         tenant_id: prelude.tenant_id,
+        allowed_models: prelude.allowed_models,
         peer_ip: prelude.peer_ip,
         req_id,
         start_time,
@@ -799,6 +871,7 @@ pub(crate) async fn handle_messages(
 /// Handle /v1/messages/count_tokens requests
 pub(crate) async fn handle_count_tokens(
     State(state): State<Arc<AppState>>,
+    vk_ctx: Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     Json(request_json): Json<serde_json::Value>,
 ) -> Result<Response, RequestError> {
     let model = request_json
@@ -806,6 +879,12 @@ pub(crate) async fn handle_count_tokens(
         .and_then(|m| m.as_str())
         .unwrap_or("unknown");
     debug!("Received count_tokens request for model: {}", model);
+
+    // count_tokens does not flow through prepare_dispatch, so enforce the
+    // virtual key's allowed_models scope here against the same shared helper.
+    if let Some(axum::Extension(vk)) = &vk_ctx {
+        enforce_allowed_models(vk.allowed_models.as_deref(), model)?;
+    }
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
@@ -831,6 +910,12 @@ pub(crate) async fn handle_count_tokens(
         .router
         .route(&mut routing_request)
         .map_err(|e| RequestError::RoutingError(e.to_string()))?;
+
+    // Re-check the resolved model: routing can remap the inbound model to one the
+    // key forbids (defense in depth alongside the inbound check above).
+    if let Some(axum::Extension(vk)) = &vk_ctx {
+        enforce_allowed_models(vk.allowed_models.as_deref(), &decision.model_name)?;
+    }
 
     debug!(
         "🧮 Routed count_tokens: {} → {} ({})",
@@ -924,4 +1009,64 @@ fn evaluate_policy_if_configured(
         estimated_cost: 0.0,
     };
     Some(matcher.evaluate(&ctx))
+}
+
+#[cfg(test)]
+mod allowed_models_tests {
+    use super::enforce_allowed_models;
+    use super::RequestError;
+
+    #[test]
+    fn absent_list_allows_any_model() {
+        // Unscoped key (no allowed_models) → unchanged behaviour.
+        assert!(enforce_allowed_models(None, "gpt-5.5").is_ok());
+    }
+
+    #[test]
+    fn empty_list_allows_any_model() {
+        // Empty list is treated as "no scope", not "deny all".
+        let allowed: Vec<String> = vec![];
+        assert!(enforce_allowed_models(Some(&allowed), "gpt-5.5").is_ok());
+    }
+
+    #[test]
+    fn scoped_key_rejects_disallowed_model() {
+        // allowed_models=["claude-haiku-4-5"] calling "gpt-5.5" → 403.
+        let allowed = vec!["claude-haiku-4-5".to_string()];
+        let err = enforce_allowed_models(Some(&allowed), "gpt-5.5").unwrap_err();
+        assert!(matches!(err, RequestError::Forbidden(_)));
+    }
+
+    #[test]
+    fn scoped_key_allows_a_listed_model() {
+        let allowed = vec!["claude-haiku-4-5".to_string(), "gpt-5.5".to_string()];
+        assert!(enforce_allowed_models(Some(&allowed), "gpt-5.5").is_ok());
+    }
+
+    #[test]
+    fn matches_across_dotted_and_dashed_canonical_forms() {
+        // The dotted alias in the list must match the canonical dashed request,
+        // and vice-versa — canonical-vs-canonical, no false 403.
+        let dotted = vec!["gpt-5.5".to_string()];
+        assert!(enforce_allowed_models(Some(&dotted), "gpt-5-5").is_ok());
+        let dashed = vec!["gpt-5-5".to_string()];
+        assert!(enforce_allowed_models(Some(&dashed), "gpt-5.5").is_ok());
+    }
+
+    #[test]
+    fn forbidden_message_does_not_leak_the_allowed_list() {
+        let allowed = vec![
+            "claude-haiku-4-5".to_string(),
+            "claude-opus-4-8".to_string(),
+        ];
+        let RequestError::Forbidden(msg) =
+            enforce_allowed_models(Some(&allowed), "gpt-5.5").unwrap_err()
+        else {
+            panic!("expected Forbidden");
+        };
+        // No scope disclosure: neither the allowed models nor the requested one.
+        assert!(!msg.contains("claude-haiku-4-5"));
+        assert!(!msg.contains("claude-opus-4-8"));
+        assert!(!msg.contains("gpt-5.5"));
+    }
 }

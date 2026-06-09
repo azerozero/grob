@@ -41,6 +41,9 @@ pub(crate) struct DispatchContext<'a> {
     pub is_streaming: bool,
     /// Tenant identifier from JWT claims (multi-tenant deployments).
     pub tenant_id: Option<String>,
+    /// Virtual-key model scope. When non-empty, the resolved model must be in
+    /// this list; `None`/empty means the key is unscoped. Enforced post-routing.
+    pub allowed_models: Option<Vec<String>>,
     /// Client IP for audit logging.
     pub peer_ip: String,
     pub req_id: &'a str,
@@ -380,7 +383,16 @@ pub(crate) async fn dispatch(
     }
 
     // ── Step 4: Resolve provider mappings ──
-    let sorted_mappings = resolve_provider_mappings(ctx.inner, ctx.headers, &decision)?;
+    // `resolve_provider_mappings` enforces the virtual-key `allowed_models` scope
+    // on the *effective* logical model (after any `[[tiers]].model` override),
+    // before any provider mapping is used — so a routing remap or a tier override
+    // to a forbidden model is rejected here, ahead of every upstream call.
+    let sorted_mappings = resolve_provider_mappings(
+        ctx.inner,
+        ctx.headers,
+        &decision,
+        ctx.allowed_models.as_deref(),
+    )?;
 
     // ── Step 4.5: Tool layer (aliasing, injection, capability gating) ──
     if let Some(ref tool_layer) = ctx.state.security.tool_layer {
@@ -832,5 +844,229 @@ mod tests {
             ComplexityHint::Trivial
         );
         assert!(parse_complexity_hint(serde_json::json!("urgent")).is_err());
+    }
+
+    // ── allowed_models post-routing enforcement (real dispatch() wiring) ──
+
+    /// Provider that records whether it was reached. The Forbidden path must
+    /// reject before any provider call, so `called` must stay `false`.
+    struct CountingProvider {
+        called: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::providers::LlmProvider for CountingProvider {
+        async fn send_message(
+            &self,
+            _request: CanonicalRequest,
+        ) -> Result<ProviderResponse, crate::providers::error::ProviderError> {
+            self.called.store(true, std::sync::atomic::Ordering::SeqCst);
+            Err(crate::providers::error::ProviderError::ApiError {
+                status: 500,
+                message: "mock provider must not be reached".to_string(),
+            })
+        }
+
+        async fn send_message_stream(
+            &self,
+            _request: CanonicalRequest,
+        ) -> Result<crate::providers::StreamResponse, crate::providers::error::ProviderError>
+        {
+            self.called.store(true, std::sync::atomic::Ordering::SeqCst);
+            Err(crate::providers::error::ProviderError::ApiError {
+                status: 500,
+                message: "mock provider must not be reached".to_string(),
+            })
+        }
+
+        async fn count_tokens(
+            &self,
+            _request: crate::models::CountTokensRequest,
+        ) -> Result<crate::models::CountTokensResponse, crate::providers::error::ProviderError>
+        {
+            Err(crate::providers::error::ProviderError::ApiError {
+                status: 500,
+                message: "mock".to_string(),
+            })
+        }
+
+        fn supports_model(&self, _model: &str) -> bool {
+            true
+        }
+    }
+
+    /// Builds a minimal real [`AppState`] with a mock provider registered as
+    /// "mock". Uses `build_recorder().handle()` so no global Prometheus recorder
+    /// is installed (no process-global singleton contention).
+    fn test_app_state(
+        config: crate::cli::AppConfig,
+        called: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Arc<AppState> {
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test("mock", Arc::new(CountingProvider { called }));
+        let router = crate::routing::classify::Router::new(config.clone());
+        let reloadable = Arc::new(ReloadableState::new(
+            config.clone(),
+            router,
+            Arc::new(registry),
+        ));
+
+        let home = tempfile::tempdir().expect("tempdir");
+        let grob_store = Arc::new(
+            crate::storage::GrobStore::open(&home.path().join("grob.db")).expect("grob store"),
+        );
+        let token_store =
+            crate::auth::TokenStore::with_store(grob_store.clone()).expect("token store");
+        // Keep the storage dir alive for the process; the test is short-lived.
+        std::mem::forget(home);
+
+        let message_tracer: Arc<dyn crate::traits::Tracer> = Arc::new(
+            crate::shared::message_tracing::MessageTracer::new(config.server.tracing.clone()),
+        );
+        let spend_tracker: Box<dyn crate::traits::SpendTracking> = Box::new(
+            crate::features::token_pricing::spend::SpendTracker::with_store(grob_store.clone()),
+        );
+        let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
+        let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+            .build_recorder()
+            .handle();
+
+        Arc::new(AppState {
+            inner: std::sync::RwLock::new(reloadable),
+            token_store,
+            grob_store,
+            config_source: crate::cli::ConfigSource::File(std::path::PathBuf::from("test.toml")),
+            active_requests: std::sync::atomic::AtomicU64::new(0),
+            started_at: chrono::Utc::now(),
+            actual_oauth_callback_port: std::sync::atomic::AtomicU16::new(0),
+            event_bus: crate::features::watch::EventBus::new(),
+            log_exporter: None,
+            #[cfg(feature = "mcp")]
+            grob_hint: std::sync::Mutex::new(None),
+            #[cfg(feature = "policies")]
+            hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+            observability: crate::server::ObservabilityState {
+                message_tracer,
+                metrics_handle,
+                spend_tracker: tokio::sync::Mutex::new(spend_tracker),
+                pricing_table,
+            },
+            security: crate::server::SecurityState {
+                jwt_validator: None,
+                rate_limiter: None,
+                dlp_sessions: None,
+                circuit_breakers: None,
+                audit_log: None,
+                response_cache: None,
+                tap_sender: None,
+                provider_scorer: None,
+                #[cfg(feature = "mcp")]
+                mcp: None,
+                tool_layer: None,
+                tool_spike_detector: None,
+            },
+        })
+    }
+
+    /// dispatch() must reject a scoped key when routing remaps the inbound model
+    /// to a forbidden one — BEFORE any provider is reached. Red if dispatch stops
+    /// passing `ctx.allowed_models` to `resolve_provider_mappings`.
+    #[tokio::test]
+    async fn dispatch_rejects_remapped_forbidden_model_before_provider() {
+        use crate::models::{Message, MessageContent, ThinkingConfig};
+
+        // `thinking` routes via `[router] think = "beta"` → decision.model_name
+        // becomes "beta", which the key (allowed only "alpha") forbids.
+        let toml = r#"
+[server]
+host = "127.0.0.1"
+port = 18097
+
+[router]
+default = "alpha"
+think = "beta"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha", "beta"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "alpha"
+
+[[models]]
+name = "beta"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "beta"
+"#;
+        let config = crate::cli::AppConfig::from_content(toml, "dispatch_allowed_models_test")
+            .expect("config parses");
+
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let state = test_app_state(config, called.clone());
+        let inner = state.snapshot();
+        let dlp: Option<Arc<DlpEngine>> = None;
+        let headers = HeaderMap::new();
+
+        let ctx = DispatchContext {
+            state: &state,
+            inner: &inner,
+            dlp: &dlp,
+            model: "alpha".to_string(),
+            is_streaming: false,
+            tenant_id: None,
+            allowed_models: Some(vec!["alpha".to_string()]),
+            peer_ip: "127.0.0.1".to_string(),
+            req_id: "test-req",
+            start_time: std::time::Instant::now(),
+            headers: &headers,
+            trace_id: None,
+            audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(feature = "policies")]
+            resolved_policy: None,
+        };
+
+        let mut request = CanonicalRequest {
+            model: "alpha".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("Think hard.".to_string()),
+            }],
+            max_tokens: 1024,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            thinking: Some(ThinkingConfig {
+                r#type: "enabled".to_string(),
+                budget_tokens: Some(10_000),
+            }),
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            extensions: Default::default(),
+        };
+
+        let result = dispatch(&ctx, &mut request).await;
+
+        assert!(
+            matches!(result, Err(RequestError::Forbidden(_))),
+            "scoped key must be rejected (403) on the remapped 'beta' model"
+        );
+        assert!(
+            !called.load(std::sync::atomic::Ordering::SeqCst),
+            "the provider must NOT be reached when the resolved model is forbidden"
+        );
     }
 }

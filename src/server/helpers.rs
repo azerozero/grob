@@ -16,13 +16,18 @@ pub(crate) fn resolve_provider_mappings(
     inner: &Arc<ReloadableState>,
     headers: &HeaderMap,
     decision: &crate::models::RouteDecision,
+    allowed_models: Option<&[String]>,
 ) -> Result<Vec<crate::cli::ModelMapping>, RequestError> {
     // Tier-based provider selection (opt-in via [[tiers]] config). A non-empty
-    // result short-circuits; `None` means "fall through" exactly as before.
-    if let Some(mappings) = resolve_tier_mappings(inner, decision) {
+    // result short-circuits; `None` means "fall through" exactly as before. The
+    // tier path enforces the virtual-key scope on its effective target model
+    // internally (before any [[models]] lookup), so it can return `Err`.
+    if let Some(mappings) = resolve_tier_mappings(inner, decision, allowed_models)? {
         return Ok(mappings);
     }
 
+    // No tier override: the effective logical model is the routed model.
+    super::handlers::enforce_allowed_models(allowed_models, &decision.model_name)?;
     if let Some(model_config) = inner.find_model(&decision.model_name) {
         resolve_explicit_model_mappings(inner, headers, decision, model_config)
     } else {
@@ -39,10 +44,15 @@ pub(crate) fn resolve_provider_mappings(
 fn resolve_tier_mappings(
     inner: &Arc<ReloadableState>,
     decision: &crate::models::RouteDecision,
-) -> Option<Vec<crate::cli::ModelMapping>> {
-    let tier = decision.complexity_tier.as_ref()?;
+    allowed_models: Option<&[String]>,
+) -> Result<Option<Vec<crate::cli::ModelMapping>>, RequestError> {
+    let Some(tier) = decision.complexity_tier.as_ref() else {
+        return Ok(None);
+    };
     let tier_name = tier.to_string();
-    let tier_cfg = inner.config.tiers.iter().find(|t| t.name == tier_name)?;
+    let Some(tier_cfg) = inner.config.tiers.iter().find(|t| t.name == tier_name) else {
+        return Ok(None);
+    };
 
     info!(
         "📊 Tier '{}' matched — resolving provider mappings",
@@ -50,6 +60,14 @@ fn resolve_tier_mappings(
     );
 
     let target_model = tier_cfg.model.as_deref().unwrap_or(&decision.model_name);
+
+    // Enforce the virtual-key scope on the tier's effective logical model BEFORE
+    // any [[models]] lookup or provider-mapping clone. A [[tiers]].model override
+    // can switch the served model away from `decision.model_name`, so a key
+    // allowed for the routed model could otherwise reach a forbidden tier target.
+    // Fail closed here, ahead of all mapping work.
+    super::handlers::enforce_allowed_models(allowed_models, target_model)?;
+
     if target_model != decision.model_name {
         info!(
             "tier {} -> virtual model override {}",
@@ -117,14 +135,14 @@ fn resolve_tier_mappings(
         .collect();
 
     if !mappings.is_empty() {
-        return Some(mappings);
+        return Ok(Some(mappings));
     }
     // All tier providers were skipped — fall through to [[models]] / pass-through logic.
     info!(
         "tier {} — all providers skipped, falling back to [[models]] routing",
         tier_name
     );
-    None
+    Ok(None)
 }
 
 /// Resolves mappings for a model declared in `[[models]]`.
@@ -414,7 +432,8 @@ priority = 1
             Some(crate::routing::classify::ComplexityTier::Complex),
         );
 
-        let mappings = resolve_provider_mappings(&state, &headers, &dec).expect("should resolve");
+        let mappings =
+            resolve_provider_mappings(&state, &headers, &dec, None).expect("should resolve");
 
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].provider, "openrouter");
@@ -462,11 +481,127 @@ priority = 1
             Some(crate::routing::classify::ComplexityTier::Trivial),
         );
 
-        let mappings = resolve_provider_mappings(&state, &headers, &dec).expect("should resolve");
+        let mappings =
+            resolve_provider_mappings(&state, &headers, &dec, None).expect("should resolve");
 
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].provider, "chatgpt-codex");
         assert_eq!(mappings[0].actual_model, "gpt-5.4-mini");
+    }
+
+    // Virtual-key scope must be enforced on the EFFECTIVE logical model: a
+    // `[[tiers]].model` override that serves a forbidden model is rejected even
+    // when the routed `decision.model_name` is itself allowed. This is the tier
+    // bypass the post-routing check on `decision.model_name` alone missed.
+    #[test]
+    fn tier_model_override_to_forbidden_model_is_rejected() {
+        let toml = r#"
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+models = []
+enabled = true
+
+[[tiers]]
+name = "trivial"
+model = "beta"
+providers = ["mock"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+provider = "mock"
+actual_model = "alpha-actual"
+priority = 1
+
+[[models]]
+name = "beta"
+[[models.mappings]]
+provider = "mock"
+actual_model = "beta-actual"
+priority = 1
+"#;
+        let state = make_state(toml);
+        let headers = HeaderMap::new();
+        let dec = decision(
+            "alpha",
+            Some(crate::routing::classify::ComplexityTier::Trivial),
+        );
+
+        // Routed model "alpha" is allowed, but the tier serves "beta" → Forbidden,
+        // before any provider mapping is used.
+        let allowed = vec!["alpha".to_string()];
+        let err = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed))
+            .expect_err("tier override to forbidden 'beta' must be rejected");
+        assert!(matches!(err, RequestError::Forbidden(_)));
+
+        // A key that allows the tier target resolves the mapping normally.
+        let allowed_beta = vec!["beta".to_string()];
+        let mappings = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed_beta))
+            .expect("allowed tier target should resolve");
+        assert_eq!(mappings[0].actual_model, "beta-actual");
+    }
+
+    // A routing remap (think / web_search / prompt rule / auto-map) that lands on
+    // a forbidden `decision.model_name` is rejected on the routed model.
+    #[test]
+    fn routed_model_outside_scope_is_rejected() {
+        let toml = r#"
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+models = ["beta"]
+enabled = true
+
+[[models]]
+name = "beta"
+[[models.mappings]]
+provider = "mock"
+actual_model = "beta-actual"
+priority = 1
+"#;
+        let state = make_state(toml);
+        let headers = HeaderMap::new();
+        // No tier: the routed decision already landed on "beta".
+        let dec = decision("beta", None);
+
+        let allowed = vec!["alpha".to_string()];
+        let err = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed))
+            .expect_err("routed model 'beta' outside the key scope must be rejected");
+        assert!(matches!(err, RequestError::Forbidden(_)));
+    }
+
+    // Backward compatibility: an unscoped key (`allowed_models = None`) is never
+    // blocked by the scope check.
+    #[test]
+    fn unscoped_key_is_not_blocked() {
+        let toml = r#"
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+models = ["alpha"]
+enabled = true
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+provider = "mock"
+actual_model = "alpha-actual"
+priority = 1
+"#;
+        let state = make_state(toml);
+        let headers = HeaderMap::new();
+        let dec = decision("alpha", None);
+        assert!(resolve_provider_mappings(&state, &headers, &dec, None).is_ok());
     }
 
     // Cas 2: tier match + pas de [[models]] mapping mais provider liste le model → used as-is.
@@ -493,7 +628,8 @@ providers = ["anthropic"]
             Some(crate::routing::classify::ComplexityTier::Medium),
         );
 
-        let mappings = resolve_provider_mappings(&state, &headers, &dec).expect("should resolve");
+        let mappings =
+            resolve_provider_mappings(&state, &headers, &dec, None).expect("should resolve");
 
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].provider, "anthropic");
@@ -541,8 +677,8 @@ priority = 1
 
         // deepinfra is in the tier but doesn't know "claude-sonnet-4-6" and has no mapping.
         // The tier loop produces an empty list → fallback to [[models]] which gives anthropic.
-        let mappings =
-            resolve_provider_mappings(&state, &headers, &dec).expect("should fallback and resolve");
+        let mappings = resolve_provider_mappings(&state, &headers, &dec, None)
+            .expect("should fallback and resolve");
 
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].provider, "anthropic");
