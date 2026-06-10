@@ -235,6 +235,7 @@ async fn main() -> anyhow::Result<()> {
                 budget,
                 rate_limit,
                 allowed_models,
+                allowed_providers,
                 expires,
             } => {
                 commands::key::cmd_key_create(
@@ -244,6 +245,7 @@ async fn main() -> anyhow::Result<()> {
                     budget,
                     rate_limit,
                     allowed_models,
+                    allowed_providers,
                     expires,
                 )
                 .await

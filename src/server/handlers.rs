@@ -342,6 +342,9 @@ struct DispatchPrelude {
     /// Virtual-key model scope, threaded into dispatch so the post-routing
     /// re-check can gate the resolved model. `None` for unscoped keys.
     allowed_models: Option<Vec<String>>,
+    /// Virtual-key provider scope, threaded into dispatch so mapping resolution
+    /// can keep only permitted providers. Empty for unscoped keys.
+    allowed_providers: Vec<String>,
     peer_ip: String,
     transparency_enabled: bool,
     /// Set by the dispatch path when it has emitted an audit entry — used
@@ -384,6 +387,10 @@ fn prepare_dispatch(
     if allowed_models.is_some() {
         enforce_allowed_models(allowed_models.as_deref(), requested_model)?;
     }
+    let allowed_providers = vk_ctx
+        .as_ref()
+        .map(|axum::Extension(vk)| vk.allowed_providers.clone())
+        .unwrap_or_default();
 
     let tenant_id = extract_tenant_id(vk_ctx, claims, headers);
     let peer_ip = extract_client_ip(headers);
@@ -402,6 +409,7 @@ fn prepare_dispatch(
         dlp,
         tenant_id,
         allowed_models,
+        allowed_providers,
         peer_ip,
         transparency_enabled,
         audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -592,6 +600,7 @@ pub(crate) async fn handle_openai_chat_completions(
         is_streaming,
         tenant_id: prelude.tenant_id,
         allowed_models: prelude.allowed_models,
+        allowed_providers: prelude.allowed_providers,
         peer_ip: prelude.peer_ip,
         req_id: &request_id.0,
         start_time,
@@ -697,6 +706,7 @@ pub(crate) async fn handle_responses(
         is_streaming,
         tenant_id: prelude.tenant_id,
         allowed_models: prelude.allowed_models,
+        allowed_providers: prelude.allowed_providers,
         peer_ip: prelude.peer_ip,
         req_id: &request_id.0,
         start_time,
@@ -824,6 +834,7 @@ pub(crate) async fn handle_messages(
         is_streaming,
         tenant_id: prelude.tenant_id,
         allowed_models: prelude.allowed_models,
+        allowed_providers: prelude.allowed_providers,
         peer_ip: prelude.peer_ip,
         req_id,
         start_time,
@@ -911,16 +922,31 @@ pub(crate) async fn handle_count_tokens(
         .route(&mut routing_request)
         .map_err(|e| RequestError::RoutingError(e.to_string()))?;
 
-    // Re-check the resolved model: routing can remap the inbound model to one the
-    // key forbids (defense in depth alongside the inbound check above).
-    if let Some(axum::Extension(vk)) = &vk_ctx {
-        enforce_allowed_models(vk.allowed_models.as_deref(), &decision.model_name)?;
-    }
-
     debug!(
         "🧮 Routed count_tokens: {} → {} ({})",
         model, decision.model_name, decision.route_type
     );
+
+    // count_tokens hits a real provider (credentials + cost), so it must honour
+    // the virtual-key scopes exactly like dispatch. Route through the shared
+    // resolver so `allowed_models` is enforced on the resolved model AND the
+    // mappings are filtered by `allowed_providers` (clean 403 if the scope leaves
+    // no provider), instead of touching `[[models]]` / pass-through mappings
+    // directly and bypassing the provider scope.
+    let allowed_models = vk_ctx
+        .as_ref()
+        .and_then(|axum::Extension(vk)| vk.allowed_models.clone());
+    let allowed_providers = vk_ctx
+        .as_ref()
+        .map(|axum::Extension(vk)| vk.allowed_providers.clone())
+        .unwrap_or_default();
+    let sorted_mappings = super::helpers::resolve_provider_mappings(
+        &inner,
+        &HeaderMap::new(),
+        &decision,
+        allowed_models.as_deref(),
+        &allowed_providers,
+    )?;
 
     // Deserialize the full count_tokens request (consumes the JSON value — no clone).
     use crate::models::CountTokensRequest;
@@ -928,54 +954,32 @@ pub(crate) async fn handle_count_tokens(
         RequestError::ParseError(format!("Invalid count_tokens request format: {}", e))
     })?;
 
-    // Try model mappings with fallback (1:N mapping)
-    if let Some(model_config) = inner.find_model(&decision.model_name) {
-        let mut sorted_mappings = model_config.mappings.clone();
-        sorted_mappings.sort_by_key(|m| m.priority);
+    for mapping in &sorted_mappings {
+        let Some(provider) = inner.provider_registry.provider(&mapping.provider) else {
+            continue;
+        };
 
-        for mapping in &sorted_mappings {
-            let Some(provider) = inner.provider_registry.provider(&mapping.provider) else {
+        let mut req = count_request.clone();
+        req.model = mapping.actual_model.clone();
+
+        match provider.count_tokens(req).await {
+            Ok(response) => return Ok(Json(response).into_response()),
+            Err(e) => {
+                debug!("Provider {} count_tokens failed: {}", mapping.provider, e);
                 continue;
-            };
-
-            let mut req = count_request.clone();
-            req.model = mapping.actual_model.clone();
-
-            match provider.count_tokens(req).await {
-                Ok(response) => return Ok(Json(response).into_response()),
-                Err(e) => {
-                    debug!("Provider {} count_tokens failed: {}", mapping.provider, e);
-                    continue;
-                }
             }
         }
-
-        Err(RequestError::ProviderUpstream {
-            provider: "all".to_string(),
-            status: 502,
-            body: Some(format!(
-                "All {} provider mappings failed for token counting: {}",
-                sorted_mappings.len(),
-                decision.model_name
-            )),
-        })
-    } else if let Ok(provider) = inner
-        .provider_registry
-        .provider_for_model(&decision.model_name)
-    {
-        let mut req = count_request.clone();
-        req.model = decision.model_name.clone();
-        let response = provider
-            .count_tokens(req)
-            .await
-            .map_err(RequestError::from)?;
-        Ok(Json(response).into_response())
-    } else {
-        Err(RequestError::RoutingError(format!(
-            "No model mapping or provider found for token counting: {}",
-            decision.model_name
-        )))
     }
+
+    Err(RequestError::ProviderUpstream {
+        provider: "all".to_string(),
+        status: 502,
+        body: Some(format!(
+            "All {} provider mappings failed for token counting: {}",
+            sorted_mappings.len(),
+            decision.model_name
+        )),
+    })
 }
 
 /// Evaluates the policy engine if configured. Returns `None` when no policies
@@ -1068,5 +1072,63 @@ mod allowed_models_tests {
         assert!(!msg.contains("claude-haiku-4-5"));
         assert!(!msg.contains("claude-opus-4-8"));
         assert!(!msg.contains("gpt-5.5"));
+    }
+
+    #[tokio::test]
+    async fn count_tokens_rejects_provider_outside_key_scope() {
+        // Model "alpha" is served only by provider "anthropic"; a key scoped to a
+        // provider with no mapping must get a 403 from count_tokens BEFORE any
+        // provider is contacted (count_tokens hits a real provider — cost/creds).
+        let toml = r#"
+[server]
+host = "127.0.0.1"
+port = 18095
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "anthropic"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "alpha"
+"#;
+        let config = crate::cli::AppConfig::from_content(toml, "count_tokens_scope_test")
+            .expect("config parses");
+        // Empty registry: the 403 fires before any provider lookup/call.
+        let state =
+            crate::server::test_app_state(config, crate::providers::ProviderRegistry::new());
+
+        let vk = crate::auth::virtual_keys::VirtualKeyContext {
+            key_id: uuid::Uuid::new_v4(),
+            tenant_id: "t".to_string(),
+            name: "scoped".to_string(),
+            budget_usd: None,
+            rate_limit_rps: None,
+            allowed_models: None,
+            allowed_providers: vec!["gemini".to_string()],
+        };
+        let body = serde_json::json!({ "model": "alpha", "messages": [] });
+
+        let result = super::handle_count_tokens(
+            axum::extract::State(state),
+            Some(axum::Extension(vk)),
+            axum::Json(body),
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(RequestError::Forbidden(_))),
+            "count_tokens must 403 when the key's provider scope excludes every mapping"
+        );
     }
 }

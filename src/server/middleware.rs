@@ -233,6 +233,7 @@ fn resolve_virtual_key(
         budget_usd: record.budget_usd,
         rate_limit_rps: record.rate_limit_rps,
         allowed_models: record.allowed_models,
+        allowed_providers: record.allowed_providers,
     })
 }
 

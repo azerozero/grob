@@ -89,7 +89,10 @@ async fn dispatch_action(
         }
 
         // ── grob/keys/* ──
-        Action::Keys(KeysAction::Create { name }) => keys_ns::create(state, caller, name).await,
+        Action::Keys(KeysAction::Create {
+            name,
+            allowed_providers,
+        }) => keys_ns::create(state, caller, name, allowed_providers.clone()).await,
         Action::Keys(KeysAction::List) => {
             let r = keys_ns::list(state, caller).await?;
             to_json(r)

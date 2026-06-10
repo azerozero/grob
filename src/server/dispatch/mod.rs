@@ -44,6 +44,9 @@ pub(crate) struct DispatchContext<'a> {
     /// Virtual-key model scope. When non-empty, the resolved model must be in
     /// this list; `None`/empty means the key is unscoped. Enforced post-routing.
     pub allowed_models: Option<Vec<String>>,
+    /// Virtual-key provider scope. When non-empty, only mappings whose provider
+    /// is in this list survive resolution; empty means the key is unscoped.
+    pub allowed_providers: Vec<String>,
     /// Client IP for audit logging.
     pub peer_ip: String,
     pub req_id: &'a str,
@@ -392,6 +395,7 @@ pub(crate) async fn dispatch(
         ctx.headers,
         &decision,
         ctx.allowed_models.as_deref(),
+        &ctx.allowed_providers,
     )?;
 
     // ── Step 4.5: Tool layer (aliasing, injection, capability gating) ──
@@ -896,76 +900,14 @@ mod tests {
     }
 
     /// Builds a minimal real [`AppState`] with a mock provider registered as
-    /// "mock". Uses `build_recorder().handle()` so no global Prometheus recorder
-    /// is installed (no process-global singleton contention).
+    /// "mock", delegating to the shared [`crate::server::test_app_state`] builder.
     fn test_app_state(
         config: crate::cli::AppConfig,
         called: Arc<std::sync::atomic::AtomicBool>,
     ) -> Arc<AppState> {
         let mut registry = crate::providers::ProviderRegistry::new();
         registry.insert_provider_for_test("mock", Arc::new(CountingProvider { called }));
-        let router = crate::routing::classify::Router::new(config.clone());
-        let reloadable = Arc::new(ReloadableState::new(
-            config.clone(),
-            router,
-            Arc::new(registry),
-        ));
-
-        let home = tempfile::tempdir().expect("tempdir");
-        let grob_store = Arc::new(
-            crate::storage::GrobStore::open(&home.path().join("grob.db")).expect("grob store"),
-        );
-        let token_store =
-            crate::auth::TokenStore::with_store(grob_store.clone()).expect("token store");
-        // Keep the storage dir alive for the process; the test is short-lived.
-        std::mem::forget(home);
-
-        let message_tracer: Arc<dyn crate::traits::Tracer> = Arc::new(
-            crate::shared::message_tracing::MessageTracer::new(config.server.tracing.clone()),
-        );
-        let spend_tracker: Box<dyn crate::traits::SpendTracking> = Box::new(
-            crate::features::token_pricing::spend::SpendTracker::with_store(grob_store.clone()),
-        );
-        let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
-        let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-            .build_recorder()
-            .handle();
-
-        Arc::new(AppState {
-            inner: std::sync::RwLock::new(reloadable),
-            token_store,
-            grob_store,
-            config_source: crate::cli::ConfigSource::File(std::path::PathBuf::from("test.toml")),
-            active_requests: std::sync::atomic::AtomicU64::new(0),
-            started_at: chrono::Utc::now(),
-            actual_oauth_callback_port: std::sync::atomic::AtomicU16::new(0),
-            event_bus: crate::features::watch::EventBus::new(),
-            log_exporter: None,
-            #[cfg(feature = "mcp")]
-            grob_hint: std::sync::Mutex::new(None),
-            #[cfg(feature = "policies")]
-            hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-            observability: crate::server::ObservabilityState {
-                message_tracer,
-                metrics_handle,
-                spend_tracker: tokio::sync::Mutex::new(spend_tracker),
-                pricing_table,
-            },
-            security: crate::server::SecurityState {
-                jwt_validator: None,
-                rate_limiter: None,
-                dlp_sessions: None,
-                circuit_breakers: None,
-                audit_log: None,
-                response_cache: None,
-                tap_sender: None,
-                provider_scorer: None,
-                #[cfg(feature = "mcp")]
-                mcp: None,
-                tool_layer: None,
-                tool_spike_detector: None,
-            },
-        })
+        crate::server::test_app_state(config, registry)
     }
 
     /// dispatch() must reject a scoped key when routing remaps the inbound model
@@ -1025,6 +967,7 @@ actual_model = "beta"
             is_streaming: false,
             tenant_id: None,
             allowed_models: Some(vec!["alpha".to_string()]),
+            allowed_providers: Vec::new(),
             peer_ip: "127.0.0.1".to_string(),
             req_id: "test-req",
             start_time: std::time::Instant::now(),

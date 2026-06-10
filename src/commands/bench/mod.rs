@@ -178,6 +178,7 @@ pub async fn cmd_bench(
             budget_usd: None,
             rate_limit_rps: None,
             allowed_models: None,
+            allowed_providers: Vec::new(),
             created_at: now,
             expires_at: Some(now + chrono::Duration::hours(1)),
             revoked: false,

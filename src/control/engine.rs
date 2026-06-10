@@ -104,6 +104,9 @@ pub enum KeysAction {
     Create {
         /// Human-readable key label.
         name: String,
+        /// Provider allowlist for the key (empty = unrestricted).
+        #[serde(default)]
+        allowed_providers: Vec<String>,
     },
     /// Lists all virtual keys.
     List,
@@ -370,6 +373,15 @@ pub fn parse_method(method: &str, params: Option<&serde_json::Value>) -> Option<
                 .and_then(|v| v.as_str())
                 .unwrap_or_default()
                 .to_string(),
+            allowed_providers: p
+                .get("allowed_providers")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default(),
         }),
         "grob/keys/list" => Action::Keys(KeysAction::List),
         "grob/keys/revoke" => Action::Keys(KeysAction::Revoke {
@@ -518,10 +530,16 @@ mod tests {
 
     #[test]
     fn parse_keys_create_extracts_name() {
-        let params = serde_json::json!({ "name": "my-key" });
+        let params = serde_json::json!({ "name": "my-key", "allowed_providers": ["anthropic"] });
         let action = parse_method("grob/keys/create", Some(&params)).unwrap();
         match action {
-            Action::Keys(KeysAction::Create { name }) => assert_eq!(name, "my-key"),
+            Action::Keys(KeysAction::Create {
+                name,
+                allowed_providers,
+            }) => {
+                assert_eq!(name, "my-key");
+                assert_eq!(allowed_providers, vec!["anthropic".to_string()]);
+            }
             _ => panic!("expected Keys::Create"),
         }
     }
@@ -625,11 +643,18 @@ mod tests {
     fn action_serde_roundtrip() {
         let action = Action::Keys(KeysAction::Create {
             name: "test".into(),
+            allowed_providers: vec!["anthropic".to_string()],
         });
         let json = serde_json::to_string(&action).unwrap();
         let parsed: Action = serde_json::from_str(&json).unwrap();
         match parsed {
-            Action::Keys(KeysAction::Create { name }) => assert_eq!(name, "test"),
+            Action::Keys(KeysAction::Create {
+                name,
+                allowed_providers,
+            }) => {
+                assert_eq!(name, "test");
+                assert_eq!(allowed_providers, vec!["anthropic".to_string()]);
+            }
             _ => panic!("roundtrip failed"),
         }
     }

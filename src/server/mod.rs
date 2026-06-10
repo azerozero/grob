@@ -221,6 +221,81 @@ impl AppState {
     }
 }
 
+/// Builds a minimal real [`AppState`] for tests.
+///
+/// Uses `build_recorder().handle()` so no global Prometheus recorder is installed
+/// (no process-global singleton contention), an empty in-memory provider registry
+/// unless one is supplied, and a throwaway `GrobStore` in a leaked temp dir. Lets
+/// unit tests exercise real handlers (`dispatch`, `handle_count_tokens`, RPC key
+/// ops) without spinning up the HTTP server.
+#[cfg(test)]
+pub(crate) fn test_app_state(
+    config: AppConfig,
+    registry: crate::providers::ProviderRegistry,
+) -> Arc<AppState> {
+    let router = Router::new(config.clone());
+    let reloadable = Arc::new(ReloadableState::new(
+        config.clone(),
+        router,
+        Arc::new(registry),
+    ));
+
+    let home = tempfile::tempdir().expect("tempdir");
+    let grob_store = Arc::new(
+        crate::storage::GrobStore::open(&home.path().join("grob.db")).expect("grob store"),
+    );
+    let token_store = crate::auth::TokenStore::with_store(grob_store.clone()).expect("token store");
+    // Keep the storage dir alive for the process; tests are short-lived.
+    std::mem::forget(home);
+
+    let message_tracer: Arc<dyn traits::Tracer> = Arc::new(
+        crate::shared::message_tracing::MessageTracer::new(config.server.tracing.clone()),
+    );
+    let spend_tracker: Box<dyn traits::SpendTracking> = Box::new(
+        crate::features::token_pricing::spend::SpendTracker::with_store(grob_store.clone()),
+    );
+    let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
+    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+
+    Arc::new(AppState {
+        inner: std::sync::RwLock::new(reloadable),
+        token_store,
+        grob_store,
+        config_source: crate::cli::ConfigSource::File(std::path::PathBuf::from("test.toml")),
+        active_requests: std::sync::atomic::AtomicU64::new(0),
+        started_at: chrono::Utc::now(),
+        actual_oauth_callback_port: std::sync::atomic::AtomicU16::new(0),
+        event_bus: crate::features::watch::EventBus::new(),
+        log_exporter: None,
+        #[cfg(feature = "mcp")]
+        grob_hint: std::sync::Mutex::new(None),
+        #[cfg(feature = "policies")]
+        hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        observability: ObservabilityState {
+            message_tracer,
+            metrics_handle,
+            spend_tracker: tokio::sync::Mutex::new(spend_tracker),
+            pricing_table,
+        },
+        security: SecurityState {
+            jwt_validator: None,
+            rate_limiter: None,
+            dlp_sessions: None,
+            circuit_breakers: None,
+            audit_log: None,
+            response_cache: None,
+            tap_sender: None,
+            provider_scorer: None,
+            #[cfg(feature = "mcp")]
+            mcp: None,
+            tool_layer: None,
+            tool_spike_detector: None,
+        },
+    })
+}
+
 /// Start the HTTP server with graceful shutdown support.
 /// When the `shutdown_signal` future completes, the server stops accepting new
 /// connections and drains in-flight requests (up to 30 s).

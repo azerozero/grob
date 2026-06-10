@@ -275,6 +275,7 @@ mod tests {
             budget_usd: Some(50.0),
             rate_limit_rps: Some(10),
             allowed_models: Some(vec!["claude-sonnet".to_string()]),
+            allowed_providers: vec!["anthropic".to_string()],
             created_at: Utc::now(),
             expires_at: None,
             revoked: false,
@@ -288,6 +289,7 @@ mod tests {
         assert_eq!(retrieved.name, "test-key");
         assert_eq!(retrieved.tenant_id, "tenant-1");
         assert_eq!(retrieved.budget_usd, Some(50.0));
+        assert_eq!(retrieved.allowed_providers, vec!["anthropic".to_string()]);
     }
 
     #[test]
@@ -307,6 +309,7 @@ mod tests {
                 budget_usd: None,
                 rate_limit_rps: None,
                 allowed_models: None,
+                allowed_providers: Vec::new(),
                 created_at: Utc::now(),
                 expires_at: None,
                 revoked: false,
@@ -336,6 +339,7 @@ mod tests {
             budget_usd: None,
             rate_limit_rps: None,
             allowed_models: None,
+            allowed_providers: Vec::new(),
             created_at: Utc::now(),
             expires_at: None,
             revoked: false,
@@ -370,6 +374,7 @@ mod tests {
             budget_usd: None,
             rate_limit_rps: None,
             allowed_models: None,
+            allowed_providers: Vec::new(),
             created_at: Utc::now(),
             expires_at: None,
             revoked: false,

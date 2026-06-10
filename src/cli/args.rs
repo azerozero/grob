@@ -361,6 +361,9 @@ pub enum KeyAction {
         /// Comma-separated list of allowed model names (optional)
         #[arg(short, long, value_delimiter = ',')]
         allowed_models: Option<Vec<String>>,
+        /// Comma-separated list of allowed provider names (optional). Empty = any.
+        #[arg(long, value_delimiter = ',')]
+        allowed_providers: Vec<String>,
         /// Key expiration in days from now (optional)
         #[arg(short, long)]
         expires: Option<u64>,

@@ -17,22 +17,51 @@ pub(crate) fn resolve_provider_mappings(
     headers: &HeaderMap,
     decision: &crate::models::RouteDecision,
     allowed_models: Option<&[String]>,
+    allowed_providers: &[String],
 ) -> Result<Vec<crate::cli::ModelMapping>, RequestError> {
     // Tier-based provider selection (opt-in via [[tiers]] config). A non-empty
     // result short-circuits; `None` means "fall through" exactly as before. The
     // tier path enforces the virtual-key scope on its effective target model
     // internally (before any [[models]] lookup), so it can return `Err`.
-    if let Some(mappings) = resolve_tier_mappings(inner, decision, allowed_models)? {
+    let mappings = if let Some(mappings) = resolve_tier_mappings(inner, decision, allowed_models)? {
+        mappings
+    } else {
+        // No tier override: the effective logical model is the routed model.
+        super::handlers::enforce_allowed_models(allowed_models, &decision.model_name)?;
+        if let Some(model_config) = inner.find_model(&decision.model_name) {
+            resolve_explicit_model_mappings(inner, headers, decision, model_config)?
+        } else {
+            resolve_pass_through_mappings(inner, decision)?
+        }
+    };
+
+    // Virtual-key provider scope: keep only mappings whose provider is permitted.
+    filter_by_allowed_providers(mappings, allowed_providers)
+}
+
+/// Restricts mappings to a virtual key's `allowed_providers` scope (intersection).
+///
+/// An empty scope disables the filter (backward compatible). When the scope
+/// removes every candidate, returns a non-leaking [`RequestError::Forbidden`]
+/// — never a fallthrough to a provider the key may not use, and the message does
+/// not disclose the permitted set.
+fn filter_by_allowed_providers(
+    mappings: Vec<crate::cli::ModelMapping>,
+    allowed_providers: &[String],
+) -> Result<Vec<crate::cli::ModelMapping>, RequestError> {
+    if allowed_providers.is_empty() {
         return Ok(mappings);
     }
-
-    // No tier override: the effective logical model is the routed model.
-    super::handlers::enforce_allowed_models(allowed_models, &decision.model_name)?;
-    if let Some(model_config) = inner.find_model(&decision.model_name) {
-        resolve_explicit_model_mappings(inner, headers, decision, model_config)
-    } else {
-        resolve_pass_through_mappings(inner, decision)
+    let filtered: Vec<crate::cli::ModelMapping> = mappings
+        .into_iter()
+        .filter(|m| allowed_providers.iter().any(|p| p == &m.provider))
+        .collect();
+    if filtered.is_empty() {
+        return Err(RequestError::Forbidden(
+            "no permitted provider for this key".to_string(),
+        ));
     }
+    Ok(filtered)
 }
 
 /// Resolves provider mappings from a matched complexity tier, if any.
@@ -433,7 +462,7 @@ priority = 1
         );
 
         let mappings =
-            resolve_provider_mappings(&state, &headers, &dec, None).expect("should resolve");
+            resolve_provider_mappings(&state, &headers, &dec, None, &[]).expect("should resolve");
 
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].provider, "openrouter");
@@ -482,7 +511,7 @@ priority = 1
         );
 
         let mappings =
-            resolve_provider_mappings(&state, &headers, &dec, None).expect("should resolve");
+            resolve_provider_mappings(&state, &headers, &dec, None, &[]).expect("should resolve");
 
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].provider, "chatgpt-codex");
@@ -534,13 +563,13 @@ priority = 1
         // Routed model "alpha" is allowed, but the tier serves "beta" → Forbidden,
         // before any provider mapping is used.
         let allowed = vec!["alpha".to_string()];
-        let err = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed))
+        let err = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed), &[])
             .expect_err("tier override to forbidden 'beta' must be rejected");
         assert!(matches!(err, RequestError::Forbidden(_)));
 
         // A key that allows the tier target resolves the mapping normally.
         let allowed_beta = vec!["beta".to_string()];
-        let mappings = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed_beta))
+        let mappings = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed_beta), &[])
             .expect("allowed tier target should resolve");
         assert_eq!(mappings[0].actual_model, "beta-actual");
     }
@@ -572,7 +601,7 @@ priority = 1
         let dec = decision("beta", None);
 
         let allowed = vec!["alpha".to_string()];
-        let err = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed))
+        let err = resolve_provider_mappings(&state, &headers, &dec, Some(&allowed), &[])
             .expect_err("routed model 'beta' outside the key scope must be rejected");
         assert!(matches!(err, RequestError::Forbidden(_)));
     }
@@ -601,7 +630,134 @@ priority = 1
         let state = make_state(toml);
         let headers = HeaderMap::new();
         let dec = decision("alpha", None);
-        assert!(resolve_provider_mappings(&state, &headers, &dec, None).is_ok());
+        assert!(resolve_provider_mappings(&state, &headers, &dec, None, &[]).is_ok());
+    }
+
+    // ── SLICE 2: virtual-key provider scope (allowed_providers) ──
+
+    /// Config where model "alpha" maps to two providers (anthropic + openrouter).
+    const TWO_PROVIDER_TOML: &str = r#"
+[router]
+default = "alpha"
+
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+models = ["alpha"]
+enabled = true
+
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+models = ["alpha"]
+enabled = true
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-x"
+priority = 1
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "or/alpha"
+priority = 2
+"#;
+
+    #[test]
+    fn provider_scope_keeps_only_the_allowed_provider() {
+        let state = make_state(TWO_PROVIDER_TOML);
+        let headers = HeaderMap::new();
+        let dec = decision("alpha", None);
+
+        // Key scoped to "anthropic" → the openrouter mapping is dropped.
+        let allowed = vec!["anthropic".to_string()];
+        let mappings = resolve_provider_mappings(&state, &headers, &dec, None, &allowed)
+            .expect("the anthropic mapping survives the scope");
+        assert_eq!(mappings.len(), 1, "only the permitted provider remains");
+        assert_eq!(mappings[0].provider, "anthropic");
+    }
+
+    #[test]
+    fn provider_scope_without_an_available_mapping_errors_cleanly() {
+        let state = make_state(TWO_PROVIDER_TOML);
+        let headers = HeaderMap::new();
+        let dec = decision("alpha", None);
+
+        // Key scoped to a provider that serves no mapping for this model → a
+        // clean 403 instead of falling through to a non-permitted provider.
+        let allowed = vec!["gemini".to_string()];
+        let err = resolve_provider_mappings(&state, &headers, &dec, None, &allowed)
+            .expect_err("no permitted provider should yield an error");
+        let RequestError::Forbidden(msg) = err else {
+            panic!("expected Forbidden, got {err:?}");
+        };
+        // Non-leaking: the message discloses neither the permitted nor the
+        // available providers.
+        assert!(!msg.contains("anthropic"));
+        assert!(!msg.contains("openrouter"));
+        assert!(!msg.contains("gemini"));
+    }
+
+    #[test]
+    fn no_provider_scope_keeps_all_mappings() {
+        let state = make_state(TWO_PROVIDER_TOML);
+        let headers = HeaderMap::new();
+        let dec = decision("alpha", None);
+
+        // Empty scope = unrestricted (backward compatible): both mappings remain.
+        let mappings = resolve_provider_mappings(&state, &headers, &dec, None, &[])
+            .expect("unscoped key resolves all mappings");
+        assert_eq!(mappings.len(), 2);
+    }
+
+    #[test]
+    fn provider_scope_applies_to_the_tier_path() {
+        // The filter must also constrain tier-resolved mappings, not just the
+        // [[models]] path.
+        let toml = r#"
+[router]
+default = "alpha"
+
+[[providers]]
+name = "anthropic"
+provider_type = "anthropic"
+models = ["alpha"]
+enabled = true
+
+[[providers]]
+name = "openrouter"
+provider_type = "openrouter"
+models = ["alpha"]
+enabled = true
+
+[[tiers]]
+name = "complex"
+providers = ["anthropic", "openrouter"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+provider = "anthropic"
+actual_model = "claude-x"
+priority = 1
+[[models.mappings]]
+provider = "openrouter"
+actual_model = "or/alpha"
+priority = 2
+"#;
+        let state = make_state(toml);
+        let headers = HeaderMap::new();
+        let dec = decision(
+            "alpha",
+            Some(crate::routing::classify::ComplexityTier::Complex),
+        );
+
+        let allowed = vec!["openrouter".to_string()];
+        let mappings = resolve_provider_mappings(&state, &headers, &dec, None, &allowed)
+            .expect("the openrouter tier mapping survives the scope");
+        assert!(mappings.iter().all(|m| m.provider == "openrouter"));
+        assert!(!mappings.is_empty());
     }
 
     // Cas 2: tier match + pas de [[models]] mapping mais provider liste le model → used as-is.
@@ -629,7 +785,7 @@ providers = ["anthropic"]
         );
 
         let mappings =
-            resolve_provider_mappings(&state, &headers, &dec, None).expect("should resolve");
+            resolve_provider_mappings(&state, &headers, &dec, None, &[]).expect("should resolve");
 
         assert_eq!(mappings.len(), 1);
         assert_eq!(mappings[0].provider, "anthropic");
@@ -677,7 +833,7 @@ priority = 1
 
         // deepinfra is in the tier but doesn't know "claude-sonnet-4-6" and has no mapping.
         // The tier loop produces an empty list → fallback to [[models]] which gives anthropic.
-        let mappings = resolve_provider_mappings(&state, &headers, &dec, None)
+        let mappings = resolve_provider_mappings(&state, &headers, &dec, None, &[])
             .expect("should fallback and resolve");
 
         assert_eq!(mappings.len(), 1);
