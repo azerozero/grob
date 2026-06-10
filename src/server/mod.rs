@@ -561,6 +561,28 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
         }
     };
 
+    // HTTP request tracing (tower-http), added outermost so the span covers the
+    // whole middleware stack. It records ONLY the method and path — never the
+    // `Authorization` header or request/response bodies (secrets / PII) — and
+    // skips the probe and metrics endpoints to avoid scrape noise. The span is
+    // quiet by default (DEBUG lifecycle events) but is exported by the OTel layer
+    // when the `otel` feature is enabled.
+    let app = app.layer(
+        tower_http::trace::TraceLayer::new_for_http().make_span_with(
+            |request: &axum::http::Request<axum::body::Body>| {
+                let path = request.uri().path();
+                if matches!(path, "/metrics" | "/health" | "/live" | "/ready") {
+                    return tracing::Span::none();
+                }
+                tracing::info_span!(
+                    "http_request",
+                    method = %request.method(),
+                    path = %path,
+                )
+            },
+        ),
+    );
+
     app.with_state(state)
 }
 
