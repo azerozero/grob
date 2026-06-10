@@ -1430,4 +1430,153 @@ provider = "{provider}"
             "openrouter must NOT be called once its budget policy blocks"
         );
     }
+
+    // ── SLICE 4: HIT on the non-streaming dispatch path ──
+
+    /// Mock provider returning a non-streaming response that contains a `Bash`
+    /// tool_use block.
+    #[cfg(feature = "policies")]
+    struct ToolUseProvider;
+
+    #[cfg(feature = "policies")]
+    #[async_trait::async_trait]
+    impl crate::providers::LlmProvider for ToolUseProvider {
+        async fn send_message(
+            &self,
+            _request: CanonicalRequest,
+        ) -> Result<ProviderResponse, crate::providers::error::ProviderError> {
+            Ok(serde_json::from_value(serde_json::json!({
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    { "type": "text", "text": "ok" },
+                    { "type": "tool_use", "id": "tu_1", "name": "Bash", "input": { "command": "ls" } }
+                ],
+                "model": "alpha",
+                "stop_reason": "tool_use",
+                "usage": { "input_tokens": 1, "output_tokens": 1 }
+            }))
+            .unwrap())
+        }
+
+        async fn send_message_stream(
+            &self,
+            _request: CanonicalRequest,
+        ) -> Result<crate::providers::StreamResponse, crate::providers::error::ProviderError>
+        {
+            Err(crate::providers::error::ProviderError::ApiError {
+                status: 400,
+                message: "no stream".to_string(),
+            })
+        }
+
+        async fn count_tokens(
+            &self,
+            _request: crate::models::CountTokensRequest,
+        ) -> Result<crate::models::CountTokensResponse, crate::providers::error::ProviderError>
+        {
+            Err(crate::providers::error::ProviderError::ApiError {
+                status: 400,
+                message: "no count".to_string(),
+            })
+        }
+
+        fn supports_model(&self, _model: &str) -> bool {
+            true
+        }
+    }
+
+    // Real dispatch(): a non-stream response carrying a denied tool_use must come
+    // back with that tool_use STRIPPED. Red if the HIT call is removed from
+    // dispatch_non_streaming.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn dispatch_non_stream_hit_deny_strips_tool_use_from_response() {
+        use crate::models::{ContentBlock, KnownContentBlock};
+
+        let toml = r#"
+[server]
+host = "127.0.0.1"
+port = 18091
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "alpha"
+"#;
+        let config =
+            crate::cli::AppConfig::from_content(toml, "hit_non_stream_test").expect("config");
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test("mock", Arc::new(ToolUseProvider));
+        let state = crate::server::test_app_state(config, registry);
+
+        // Resolved HIT policy denying Bash (as the handler would attach it).
+        let hit: crate::features::policies::hit::HitOverride =
+            serde_json::from_value(serde_json::json!({ "deny": ["Bash"] })).unwrap();
+        let resolved = crate::features::policies::resolved::ResolvedPolicy {
+            matched: true,
+            hit: Some(hit),
+            ..Default::default()
+        };
+
+        let inner = state.snapshot();
+        let dlp: Option<Arc<DlpEngine>> = None;
+        let headers = HeaderMap::new();
+        let ctx = DispatchContext {
+            state: &state,
+            inner: &inner,
+            dlp: &dlp,
+            model: "alpha".to_string(),
+            is_streaming: false,
+            tenant_id: None,
+            allowed_models: None,
+            allowed_providers: Vec::new(),
+            peer_ip: "127.0.0.1".to_string(),
+            req_id: "req-dispatch-hit",
+            start_time: std::time::Instant::now(),
+            headers: &headers,
+            trace_id: None,
+            audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resolved_policy: Some(resolved),
+        };
+        let mut request: CanonicalRequest = serde_json::from_value(serde_json::json!({
+            "model": "alpha",
+            "max_tokens": 16,
+            "messages": [{ "role": "user", "content": "go" }]
+        }))
+        .unwrap();
+
+        let result = dispatch(&ctx, &mut request).await.expect("dispatch ok");
+        let DispatchResult::Complete { response, .. } = result else {
+            panic!("expected a Complete result");
+        };
+
+        let has_tool_use = response
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Known(KnownContentBlock::ToolUse { .. })));
+        assert!(
+            !has_tool_use,
+            "the denied tool_use must be stripped from the non-stream response"
+        );
+        // The text block survives.
+        assert!(response
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Known(KnownContentBlock::Text { .. }))));
+    }
 }

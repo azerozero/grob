@@ -475,6 +475,13 @@ pub(super) async fn dispatch_non_streaming(
                 ctx.sanitize_output(&mut response);
                 response.model = attempt.original_model.to_string();
 
+                // HIT authorization: inspect tool_use blocks and strip any the
+                // policy denies (the streaming path does this via HitStream).
+                // Runs after DLP and before caching so a denied tool is neither
+                // returned nor cached.
+                #[cfg(feature = "policies")]
+                authorize_non_streaming_response(ctx, &mut response).await;
+
                 let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
                 let outcome = telemetry::DispatchOutcome {
                     mapping: attempt.mapping,
@@ -667,6 +674,159 @@ fn wrap_stream_with_middleware(
     } else {
         stream
     }
+}
+
+/// Maximum time the non-streaming path waits for a human HIT approval before
+/// denying the tool_use.
+///
+/// Bounded so a synchronous request can never block indefinitely (DoS); a
+/// streaming request keeps the connection open via `HitStream` instead.
+#[cfg(feature = "policies")]
+const HIT_APPROVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Applies HIT authorization to a non-streaming response *in place*, reusing the
+/// stream's `evaluate_tool_use` decision logic and signed-receipt mechanism.
+///
+/// Each `tool_use` block is evaluated against `policy`; denied or timed-out tools
+/// are STRIPPED from `response.content`, approved ones kept. Approvals
+/// (Simple/MultiSig/Quorum) wait on the same channel the `/api/hit/approve`
+/// endpoint resolves, but bounded by `approval_timeout` — a timeout denies rather
+/// than blocking forever. Returns the signed receipts (also written to the audit
+/// log) so callers/tests can observe the decisions.
+#[cfg(feature = "policies")]
+async fn apply_hit_to_response(
+    response: &mut crate::providers::ProviderResponse,
+    policy: &crate::features::policies::hit::HitOverride,
+    request_id: &str,
+    hit_pending: &Option<Arc<crate::features::policies::stream::HitPendingApprovals>>,
+    event_bus: &Option<crate::features::watch::EventBus>,
+    audit_log: &Option<Arc<crate::security::AuditLog>>,
+    approval_timeout: std::time::Duration,
+) -> Vec<crate::features::policies::hit_auth::HitAuthorization> {
+    use crate::features::policies::hit::{evaluate_tool_use, HitDecision, ToolUseInfo};
+    use crate::features::policies::hit_auth::{AuthDecision, AuthMethod};
+    use crate::features::policies::stream::approval::setup_approval;
+    use crate::features::policies::stream::{write_hit_receipt, ReceiptContext};
+    use crate::models::{ContentBlock, KnownContentBlock};
+
+    let mut receipts = Vec::new();
+    let mut last_hash: Option<String> = None;
+    let original = std::mem::take(&mut response.content);
+    let mut kept = Vec::with_capacity(original.len());
+
+    for block in original {
+        let tool = match &block {
+            ContentBlock::Known(KnownContentBlock::ToolUse { name, input, .. }) => {
+                Some((name.clone(), input.to_string()))
+            }
+            _ => None,
+        };
+        let Some((name, input_preview)) = tool else {
+            kept.push(block);
+            continue;
+        };
+        let info = ToolUseInfo {
+            name: name.clone(),
+            input_preview: input_preview.clone(),
+        };
+
+        // Mirror the streaming receipt mapping exactly (see `apply_hit_decision`
+        // / `apply_require_approval` in `policies::stream`).
+        let (approve, decision, method, signer): (bool, AuthDecision, AuthMethod, &str) =
+            match evaluate_tool_use(policy, &info) {
+                HitDecision::AutoApprove => (
+                    true,
+                    AuthDecision::Approve,
+                    AuthMethod::MachineKey,
+                    "policy",
+                ),
+                HitDecision::Deny => (false, AuthDecision::Deny, AuthMethod::MachineKey, "policy"),
+                HitDecision::RequireApproval if policy.auth_method == AuthMethod::MachineKey => (
+                    true,
+                    AuthDecision::Approve,
+                    AuthMethod::MachineKey,
+                    "machine_key",
+                ),
+                HitDecision::RequireApproval => {
+                    let rx = setup_approval(
+                        request_id,
+                        &name,
+                        &input_preview,
+                        policy,
+                        hit_pending,
+                        event_bus,
+                    );
+                    match tokio::time::timeout(approval_timeout, rx).await {
+                        Ok(Ok(true)) => (true, AuthDecision::Approve, policy.auth_method, "human"),
+                        Ok(Ok(false)) => (false, AuthDecision::Deny, policy.auth_method, "human"),
+                        // Channel dropped without a decision → deny (as streaming does).
+                        Ok(Err(_)) => (false, AuthDecision::Deny, policy.auth_method, "human"),
+                        // Bounded timeout → deny, and drop the now-orphaned pending entry.
+                        Err(_) => {
+                            if let Some(store) = hit_pending {
+                                if let Ok(mut map) = store.lock() {
+                                    map.remove(&format!("{request_id}:{name}"));
+                                }
+                            }
+                            (false, AuthDecision::Deny, policy.auth_method, "timeout")
+                        }
+                    }
+                }
+            };
+
+        receipts.push(write_hit_receipt(
+            &mut last_hash,
+            audit_log,
+            request_id,
+            ReceiptContext {
+                tool_name: &name,
+                tool_input: &input_preview,
+                decision,
+                auth_method: method,
+                signer,
+            },
+        ));
+
+        if approve {
+            kept.push(block);
+        } else {
+            metrics::counter!("grob_hit_denied_total").increment(1);
+            tracing::info!(
+                request_id = %request_id,
+                tool = %name,
+                "HIT: tool_use stripped from non-stream response"
+            );
+        }
+    }
+
+    response.content = kept;
+    receipts
+}
+
+/// HIT authorization for the non-streaming path.
+///
+/// Mirrors the streaming `wrap_stream_with_middleware` HIT layer: same
+/// `policy.hit` (read from `ctx.resolved_policy`), same signed receipts, same
+/// approval channel — only the unbounded `Paused` wait is replaced by a bounded
+/// timeout, since a synchronous request cannot stay open forever.
+#[cfg(feature = "policies")]
+async fn authorize_non_streaming_response(
+    ctx: &DispatchContext<'_>,
+    response: &mut crate::providers::ProviderResponse,
+) {
+    let Some(policy) = ctx.resolved_policy.as_ref().and_then(|p| p.hit.clone()) else {
+        return;
+    };
+    apply_hit_to_response(
+        response,
+        &policy,
+        ctx.req_id,
+        &Some(Arc::clone(&ctx.state.hit_pending)),
+        &Some(ctx.state.event_bus.clone()),
+        &ctx.state.security.audit_log,
+        HIT_APPROVAL_TIMEOUT,
+    )
+    .await;
 }
 
 /// Returns `true` when the log-export content mode requests encryption.
@@ -928,5 +1088,152 @@ mod tests {
         assert!(encryption_enabled(&ContentMode::Encrypted));
         assert!(!encryption_enabled(&ContentMode::Plaintext));
         assert!(!encryption_enabled(&ContentMode::None));
+    }
+
+    // ── SLICE 4: HIT on the non-streaming path ──
+
+    #[cfg(feature = "policies")]
+    fn response_with_tool_use(tool: &str) -> ProviderResponse {
+        serde_json::from_value(serde_json::json!({
+            "id": "msg_1",
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                { "type": "text", "text": "running it" },
+                { "type": "tool_use", "id": "tu_1", "name": tool, "input": { "command": "rm -rf /" } }
+            ],
+            "model": "alpha",
+            "stop_reason": "tool_use",
+            "usage": { "input_tokens": 5, "output_tokens": 3 }
+        }))
+        .expect("response")
+    }
+
+    #[cfg(feature = "policies")]
+    fn has_tool_use(response: &ProviderResponse) -> bool {
+        use crate::models::{ContentBlock, KnownContentBlock};
+        response
+            .content
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Known(KnownContentBlock::ToolUse { .. })))
+    }
+
+    #[cfg(feature = "policies")]
+    fn hit_policy(json: serde_json::Value) -> crate::features::policies::hit::HitOverride {
+        serde_json::from_value(json).expect("HitOverride")
+    }
+
+    // (1) Deny → the tool_use is actually stripped from the rendered response,
+    // and a signed receipt (consistent with the streaming path) is emitted.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn non_stream_hit_deny_strips_tool_use_and_signs_receipt() {
+        use crate::features::policies::hit_auth::{AuthDecision, AuthMethod};
+
+        let mut response = response_with_tool_use("Bash");
+        let policy = hit_policy(serde_json::json!({ "deny": ["Bash"] }));
+
+        let receipts = apply_hit_to_response(
+            &mut response,
+            &policy,
+            "req-deny",
+            &None,
+            &None,
+            &None,
+            std::time::Duration::from_millis(50),
+        )
+        .await;
+
+        // Tool stripped, the text block survives.
+        assert!(!has_tool_use(&response), "denied tool_use must be removed");
+        assert_eq!(response.content.len(), 1, "the text block is kept");
+
+        // Signed receipt mirrors the streaming policy-deny mapping.
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].decision, AuthDecision::Deny);
+        assert_eq!(receipts[0].auth_method, AuthMethod::MachineKey);
+        assert_eq!(receipts[0].signer, "policy");
+        assert_eq!(receipts[0].tool_name, "Bash");
+        assert!(receipts[0].verify(), "the HMAC receipt must verify");
+    }
+
+    // (2) RequireApproval with no human decision → the bounded timeout denies
+    // (strips) deterministically, NEVER blocking indefinitely.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn non_stream_hit_require_approval_times_out_to_deny() {
+        use crate::features::policies::hit_auth::AuthDecision;
+        use crate::features::policies::stream::HitPendingApprovals;
+
+        let mut response = response_with_tool_use("Bash");
+        // Empty policy → any tool defaults to RequireApproval, auth_method Prompt.
+        let policy = hit_policy(serde_json::json!({}));
+        // Real pending map so the approval sender is kept alive (forcing a timeout
+        // rather than an immediate channel-closed deny).
+        let pending_map: Arc<HitPendingApprovals> =
+            Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+        let pending: Option<Arc<HitPendingApprovals>> = Some(Arc::clone(&pending_map));
+        let bus = Some(crate::features::watch::EventBus::new());
+
+        let start = std::time::Instant::now();
+        let receipts = apply_hit_to_response(
+            &mut response,
+            &policy,
+            "req-timeout",
+            &pending,
+            &bus,
+            &None,
+            std::time::Duration::from_millis(60),
+        )
+        .await;
+        let elapsed = start.elapsed();
+
+        // Deterministic deny on timeout: tool stripped.
+        assert!(
+            !has_tool_use(&response),
+            "timed-out tool_use must be stripped"
+        );
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].decision, AuthDecision::Deny);
+        assert_eq!(receipts[0].signer, "timeout");
+        // Bounded: returns shortly after the timeout, never blocks forever.
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "approval wait must be bounded (was {elapsed:?})"
+        );
+        // The orphaned pending entry was cleaned up.
+        assert!(
+            pending_map.lock().unwrap().is_empty(),
+            "the timed-out approval entry must be removed"
+        );
+    }
+
+    // (3) Auto-approve → the tool_use is kept and an Approve receipt is signed.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn non_stream_hit_auto_approve_keeps_tool_use() {
+        use crate::features::policies::hit_auth::AuthDecision;
+
+        let mut response = response_with_tool_use("Read");
+        let policy = hit_policy(serde_json::json!({ "auto_approve": ["Read"] }));
+
+        let receipts = apply_hit_to_response(
+            &mut response,
+            &policy,
+            "req-approve",
+            &None,
+            &None,
+            &None,
+            std::time::Duration::from_millis(50),
+        )
+        .await;
+
+        assert!(
+            has_tool_use(&response),
+            "auto-approved tool_use must be kept"
+        );
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].decision, AuthDecision::Approve);
+        assert!(receipts[0].verify());
     }
 }

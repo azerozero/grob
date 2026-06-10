@@ -160,24 +160,29 @@ where
 // ── Receipt writing ───────────────────────────────────────────────────────────
 
 /// Decision context for a single `HitAuthorization` receipt.
-struct ReceiptContext<'a> {
-    tool_name: &'a str,
-    tool_input: &'a str,
-    decision: AuthDecision,
-    auth_method: AuthMethod,
-    signer: &'a str,
+///
+/// `pub(crate)` so the non-streaming dispatch path reuses the exact same signed
+/// receipt mechanism as the stream (no weaker/divergent authorization path).
+pub(crate) struct ReceiptContext<'a> {
+    pub(crate) tool_name: &'a str,
+    pub(crate) tool_input: &'a str,
+    pub(crate) decision: AuthDecision,
+    pub(crate) auth_method: AuthMethod,
+    pub(crate) signer: &'a str,
 }
 
 /// Creates a [`HitAuthorization`] and appends it to the audit chain.
 ///
 /// Chaining is maintained via `last_hit_hash` (SHA-256 of the previous receipt
 /// in this session). The audit log handles its own independent signing chain.
-fn write_hit_receipt(
+/// Returns the freshly-minted receipt so callers (e.g. the non-stream path) can
+/// observe / collect it; the streaming caller ignores the return.
+pub(crate) fn write_hit_receipt(
     last_hit_hash: &mut Option<String>,
     audit_log: &Option<Arc<crate::security::AuditLog>>,
     request_id: &str,
     ctx: ReceiptContext<'_>,
-) {
+) -> HitAuthorization {
     let auth = HitAuthorization::new(HitAuthParams {
         request_id: request_id.to_string(),
         tool_name: ctx.tool_name.to_string(),
@@ -192,7 +197,7 @@ fn write_hit_receipt(
     if let Some(ref log) = audit_log {
         use crate::security::audit_log::{AuditEntry, AuditEvent, Classification, RiskLevel};
         let Ok(receipt_json) = serde_json::to_string(&auth) else {
-            return;
+            return auth;
         };
         let entry = AuditEntry {
             timestamp: chrono::Utc::now(),
@@ -222,6 +227,8 @@ fn write_hit_receipt(
             tracing::warn!(error = %e, "HIT: failed to write receipt to audit log");
         }
     }
+
+    auth
 }
 
 // ── Projected mutable view ─────────────────────────────────────────────────────
