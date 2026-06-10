@@ -36,6 +36,7 @@ fn create_test_config() -> AppConfig {
         otel: Default::default(),
         log_export: Default::default(),
         pledge: Default::default(),
+        tool_validation: Default::default(),
         policies: vec![],
         #[cfg(feature = "mcp")]
         mcp: Default::default(),

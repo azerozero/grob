@@ -104,6 +104,9 @@ pub struct AppConfig {
     /// Pledge filter: structurally removes tools from LLM payloads.
     #[serde(default)]
     pub pledge: PledgeConfig,
+    /// Inbound tool well-formedness validation (strip malformed, or reject 400).
+    #[serde(default)]
+    pub tool_validation: crate::features::tool_validation::ToolValidationConfig,
     /// Trusted Execution Environment (TEE) attestation and key sealing.
     #[serde(default)]
     pub tee: TeeConfig,
@@ -441,7 +444,55 @@ default = "placeholder-model"
         Self::validate_auth_mode(&self.auth)?;
         Self::validate_fan_out(&self.models, &model_names)?;
         Self::validate_tiers(&self.tiers, &provider_names, &model_names)?;
+        Self::validate_pledge_profiles(&self.pledge)?;
 
+        Ok(())
+    }
+
+    /// Rejects pledge configs that reference an unknown profile name.
+    ///
+    /// Fail-closed at load: a typo'd `default_profile` or rule profile (which
+    /// would otherwise resolve to `none`/strip-all at runtime) is surfaced as a
+    /// startup error instead, so the operator notices before deploying.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first profile reference that resolves to
+    /// neither a config-defined nor a built-in profile.
+    fn validate_pledge_profiles(pledge: &PledgeConfig) -> Result<()> {
+        use crate::features::pledge::profiles::is_known;
+
+        if is_known(pledge, &pledge.default_profile) {
+            // ok
+        } else {
+            anyhow::bail!(
+                "pledge.default_profile '{}' is not a known profile (built-in or [[pledge.profiles]])",
+                pledge.default_profile
+            );
+        }
+        for rule in &pledge.rules {
+            if !is_known(pledge, &rule.profile) {
+                anyhow::bail!(
+                    "pledge rule references unknown profile '{}' (built-in or [[pledge.profiles]])",
+                    rule.profile
+                );
+            }
+        }
+        // Validate every custom profile's glob patterns compile, so an invalid
+        // pattern is a startup error rather than a silently-dropped (never-match)
+        // pattern at runtime.
+        for profile in &pledge.profiles {
+            for pattern in &profile.allowed_tool_patterns {
+                globset::Glob::new(pattern).map_err(|e| {
+                    anyhow::anyhow!(
+                        "pledge profile '{}' has an invalid tool pattern '{}': {}",
+                        profile.name,
+                        pattern,
+                        e
+                    )
+                })?;
+            }
+        }
         Ok(())
     }
 

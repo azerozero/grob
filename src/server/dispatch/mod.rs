@@ -333,6 +333,26 @@ pub(crate) async fn dispatch(
         crate::features::mcp::calibration::calibrate_tools(mcp, request);
     }
 
+    // ── Step 1.55: Inbound tool well-formedness validation ──
+    // Strips (or, in reject mode, 400s on) tools with a missing name or a
+    // malformed `input_schema`. Well-formedness only — client tools are
+    // arbitrary and are NOT checked against grob's internal catalogue. Runs
+    // before pledge so malformed tools never reach the allowlist check.
+    match crate::features::tool_validation::validate_inbound_tools(
+        request,
+        &ctx.inner.config.tool_validation,
+    ) {
+        Ok(stripped) => {
+            if !stripped.is_empty() {
+                tracing::warn!(
+                    tools = ?stripped,
+                    "tool validation: stripped malformed inbound tools"
+                );
+            }
+        }
+        Err(reason) => return Err(RequestError::BadRequest(reason)),
+    }
+
     // ── Step 1.6: Pledge tool filtering ──
     if ctx.inner.config.pledge.enabled {
         let filter = crate::features::pledge::PledgeFilter::new(&ctx.inner.config.pledge);
@@ -1578,5 +1598,141 @@ actual_model = "alpha"
             .content
             .iter()
             .any(|b| matches!(b, ContentBlock::Known(KnownContentBlock::Text { .. }))));
+    }
+
+    // ── SLICE 6: inbound tool validation wiring ──
+
+    /// Records the tool names of the request it receives, then fails fast.
+    struct ToolRecordingProvider {
+        seen: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::providers::LlmProvider for ToolRecordingProvider {
+        async fn send_message(
+            &self,
+            request: CanonicalRequest,
+        ) -> Result<ProviderResponse, crate::providers::error::ProviderError> {
+            let names = request
+                .tools
+                .as_ref()
+                .map(|t| t.iter().filter_map(|t| t.name.clone()).collect())
+                .unwrap_or_default();
+            *self.seen.lock().unwrap() = names;
+            Err(crate::providers::error::ProviderError::ApiError {
+                status: 400,
+                message: "recorded".to_string(),
+            })
+        }
+
+        async fn send_message_stream(
+            &self,
+            _request: CanonicalRequest,
+        ) -> Result<crate::providers::StreamResponse, crate::providers::error::ProviderError>
+        {
+            Err(crate::providers::error::ProviderError::ApiError {
+                status: 400,
+                message: "no stream".to_string(),
+            })
+        }
+
+        async fn count_tokens(
+            &self,
+            _request: crate::models::CountTokensRequest,
+        ) -> Result<crate::models::CountTokensResponse, crate::providers::error::ProviderError>
+        {
+            Err(crate::providers::error::ProviderError::ApiError {
+                status: 400,
+                message: "no count".to_string(),
+            })
+        }
+
+        fn supports_model(&self, _model: &str) -> bool {
+            true
+        }
+    }
+
+    // Real dispatch(): a malformed inbound tool must be stripped (Step 1.55)
+    // BEFORE the provider is called, while the well-formed tool reaches it. Red
+    // if the tool-validation call is removed from dispatch.
+    #[tokio::test]
+    async fn dispatch_strips_malformed_inbound_tool_before_provider() {
+        let toml = r#"
+[server]
+host = "127.0.0.1"
+port = 18090
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "alpha"
+"#;
+        let config =
+            crate::cli::AppConfig::from_content(toml, "tool_validation_dispatch").expect("config");
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test(
+            "mock",
+            Arc::new(ToolRecordingProvider { seen: seen.clone() }),
+        );
+        let state = crate::server::test_app_state(config, registry);
+
+        let inner = state.snapshot();
+        let dlp: Option<Arc<DlpEngine>> = None;
+        let headers = HeaderMap::new();
+        let ctx = DispatchContext {
+            state: &state,
+            inner: &inner,
+            dlp: &dlp,
+            model: "alpha".to_string(),
+            is_streaming: false,
+            tenant_id: None,
+            allowed_models: None,
+            allowed_providers: Vec::new(),
+            peer_ip: "127.0.0.1".to_string(),
+            req_id: "req-toolval",
+            start_time: std::time::Instant::now(),
+            headers: &headers,
+            trace_id: None,
+            audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(feature = "policies")]
+            resolved_policy: None,
+        };
+        // Two tools: one well-formed, one malformed (input_schema is a string).
+        let mut request: CanonicalRequest = serde_json::from_value(serde_json::json!({
+            "model": "alpha",
+            "max_tokens": 16,
+            "messages": [{ "role": "user", "content": "hi" }],
+            "tools": [
+                { "name": "good_tool", "input_schema": { "type": "object" } },
+                { "name": "bad_tool", "input_schema": "not-a-schema" }
+            ]
+        }))
+        .unwrap();
+
+        let _ = dispatch(&ctx, &mut request).await;
+
+        let received = seen.lock().unwrap().clone();
+        assert!(
+            received.contains(&"good_tool".to_string()),
+            "the well-formed tool must reach the provider"
+        );
+        assert!(
+            !received.contains(&"bad_tool".to_string()),
+            "the malformed tool must be stripped before the provider; got {received:?}"
+        );
     }
 }

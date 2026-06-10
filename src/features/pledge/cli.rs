@@ -133,6 +133,7 @@ mod tests {
         let config = PledgeConfig {
             enabled: true,
             default_profile: "full".to_string(),
+            profiles: Vec::new(),
             rules: vec![PledgeRule {
                 source: Some("mcp".to_string()),
                 token_prefix: None,

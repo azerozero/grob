@@ -1,5 +1,6 @@
 //! Pledge configuration: profiles, rules, and matching logic.
 
+use globset::GlobMatcher;
 use serde::{Deserialize, Serialize};
 
 /// Top-level pledge configuration section (`[pledge]` in TOML).
@@ -14,6 +15,10 @@ pub struct PledgeConfig {
     /// Ordered list of matching rules evaluated top-to-bottom.
     #[serde(default)]
     pub rules: Vec<PledgeRule>,
+    /// Operator-defined profiles (`[[pledge.profiles]]`). These extend or
+    /// override the four built-ins (`read_only`/`execute`/`full`/`none`).
+    #[serde(default)]
+    pub profiles: Vec<PledgeProfileConfig>,
 }
 
 impl Default for PledgeConfig {
@@ -22,8 +27,42 @@ impl Default for PledgeConfig {
             enabled: false,
             default_profile: default_profile_name(),
             rules: Vec::new(),
+            profiles: Vec::new(),
         }
     }
+}
+
+/// A pledge profile defined in TOML (`[[pledge.profiles]]`).
+///
+/// Owned counterpart of the built-in [`PledgeProfile`]: same shape, but its
+/// fields come from config rather than `'static` data.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PledgeProfileConfig {
+    /// Profile name, referenced by `default_profile` / `rules[].profile`.
+    pub name: String,
+    /// When true, all tools pass through (`allowed_tools` is ignored).
+    #[serde(default)]
+    pub allow_all: bool,
+    /// Explicit exact tool-name allowlist (consulted when `allow_all` is false).
+    #[serde(default)]
+    pub allowed_tools: Vec<String>,
+    /// Glob patterns matched against tool names (e.g. `"mcp_*"`, `"*_read"`).
+    /// Applied IN ADDITION to `allowed_tools`; validated at config load.
+    #[serde(default)]
+    pub allowed_tool_patterns: Vec<String>,
+}
+
+/// A resolved pledge decision, unifying built-in and config-defined profiles.
+///
+/// Owned so it can carry either `'static` built-in names or config strings.
+#[derive(Debug, Clone)]
+pub struct ResolvedProfile {
+    /// When true, every tool passes through.
+    pub allow_all: bool,
+    /// Exact tool names retained when `allow_all` is false (empty ⇒ strip all).
+    pub allowed_tools: Vec<String>,
+    /// Compiled glob matchers; a tool is also kept if any matches its name.
+    pub allowed_patterns: Vec<GlobMatcher>,
 }
 
 fn default_profile_name() -> String {

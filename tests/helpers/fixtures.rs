@@ -159,6 +159,7 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         otel: Default::default(),
         log_export: Default::default(),
         pledge: Default::default(),
+        tool_validation: Default::default(),
         policies: vec![],
         tool_layer: Default::default(),
         tee: Default::default(),

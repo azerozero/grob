@@ -11,4 +11,5 @@ pub mod policies;
 pub mod tap;
 pub mod token_pricing;
 pub mod tool_layer;
+pub mod tool_validation;
 pub mod watch;

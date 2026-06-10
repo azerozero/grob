@@ -413,6 +413,7 @@ mod tests {
             otel: Default::default(),
             log_export: Default::default(),
             pledge: Default::default(),
+            tool_validation: Default::default(),
             policies: vec![],
             tool_layer: Default::default(),
             tee: Default::default(),
