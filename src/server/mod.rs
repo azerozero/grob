@@ -207,6 +207,11 @@ pub struct AppState {
     /// Pending HIT approval channels keyed by `"{request_id}:{tool_name}"`.
     #[cfg(feature = "policies")]
     pub hit_pending: Arc<crate::features::policies::stream::HitPendingApprovals>,
+    /// Dedicated limiter for per-policy `rate_limit` overrides. Separate from
+    /// [`SecurityState::rate_limiter`] so policy buckets (custom rps) never
+    /// collide with the pre-handler middleware's default-rate buckets.
+    #[cfg(feature = "policies")]
+    pub policy_rate_limiter: Arc<RateLimiter>,
 }
 
 impl AppState {
@@ -273,6 +278,13 @@ pub(crate) fn test_app_state(
         grob_hint: std::sync::Mutex::new(None),
         #[cfg(feature = "policies")]
         hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        #[cfg(feature = "policies")]
+        policy_rate_limiter: Arc::new(crate::security::RateLimiter::new(
+            crate::security::RateLimitConfig {
+                requests_per_second: 1,
+                burst: 1,
+            },
+        )),
         observability: ObservabilityState {
             message_tracer,
             metrics_handle,
@@ -375,6 +387,11 @@ pub async fn start_server(
         grob_hint: std::sync::Mutex::new(None),
         #[cfg(feature = "policies")]
         hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        #[cfg(feature = "policies")]
+        policy_rate_limiter: Arc::new(RateLimiter::new(crate::security::RateLimitConfig {
+            requests_per_second: 1,
+            burst: 1,
+        })),
         observability: ObservabilityState {
             message_tracer: tracer,
             metrics_handle,

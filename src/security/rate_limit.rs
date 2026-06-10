@@ -125,6 +125,40 @@ impl RateLimiter {
         (allowed, remaining, reset_after)
     }
 
+    /// Like [`RateLimiter::check`], but enforces `rps` for this key's bucket.
+    ///
+    /// Used for per-policy `rate_limit` overrides, where the rate is decided per
+    /// request (not from the limiter's default config). The bucket's rate is set
+    /// to `rps` on every call so a policy change takes effect immediately; burst
+    /// equals `rps` (min 1) so a key may spend up to `rps` tokens before
+    /// throttling. Use a dedicated limiter instance for this so the buckets never
+    /// collide with the middleware's default-rate buckets.
+    pub async fn check_with_rps(
+        &self,
+        key: &RateLimitKey,
+        rps: u32,
+    ) -> (bool, u32, Option<Duration>) {
+        let rps = rps.max(1);
+        let mut buckets = self.buckets.write().await;
+        let bucket = buckets.entry(key.clone()).or_insert_with(|| {
+            TokenBucket::new(RateLimitConfig {
+                requests_per_second: rps,
+                burst: rps,
+            })
+        });
+        // Honour the current policy's rps even if the bucket predates it.
+        bucket.rps = rps;
+        let allowed = bucket.try_consume();
+        let remaining = bucket.remaining();
+        let reset_after = if allowed {
+            None
+        } else {
+            let needed_milli = 1000u64.saturating_sub(bucket.tokens_milli);
+            Some(Duration::from_millis(needed_milli / rps as u64))
+        };
+        (allowed, remaining, reset_after)
+    }
+
     /// Cleanup stale buckets (idle > 10 minutes)
     async fn cleanup_stale_buckets(buckets: &Arc<RwLock<HashMap<RateLimitKey, TokenBucket>>>) {
         const IDLE_TIMEOUT: Duration = Duration::from_secs(600);

@@ -82,6 +82,12 @@ pub enum RequestError {
     /// rejection (e.g. the tool-call spike anomaly detector, T-AD1) and
     /// is never retried against a sibling provider.
     ToolSpikeBlocked(String),
+    /// Indicates a per-policy rate-limit override rejected the request (HTTP 429).
+    ///
+    /// Like [`RequestError::ToolSpikeBlocked`] this is a terminal local 429 (not
+    /// retryable against a sibling provider), but it is raised by the in-dispatch
+    /// `[[policies]].rate_limit` check rather than the anomaly detector.
+    RateLimitedLocal(String),
     /// Indicates an upstream OAuth credential was revoked (HTTP 401).
     ///
     /// Surfaces a terminal authentication error — the user must run
@@ -178,6 +184,11 @@ impl RequestError {
             RequestError::ToolSpikeBlocked(msg) => {
                 (StatusCode::TOO_MANY_REQUESTS, "rate_limited", msg.clone())
             }
+            RequestError::RateLimitedLocal(msg) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+                msg.clone(),
+            ),
             RequestError::AuthRevoked(msg) => (
                 StatusCode::UNAUTHORIZED,
                 "authentication_error",
@@ -205,6 +216,7 @@ impl RequestError {
             RequestError::BudgetExceeded { .. } => "budget_exceeded",
             RequestError::DlpBlocked(_) => "dlp_blocked",
             RequestError::ToolSpikeBlocked(_) => "tool_spike_blocked",
+            RequestError::RateLimitedLocal(_) => "rate_limited_local",
             RequestError::AuthRevoked(_) => "auth_revoked",
             RequestError::Internal(_) => "internal",
         }

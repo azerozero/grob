@@ -317,7 +317,9 @@ pub(crate) async fn dispatch(
     let grob_hint = resolve_grob_hint(ctx, request)?;
 
     // ── Step 1: DLP input scanning ──
-    scan_dlp_input(ctx, request)?;
+    // `dlp_triggered` feeds the post-route policy context (Step 5.4).
+    #[cfg_attr(not(feature = "policies"), allow(unused_variables))]
+    let dlp_triggered = scan_dlp_input(ctx, request)?;
 
     // ── Step 1.4: Tool-call spike anomaly detection (T-AD1) ──
     // Runs after DLP so scoped DLP blocks take precedence, and before
@@ -410,6 +412,15 @@ pub(crate) async fn dispatch(
         return Ok(hit);
     }
 
+    // NOTE: Policy budget/rate_limit overrides are enforced per *effective*
+    // provider inside the provider loop (`provider_loop.rs`) and per fan-out
+    // participant (`dispatch_fan_out`), NOT here — the first sorted mapping is
+    // not necessarily the provider actually called (adaptive scorer reorders,
+    // circuit-breaker/health skips a mapping, fan-out hits several). A
+    // provider-keyed policy must see the real provider, so enforcement moves to
+    // the point where the candidate is chosen. `dlp_triggered` is threaded down
+    // for `dlp_triggered`-keyed policies.
+
     // ── Step 5.5: Tier-based fan-out ──
     // When the complexity scorer assigns a tier AND the matching [[tiers]]
     // entry has fanout=true, dispatch to all tier providers in parallel.
@@ -435,6 +446,7 @@ pub(crate) async fn dispatch(
                     &sorted_mappings,
                     &fan_out_config,
                     &decision,
+                    dlp_triggered,
                 )
                 .await;
             }
@@ -445,15 +457,154 @@ pub(crate) async fn dispatch(
     if let Some(model_config) = ctx.inner.find_model(&decision.model_name) {
         if is_fan_out_strategy(&model_config.strategy) {
             if let Some(ref fan_out_config) = model_config.fan_out {
-                return dispatch_fan_out(ctx, request, &sorted_mappings, fan_out_config, &decision)
-                    .await;
+                return dispatch_fan_out(
+                    ctx,
+                    request,
+                    &sorted_mappings,
+                    fan_out_config,
+                    &decision,
+                    dlp_triggered,
+                )
+                .await;
             }
         }
     }
 
     // ── Step 7: Provider loop with fallback/retry ──
-    provider_loop::dispatch_provider_loop(ctx, request, &sorted_mappings, &decision, &cache_key)
+    provider_loop::dispatch_provider_loop(
+        ctx,
+        request,
+        &sorted_mappings,
+        &decision,
+        &cache_key,
+        dlp_triggered,
+    )
+    .await
+}
+
+/// Re-evaluates `[[policies]]` with the *enriched* request context and applies
+/// the `budget` and `rate_limit` overrides.
+///
+/// The pre-route eval in the handler builds a [`RequestContext`] with empty
+/// `provider`/`route_type`/`dlp_triggered`/`estimated_cost` (routing/DLP have not
+/// run yet), so any policy keyed on those criteria never matches. This second
+/// evaluation — once routing + DLP have run — populates them so such policies
+/// match, then enforces their overrides.
+///
+/// # Load-bearing order
+///
+/// 1. Runs AFTER routing + provider-mapping resolution (so `provider`/`route_type`
+///    are known) and AFTER the cache check (a cache hit incurs no provider cost
+///    or rate, so it must not be budget-/rate-blocked).
+/// 2. The `budget` override is enforced HERE, BEFORE the provider loop's spend
+///    check ([`check_budget_for_tenant`]), so a per-policy cap rejects ahead of
+///    any upstream call.
+/// 3. The `rate_limit` override is a SECOND limiter check: the pre-handler
+///    rate-limit middleware ran before any policy was evaluated, so it cannot see
+///    a policy override. A dedicated [`AppState::policy_rate_limiter`] keeps these
+///    custom-rps buckets off the middleware's default-rate buckets.
+///
+/// `routing` and `log_export` overrides are intentionally NOT applied in this
+/// slice (explicit follow-up).
+///
+/// [`RequestContext`]: crate::features::policies::context::RequestContext
+#[cfg(feature = "policies")]
+async fn enforce_post_route_policy(
+    ctx: &DispatchContext<'_>,
+    request: &CanonicalRequest,
+    decision: &crate::models::RouteDecision,
+    provider: &str,
+    dlp_triggered: bool,
+) -> Result<(), RequestError> {
+    let Some(matcher) = ctx.inner.policy_matcher.as_ref() else {
+        return Ok(());
+    };
+
+    // Best-effort estimated cost (input only — output is unknown pre-call) so
+    // `cost_above`-keyed policies can match.
+    let input_tokens = super::estimate_input_tokens(request);
+    let estimated_cost = calculate_cost(ctx.state, &decision.model_name, input_tokens, 0, 0, false)
         .await
+        .estimated_cost_usd;
+
+    let header = |name: &str| {
+        ctx.headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string())
+    };
+    let rctx = crate::features::policies::context::RequestContext {
+        tenant: ctx.tenant_id.clone(),
+        zone: None,
+        project: header("x-grob-project"),
+        user: None,
+        agent: header("user-agent"),
+        compliance: vec![],
+        model: decision.model_name.clone(),
+        provider: provider.to_string(),
+        route_type: decision.route_type.to_string(),
+        dlp_triggered,
+        estimated_cost,
+    };
+
+    let policy = matcher.evaluate(&rctx);
+    if !policy.matched {
+        return Ok(());
+    }
+
+    // (2) Budget override — enforced before the provider loop's spend check.
+    if let Some(limit) = policy.budget.as_ref().and_then(|b| b.monthly_usd) {
+        let tracker = ctx.state.observability.spend_tracker.lock().await;
+        let result = match ctx.tenant_id.as_deref() {
+            Some(tenant) => tracker.check_tenant_budget(
+                Some(tenant),
+                provider,
+                &decision.model_name,
+                limit,
+                None,
+                None,
+            ),
+            None => tracker.check_budget(provider, &decision.model_name, limit, None, None),
+        };
+        if let Err(e) = result {
+            return Err(RequestError::BudgetExceeded {
+                limit_usd: e.limit_usd,
+                actual_usd: e.actual_usd,
+            });
+        }
+    }
+
+    // (3) Rate-limit override — second, policy-aware limiter check.
+    if let Some(rps) = policy.rate_limit.as_ref().and_then(|r| r.rps) {
+        let key = crate::security::RateLimitKey::Tenant(
+            ctx.tenant_id.clone().unwrap_or_else(|| "anon".to_string()),
+        );
+        let (allowed, _, _) = ctx
+            .state
+            .policy_rate_limiter
+            .check_with_rps(&key, rps)
+            .await;
+        if !allowed {
+            return Err(RequestError::RateLimitedLocal(
+                "policy rate limit exceeded".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// No-op when the `policies` feature is disabled, so the per-candidate call sites
+/// in the provider loop / fan-out need no `#[cfg]` gating.
+#[cfg(not(feature = "policies"))]
+async fn enforce_post_route_policy(
+    _ctx: &DispatchContext<'_>,
+    _request: &CanonicalRequest,
+    _decision: &crate::models::RouteDecision,
+    _provider: &str,
+    _dlp_triggered: bool,
+) -> Result<(), RequestError> {
+    Ok(())
 }
 
 /// Check the response cache for a hit (non-streaming requests only).
@@ -502,21 +653,26 @@ fn should_escalate_compliance(enabled: bool, risk_classification: bool) -> bool 
 }
 
 /// DLP input scanning with risk assessment and audit logging.
+///
+/// Returns `Ok(true)` when DLP acted on the request (one or more redact/warn
+/// reports), `Ok(false)` when scanning is off or nothing matched. That flag
+/// feeds the post-route policy context so `dlp_triggered`-keyed policies match.
 fn scan_dlp_input(
     ctx: &DispatchContext<'_>,
     request: &mut CanonicalRequest,
-) -> Result<(), RequestError> {
+) -> Result<bool, RequestError> {
     let Some(ref dlp_engine) = ctx.dlp else {
-        return Ok(());
+        return Ok(false);
     };
     if dlp_input_scan_disabled(dlp_engine.config.scan_input) {
-        return Ok(());
+        return Ok(false);
     }
 
     match dlp_engine.sanitize_request_checked(request) {
         Ok(reports) => {
+            let triggered = !reports.is_empty();
             ctx.emit_dlp_events(&reports, DlpDirection::Request);
-            Ok(())
+            Ok(triggered)
         }
         Err(block_err) => {
             // Emit DLP block event for `grob watch`.
@@ -676,6 +832,7 @@ async fn dispatch_fan_out(
     sorted_mappings: &[crate::cli::ModelMapping],
     fan_out_config: &crate::cli::FanOutConfig,
     decision: &crate::models::RouteDecision,
+    dlp_triggered: bool,
 ) -> Result<DispatchResult, RequestError> {
     // Budget enforcement: fan-out returns from `dispatch()` *before* the
     // provider loop, which is where the per-attempt budget gate lives. Without
@@ -683,7 +840,12 @@ async fn dispatch_fan_out(
     // parallel) — would bypass budget caps entirely. Each participating mapping
     // is checked; if any provider/model/global cap is already reached the whole
     // fan-out is rejected before any upstream call is made.
+    //
+    // Per-participant policy overrides run here too: every fan-out provider is a
+    // real upstream call, so a provider-keyed budget/rate_limit policy must gate
+    // each participant.
     for mapping in sorted_mappings {
+        enforce_post_route_policy(ctx, request, decision, &mapping.provider, dlp_triggered).await?;
         check_budget_for_tenant(
             ctx.state,
             ctx.inner,
@@ -866,7 +1028,7 @@ mod tests {
         ) -> Result<ProviderResponse, crate::providers::error::ProviderError> {
             self.called.store(true, std::sync::atomic::Ordering::SeqCst);
             Err(crate::providers::error::ProviderError::ApiError {
-                status: 500,
+                status: 400,
                 message: "mock provider must not be reached".to_string(),
             })
         }
@@ -878,7 +1040,7 @@ mod tests {
         {
             self.called.store(true, std::sync::atomic::Ordering::SeqCst);
             Err(crate::providers::error::ProviderError::ApiError {
-                status: 500,
+                status: 400,
                 message: "mock provider must not be reached".to_string(),
             })
         }
@@ -889,7 +1051,7 @@ mod tests {
         ) -> Result<crate::models::CountTokensResponse, crate::providers::error::ProviderError>
         {
             Err(crate::providers::error::ProviderError::ApiError {
-                status: 500,
+                status: 400,
                 message: "mock".to_string(),
             })
         }
@@ -1010,6 +1172,262 @@ actual_model = "beta"
         assert!(
             !called.load(std::sync::atomic::Ordering::SeqCst),
             "the provider must NOT be reached when the resolved model is forbidden"
+        );
+    }
+
+    // ── SLICE 3: policy overrides (matching fix + budget + rate_limit) ──
+
+    /// Config declaring one policy with a `route_type` condition plus the given
+    /// `[policies.*]` override TOML block.
+    #[cfg(feature = "policies")]
+    fn policy_config(route_type: &str, override_toml: &str) -> crate::cli::AppConfig {
+        let toml = format!(
+            r#"
+[server]
+host = "127.0.0.1"
+port = 18093
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "anthropic"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "alpha"
+
+[[policies]]
+name = "p"
+[policies.match]
+route_type = "{route_type}"
+{override_toml}
+"#
+        );
+        crate::cli::AppConfig::from_content(&toml, "policy_override_test").expect("config parses")
+    }
+
+    /// Config with a `provider`-keyed policy and TWO mappings (anthropic at
+    /// priority 1, openrouter at priority 2), so a fallback to a non-first
+    /// provider can be exercised.
+    #[cfg(feature = "policies")]
+    fn provider_keyed_config(provider: &str, override_toml: &str) -> crate::cli::AppConfig {
+        let toml = format!(
+            r#"
+[server]
+host = "127.0.0.1"
+port = 18092
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "anthropic"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[providers]]
+name = "openrouter"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "alpha"
+[[models.mappings]]
+priority = 2
+provider = "openrouter"
+actual_model = "alpha"
+
+[[policies]]
+name = "p"
+[policies.match]
+provider = "{provider}"
+{override_toml}
+"#
+        );
+        crate::cli::AppConfig::from_content(&toml, "provider_keyed_policy_test")
+            .expect("config parses")
+    }
+
+    /// Drives a real `dispatch()` for model "alpha" (a plain request routes to
+    /// `default`), so the policy enforcement wiring is actually exercised.
+    #[cfg(feature = "policies")]
+    async fn run_dispatch(
+        state: &Arc<AppState>,
+        tenant: Option<&str>,
+    ) -> Result<DispatchResult, RequestError> {
+        let inner = state.snapshot();
+        let dlp: Option<Arc<DlpEngine>> = None;
+        let headers = HeaderMap::new();
+        let ctx = DispatchContext {
+            state,
+            inner: &inner,
+            dlp: &dlp,
+            model: "alpha".to_string(),
+            is_streaming: false,
+            tenant_id: tenant.map(|s| s.to_string()),
+            allowed_models: None,
+            allowed_providers: Vec::new(),
+            peer_ip: "127.0.0.1".to_string(),
+            req_id: "test",
+            start_time: std::time::Instant::now(),
+            headers: &headers,
+            trace_id: None,
+            audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resolved_policy: None,
+        };
+        let mut request: CanonicalRequest = serde_json::from_value(serde_json::json!({
+            "model": "alpha",
+            "max_tokens": 16,
+            "messages": [{ "role": "user", "content": "hi" }]
+        }))
+        .expect("request");
+        dispatch(&ctx, &mut request).await
+    }
+
+    // (1) Matching is fixed: a policy keyed on route_type matches only once the
+    // context is enriched. The empty pre-route context (route_type = "") — what
+    // the handler eval produces — never matches, which is the bug.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn policy_keyed_on_route_type_matches_only_when_context_is_enriched() {
+        use crate::features::policies::context::RequestContext;
+
+        let config = policy_config("background", "[policies.budget]\nmonthly_usd = 1.0");
+        let state =
+            crate::server::test_app_state(config, crate::providers::ProviderRegistry::new());
+        let inner = state.snapshot();
+        let matcher = inner.policy_matcher.as_ref().expect("matcher built");
+
+        let empty = RequestContext {
+            route_type: String::new(),
+            ..Default::default()
+        };
+        assert!(
+            !matcher.evaluate(&empty).matched,
+            "empty pre-route context must NOT match a route_type policy (the bug)"
+        );
+
+        let enriched = RequestContext {
+            route_type: "background".to_string(),
+            ..Default::default()
+        };
+        let resolved = matcher.evaluate(&enriched);
+        assert!(resolved.matched, "enriched context must match the policy");
+        assert!(resolved.budget.is_some(), "the budget override is resolved");
+    }
+
+    // (2) Budget override blocks via the REAL dispatch() path, before the
+    // provider is reached. Red if the per-candidate enforcement is removed from
+    // the provider loop.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn dispatch_policy_budget_override_blocks_before_provider() {
+        let config = policy_config("default", "[policies.budget]\nmonthly_usd = 5.0");
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test(
+            "anthropic",
+            Arc::new(CountingProvider {
+                called: called.clone(),
+            }),
+        );
+        let state = crate::server::test_app_state(config, registry);
+
+        {
+            let mut tracker = state.observability.spend_tracker.lock().await;
+            tracker.record("anthropic", "alpha", 10.0); // over the 5.0 cap
+        }
+
+        let result = run_dispatch(&state, None).await;
+        assert!(
+            matches!(result, Err(RequestError::BudgetExceeded { .. })),
+            "dispatch must block on the policy budget cap"
+        );
+        assert!(
+            !called.load(std::sync::atomic::Ordering::SeqCst),
+            "the provider must NOT be reached when the budget policy blocks"
+        );
+    }
+
+    // (3) Rate-limit override throttles via REAL dispatch(): rps = 1, the second
+    // immediate dispatch is rejected. Red if the per-candidate enforcement is
+    // removed.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn dispatch_policy_rate_limit_override_throttles() {
+        let config = policy_config("default", "[policies.rate_limit]\nrps = 1");
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test("anthropic", Arc::new(CountingProvider { called }));
+        let state = crate::server::test_app_state(config, registry);
+
+        // First dispatch consumes the single token (provider reached, then errors).
+        let first = run_dispatch(&state, Some("tenant-1")).await;
+        assert!(
+            !matches!(first, Err(RequestError::RateLimitedLocal(_))),
+            "first request within rps must not be rate-limited"
+        );
+
+        // Second immediate dispatch is throttled before the provider.
+        let second = run_dispatch(&state, Some("tenant-1")).await;
+        assert!(
+            matches!(second, Err(RequestError::RateLimitedLocal(_))),
+            "second immediate dispatch must hit the policy rps override"
+        );
+    }
+
+    // (point 1 + 3) A `provider`-keyed policy must match the EFFECTIVE provider.
+    // anthropic (priority 1) is unregistered → skipped; dispatch falls back to
+    // openrouter, and the openrouter-keyed budget policy fires — proving the
+    // enforcement sees the real provider, not just the first mapping.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn dispatch_provider_keyed_policy_matches_effective_fallback_provider() {
+        let config = provider_keyed_config("openrouter", "[policies.budget]\nmonthly_usd = 5.0");
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut registry = crate::providers::ProviderRegistry::new();
+        // Only openrouter is registered → anthropic is skipped and openrouter is
+        // the effective (fallback) provider.
+        registry.insert_provider_for_test(
+            "openrouter",
+            Arc::new(CountingProvider {
+                called: called.clone(),
+            }),
+        );
+        let state = crate::server::test_app_state(config, registry);
+
+        {
+            let mut tracker = state.observability.spend_tracker.lock().await;
+            tracker.record("openrouter", "alpha", 10.0); // over the 5.0 cap
+        }
+
+        let result = run_dispatch(&state, None).await;
+        assert!(
+            matches!(result, Err(RequestError::BudgetExceeded { .. })),
+            "the openrouter-keyed budget policy must fire on the fallback provider"
+        );
+        assert!(
+            !called.load(std::sync::atomic::Ordering::SeqCst),
+            "openrouter must NOT be called once its budget policy blocks"
         );
     }
 }

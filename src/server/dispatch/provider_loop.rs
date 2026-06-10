@@ -39,6 +39,7 @@ pub(super) async fn dispatch_provider_loop(
     sorted_mappings: &[crate::cli::ModelMapping],
     decision: &crate::models::RouteDecision,
     cache_key: &Option<String>,
+    dlp_triggered: bool,
 ) -> Result<DispatchResult, RequestError> {
     // Re-sort mappings by adaptive score when scorer is enabled
     let rescored;
@@ -58,6 +59,14 @@ pub(super) async fn dispatch_provider_loop(
         let Some(provider) = resolve_provider(ctx, mapping).await else {
             continue;
         };
+
+        // Policy overrides (budget + rate_limit) are enforced here against the
+        // *effective* provider about to be called — `mapping.provider` after the
+        // adaptive-scorer reorder and circuit-breaker/health skip — so a
+        // provider-keyed policy gates the real upstream, ahead of the config
+        // budget check and the call itself.
+        super::enforce_post_route_policy(ctx, request, decision, &mapping.provider, dlp_triggered)
+            .await?;
 
         check_budget_for_tenant(
             ctx.state,
