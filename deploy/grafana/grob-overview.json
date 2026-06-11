@@ -1,0 +1,127 @@
+{
+  "uid": "grob-overview",
+  "title": "grob — Overview",
+  "tags": ["grob", "llm", "proxy"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "provider",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(grob_requests_total, provider)", "refId": "A" },
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "model",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": { "query": "label_values(grob_requests_total, model)", "refId": "A" },
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Requests (total)",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [ { "refId": "A", "expr": "sum(grob_requests_total{provider=~\"$provider\", model=~\"$model\"})" } ]
+    },
+    {
+      "id": 2, "type": "stat", "title": "Request rate",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "green" } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" },
+      "targets": [ { "refId": "A", "expr": "sum(rate(grob_requests_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))" } ]
+    },
+    {
+      "id": 3, "type": "stat", "title": "In-flight requests",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 20 }, { "color": "red", "value": 50 } ] } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+      "targets": [ { "refId": "A", "expr": "sum(grob_active_requests)" } ]
+    },
+    {
+      "id": 4, "type": "stat", "title": "p95 latency",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 } ] } } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
+      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))" } ]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Request rate by model",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" }, "lineWidth": 1 } } },
+      "targets": [ { "refId": "A", "expr": "sum by (model) (rate(grob_requests_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))", "legendFormat": "{{model}}" } ]
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Request rate by provider (fallback visible)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" }, "lineWidth": 1 } } },
+      "targets": [ { "refId": "A", "expr": "sum by (provider) (rate(grob_requests_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))", "legendFormat": "{{provider}}" } ]
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Latency (p50 / p95 / p99)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } } },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 13, "type": "timeseries", "title": "Outcomes by status",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 30, "stacking": { "mode": "normal" }, "lineWidth": 1 } } },
+      "targets": [ { "refId": "A", "expr": "sum by (status) (rate(grob_requests_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))", "legendFormat": "{{status}}" } ]
+    },
+    {
+      "id": 20, "type": "timeseries", "title": "Provider errors /s",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 20, "lineWidth": 1 }, "color": { "mode": "palette-classic" } } },
+      "targets": [ { "refId": "A", "expr": "sum by (provider) (rate(grob_provider_errors_total[$__rate_interval]))", "legendFormat": "{{provider}}" } ]
+    },
+    {
+      "id": 21, "type": "timeseries", "title": "Tokens /s (input & output)",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10, "lineWidth": 2 } } },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(grob_input_tokens_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))", "legendFormat": "input" },
+        { "refId": "B", "expr": "sum(rate(grob_output_tokens_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))", "legendFormat": "output" }
+      ]
+    },
+    {
+      "id": 22, "type": "bargauge", "title": "Spend & budget (USD)",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "red", "value": 0.9 } ] } } },
+      "options": { "orientation": "horizontal", "displayMode": "gradient", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "refId": "A", "expr": "sum(grob_spend_usd)", "legendFormat": "spend" },
+        { "refId": "B", "expr": "max(grob_budget_limit_usd)", "legendFormat": "budget limit" },
+        { "refId": "C", "expr": "max(grob_budget_remaining_usd)", "legendFormat": "remaining" }
+      ]
+    }
+  ]
+}
