@@ -122,6 +122,13 @@
         { "refId": "B", "expr": "max(grob_budget_limit_usd)", "legendFormat": "budget limit" },
         { "refId": "C", "expr": "max(grob_budget_remaining_usd)", "legendFormat": "remaining" }
       ]
+    },
+    {
+      "id": 30, "type": "logs", "title": "Logs (Loki) — service_name = grob",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 28 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none", "prettifyLogMessage": false },
+      "targets": [ { "refId": "A", "datasource": { "type": "loki", "uid": "loki" }, "expr": "{service_name=\"grob\"}" } ]
     }
   ]
 }
