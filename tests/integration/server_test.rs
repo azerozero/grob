@@ -409,6 +409,7 @@ mod tests {
             version: None,
             user: Default::default(),
             otel: Default::default(),
+            metrics: Default::default(),
             log_export: Default::default(),
             pledge: Default::default(),
             tool_validation: Default::default(),

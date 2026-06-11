@@ -45,7 +45,9 @@ helm template grob deploy/helm/grob -f my-values.yaml
 | `secret.create` / `secret.existingSecret` | `true` / `""` | provider keys as env (`env:NAME` in config); empty Secret by default |
 | `persistence.enabled` / `.size` / `.accessModes` | `true` / `1Gi` / `[ReadWriteOnce]` | `GROB_HOME` PVC |
 | `service.type` / `service.port` | `ClusterIP` / `8080` | |
+| `metrics.bearerTokenSecret` | `{}` | `{name,key}` of a Secret mounted at `/etc/grob/metrics/<key>` for `[metrics] bearer_token_file` |
 | `serviceMonitor.enabled` | `false` | Prometheus Operator |
+| `serviceMonitor.bearerTokenSecret` | `{}` | `{name,key}` of a Secret to present when scraping a gated `/metrics` |
 | `autoscaling.enabled` / `.maxReplicas` | `false` / `1` | HPA on `grob_active_requests` |
 | `ingress.enabled` / `networkPolicy.enabled` | `false` / `false` | exposure controls |
 
@@ -97,3 +99,43 @@ to hot-swap reloadable state without a restart (reach it internally, per above).
 `/metrics`. The HPA targets the `grob_active_requests` gauge and needs a custom
 metrics adapter (e.g. `prometheus-adapter`) publishing it as a Pods metric.
 Remember the budget caveat above before enabling autoscaling.
+
+### Authenticating `/metrics`
+
+`/metrics` is **public by default** (it carries spend, budget, and tenant
+labels — keep it internal). To require a bearer token, keep the token in a
+**Secret mounted as a file** and point grob's `bearer_token_file` at it. **Never**
+put the token inline in `config` — that value is rendered into the ConfigMap and
+the Helm release history in clear text.
+
+```bash
+# 1. Create the Secret holding the token (out of band, or via secret.data):
+kubectl create secret generic grob-metrics-token --from-literal=token=<TOKEN>
+```
+
+```yaml
+# 2. Mount it into the grob pod and reference it in config (a PATH, not the token):
+metrics:
+  bearerTokenSecret:
+    name: grob-metrics-token
+    key: token                       # mounted at /etc/grob/metrics/token
+config: |
+  # ...your config...
+  [metrics]
+  bearer_token_file = "/etc/grob/metrics/token"
+
+# 3. Make Prometheus present the SAME token when scraping:
+serviceMonitor:
+  enabled: true
+  bearerTokenSecret:
+    name: grob-metrics-token
+    key: token
+```
+
+Unauthorized scrapes then get `401`. `/health`, `/live`, and `/ready` stay
+public. TLS is handled by your ingress / the chart's TLS settings, not here.
+
+> Changing the token requires a pod restart — grob resolves it once at startup,
+> so `POST /api/config/reload` deliberately rejects `[metrics]` token changes.
+> The config/secret checksums annotated on the Deployment already roll the pod
+> on `helm upgrade` when the mounted Secret changes.

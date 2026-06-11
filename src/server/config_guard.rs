@@ -43,13 +43,26 @@ const DENIED_SECTIONS: &[&str] = &["providers", "dlp", "tee", "fips"];
 /// | `server.tls`       | TLS listener is bound at startup; rebuilding it requires a daemon restart.      |
 /// | `secrets.backend`  | The secret backend is constructed once and shared via `Arc`; swapping it at     |
 /// |                    | runtime would orphan in-flight readers and change credential resolution semantics. |
+/// | `metrics.bearer_token` | `/metrics` auth token is resolved once at startup into non-reloadable state; |
+/// | `metrics.bearer_token_file` | hot-reloading it would leave `/metrics` on its old posture (false sense of security). |
 const DENIED_KEYS: &[(&str, &str)] = &[
     ("router", "api_key"),
     ("budget", "api_key"),
     ("cache", "api_key"),
     ("server", "tls"),
     ("secrets", "backend"),
+    ("metrics", "bearer_token"),
+    ("metrics", "bearer_token_file"),
 ];
+
+/// Message returned when a hot reload would change the `/metrics` bearer token.
+///
+/// The token is resolved once at startup into non-reloadable
+/// [`super::ObservabilityState`], so a reload cannot re-apply it — surfacing this
+/// instead of silently keeping the old posture avoids a false sense of security.
+pub const METRICS_AUTH_RESTART_MSG: &str =
+    "[metrics] bearer_token / bearer_token_file changes require a daemon restart — the token is \
+     resolved once at startup, so /metrics auth was NOT changed by this reload";
 
 /// Checks whether a (section, key) pair is blocked by the deny-list.
 ///
@@ -82,6 +95,49 @@ pub fn is_section_or_key_denied(section: &str, key: &str) -> bool {
         return true;
     }
     false
+}
+
+/// Ensures a candidate config neither changes nor breaks the live `/metrics`
+/// bearer token, which is resolved **once at startup** into non-reloadable
+/// [`super::ObservabilityState`].
+///
+/// This is the single choke-point every reload path MUST call (HTTP
+/// `/api/config` + `/api/config/reload`, RPC `grob/server/reload_config`, MCP
+/// self-tuning) so none can silently keep the old `/metrics` posture. Comparison
+/// uses the **resolved** tokens, so an inline change, a file-path change, and a
+/// same-path file-content change are all caught.
+///
+/// A candidate whose `bearer_token_file` cannot be read is also rejected: masking
+/// the read error as "no token" would let an operator who just pointed at a bad
+/// path believe `/metrics` became gated when it actually stays public.
+///
+/// # Errors
+///
+/// Returns the user-facing "restart required" message when the resolved token
+/// would change, or when a configured token source fails to resolve.
+pub fn ensure_metrics_auth_reloadable(
+    state: &Arc<super::AppState>,
+    candidate: &crate::config::AppConfig,
+) -> Result<(), String> {
+    use secrecy::ExposeSecret;
+
+    // A configured-but-unreadable source is a hard error, NOT silently "public":
+    // the operator's intent (gate /metrics) cannot be honoured without a restart.
+    let next = candidate.metrics.resolve_bearer_token().map_err(|e| {
+        format!("{METRICS_AUTH_RESTART_MSG} (candidate [metrics] bearer_token_file could not be read: {e})")
+    })?;
+
+    let live = state
+        .observability
+        .metrics_bearer_token
+        .as_ref()
+        .map(|s| s.expose_secret().to_string());
+    let next = next.map(|s| s.expose_secret().to_string());
+
+    if live != next {
+        return Err(METRICS_AUTH_RESTART_MSG.to_string());
+    }
+    Ok(())
 }
 
 /// Validates a key update against the deny-list using [`ConfigSection`].
@@ -123,6 +179,11 @@ pub async fn persist_and_reload(
             ));
         }
     };
+
+    // Reject a `/metrics` token change BEFORE any persistence, so the on-disk
+    // config and the running token never diverge (the token is resolved once at
+    // startup and cannot be hot-applied).
+    ensure_metrics_auth_reloadable(state, config).map_err(super::RequestError::BadRequest)?;
 
     // 1. Backup
     let backup_path = config_path.with_extension("toml.backup");
@@ -166,6 +227,10 @@ fn reload_state(
     config: crate::config::AppConfig,
     _config_path: &Path,
 ) -> Result<(), super::RequestError> {
+    // NOTE: the `/metrics` token guard runs in `persist_and_reload` BEFORE any
+    // write, so it is intentionally not repeated here (this is reached only after
+    // that check has passed).
+
     let new_router = crate::routing::classify::Router::new(config.clone());
 
     let secret_backend =
@@ -252,6 +317,123 @@ mod tests {
         // Sibling keys in the same sections must remain editable.
         assert!(!is_section_or_key_denied("server", "host"));
         assert!(!is_section_or_key_denied("server", "port"));
+    }
+
+    #[test]
+    fn deny_metrics_bearer_token_keys() {
+        // The /metrics bearer token is resolved once at startup; changing it via
+        // the JSON config API must be rejected (restart required).
+        assert!(is_section_or_key_denied("metrics", "bearer_token"));
+        assert!(is_section_or_key_denied("metrics", "bearer_token_file"));
+    }
+
+    // Helper: a minimal, parseable config with an optional extra `[metrics]`.
+    #[cfg(test)]
+    fn guard_config(extra: &str) -> crate::config::AppConfig {
+        let base = r#"
+[server]
+host = "127.0.0.1"
+port = 18098
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "alpha"
+"#;
+        crate::cli::AppConfig::from_content(&format!("{base}{extra}"), "guard_test")
+            .expect("config parses")
+    }
+
+    // The reload gap the review caught: changing/adding/removing the /metrics
+    // token must be rejected by the shared guard (restart required).
+    #[tokio::test]
+    async fn metrics_auth_change_is_rejected() {
+        use crate::providers::ProviderRegistry;
+
+        let with_token = "\n[metrics]\nbearer_token = \"live-token\"\n";
+        let live = crate::server::test_app_state(guard_config(with_token), ProviderRegistry::new());
+
+        // Unchanged token → Ok (other sections may still reload).
+        assert!(ensure_metrics_auth_reloadable(&live, &guard_config(with_token)).is_ok());
+        // Different token → rejected with a restart-required message.
+        let err = ensure_metrics_auth_reloadable(
+            &live,
+            &guard_config("\n[metrics]\nbearer_token = \"rotated\"\n"),
+        )
+        .expect_err("rotation must be rejected");
+        assert!(
+            err.contains("restart"),
+            "message must mention restart: {err}"
+        );
+        // Token removed → rejected (would silently open /metrics).
+        assert!(ensure_metrics_auth_reloadable(&live, &guard_config("")).is_err());
+
+        // Public live state: ADDING a token is the exact gap — must be rejected.
+        let public = crate::server::test_app_state(guard_config(""), ProviderRegistry::new());
+        assert!(ensure_metrics_auth_reloadable(
+            &public,
+            &guard_config("\n[metrics]\nbearer_token = \"added\"\n")
+        )
+        .is_err());
+        // Staying public → Ok (default reloads keep working).
+        assert!(ensure_metrics_auth_reloadable(&public, &guard_config("")).is_ok());
+    }
+
+    // #2: a configured-but-unreadable bearer_token_file must NOT be masked as
+    // "no token". From a public live state, pointing at a bad path is rejected
+    // (not silently kept public).
+    #[tokio::test]
+    async fn metrics_unreadable_token_file_is_rejected_from_public() {
+        use crate::providers::ProviderRegistry;
+
+        let public = crate::server::test_app_state(guard_config(""), ProviderRegistry::new());
+        let candidate =
+            guard_config("\n[metrics]\nbearer_token_file = \"/no/such/grob-metrics-token\"\n");
+        let err = ensure_metrics_auth_reloadable(&public, &candidate)
+            .expect_err("unreadable token file must be rejected, not treated as public");
+        assert!(
+            err.contains("restart") || err.contains("could not be read"),
+            "message must explain the rejection: {err}"
+        );
+    }
+
+    // #3: persist_and_reload must reject a token change BEFORE persisting. The
+    // test state's config_source points at a non-existent "test.toml", so if the
+    // metrics check ran AFTER the backup we'd get an IO error instead of the
+    // BadRequest restart message — proving the check runs first.
+    #[tokio::test]
+    async fn persist_and_reload_rejects_token_change_before_write() {
+        use crate::providers::ProviderRegistry;
+
+        let live = crate::server::test_app_state(
+            guard_config("\n[metrics]\nbearer_token = \"live\"\n"),
+            ProviderRegistry::new(),
+        );
+        let candidate = guard_config("\n[metrics]\nbearer_token = \"rotated\"\n");
+        let err = persist_and_reload(&live, &candidate)
+            .await
+            .expect_err("token change must be rejected before any write");
+        if let crate::server::RequestError::BadRequest(msg) = err {
+            assert!(
+                msg.contains("restart"),
+                "must be the restart message: {msg}"
+            );
+        } else {
+            panic!("expected BadRequest (pre-write guard), got an IO/other error");
+        }
     }
 
     #[cfg(feature = "mcp")]

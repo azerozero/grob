@@ -157,6 +157,7 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         version: None,
         user: Default::default(),
         otel: Default::default(),
+        metrics: Default::default(),
         log_export: Default::default(),
         pledge: Default::default(),
         tool_validation: Default::default(),

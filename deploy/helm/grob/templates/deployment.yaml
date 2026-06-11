@@ -101,6 +101,14 @@ spec:
             - name: config
               mountPath: /etc/grob
               readOnly: true
+            {{- if .Values.metrics.bearerTokenSecret.name }}
+            # /metrics bearer token, mounted read-only as a file so the token
+            # never lands in the ConfigMap. Point `[metrics] bearer_token_file`
+            # at /etc/grob/metrics/<key>.
+            - name: metrics-token
+              mountPath: /etc/grob/metrics
+              readOnly: true
+            {{- end }}
             - name: data
               mountPath: {{ .Values.persistence.mountPath }}
             - name: tmp
@@ -109,6 +117,14 @@ spec:
         - name: config
           configMap:
             name: {{ include "grob.fullname" . }}-config
+        {{- if .Values.metrics.bearerTokenSecret.name }}
+        - name: metrics-token
+          secret:
+            secretName: {{ .Values.metrics.bearerTokenSecret.name }}
+            items:
+              - key: {{ .Values.metrics.bearerTokenSecret.key }}
+                path: {{ .Values.metrics.bearerTokenSecret.key }}
+        {{- end }}
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

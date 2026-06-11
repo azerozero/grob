@@ -146,8 +146,25 @@ probes:
     timeoutSeconds: 3
     failureThreshold: 2
 
+# ── /metrics bearer-token auth (optional) ────────────────────────────────────
+# /metrics is PUBLIC by default. To gate it, put the token in a Secret and mount
+# it here as a FILE — never inline in `config` (that lands in the ConfigMap and
+# Helm release history). The token then lives at /etc/grob/metrics/<key>; set:
+#   config: |
+#     [metrics]
+#     bearer_token_file = "/etc/grob/metrics/token"
+# Create the Secret out of band (or via `secret.data` / `existingSecret`):
+#   kubectl create secret generic grob-metrics-token --from-literal=token=<TOKEN>
+# and point serviceMonitor.bearerTokenSecret at the SAME Secret/key below.
+metrics:
+  bearerTokenSecret: {}
+    # name: grob-metrics-token
+    # key: token
+
 # ── ServiceMonitor (Prometheus Operator) ─────────────────────────────────────
-# Scrapes /metrics in-cluster. /metrics is unauthenticated; keep it internal.
+# Scrapes /metrics in-cluster. /metrics is unauthenticated by default; keep it
+# internal, OR gate it with a bearer token (mount it via `metrics.bearerTokenSecret`
+# above) and point `bearerTokenSecret` below at the SAME Secret/key.
 serviceMonitor:
   enabled: false
   # Extra labels so your Prometheus selects it (e.g. release: kube-prometheus).
@@ -155,6 +172,12 @@ serviceMonitor:
   interval: 30s
   scrapeTimeout: 10s
   path: /metrics
+  # Optional: present a bearer token when scraping a gated /metrics. References
+  # an existing Secret holding the token; the SAME value must be configured in
+  # grob. Leave empty ({}) to scrape unauthenticated (the default).
+  bearerTokenSecret: {}
+    # name: grob-metrics-token
+    # key: token
 
 # ── Autoscaling (HPA on grob_active_requests) ────────────────────────────────
 # OFF by default. Scaling >1 replica triggers the per-pod budget caveat above —

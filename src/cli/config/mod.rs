@@ -47,7 +47,7 @@ pub use routing::{
 pub use secrets::{SecretsBackend, SecretsConfig, SecretsFileConfig};
 pub use security::{ComplianceConfig, EnforcementMode, FipsConfig, SecurityConfig, TeeConfig};
 pub use server::{AcmeConfig, ServerConfig, TimeoutConfig, TlsConfig};
-pub use telemetry::{OtelConfig, TracingConfig};
+pub use telemetry::{MetricsConfig, OtelConfig, TracingConfig};
 pub use user::{PresetConfig, UserConfig};
 
 // Shared across security.rs and telemetry.rs (any serde `default = "..."`

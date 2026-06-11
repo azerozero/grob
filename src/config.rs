@@ -21,9 +21,9 @@ use crate::auth::jwt::AuthConfig;
 use crate::cli::HarnessConfig;
 use crate::cli::{
     BudgetConfig, CacheConfig, ComplianceConfig, ConfigSource, FipsConfig, LogExportConfig,
-    ModelConfig, ModelStrategy, OtelConfig, PresetConfig, PricingConfig, ProjectConfig,
-    ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TierConfig,
-    ToolLayerConfig, UserConfig,
+    MetricsConfig, ModelConfig, ModelStrategy, OtelConfig, PresetConfig, PricingConfig,
+    ProjectConfig, ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig,
+    TierConfig, ToolLayerConfig, UserConfig,
 };
 use crate::features::dlp::config::DlpConfig;
 #[cfg(feature = "mcp")]
@@ -98,6 +98,9 @@ pub struct AppConfig {
     /// OpenTelemetry distributed tracing export
     #[serde(default)]
     pub otel: OtelConfig,
+    /// `/metrics` endpoint protection (optional bearer-token auth)
+    #[serde(default)]
+    pub metrics: MetricsConfig,
     /// External log sink configuration for structured request/response export
     #[serde(default)]
     pub log_export: LogExportConfig,

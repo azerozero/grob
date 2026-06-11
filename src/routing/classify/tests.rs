@@ -34,6 +34,7 @@ fn create_test_config() -> AppConfig {
         secrets: Default::default(),
         compliance: Default::default(),
         otel: Default::default(),
+        metrics: Default::default(),
         log_export: Default::default(),
         pledge: Default::default(),
         tool_validation: Default::default(),

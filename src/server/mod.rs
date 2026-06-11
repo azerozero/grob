@@ -74,7 +74,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::limit::RequestBodyLimitLayer;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
@@ -132,6 +132,9 @@ pub struct ObservabilityState {
     pub message_tracer: Arc<dyn traits::Tracer>,
     /// Prometheus metrics exporter handle for `/metrics` endpoint.
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
+    /// Optional bearer token gating `/metrics`. `None` = endpoint is public
+    /// (the default). Resolved once at startup from `[metrics]` config.
+    pub metrics_bearer_token: Option<secrecy::SecretString>,
     /// Persistent monthly spend tracker with budget enforcement.
     pub spend_tracker: tokio::sync::Mutex<Box<dyn traits::SpendTracking>>,
     /// Shared token pricing table for cost calculation.
@@ -238,6 +241,23 @@ pub(crate) fn test_app_state(
     config: AppConfig,
     registry: crate::providers::ProviderRegistry,
 ) -> Arc<AppState> {
+    test_app_state_with_source(
+        config,
+        registry,
+        crate::cli::ConfigSource::File(std::path::PathBuf::from("test.toml")),
+    )
+}
+
+/// Like [`test_app_state`] but with an explicit [`crate::cli::ConfigSource`].
+///
+/// Lets reload-path tests point the state at a real on-disk config file so the
+/// HTTP/RPC `reload_config` handlers can re-read it.
+#[cfg(test)]
+pub(crate) fn test_app_state_with_source(
+    config: AppConfig,
+    registry: crate::providers::ProviderRegistry,
+    config_source: crate::cli::ConfigSource,
+) -> Arc<AppState> {
     let router = Router::new(config.clone());
     let reloadable = Arc::new(ReloadableState::new(
         config.clone(),
@@ -268,7 +288,7 @@ pub(crate) fn test_app_state(
         inner: std::sync::RwLock::new(reloadable),
         token_store,
         grob_store,
-        config_source: crate::cli::ConfigSource::File(std::path::PathBuf::from("test.toml")),
+        config_source,
         active_requests: std::sync::atomic::AtomicU64::new(0),
         started_at: chrono::Utc::now(),
         actual_oauth_callback_port: std::sync::atomic::AtomicU16::new(0),
@@ -288,6 +308,9 @@ pub(crate) fn test_app_state(
         observability: ObservabilityState {
             message_tracer,
             metrics_handle,
+            // Mirror real startup: resolve the optional `/metrics` bearer token
+            // from config so tests can exercise both the public and gated paths.
+            metrics_bearer_token: config.metrics.resolve_bearer_token().ok().flatten(),
             spend_tracker: tokio::sync::Mutex::new(spend_tracker),
             pricing_table,
         },
@@ -371,6 +394,29 @@ pub async fn start_server(
 
     let log_exporter = crate::features::log_export::init_log_exporter(&config.log_export);
 
+    // Resolve the optional `/metrics` bearer token once at startup (the file,
+    // if set, wins and is trimmed). A configured-but-blank source is a likely
+    // misconfiguration, so warn instead of silently leaving `/metrics` public.
+    let metrics_bearer_token = config.metrics.resolve_bearer_token().map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to read [metrics] bearer_token_file '{}': {}",
+            config.metrics.bearer_token_file.as_deref().unwrap_or(""),
+            e
+        )
+    })?;
+    match (
+        &metrics_bearer_token,
+        config.metrics.token_source_configured(),
+    ) {
+        (Some(_), _) => info!("🔒 /metrics requires Authorization: Bearer <token>"),
+        (None, true) => {
+            warn!(
+                "⚠️  [metrics] token source configured but resolved empty — /metrics stays PUBLIC"
+            )
+        }
+        (None, false) => {}
+    }
+
     let event_bus = crate::features::watch::EventBus::new();
 
     let state = Arc::new(AppState {
@@ -395,6 +441,7 @@ pub async fn start_server(
         observability: ObservabilityState {
             message_tracer: tracer,
             metrics_handle,
+            metrics_bearer_token,
             spend_tracker: tokio::sync::Mutex::new(tracker),
             pricing_table,
         },
