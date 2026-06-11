@@ -1908,6 +1908,7 @@ dependencies = [
  "memchr",
  "metrics",
  "metrics-exporter-prometheus",
+ "metrics-util",
  "mockito",
  "moka",
  "nix",

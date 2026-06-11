@@ -68,6 +68,16 @@ pub struct OtelConfig {
     /// Service name reported in traces (default: "grob")
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,
+    /// Export metrics over OTLP in addition to the always-on Prometheus
+    /// `/metrics` surface. Requires the `otel` build feature; reuses `endpoint`
+    /// and `service_name`. The single `metrics` recorder is fanned out to both
+    /// backends, so no call site is instrumented twice. Default: false.
+    #[serde(default)]
+    pub metrics: bool,
+    /// Push interval in seconds for the OTLP metrics `PeriodicReader`
+    /// (default: 60). Ignored unless `metrics` is true.
+    #[serde(default = "default_otel_metrics_interval_secs")]
+    pub metrics_interval_secs: u64,
 }
 
 impl Default for OtelConfig {
@@ -76,8 +86,14 @@ impl Default for OtelConfig {
             enabled: false,
             endpoint: default_otel_endpoint(),
             service_name: default_otel_service_name(),
+            metrics: false,
+            metrics_interval_secs: default_otel_metrics_interval_secs(),
         }
     }
+}
+
+fn default_otel_metrics_interval_secs() -> u64 {
+    60
 }
 
 fn default_otel_endpoint() -> String {

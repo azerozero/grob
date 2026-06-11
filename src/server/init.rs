@@ -131,39 +131,95 @@ pub(crate) async fn init_observability(
     // only fetches OpenRouter prices in the background when explicitly enabled.
     let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
 
-    // Prometheus is the always-active metrics surface (`/metrics`). Installing
-    // the global recorder is the single source of instrumentation.
+    // Prometheus is the always-active metrics surface (`/metrics`). It is the
+    // single source of instrumentation: under the `otel` feature, OTLP export is
+    // a FAN-OUT layered over this same recorder (see `install_metrics_recorder`),
+    // never a second `MeterProvider` re-instrumenting the ~65 call sites.
     //
-    // NOTE (deferred to SLICE 5b — OTLP metrics export): exporting these same
-    // metrics over OTLP must layer a `metrics_util::layers::FanoutBuilder`
-    // recorder OVER this one — `[PrometheusRecorder, OtelBridgeRecorder]` from the
-    // ONE existing `metrics` instrumentation — and NOT stand up a second
-    // OpenTelemetry `MeterProvider` (a parallel provider would re-instrument all
-    // ~65 call sites and drift; the review's central risk). The bridge recorder is
-    // tractable on the pinned versions (verified): `metrics::Recorder` →
-    // per-family OTel instruments (`u64_counter().add`, `f64_gauge().record`,
-    // `f64_histogram().record`) created from an `SdkMeterProvider::builder()
-    // .with_periodic_exporter(MetricExporter::builder().with_tonic()…)`, with the
-    // `Key`'s labels mapped to `KeyValue` attributes and gauge increment/decrement
-    // tracked in an `AtomicU64`. It needs the `metrics` feature on
-    // `opentelemetry-otlp`/`opentelemetry_sdk` plus a `metrics-util` dep, all gated
-    // behind `otel`. Scoped out of this slice to keep the change reviewable and the
-    // `--features otel` build green; the single-source groundwork is preserved.
+    // `build_recorder` (not `install_recorder`) hands us the recorder by value so
+    // it can be moved into the fan-out; the handle is taken first so `/metrics`
+    // keeps rendering in BOTH the Prometheus-only and fan-out cases.
     //
     // NOTE (deferred, security): `/metrics` is currently unauthenticated and
     // public (it carries spend/budget and tenant labels). Authenticating or
     // binding it to an admin interface is a separate security follow-up — not
     // changed in this slice so the scrape surface is not regressed.
-    let prometheus_builder = metrics_exporter_prometheus::PrometheusBuilder::new();
-    let metrics_handle = prometheus_builder
-        .install_recorder()
-        .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))?;
+    let prometheus_recorder =
+        metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+    let metrics_handle = prometheus_recorder.handle();
+    install_metrics_recorder(prometheus_recorder, &config.otel)?;
 
     // Register `# HELP` / `# TYPE` metadata for every exported metric family.
-    // Must run after the recorder is installed so the descriptions land on it.
+    // Must run after the recorder is installed so the descriptions land on it
+    // (and, under fan-out, on the OTLP bridge as instrument descriptions).
     describe_metrics();
 
     Ok((message_tracer, spend_tracker, pricing_table, metrics_handle))
+}
+
+/// Installs the global `metrics` recorder, fanning out to OTLP when configured.
+///
+/// With the `otel` feature AND `[otel] metrics = true`, wraps the Prometheus
+/// recorder and an OTLP bridge in a `metrics_util` fan-out so both backends are
+/// driven by the ONE existing instrumentation. If the OTLP bridge fails to
+/// build, it logs and falls back to Prometheus-only rather than aborting
+/// startup. In every other case the behaviour is identical to the previous
+/// `install_recorder()` (Prometheus alone).
+///
+/// # Errors
+///
+/// Returns an error only if the global recorder cannot be set (it was already
+/// installed once this process).
+#[cfg(feature = "otel")]
+fn install_metrics_recorder(
+    prometheus_recorder: metrics_exporter_prometheus::PrometheusRecorder,
+    otel: &crate::cli::OtelConfig,
+) -> anyhow::Result<()> {
+    use metrics_util::layers::FanoutBuilder;
+
+    if otel.metrics {
+        match crate::shared::otel_metrics::build_recorder(otel) {
+            Ok(otel_recorder) => {
+                let fanout = FanoutBuilder::default()
+                    .add_recorder(prometheus_recorder)
+                    .add_recorder(otel_recorder)
+                    .build();
+                metrics::set_global_recorder(fanout)
+                    .map_err(|e| anyhow::anyhow!("Failed to install fan-out recorder: {}", e))?;
+                info!(
+                    "📊 OTLP metrics export enabled → {} (push every {}s, fan-out over Prometheus)",
+                    otel.endpoint, otel.metrics_interval_secs
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                error!(
+                    "⚠️  Failed to build OTLP metrics recorder, falling back to Prometheus only: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    metrics::set_global_recorder(prometheus_recorder)
+        .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))
+}
+
+/// Installs the Prometheus recorder as the global `metrics` recorder.
+///
+/// The non-`otel` build has no fan-out, so this is a thin wrapper preserving the
+/// exact prior behaviour.
+///
+/// # Errors
+///
+/// Returns an error if the global recorder was already installed this process.
+#[cfg(not(feature = "otel"))]
+fn install_metrics_recorder(
+    prometheus_recorder: metrics_exporter_prometheus::PrometheusRecorder,
+    _otel: &crate::cli::OtelConfig,
+) -> anyhow::Result<()> {
+    metrics::set_global_recorder(prometheus_recorder)
+        .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))
 }
 
 /// Kind of an exported metric family, used to register its `# TYPE`.
@@ -973,6 +1029,62 @@ mod tests {
             missing.is_empty(),
             "metric families emitted in src/ but missing a `describe_metrics` entry \
              (they would ship without # HELP / # TYPE): {missing:?}"
+        );
+    }
+
+    // SLICE 5b: with the OTLP fan-out active, the ONE `metrics` instrumentation
+    // must reach BOTH backends. Uses a thread-local recorder (`with_local_recorder`)
+    // so it never touches the process-global recorder that
+    // `every_metric_family_is_described_without_otel` owns. Proves: (1) the
+    // Prometheus side stays populated through the fan-out, and (2) the OTLP bridge
+    // creates instruments from the same call sites (no double instrumentation).
+    #[cfg(feature = "otel")]
+    #[test]
+    fn fanout_reemits_to_prometheus_and_creates_otel_instruments() {
+        use metrics_util::layers::FanoutBuilder;
+
+        let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+        let handle = prometheus.handle();
+
+        // No reader → no tokio runtime / collector needed; instruments are still
+        // created, which is all this test asserts on the OTel side.
+        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
+        let otel = crate::shared::otel_metrics::OtelRecorder::new(provider);
+        let probe = otel.clone();
+
+        let fanout = FanoutBuilder::default()
+            .add_recorder(prometheus)
+            .add_recorder(otel)
+            .build();
+
+        metrics::with_local_recorder(&fanout, || {
+            describe_metrics();
+            metrics::counter!("grob_requests_total", "model" => "test").increment(2);
+            metrics::gauge!("grob_active_requests").set(5.0);
+            metrics::histogram!("grob_request_duration_seconds").record(0.05);
+        });
+
+        // Prometheus side: families rendered with metadata AND the emitted value.
+        let rendered = handle.render();
+        assert!(
+            rendered.contains("# TYPE grob_requests_total counter"),
+            "fan-out must still feed Prometheus its metadata"
+        );
+        assert!(
+            rendered.contains("grob_requests_total{model=\"test\"} 2"),
+            "fan-out must still feed Prometheus the emitted counter value + labels"
+        );
+        assert!(
+            rendered.contains("# TYPE grob_active_requests gauge")
+                && rendered.contains("# TYPE grob_request_duration_seconds"),
+            "fan-out must still feed Prometheus the gauge and histogram families"
+        );
+
+        // OTel side: exactly one instrument per distinct family, no double-count.
+        assert_eq!(
+            probe.instrument_count(),
+            3,
+            "the same three call sites must create three OTel instruments"
         );
     }
 }

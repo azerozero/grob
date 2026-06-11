@@ -14,6 +14,7 @@
 //! - [`message_tracing`] — Request/response trace pipeline (JSONL with rotation).
 //! - [`net`] — Network binding helpers (SO_REUSEPORT for zero-downtime upgrades).
 //! - [`otel`] — OpenTelemetry subscriber bootstrap.
+//! - `otel_metrics` — OpenTelemetry metrics bridge / fan-out recorder (feature-gated).
 //! - [`pid`] — PID file management for daemon mode.
 
 /// Automatic TLS certificate provisioning via ACME.
@@ -34,6 +35,10 @@ pub mod net;
 
 /// OpenTelemetry distributed tracing export.
 pub mod otel;
+
+/// OpenTelemetry metrics bridge (fan-out recorder).
+#[cfg(feature = "otel")]
+pub mod otel_metrics;
 
 /// PID file management for daemon mode.
 pub mod pid;

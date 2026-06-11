@@ -75,6 +75,10 @@ zeroize = { version = "1", features = ["derive"] }  # Zero secrets in memory on 
 # Metrics
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
+# Fan-out layer: mirrors the single `metrics` recorder to Prometheus AND the
+# OTLP bridge from ONE instrumentation source (otel feature only). `FanoutBuilder`
+# lives in the always-available `layers` module, so no extra features are needed.
+metrics-util = { version = "0.19", default-features = false, optional = true }
 subtle = "2.6.1"
 
 # DLP (Data Loss Prevention)
@@ -211,7 +215,16 @@ jemalloc = ["tikv-jemallocator"]
 unix-signals = ["nix"]
 socket-opts = ["socket2"]
 watch = ["ratatui", "crossterm"]
-otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
+otel = [
+    "opentelemetry",
+    "opentelemetry/metrics",
+    "opentelemetry_sdk",
+    "opentelemetry_sdk/metrics",
+    "opentelemetry-otlp",
+    "opentelemetry-otlp/metrics",
+    "tracing-opentelemetry",
+    "metrics-util",
+]
 tls = ["axum-server", "rustls", "rustls-pemfile"]
 acme = ["tls", "rustls-acme"]
 dlp = []
