@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "grob.fullname" . }}-config
+  labels:
+    {{- include "grob.labels" . | nindent 4 }}
+data:
+  # The full grob config is rendered into config.toml. An empty `.Values.config`
+  # falls back to the chart-bundled default in files/config.toml.
+  config.toml: |
+    {{- .Values.config | default (.Files.Get "files/config.toml") | nindent 4 }}

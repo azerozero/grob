@@ -1,0 +1,21 @@
+apiVersion: v2
+name: grob
+description: |
+  Grob — multi-provider LLM routing proxy. Routes requests across Anthropic,
+  OpenAI, Gemini and others with fallback, DLP, spend tracking and budgets.
+type: application
+# Chart version — bump on chart changes (SemVer).
+version: 0.1.0
+# Default application (container image) version; overridable via image.tag.
+appVersion: "0.36"
+home: https://github.com/azerozero/grob
+sources:
+  - https://github.com/azerozero/grob
+maintainers:
+  - name: azerozero
+keywords:
+  - llm
+  - proxy
+  - gateway
+  - anthropic
+  - openai

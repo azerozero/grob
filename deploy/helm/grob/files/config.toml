@@ -1,0 +1,25 @@
+# Default grob configuration shipped with the chart.
+# Override entirely by setting `.Values.config` (a full grob.toml string).
+
+[server]
+host = "0.0.0.0"
+port = 8080
+
+[router]
+default = "default"
+
+# Add providers and models, e.g.:
+# [[providers]]
+# name = "anthropic"
+# provider_type = "anthropic"
+# auth_type = "apikey"
+# api_key = "env:ANTHROPIC_API_KEY"   # resolved from the Secret
+# base_url = "https://api.anthropic.com"
+# models = ["claude"]
+#
+# [[models]]
+# name = "default"
+# [[models.mappings]]
+# priority = 1
+# provider = "anthropic"
+# actual_model = "claude-sonnet-4-6"

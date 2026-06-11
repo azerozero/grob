@@ -1,0 +1,39 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullName := include "grob.fullname" . -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "grob.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    # SECURITY: expose ONLY public LLM/health paths. The control plane
+    # (/api/config/reload, /rpc, /api/oauth/*, /api/config) shares the same port
+    # and is intentionally NOT routed here. Do not add control paths.
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ $fullName }}
+                port:
+                  name: http
+          {{- end }}
+    {{- end }}
+{{- end }}

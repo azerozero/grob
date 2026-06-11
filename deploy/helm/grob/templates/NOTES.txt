@@ -1,0 +1,30 @@
+grob {{ .Chart.AppVersion }} installed as release "{{ .Release.Name }}".
+
+In-cluster endpoint (ClusterIP, NOT exposed externally):
+  http://{{ include "grob.fullname" . }}.{{ .Release.Namespace }}.svc:{{ .Values.service.port }}
+
+Port-forward for a quick check:
+  kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "grob.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  curl localhost:{{ .Values.service.port }}/health
+
+SECURITY — the control plane shares the HTTP port:
+  /api/config/reload, /rpc and /api/oauth/* are served on the SAME port as the
+  LLM API. Do NOT expose them publicly.
+{{- if .Values.ingress.enabled }}
+  The Ingress routes only public paths (/v1, /health); keep it that way.
+{{- else }}
+  Ingress is disabled (recommended). If you add one, route only /v1 and /health.
+{{- end }}
+{{- if not .Values.networkPolicy.enabled }}
+  Consider networkPolicy.enabled=true to restrict who can reach the port.
+{{- end }}
+
+BUDGET & PERSISTENCE:
+{{- if .Values.persistence.enabled }}
+  Spend journals and OAuth tokens persist on a PVC at {{ .Values.persistence.mountPath }}.
+{{- else }}
+  WARNING: persistence is DISABLED — OAuth tokens and month-to-date spend are
+  LOST on every pod restart. Set persistence.enabled=true.
+{{- end }}
+  Budget enforcement is PER POD. Running >1 replica multiplies the effective
+  budget by the replica count. This release runs {{ if .Values.autoscaling.enabled }}HPA {{ .Values.autoscaling.minReplicas }}–{{ .Values.autoscaling.maxReplicas }}{{ else }}{{ .Values.replicaCount }} replica(s){{ end }}.
