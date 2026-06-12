@@ -24,6 +24,7 @@ use secrecy::SecretString;
 use crate::auth::token_store::{OAuthToken, TokenStore};
 
 /// macOS keychain service under which Claude Code stores its OAuth credential.
+#[cfg(target_os = "macos")]
 const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 /// A co-installed CLI tool whose OAuth token grob can mirror.
@@ -150,6 +151,7 @@ fn read_claude_token(_provider_id: &str) -> Result<OAuthToken> {
 ///
 /// `expiresAt` is a millisecond Unix timestamp; a missing or invalid value
 /// falls back to a short window so the token is re-validated promptly.
+#[cfg(any(target_os = "macos", test))]
 fn parse_claude_payload(provider_id: &str, raw: &str) -> Result<OAuthToken> {
     let doc: serde_json::Value =
         serde_json::from_str(raw).context("parsing Claude keychain JSON")?;
