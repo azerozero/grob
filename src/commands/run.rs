@@ -6,11 +6,15 @@ pub async fn cmd_run(
     config_source: cli::ConfigSource,
     port: Option<u16>,
     host: Option<String>,
+    adopt_from_system: bool,
 ) -> anyhow::Result<()> {
     if let Some(port) = port {
         config.server.port = Port::new(port).expect("valid port");
     }
     config.server.host = host.unwrap_or_else(|| "::".to_string());
+    if adopt_from_system {
+        config.auth.adopt_from_system = true;
+    }
 
     tracing::info!(
         "🐳 Container mode: {}:{}",

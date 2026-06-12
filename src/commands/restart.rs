@@ -41,7 +41,9 @@ pub async fn cmd_restart(
     if detach {
         println!("Starting service in background...");
         let port_from_config = Some(config.server.port.value());
-        let log_path = spawn_background_service(port_from_config, cli_config)?;
+        // Restart is config-driven: credential adoption follows the config
+        // file, not a remembered per-invocation flag.
+        let log_path = spawn_background_service(port_from_config, cli_config, false)?;
         let base_url = cli::format_base_url(&config.server.host, config.server.port.value());
 
         let verb = if was_running { "restarted" } else { "started" };
