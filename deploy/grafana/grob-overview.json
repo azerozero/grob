@@ -129,6 +129,13 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none", "prettifyLogMessage": false },
       "targets": [ { "refId": "A", "datasource": { "type": "loki", "uid": "loki" }, "expr": "{service_name=\"grob\"}" } ]
+    },
+    {
+      "id": 31, "type": "table", "title": "Traces (Tempo) — service.name = grob",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 38 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "options": { "showHeader": true },
+      "targets": [ { "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" }, "queryType": "traceql", "query": "{ resource.service.name=\"grob\" }", "limit": 20 } ]
     }
   ]
 }
