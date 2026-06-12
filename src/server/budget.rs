@@ -70,12 +70,14 @@ pub(crate) fn record_request_metrics(m: &RequestMetrics<'_>) {
     // thread-local Context, so without this attach `Context::current()` is empty
     // at the metrics call-site.
     //
-    // NOTE: opentelemetry_sdk 0.28 does NOT implement exemplar capture (every
-    // aggregator hardcodes `exemplars: vec![]`, and there is no
-    // `with_exemplar_filter` / reservoir API), so this is currently a NO-OP for
-    // exemplars. It becomes effective after upgrading the OTel stack to >= 0.30
-    // and enabling `ExemplarFilter::TraceBased`. See
-    // `docs/explanation/otlp-exemplars.md`.
+    // NOTE: opentelemetry-rust does NOT implement exemplar CAPTURE in any
+    // released version — verified through the latest stable opentelemetry_sdk
+    // 0.32.1: every metric aggregator still hardcodes `exemplars: vec![]` and
+    // there is no `ExemplarFilter` / reservoir / `with_exemplar_filter` API to
+    // enable. So this attach is currently a NO-OP for exemplars. It is grob's
+    // (correct) half of the wiring, ready for the day upstream lands exemplar
+    // capture — at which point only the bridge's `SdkMeterProvider` needs a
+    // trace-based filter. See `docs/explanation/otlp-exemplars.md`.
     #[cfg(feature = "otel")]
     let _otel_ctx_guard = {
         use opentelemetry::trace::TraceContextExt;
