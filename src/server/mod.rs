@@ -74,7 +74,7 @@ use axum::{
 };
 use std::sync::Arc;
 use tower_http::limit::RequestBodyLimitLayer;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
@@ -132,6 +132,9 @@ pub struct ObservabilityState {
     pub message_tracer: Arc<dyn traits::Tracer>,
     /// Prometheus metrics exporter handle for `/metrics` endpoint.
     pub metrics_handle: metrics_exporter_prometheus::PrometheusHandle,
+    /// Optional bearer token gating `/metrics`. `None` = endpoint is public
+    /// (the default). Resolved once at startup from `[metrics]` config.
+    pub metrics_bearer_token: Option<secrecy::SecretString>,
     /// Persistent monthly spend tracker with budget enforcement.
     pub spend_tracker: tokio::sync::Mutex<Box<dyn traits::SpendTracking>>,
     /// Shared token pricing table for cost calculation.
@@ -207,6 +210,11 @@ pub struct AppState {
     /// Pending HIT approval channels keyed by `"{request_id}:{tool_name}"`.
     #[cfg(feature = "policies")]
     pub hit_pending: Arc<crate::features::policies::stream::HitPendingApprovals>,
+    /// Dedicated limiter for per-policy `rate_limit` overrides. Separate from
+    /// [`SecurityState::rate_limiter`] so policy buckets (custom rps) never
+    /// collide with the pre-handler middleware's default-rate buckets.
+    #[cfg(feature = "policies")]
+    pub policy_rate_limiter: Arc<RateLimiter>,
 }
 
 impl AppState {
@@ -219,6 +227,108 @@ impl AppState {
     pub fn snapshot(&self) -> Arc<ReloadableState> {
         self.inner.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
+}
+
+/// Builds a minimal real [`AppState`] for tests.
+///
+/// Uses `build_recorder().handle()` so no global Prometheus recorder is installed
+/// (no process-global singleton contention), an empty in-memory provider registry
+/// unless one is supplied, and a throwaway `GrobStore` in a leaked temp dir. Lets
+/// unit tests exercise real handlers (`dispatch`, `handle_count_tokens`, RPC key
+/// ops) without spinning up the HTTP server.
+#[cfg(test)]
+pub(crate) fn test_app_state(
+    config: AppConfig,
+    registry: crate::providers::ProviderRegistry,
+) -> Arc<AppState> {
+    test_app_state_with_source(
+        config,
+        registry,
+        crate::cli::ConfigSource::File(std::path::PathBuf::from("test.toml")),
+    )
+}
+
+/// Like [`test_app_state`] but with an explicit [`crate::cli::ConfigSource`].
+///
+/// Lets reload-path tests point the state at a real on-disk config file so the
+/// HTTP/RPC `reload_config` handlers can re-read it.
+#[cfg(test)]
+pub(crate) fn test_app_state_with_source(
+    config: AppConfig,
+    registry: crate::providers::ProviderRegistry,
+    config_source: crate::cli::ConfigSource,
+) -> Arc<AppState> {
+    let router = Router::new(config.clone());
+    let reloadable = Arc::new(ReloadableState::new(
+        config.clone(),
+        router,
+        Arc::new(registry),
+    ));
+
+    let home = tempfile::tempdir().expect("tempdir");
+    let grob_store = Arc::new(
+        crate::storage::GrobStore::open(&home.path().join("grob.db")).expect("grob store"),
+    );
+    let token_store = crate::auth::TokenStore::with_store(grob_store.clone()).expect("token store");
+    // Keep the storage dir alive for the process; tests are short-lived.
+    std::mem::forget(home);
+
+    let message_tracer: Arc<dyn traits::Tracer> = Arc::new(
+        crate::shared::message_tracing::MessageTracer::new(config.server.tracing.clone()),
+    );
+    let spend_tracker: Box<dyn traits::SpendTracking> = Box::new(
+        crate::features::token_pricing::spend::SpendTracker::with_store(grob_store.clone()),
+    );
+    let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
+    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+        .build_recorder()
+        .handle();
+
+    Arc::new(AppState {
+        inner: std::sync::RwLock::new(reloadable),
+        token_store,
+        grob_store,
+        config_source,
+        active_requests: std::sync::atomic::AtomicU64::new(0),
+        started_at: chrono::Utc::now(),
+        actual_oauth_callback_port: std::sync::atomic::AtomicU16::new(0),
+        event_bus: crate::features::watch::EventBus::new(),
+        log_exporter: None,
+        #[cfg(feature = "mcp")]
+        grob_hint: std::sync::Mutex::new(None),
+        #[cfg(feature = "policies")]
+        hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        #[cfg(feature = "policies")]
+        policy_rate_limiter: Arc::new(crate::security::RateLimiter::new(
+            crate::security::RateLimitConfig {
+                requests_per_second: 1,
+                burst: 1,
+            },
+        )),
+        observability: ObservabilityState {
+            message_tracer,
+            metrics_handle,
+            // Mirror real startup: resolve the optional `/metrics` bearer token
+            // from config so tests can exercise both the public and gated paths.
+            metrics_bearer_token: config.metrics.resolve_bearer_token().ok().flatten(),
+            spend_tracker: tokio::sync::Mutex::new(spend_tracker),
+            pricing_table,
+        },
+        security: SecurityState {
+            jwt_validator: None,
+            rate_limiter: None,
+            dlp_sessions: None,
+            circuit_breakers: None,
+            audit_log: None,
+            response_cache: None,
+            tap_sender: None,
+            provider_scorer: None,
+            #[cfg(feature = "mcp")]
+            mcp: None,
+            tool_layer: None,
+            tool_spike_detector: None,
+        },
+    })
 }
 
 /// Start the HTTP server with graceful shutdown support.
@@ -284,6 +394,29 @@ pub async fn start_server(
 
     let log_exporter = crate::features::log_export::init_log_exporter(&config.log_export);
 
+    // Resolve the optional `/metrics` bearer token once at startup (the file,
+    // if set, wins and is trimmed). A configured-but-blank source is a likely
+    // misconfiguration, so warn instead of silently leaving `/metrics` public.
+    let metrics_bearer_token = config.metrics.resolve_bearer_token().map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to read [metrics] bearer_token_file '{}': {}",
+            config.metrics.bearer_token_file.as_deref().unwrap_or(""),
+            e
+        )
+    })?;
+    match (
+        &metrics_bearer_token,
+        config.metrics.token_source_configured(),
+    ) {
+        (Some(_), _) => info!("🔒 /metrics requires Authorization: Bearer <token>"),
+        (None, true) => {
+            warn!(
+                "⚠️  [metrics] token source configured but resolved empty — /metrics stays PUBLIC"
+            )
+        }
+        (None, false) => {}
+    }
+
     let event_bus = crate::features::watch::EventBus::new();
 
     let state = Arc::new(AppState {
@@ -300,9 +433,15 @@ pub async fn start_server(
         grob_hint: std::sync::Mutex::new(None),
         #[cfg(feature = "policies")]
         hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        #[cfg(feature = "policies")]
+        policy_rate_limiter: Arc::new(RateLimiter::new(crate::security::RateLimitConfig {
+            requests_per_second: 1,
+            burst: 1,
+        })),
         observability: ObservabilityState {
             message_tracer: tracer,
             metrics_handle,
+            metrics_bearer_token,
             spend_tracker: tokio::sync::Mutex::new(tracker),
             pricing_table,
         },
@@ -468,6 +607,28 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
             app
         }
     };
+
+    // HTTP request tracing (tower-http), added outermost so the span covers the
+    // whole middleware stack. It records ONLY the method and path — never the
+    // `Authorization` header or request/response bodies (secrets / PII) — and
+    // skips the probe and metrics endpoints to avoid scrape noise. The span is
+    // quiet by default (DEBUG lifecycle events) but is exported by the OTel layer
+    // when the `otel` feature is enabled.
+    let app = app.layer(
+        tower_http::trace::TraceLayer::new_for_http().make_span_with(
+            |request: &axum::http::Request<axum::body::Body>| {
+                let path = request.uri().path();
+                if matches!(path, "/metrics" | "/health" | "/live" | "/ready") {
+                    return tracing::Span::none();
+                }
+                tracing::info_span!(
+                    "http_request",
+                    method = %request.method(),
+                    path = %path,
+                )
+            },
+        ),
+    );
 
     app.with_state(state)
 }

@@ -22,7 +22,9 @@ Grob supports three authentication modes for incoming requests:
 - **API key**: Set `api_key` in `[server]` config. All requests must include `Authorization: Bearer <token>` or `x-api-key: <token>`. API key comparison uses constant-time equality (`subtle` crate) to prevent timing attacks.
 - **JWT**: Validate JWTs against a JWKS endpoint with key rotation support.
 
-Health (`/health`), metrics (`/metrics`), and OAuth endpoints are exempt from authentication.
+Health (`/health`, `/live`, `/ready`), metrics (`/metrics`), and OAuth endpoints are exempt from the API-key/JWT authentication above.
+
+`/metrics` carries spend, budget, and tenant labels, so it can be gated independently with its own bearer token via `[metrics] bearer_token` / `bearer_token_file` (constant-time comparison, `401` on mismatch). It stays public when unset; the health probes always stay public. See [how-to/deploy](../how-to/deploy.md#protect-metrics-with-a-bearer-token).
 
 ### Rate limiting
 

@@ -18,6 +18,9 @@ async fn live_base_url(config: &cli::AppConfig) -> Option<String> {
 }
 
 /// Creates a new virtual API key via RPC or local store.
+// CLI command entry point: the parameter list mirrors the `key create` flags
+// (name, tenant, budget, rate_limit, allowed_models, allowed_providers, expiry).
+#[allow(clippy::too_many_arguments)]
 pub async fn cmd_key_create(
     config: &cli::AppConfig,
     name: &str,
@@ -25,10 +28,11 @@ pub async fn cmd_key_create(
     budget: Option<f64>,
     rate_limit: Option<u32>,
     allowed_models: Option<Vec<String>>,
+    allowed_providers: Vec<String>,
     expires_in_days: Option<u64>,
 ) {
     if let Some(base_url) = live_base_url(config).await {
-        create_via_rpc(&base_url, name).await;
+        create_via_rpc(&base_url, name, &allowed_providers).await;
     } else {
         create_local(
             name,
@@ -36,6 +40,7 @@ pub async fn cmd_key_create(
             budget,
             rate_limit,
             allowed_models,
+            allowed_providers,
             expires_in_days,
         );
     }
@@ -61,10 +66,13 @@ pub async fn cmd_key_revoke(config: &cli::AppConfig, id_or_prefix: &str) {
 
 // ── RPC path ──
 
-async fn create_via_rpc(base_url: &str, name: &str) {
+async fn create_via_rpc(base_url: &str, name: &str, allowed_providers: &[String]) {
     use super::rpc_client::rpc_call;
 
-    let params = serde_json::json!({ "name": name });
+    let params = serde_json::json!({
+        "name": name,
+        "allowed_providers": allowed_providers,
+    });
     match rpc_call(base_url, "grob/keys/create", Some(params)).await {
         Ok(result) => {
             println!("Virtual key created successfully.\n");
@@ -169,6 +177,7 @@ fn create_local(
     budget: Option<f64>,
     rate_limit: Option<u32>,
     allowed_models: Option<Vec<String>>,
+    allowed_providers: Vec<String>,
     expires_in_days: Option<u64>,
 ) {
     let store = match GrobStore::open(&GrobStore::default_path()) {
@@ -194,6 +203,7 @@ fn create_local(
         budget_usd: budget,
         rate_limit_rps: rate_limit,
         allowed_models,
+        allowed_providers,
         created_at: now,
         expires_at,
         revoked: false,

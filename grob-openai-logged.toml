@@ -78,3 +78,17 @@ default = "dev"
 think = "codex"
 background = "fast"
 websearch = "dev"
+
+# Cost-aware agent-loop routing for debug/A-B runs.
+[[tiers]]
+name = "trivial"
+model = "fast"
+providers = ["chatgpt-codex"]
+
+# medium → dev (gpt-5.5), NOT codex: gpt-5.3-codex 400s on this ChatGPT account
+# (not entitled). Routing medium to dev keeps mid-tier turns flowing; it collapses
+# onto the complex tier (both gpt-5.5) until a cheaper entitled model is available.
+[[tiers]]
+name = "medium"
+model = "dev"
+providers = ["chatgpt-codex"]

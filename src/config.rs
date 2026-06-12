@@ -21,9 +21,9 @@ use crate::auth::jwt::AuthConfig;
 use crate::cli::HarnessConfig;
 use crate::cli::{
     BudgetConfig, CacheConfig, ComplianceConfig, ConfigSource, FipsConfig, LogExportConfig,
-    ModelConfig, ModelStrategy, OtelConfig, PresetConfig, PricingConfig, ProjectConfig,
-    ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig, TierConfig,
-    ToolLayerConfig, UserConfig,
+    MetricsConfig, ModelConfig, ModelStrategy, OtelConfig, PresetConfig, PricingConfig,
+    ProjectConfig, ProviderConfig, RouterConfig, SecurityConfig, ServerConfig, TeeConfig,
+    TierConfig, ToolLayerConfig, UserConfig,
 };
 use crate::features::dlp::config::DlpConfig;
 #[cfg(feature = "mcp")]
@@ -98,12 +98,18 @@ pub struct AppConfig {
     /// OpenTelemetry distributed tracing export
     #[serde(default)]
     pub otel: OtelConfig,
+    /// `/metrics` endpoint protection (optional bearer-token auth)
+    #[serde(default)]
+    pub metrics: MetricsConfig,
     /// External log sink configuration for structured request/response export
     #[serde(default)]
     pub log_export: LogExportConfig,
     /// Pledge filter: structurally removes tools from LLM payloads.
     #[serde(default)]
     pub pledge: PledgeConfig,
+    /// Inbound tool well-formedness validation (strip malformed, or reject 400).
+    #[serde(default)]
+    pub tool_validation: crate::features::tool_validation::ToolValidationConfig,
     /// Trusted Execution Environment (TEE) attestation and key sealing.
     #[serde(default)]
     pub tee: TeeConfig,
@@ -440,8 +446,56 @@ default = "placeholder-model"
         Self::validate_acme(&self.server)?;
         Self::validate_auth_mode(&self.auth)?;
         Self::validate_fan_out(&self.models, &model_names)?;
-        Self::validate_tiers(&self.tiers, &provider_names)?;
+        Self::validate_tiers(&self.tiers, &provider_names, &model_names)?;
+        Self::validate_pledge_profiles(&self.pledge)?;
 
+        Ok(())
+    }
+
+    /// Rejects pledge configs that reference an unknown profile name.
+    ///
+    /// Fail-closed at load: a typo'd `default_profile` or rule profile (which
+    /// would otherwise resolve to `none`/strip-all at runtime) is surfaced as a
+    /// startup error instead, so the operator notices before deploying.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error naming the first profile reference that resolves to
+    /// neither a config-defined nor a built-in profile.
+    fn validate_pledge_profiles(pledge: &PledgeConfig) -> Result<()> {
+        use crate::features::pledge::profiles::is_known;
+
+        if is_known(pledge, &pledge.default_profile) {
+            // ok
+        } else {
+            anyhow::bail!(
+                "pledge.default_profile '{}' is not a known profile (built-in or [[pledge.profiles]])",
+                pledge.default_profile
+            );
+        }
+        for rule in &pledge.rules {
+            if !is_known(pledge, &rule.profile) {
+                anyhow::bail!(
+                    "pledge rule references unknown profile '{}' (built-in or [[pledge.profiles]])",
+                    rule.profile
+                );
+            }
+        }
+        // Validate every custom profile's glob patterns compile, so an invalid
+        // pattern is a startup error rather than a silently-dropped (never-match)
+        // pattern at runtime.
+        for profile in &pledge.profiles {
+            for pattern in &profile.allowed_tool_patterns {
+                globset::Glob::new(pattern).map_err(|e| {
+                    anyhow::anyhow!(
+                        "pledge profile '{}' has an invalid tool pattern '{}': {}",
+                        profile.name,
+                        pattern,
+                        e
+                    )
+                })?;
+            }
+        }
         Ok(())
     }
 
@@ -629,14 +683,18 @@ default = "placeholder-model"
         Ok(())
     }
 
-    /// Verifies every tier references a declared provider (skipped when none exist).
+    /// Verifies every tier references a declared provider; warns on unknown models.
     ///
     /// # Errors
     ///
-    /// Returns an error naming the first tier whose provider is unknown.
+    /// Returns an error naming the first tier whose provider is unknown. An
+    /// unknown `model` only warns — it may be a pass-through model forwarded
+    /// verbatim to a `pass_through = true` provider and intentionally absent
+    /// from `[[models]]` (mirrors [`Self::warn_unknown_router_models`]).
     fn validate_tiers(
         tiers: &[TierConfig],
         provider_names: &std::collections::HashSet<&str>,
+        model_names: &std::collections::HashSet<&str>,
     ) -> Result<()> {
         // Skip when no providers are defined: an empty provider set means no
         // declared names to validate against, matching the original guard.
@@ -649,6 +707,24 @@ default = "placeholder-model"
                             tier.name,
                             prov,
                             provider_names.iter().collect::<Vec<_>>()
+                        );
+                    }
+                }
+            }
+        }
+        // Unknown tier models are a warning, not a hard error: a tier may target
+        // a pass-through model — forwarded verbatim to a `pass_through = true`
+        // provider and intentionally absent from `[[models]]`. This matches
+        // `warn_unknown_router_models` and `validate_fan_out`, which also only
+        // warn. Providers (above) stay a hard error: a tier must reference a
+        // declared `[[providers]]` entry.
+        if !model_names.is_empty() {
+            for tier in tiers {
+                if let Some(model) = tier.model.as_deref() {
+                    if !model_names.contains(model) {
+                        eprintln!(
+                            "⚠️  Warning: tier '{}' model '{}' not found in [[models]] (ok for pass-through)",
+                            tier.name, model
                         );
                     }
                 }
@@ -767,5 +843,34 @@ think = "my-think-model"
         assert_eq!(config.server.port.value(), 3456);
         assert_eq!(config.router.default, "my-default-model");
         assert_eq!(config.router.think.as_deref(), Some("my-think-model"));
+    }
+
+    #[test]
+    fn validate_tiers_accepts_pass_through_model_but_rejects_unknown_provider() {
+        use std::collections::HashSet;
+        let providers: HashSet<&str> = ["chatgpt-codex"].into_iter().collect();
+        // Non-empty [[models]] that does NOT contain the tier's model.
+        let models: HashSet<&str> = ["dev"].into_iter().collect();
+
+        // A tier model absent from [[models]] is a pass-through target → warn,
+        // not error (mirrors router/fan_out validation).
+        let pass_through = vec![TierConfig {
+            name: "medium".to_string(),
+            model: Some("gpt-5.5-not-declared".to_string()),
+            providers: vec!["chatgpt-codex".to_string()],
+            fanout: false,
+            match_conditions: None,
+        }];
+        assert!(AppConfig::validate_tiers(&pass_through, &providers, &models).is_ok());
+
+        // An unknown provider stays a hard error.
+        let bad_provider = vec![TierConfig {
+            name: "medium".to_string(),
+            model: None,
+            providers: vec!["does-not-exist".to_string()],
+            fanout: false,
+            match_conditions: None,
+        }];
+        assert!(AppConfig::validate_tiers(&bad_provider, &providers, &models).is_err());
     }
 }

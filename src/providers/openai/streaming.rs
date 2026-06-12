@@ -1,5 +1,6 @@
 use super::tool_salvage::{drain_buffer, salvage_complete, SalvageEvent, SalvagedToolCall};
 use super::types::{OpenAIStreamChunk, StreamTransformState};
+use crate::providers::error::ProviderError;
 
 /// Transform an OpenAI streaming chunk to Anthropic SSE format.
 ///
@@ -317,21 +318,27 @@ fn emit_tool_call_deltas(
     }
 }
 
-/// Opens an Anthropic `tool_use` block for a streaming Codex `function_call` item.
+/// Resolves the `output_index` a streaming `function_call` item was registered under.
 ///
 /// Codex streams a structured tool call as `output_item.added` (the call shell),
 /// then `function_call_arguments.delta` chunks, then `output_item.done`. The
-/// block is keyed by the Responses `output_index` so argument deltas correlate.
+/// block is registered on `added` and keyed by its `output_index`, so the
+/// follow-up deltas/done must resolve back to that same index.
+///
+/// The item's stable identity (`item_id` / `call_id`) is consulted **before** the
+/// event's raw `output_index`. When a preamble `message` precedes the call the
+/// upstream `output_index` can be absent on `added` (so the block registers under
+/// index `0`) yet present on the deltas (e.g. `2`), or otherwise drift across the
+/// three events. Trusting the raw `output_index` then resolves the deltas to an
+/// unregistered index and their arguments are silently dropped, leaving Codex
+/// with an empty-argument tool call. Keying on the call's identity rattaches each
+/// delta to the block its `added` opened, regardless of any `output_index` drift.
 fn resolve_responses_fc_output_index(
     state: &StreamTransformState,
     json: &serde_json::Value,
     item: Option<&serde_json::Value>,
     fallback_to_single_open: bool,
 ) -> Option<u64> {
-    if let Some(output_index) = json.get("output_index").and_then(|v| v.as_u64()) {
-        return Some(output_index);
-    }
-
     for id in [
         json.get("item_id").and_then(|v| v.as_str()),
         item.and_then(|i| i.get("id")).and_then(|v| v.as_str()),
@@ -345,11 +352,30 @@ fn resolve_responses_fc_output_index(
         }
     }
 
+    if let Some(output_index) = json.get("output_index").and_then(|v| v.as_u64()) {
+        return Some(output_index);
+    }
+
     if fallback_to_single_open && state.responses_fc_blocks.len() == 1 {
         return state.responses_fc_blocks.keys().next().copied();
     }
 
     None
+}
+
+/// Synthetic base for `function_call` blocks that arrive without an
+/// `output_index`, kept far above any real upstream index so a synthetic slot
+/// can never collide with a genuine `output_index`.
+const SYNTHETIC_FC_INDEX_BASE: u64 = 1 << 32;
+
+/// Picks the block slot for an index-less `function_call`: the default `0`, or a
+/// fresh synthetic index when `0` is already held by another index-less call.
+fn fc_default_output_index(state: &StreamTransformState) -> u64 {
+    if state.responses_fc_blocks.contains_key(&0) {
+        SYNTHETIC_FC_INDEX_BASE + state.responses_fc_blocks.len() as u64
+    } else {
+        0
+    }
 }
 
 fn emit_responses_fc_start(
@@ -358,8 +384,14 @@ fn emit_responses_fc_start(
     json: &serde_json::Value,
     item: &serde_json::Value,
 ) {
-    let output_index =
-        resolve_responses_fc_output_index(state, json, Some(item), false).unwrap_or(0);
+    let output_index = match resolve_responses_fc_output_index(state, json, Some(item), false) {
+        Some(idx) => idx,
+        // No `output_index` and no id match: use the default slot 0 unless it is
+        // already held by a *different* index-less call (parallel `function_call`s
+        // without an `output_index`), in which case allocate a fresh synthetic
+        // index so the second call isn't dropped by the duplicate guard below.
+        None => fc_default_output_index(state),
+    };
     if state.responses_fc_blocks.contains_key(&output_index) {
         return;
     }
@@ -429,6 +461,13 @@ fn emit_responses_fc_args(
     delta: &str,
 ) {
     let Some(output_index) = resolve_responses_fc_output_index(state, json, None, true) else {
+        // Losing an argument delta empties the tool call and stalls the Codex
+        // turn (the exact failure class slice A fixed); surface drift instead of
+        // dropping it silently.
+        tracing::warn!(
+            item_id = ?json.get("item_id").and_then(|v| v.as_str()),
+            "Dropping function_call argument delta: no output_index resolvable"
+        );
         return;
     };
     if let Some(&block_index) = state.responses_fc_blocks.get(&output_index) {
@@ -443,6 +482,11 @@ fn emit_responses_fc_args(
             .entry(output_index)
             .or_default()
             .push_str(delta);
+    } else {
+        tracing::warn!(
+            output_index,
+            "Dropping function_call argument delta: no open block for output_index"
+        );
     }
 }
 
@@ -512,7 +556,7 @@ fn emit_tool_input_delta(
     output.push_str(&format!("event: content_block_delta\ndata: {}\n\n", delta));
 }
 
-fn sanitize_tool_input_delta<'a>(
+pub(crate) fn sanitize_tool_input_delta<'a>(
     tool_name: &str,
     partial_json: &'a str,
 ) -> std::borrow::Cow<'a, str> {
@@ -727,6 +771,57 @@ fn read_integer_number_to_u64(number: &serde_json::Number, min: u64) -> Option<u
     }
 }
 
+fn message_delta_with_usage(
+    stop_reason: &str,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_input_tokens: u64,
+) -> serde_json::Value {
+    let mut usage = serde_json::json!({
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+    });
+    if cache_read_input_tokens > 0 {
+        if let Some(map) = usage.as_object_mut() {
+            map.insert(
+                "cache_read_input_tokens".to_string(),
+                serde_json::Value::Number(cache_read_input_tokens.into()),
+            );
+        }
+    }
+
+    serde_json::json!({
+        "type": "message_delta",
+        "delta": { "stop_reason": stop_reason, "stop_sequence": null },
+        "usage": usage
+    })
+}
+
+fn responses_usage_tokens(usage: Option<&serde_json::Value>) -> (u64, u64, u64) {
+    let Some(usage) = usage else {
+        return (0, 0, 0);
+    };
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let cached_tokens = usage
+        .pointer("/input_tokens_details/cached_tokens")
+        .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    (
+        input_tokens.saturating_sub(cached_tokens),
+        output_tokens,
+        cached_tokens,
+    )
+}
+
 fn emit_stream_end(
     output: &mut String,
     state: &mut StreamTransformState,
@@ -762,17 +857,26 @@ fn emit_stream_end(
         }
     };
 
-    let (input_tokens, output_tokens) = chunk
+    let (input_tokens, output_tokens, cache_read_input_tokens) = chunk
         .usage
         .as_ref()
-        .map(|u| (u.prompt_tokens, u.completion_tokens))
-        .unwrap_or((0, 0));
+        .map(|u| {
+            let cached = u.cached_tokens() as u64;
+            let prompt = u.prompt_tokens as u64;
+            (
+                prompt.saturating_sub(cached),
+                u.completion_tokens as u64,
+                cached,
+            )
+        })
+        .unwrap_or((0, 0, 0));
 
-    let message_delta = serde_json::json!({
-        "type": "message_delta",
-        "delta": { "stop_reason": stop_reason, "stop_sequence": null },
-        "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens }
-    });
+    let message_delta = message_delta_with_usage(
+        stop_reason,
+        input_tokens,
+        output_tokens,
+        cache_read_input_tokens,
+    );
     output.push_str(&format!(
         "event: message_delta\ndata: {}\n\n",
         message_delta
@@ -812,16 +916,22 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
     message_id: &str,
     model: &str,
     state: &mut StreamTransformState,
-) -> String {
+) -> Result<String, ProviderError> {
     let mut output = String::new();
 
     if state.stream_ended {
-        return output;
+        return Ok(output);
     }
 
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
-        return output;
-    };
+    let json =
+        serde_json::from_str::<serde_json::Value>(data).map_err(|e| ProviderError::ApiError {
+            status: 502,
+            message: format!(
+                "OpenAI Responses stream emitted malformed JSON SSE payload ({} bytes): {}",
+                data.len(),
+                e
+            ),
+        })?;
     let event_type = json
         .get("type")
         .and_then(|v| v.as_str())
@@ -858,6 +968,11 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
                 emit_responses_fc_args(&mut output, state, &json, delta);
             }
         }
+        // NOTE: The consolidated `function_call_arguments.done` is deliberately
+        // ignored. Arguments are already streamed incrementally via the `.delta`
+        // events above and authoritatively confirmed by `output_item.done` below;
+        // re-emitting here would duplicate the `input_json_delta` payload.
+        ty if ty.ends_with("function_call_arguments.done") => {}
         "response.output_item.done" => {
             if let Some(item) = json.get("item") {
                 if item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
@@ -876,7 +991,7 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
         _ => {}
     }
 
-    output
+    Ok(output)
 }
 
 /// Closes any open content blocks and emits `message_delta` + `message_stop`
@@ -914,21 +1029,15 @@ fn emit_codex_stream_end(
         "end_turn"
     };
 
-    let usage = response.and_then(|r| r.get("usage"));
-    let input_tokens = usage
-        .and_then(|u| u.get("input_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let output_tokens = usage
-        .and_then(|u| u.get("output_tokens"))
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let (input_tokens, output_tokens, cache_read_input_tokens) =
+        responses_usage_tokens(response.and_then(|r| r.get("usage")));
 
-    let message_delta = serde_json::json!({
-        "type": "message_delta",
-        "delta": { "stop_reason": stop_reason, "stop_sequence": null },
-        "usage": { "input_tokens": input_tokens, "output_tokens": output_tokens }
-    });
+    let message_delta = message_delta_with_usage(
+        stop_reason,
+        input_tokens,
+        output_tokens,
+        cache_read_input_tokens,
+    );
     output.push_str(&format!(
         "event: message_delta\ndata: {}\n\n",
         message_delta
@@ -985,7 +1094,7 @@ mod codex_stream_tests {
         let mut state = StreamTransformState::default();
         let mut out = String::new();
         for event in events {
-            out.push_str(&transform(event, "msg_test", "gpt-5.5", &mut state));
+            out.push_str(&transform(event, "msg_test", "gpt-5.5", &mut state).unwrap());
         }
         out
     }
@@ -1033,6 +1142,18 @@ mod codex_stream_tests {
     }
 
     #[test]
+    fn chat_completions_stream_preserves_cached_token_usage() {
+        let out = run_openai_chunks(&[
+            r#"{"model":"gpt-4.1","choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#,
+            r#"{"model":"gpt-4.1","choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1000,"completion_tokens":42,"prompt_tokens_details":{"cached_tokens":700}}}"#,
+        ]);
+
+        assert!(out.contains(r#""input_tokens":300"#));
+        assert!(out.contains(r#""output_tokens":42"#));
+        assert!(out.contains(r#""cache_read_input_tokens":700"#));
+    }
+
+    #[test]
     fn emits_message_start_then_incremental_text_then_stop() {
         let out = run(&[
             r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
@@ -1048,6 +1169,19 @@ mod codex_stream_tests {
         assert!(out.contains("end_turn"));
         assert_eq!(out.matches("event: message_stop").count(), 1);
         assert_eq!(out.matches("event: message_start").count(), 1);
+    }
+
+    #[test]
+    fn responses_stream_preserves_cached_token_usage() {
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_text.delta","delta":"ok"}"#,
+            r#"{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":1000,"output_tokens":42,"input_tokens_details":{"cached_tokens":700}}}}"#,
+        ]);
+
+        assert!(out.contains(r#""input_tokens":300"#));
+        assert!(out.contains(r#""output_tokens":42"#));
+        assert!(out.contains(r#""cache_read_input_tokens":700"#));
     }
 
     #[test]
@@ -1184,6 +1318,28 @@ mod codex_stream_tests {
     }
 
     #[test]
+    fn structured_function_call_args_delta_without_ids_uses_single_open_block() {
+        // Some Codex shapes stream `function_call_arguments.delta` with neither an
+        // `item_id` nor an `output_index`. With exactly one function-call block
+        // open, the resolver must fall back to it instead of dropping the args.
+        let out = run(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","call_id":"call_exec","name":"exec_command","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","delta":"{\"cmd\":\""}"#,
+            r#"{"type":"response.function_call_arguments.delta","delta":"ls\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","call_id":"call_exec","name":"exec_command","arguments":"{\"cmd\":\"ls\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        assert!(out.contains(r#""id":"call_exec""#));
+        assert!(out.contains(r#""name":"exec_command""#));
+        // The id-less deltas resolve to the single open block, so the arguments
+        // arrive intact rather than being silently dropped.
+        assert_eq!(collected_tool_input(&out), r#"{"cmd":"ls"}"#);
+        assert!(out.contains(r#""stop_reason":"tool_use""#));
+    }
+
+    #[test]
     fn read_tool_empty_pages_argument_is_stripped() {
         let out = run(&[
             r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
@@ -1285,12 +1441,21 @@ mod codex_stream_tests {
     }
 
     #[test]
-    fn unknown_events_and_garbage_are_ignored() {
+    fn unknown_json_events_are_ignored() {
         let out = run(&[
-            "not json",
             r#"{"type":"response.in_progress"}"#,
             r#"{"type":"response.output_item.added","item":{"type":"message"}}"#,
         ]);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn malformed_response_event_returns_error() {
+        let mut state = StreamTransformState::default();
+        let err = transform("not json", "msg_test", "gpt-5.5", &mut state).unwrap_err();
+        let message = err.to_string();
+
+        assert!(message.contains("malformed JSON SSE payload"));
+        assert!(message.contains("8 bytes"));
     }
 }

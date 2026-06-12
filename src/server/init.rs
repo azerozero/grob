@@ -132,12 +132,353 @@ pub(crate) async fn init_observability(
     // only fetches OpenRouter prices in the background when explicitly enabled.
     let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
 
-    let prometheus_builder = metrics_exporter_prometheus::PrometheusBuilder::new();
-    let metrics_handle = prometheus_builder
-        .install_recorder()
-        .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))?;
+    // Prometheus is the always-active metrics surface (`/metrics`). It is the
+    // single source of instrumentation: under the `otel` feature, OTLP export is
+    // a FAN-OUT layered over this same recorder (see `install_metrics_recorder`),
+    // never a second `MeterProvider` re-instrumenting the ~65 call sites.
+    //
+    // `build_recorder` (not `install_recorder`) hands us the recorder by value so
+    // it can be moved into the fan-out; the handle is taken first so `/metrics`
+    // keeps rendering in BOTH the Prometheus-only and fan-out cases.
+    //
+    // NOTE (deferred, security): `/metrics` is currently unauthenticated and
+    // public (it carries spend/budget and tenant labels). Authenticating or
+    // binding it to an admin interface is a separate security follow-up — not
+    // changed in this slice so the scrape surface is not regressed.
+    let prometheus_recorder =
+        metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+    let metrics_handle = prometheus_recorder.handle();
+    install_metrics_recorder(prometheus_recorder, &config.otel)?;
+
+    // Register `# HELP` / `# TYPE` metadata for every exported metric family.
+    // Must run after the recorder is installed so the descriptions land on it
+    // (and, under fan-out, on the OTLP bridge as instrument descriptions).
+    describe_metrics();
 
     Ok((message_tracer, spend_tracker, pricing_table, metrics_handle))
+}
+
+/// Installs the global `metrics` recorder, fanning out to OTLP when configured.
+///
+/// With the `otel` feature AND `[otel] metrics = true`, wraps the Prometheus
+/// recorder and an OTLP bridge in a `metrics_util` fan-out so both backends are
+/// driven by the ONE existing instrumentation. If the OTLP bridge fails to
+/// build, it logs and falls back to Prometheus-only rather than aborting
+/// startup. In every other case the behaviour is identical to the previous
+/// `install_recorder()` (Prometheus alone).
+///
+/// # Errors
+///
+/// Returns an error only if the global recorder cannot be set (it was already
+/// installed once this process).
+#[cfg(feature = "otel")]
+fn install_metrics_recorder(
+    prometheus_recorder: metrics_exporter_prometheus::PrometheusRecorder,
+    otel: &crate::cli::OtelConfig,
+) -> anyhow::Result<()> {
+    use metrics_util::layers::FanoutBuilder;
+
+    if otel.metrics {
+        match crate::shared::otel_metrics::build_recorder(otel) {
+            Ok(otel_recorder) => {
+                let fanout = FanoutBuilder::default()
+                    .add_recorder(prometheus_recorder)
+                    .add_recorder(otel_recorder)
+                    .build();
+                metrics::set_global_recorder(fanout)
+                    .map_err(|e| anyhow::anyhow!("Failed to install fan-out recorder: {}", e))?;
+                info!(
+                    "📊 OTLP metrics export enabled → {} (push every {}s, fan-out over Prometheus)",
+                    otel.endpoint, otel.metrics_interval_secs
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                error!(
+                    "⚠️  Failed to build OTLP metrics recorder, falling back to Prometheus only: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    metrics::set_global_recorder(prometheus_recorder)
+        .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))
+}
+
+/// Installs the Prometheus recorder as the global `metrics` recorder.
+///
+/// The non-`otel` build has no fan-out, so this is a thin wrapper preserving the
+/// exact prior behaviour.
+///
+/// # Errors
+///
+/// Returns an error if the global recorder was already installed this process.
+#[cfg(not(feature = "otel"))]
+fn install_metrics_recorder(
+    prometheus_recorder: metrics_exporter_prometheus::PrometheusRecorder,
+    _otel: &crate::cli::OtelConfig,
+) -> anyhow::Result<()> {
+    metrics::set_global_recorder(prometheus_recorder)
+        .map_err(|e| anyhow::anyhow!("Failed to install Prometheus recorder: {}", e))
+}
+
+/// Kind of an exported metric family, used to register its `# TYPE`.
+#[derive(Clone, Copy)]
+enum MetricKind {
+    Counter,
+    Gauge,
+    Histogram,
+}
+
+/// Single source of truth for every exported Prometheus metric family:
+/// `(name, kind, # HELP description)`.
+///
+/// `describe_metrics` registers `# HELP` / `# TYPE` for each entry; the
+/// `every_metric_family_is_described` test emits + renders each one and fails if
+/// any lacks metadata — so a newly-added metric family must be listed here.
+const METRIC_FAMILIES: &[(&str, MetricKind, &str)] = &[
+    (
+        "grob_requests_total",
+        MetricKind::Counter,
+        "Total LLM requests processed, by model, provider, route_type and status.",
+    ),
+    (
+        "grob_tokens_input_total",
+        MetricKind::Counter,
+        "Total billable input tokens, by model and provider.",
+    ),
+    (
+        "grob_tokens_output_total",
+        MetricKind::Counter,
+        "Total output tokens generated, by model and provider.",
+    ),
+    (
+        "grob_input_tokens_total",
+        MetricKind::Counter,
+        "Total input tokens observed (raw count).",
+    ),
+    (
+        "grob_output_tokens_total",
+        MetricKind::Counter,
+        "Total output tokens observed (raw count).",
+    ),
+    (
+        "grob_provider_errors_total",
+        MetricKind::Counter,
+        "Total provider errors, by provider.",
+    ),
+    (
+        "grob_ratelimit_hits_total",
+        MetricKind::Counter,
+        "Total upstream 429 rate-limit responses, by provider.",
+    ),
+    (
+        "grob_ratelimit_rejected_total",
+        MetricKind::Counter,
+        "Total requests rejected by the in-process rate limiter.",
+    ),
+    (
+        "grob_cache_hits_total",
+        MetricKind::Counter,
+        "Total response-cache hits.",
+    ),
+    (
+        "grob_cache_misses_total",
+        MetricKind::Counter,
+        "Total response-cache misses.",
+    ),
+    (
+        "grob_cache_skipped_too_large_total",
+        MetricKind::Counter,
+        "Responses not cached because they exceeded the size limit.",
+    ),
+    (
+        "grob_simhash_cache_hits_total",
+        MetricKind::Counter,
+        "SimHash near-duplicate cache hits.",
+    ),
+    (
+        "grob_simhash_cache_misses_total",
+        MetricKind::Counter,
+        "SimHash near-duplicate cache misses.",
+    ),
+    (
+        "grob_dlp_stream_blocked_total",
+        MetricKind::Counter,
+        "Streaming responses blocked by DLP.",
+    ),
+    (
+        "grob_dlp_circuit_breaker_total",
+        MetricKind::Counter,
+        "DLP circuit-breaker trips.",
+    ),
+    (
+        "grob_dlp_cross_chunk_total",
+        MetricKind::Counter,
+        "Cross-chunk DLP detections in streaming responses.",
+    ),
+    (
+        "grob_dlp_name_ac_rebuilds_total",
+        MetricKind::Counter,
+        "Aho-Corasick name-matcher rebuilds in the DLP engine.",
+    ),
+    (
+        "grob_dlp_signature_verified_total",
+        MetricKind::Counter,
+        "DLP canary-token signature verifications.",
+    ),
+    (
+        "grob_dlp_hot_reload_total",
+        MetricKind::Counter,
+        "DLP signed-config hot reloads applied.",
+    ),
+    (
+        "grob_dlp_detections_total",
+        MetricKind::Counter,
+        "DLP prompt-injection detections, by pattern.",
+    ),
+    (
+        "grob_hit_approval_requested_total",
+        MetricKind::Counter,
+        "Human-in-the-loop tool approvals requested.",
+    ),
+    (
+        "grob_hit_denied_total",
+        MetricKind::Counter,
+        "Tool calls denied by HIT policy (stream and non-stream).",
+    ),
+    (
+        "grob_tool_spike_blocked_total",
+        MetricKind::Counter,
+        "Requests blocked by the tool-call spike detector (T-AD1).",
+    ),
+    (
+        "grob_tool_spike_warn_total",
+        MetricKind::Counter,
+        "Tool-call spike warnings emitted.",
+    ),
+    (
+        "grob_risk_escalation_total",
+        MetricKind::Counter,
+        "Security risk escalations triggered.",
+    ),
+    (
+        "grob_escalation_webhook_failures_total",
+        MetricKind::Counter,
+        "Failed escalation webhook deliveries.",
+    ),
+    (
+        "grob_circuit_breaker_rejected_total",
+        MetricKind::Counter,
+        "Requests rejected by an open provider circuit breaker.",
+    ),
+    (
+        "grob_routing_endpoint_cb_rejected_total",
+        MetricKind::Counter,
+        "Requests rejected by an open routing-layer endpoint circuit breaker (RE-1a).",
+    ),
+    (
+        "grob_active_requests",
+        MetricKind::Gauge,
+        "Currently in-flight requests (used for HPA / graceful drain).",
+    ),
+    (
+        "grob_spend_usd",
+        MetricKind::Gauge,
+        "Recorded monthly spend in USD, by provider/model.",
+    ),
+    (
+        "grob_estimated_cost_usd",
+        MetricKind::Gauge,
+        "Estimated cost in USD of the last accounted request.",
+    ),
+    (
+        "grob_request_cost_usd",
+        MetricKind::Gauge,
+        "Cost in USD attributed to the last request.",
+    ),
+    (
+        "grob_budget_limit_usd",
+        MetricKind::Gauge,
+        "Configured monthly budget limit in USD.",
+    ),
+    (
+        "grob_budget_remaining_usd",
+        MetricKind::Gauge,
+        "Remaining monthly budget in USD.",
+    ),
+    (
+        "grob_dlp_rules_loaded",
+        MetricKind::Gauge,
+        "Number of DLP rules currently loaded.",
+    ),
+    (
+        "grob_dlp_config_hash_info",
+        MetricKind::Gauge,
+        "Info gauge carrying the active DLP config hash as a label.",
+    ),
+    (
+        "grob_circuit_breaker_state",
+        MetricKind::Gauge,
+        "Provider circuit-breaker state (0=closed, 1=open, 2=half-open), by provider.",
+    ),
+    (
+        "grob_provider_latency_ewma_ms",
+        MetricKind::Gauge,
+        "EWMA of provider latency in milliseconds, by provider.",
+    ),
+    (
+        "grob_provider_score",
+        MetricKind::Gauge,
+        "Adaptive routing score, by provider.",
+    ),
+    (
+        "grob_provider_success_rate",
+        MetricKind::Gauge,
+        "Provider success rate (0..1), by provider.",
+    ),
+    (
+        "grob_ratelimit_tokens_remaining",
+        MetricKind::Gauge,
+        "Upstream remaining token quota (from provider rate-limit headers).",
+    ),
+    (
+        "grob_ratelimit_requests_remaining",
+        MetricKind::Gauge,
+        "Upstream remaining request quota (from provider rate-limit headers).",
+    ),
+    (
+        "grob_ratelimit_input_tokens_remaining",
+        MetricKind::Gauge,
+        "Upstream remaining input-token quota.",
+    ),
+    (
+        "grob_ratelimit_output_tokens_remaining",
+        MetricKind::Gauge,
+        "Upstream remaining output-token quota.",
+    ),
+    (
+        "grob_request_duration_seconds",
+        MetricKind::Histogram,
+        "End-to-end request duration in seconds, by model and provider.",
+    ),
+];
+
+/// Registers `# HELP` / `# TYPE` descriptions for every exported metric family.
+///
+/// Metadata only — never emits or alters a metric value, so it is safe to call
+/// unconditionally and changes no runtime behaviour. The `metrics` crate routes
+/// these to whichever recorder is installed (Prometheus today; the `otel` fan-out
+/// recorder inherits them with no extra instrumentation).
+pub(crate) fn describe_metrics() {
+    for &(name, kind, description) in METRIC_FAMILIES {
+        match kind {
+            MetricKind::Counter => metrics::describe_counter!(name, description),
+            MetricKind::Gauge => metrics::describe_gauge!(name, description),
+            MetricKind::Histogram => metrics::describe_histogram!(name, description),
+        }
+    }
 }
 
 /// Initializes the DLP session manager and optional hot-reload loop.
@@ -576,4 +917,175 @@ pub(crate) fn maybe_preset_sync(config: &AppConfig) {
             crate::preset::spawn_background_sync(sync_url, interval);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Completeness: EVERY family in `METRIC_FAMILIES` must render a `# HELP` and
+    // `# TYPE` line — so a metric emitted without a describe entry fails the
+    // build. Runs under default features (no `otel`), doubling as the
+    // anti-regression for the always-active Prometheus surface. This is the only
+    // lib test that installs the process-global recorder (nothing else does), so
+    // it cannot double-install.
+    #[test]
+    fn every_metric_family_is_described_without_otel() {
+        let handle = metrics_exporter_prometheus::PrometheusBuilder::new()
+            .install_recorder()
+            .expect("install prometheus recorder");
+        describe_metrics();
+
+        // A metric must be touched to appear in the rendered output, so emit one
+        // sample per family using its declared kind.
+        for &(name, kind, _) in METRIC_FAMILIES {
+            match kind {
+                MetricKind::Counter => metrics::counter!(name).increment(1),
+                MetricKind::Gauge => metrics::gauge!(name).set(1.0),
+                MetricKind::Histogram => metrics::histogram!(name).record(0.01),
+            }
+        }
+
+        let rendered = handle.render();
+        for &(name, _, _) in METRIC_FAMILIES {
+            assert!(
+                rendered.contains(&format!("# HELP {name}")),
+                "metric family `{name}` is missing its `# HELP` line"
+            );
+            assert!(
+                rendered.contains(&format!("# TYPE {name}")),
+                "metric family `{name}` is missing its `# TYPE` line"
+            );
+        }
+        assert!(
+            rendered.contains("# TYPE grob_requests_total counter"),
+            "counters must render as `counter`"
+        );
+        assert!(
+            rendered.contains("# TYPE grob_active_requests gauge"),
+            "gauges must render as `gauge`"
+        );
+    }
+
+    /// Recursively collects every `.rs` file under `dir`.
+    fn collect_rs_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    out.extend(collect_rs_files(&path));
+                } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    out.push(path);
+                }
+            }
+        }
+        out
+    }
+
+    // Non-circular completeness: scan the *actual source* for every metric family
+    // emitted at a call-site (`metrics::{counter,gauge,histogram}!("…")`) and
+    // assert each one has a `METRIC_FAMILIES` describe entry. Unlike the test
+    // above (which only re-emits the catalogue), this FAILS when a new metric is
+    // added anywhere in `src/` without a `# HELP`/`# TYPE`. `cargo test` runs with
+    // the crate root as CWD, so `src/` is reachable. Names built from a runtime
+    // variable (e.g. the `RATE_LIMIT_HEADERS` table) can't be detected statically
+    // and are simply not asserted here.
+    #[test]
+    fn no_emitted_metric_family_lacks_a_catalog_entry() {
+        use std::collections::BTreeSet;
+
+        let cataloged: BTreeSet<&str> = METRIC_FAMILIES.iter().map(|&(n, _, _)| n).collect();
+
+        // `\s*` spans newlines, so multi-line macro calls are matched too.
+        let re =
+            regex::Regex::new(r#"metrics::(?:counter|gauge|histogram)!\s*\(\s*"([a-z0-9_]+)""#)
+                .expect("valid regex");
+
+        let mut emitted: BTreeSet<String> = BTreeSet::new();
+        for path in collect_rs_files(std::path::Path::new("src")) {
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            for cap in re.captures_iter(&content) {
+                let name = &cap[1];
+                if name.starts_with("grob_") {
+                    emitted.insert(name.to_string());
+                }
+            }
+        }
+
+        // Guard against a silently-passing test (wrong CWD / broken walk).
+        assert!(
+            emitted.len() >= 20,
+            "source scan found only {} metric call-sites — walk/CWD problem?",
+            emitted.len()
+        );
+
+        let missing: Vec<&String> = emitted
+            .iter()
+            .filter(|n| !cataloged.contains(n.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "metric families emitted in src/ but missing a `describe_metrics` entry \
+             (they would ship without # HELP / # TYPE): {missing:?}"
+        );
+    }
+
+    // SLICE 5b: with the OTLP fan-out active, the ONE `metrics` instrumentation
+    // must reach BOTH backends. Uses a thread-local recorder (`with_local_recorder`)
+    // so it never touches the process-global recorder that
+    // `every_metric_family_is_described_without_otel` owns. Proves: (1) the
+    // Prometheus side stays populated through the fan-out, and (2) the OTLP bridge
+    // creates instruments from the same call sites (no double instrumentation).
+    #[cfg(feature = "otel")]
+    #[test]
+    fn fanout_reemits_to_prometheus_and_creates_otel_instruments() {
+        use metrics_util::layers::FanoutBuilder;
+
+        let prometheus = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+        let handle = prometheus.handle();
+
+        // No reader → no tokio runtime / collector needed; instruments are still
+        // created, which is all this test asserts on the OTel side.
+        let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
+        let otel = crate::shared::otel_metrics::OtelRecorder::new(provider);
+        let probe = otel.clone();
+
+        let fanout = FanoutBuilder::default()
+            .add_recorder(prometheus)
+            .add_recorder(otel)
+            .build();
+
+        metrics::with_local_recorder(&fanout, || {
+            describe_metrics();
+            metrics::counter!("grob_requests_total", "model" => "test").increment(2);
+            metrics::gauge!("grob_active_requests").set(5.0);
+            metrics::histogram!("grob_request_duration_seconds").record(0.05);
+        });
+
+        // Prometheus side: families rendered with metadata AND the emitted value.
+        let rendered = handle.render();
+        assert!(
+            rendered.contains("# TYPE grob_requests_total counter"),
+            "fan-out must still feed Prometheus its metadata"
+        );
+        assert!(
+            rendered.contains("grob_requests_total{model=\"test\"} 2"),
+            "fan-out must still feed Prometheus the emitted counter value + labels"
+        );
+        assert!(
+            rendered.contains("# TYPE grob_active_requests gauge")
+                && rendered.contains("# TYPE grob_request_duration_seconds"),
+            "fan-out must still feed Prometheus the gauge and histogram families"
+        );
+
+        // OTel side: exactly one instrument per distinct family, no double-count.
+        assert_eq!(
+            probe.instrument_count(),
+            3,
+            "the same three call sites must create three OTel instruments"
+        );
+    }
 }

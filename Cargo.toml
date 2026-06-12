@@ -49,8 +49,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # OpenTelemetry (optional, for distributed tracing export)
 opentelemetry = { version = "0.28", optional = true }
 opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"], optional = true }
-opentelemetry-otlp = { version = "0.28", features = ["grpc-tonic"], optional = true }
+# default-features=false drops the `http-proto` + `reqwest-blocking-client`
+# defaults (which pull opentelemetry-http + reqwest/native-tls/openssl). grob
+# exports over gRPC/tonic only, so it needs just grpc-tonic + trace + metrics.
+opentelemetry-otlp = { version = "0.28", default-features = false, features = ["grpc-tonic", "trace", "metrics"], optional = true }
 tracing-opentelemetry = { version = "0.29", optional = true }
+# Bridges `tracing` events into OTLP logs (the 3rd OTel signal). gRPC/tonic only.
+opentelemetry-appender-tracing = { version = "0.28", optional = true }
 
 # Error Handling
 anyhow = "1"
@@ -75,6 +80,10 @@ zeroize = { version = "1", features = ["derive"] }  # Zero secrets in memory on 
 # Metrics
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
+# Fan-out layer: mirrors the single `metrics` recorder to Prometheus AND the
+# OTLP bridge from ONE instrumentation source (otel feature only). `FanoutBuilder`
+# lives in the always-available `layers` module, so no extra features are needed.
+metrics-util = { version = "0.19", default-features = false, optional = true }
 subtle = "2.6.1"
 
 # DLP (Data Loss Prevention)
@@ -125,7 +134,9 @@ http = "1"
 
 # TUI dashboard (`grob watch`)
 ratatui = { version = "0.30", optional = true }
-crossterm = { version = "0.28", optional = true }
+# 0.29 aligns with the crossterm ratatui 0.30 pulls (ratatui-crossterm), so the
+# tree carries a single crossterm version instead of 0.28 + 0.29.
+crossterm = { version = "0.29", optional = true }
 
 # Socket options (SO_REUSEPORT for zero-downtime restarts)
 socket2 = { version = "0.5", features = ["all"], optional = true }
@@ -170,7 +181,9 @@ rcgen = "0.13"             # Self-signed certs for TLS benchmarks
 
 # Cucumber BDD (E2E)
 cucumber = "0.21"
-reqwest = { version = "0.12", features = ["json"] }
+# rustls (no default-features) to keep native-tls/openssl out of the tree — must
+# stay aligned with the main `reqwest` dependency above.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
 
 [[test]]
 name = "cucumber"
@@ -211,7 +224,20 @@ jemalloc = ["tikv-jemallocator"]
 unix-signals = ["nix"]
 socket-opts = ["socket2"]
 watch = ["ratatui", "crossterm"]
-otel = ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "tracing-opentelemetry"]
+otel = [
+    "opentelemetry",
+    "opentelemetry/metrics",
+    "opentelemetry/logs",
+    "opentelemetry_sdk",
+    "opentelemetry_sdk/metrics",
+    "opentelemetry_sdk/logs",
+    "opentelemetry-otlp",
+    "opentelemetry-otlp/metrics",
+    "opentelemetry-otlp/logs",
+    "tracing-opentelemetry",
+    "opentelemetry-appender-tracing",
+    "metrics-util",
+]
 tls = ["axum-server", "rustls", "rustls-pemfile"]
 acme = ["tls", "rustls-acme"]
 dlp = []

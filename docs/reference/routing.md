@@ -166,6 +166,20 @@ Lower values are tried first. This is provider-level scoring, not endpoint-level
 EMA: there is no `[[endpoints]]` schema or `[router.ema]` configuration in the
 current runtime.
 
+## Complexity Tier Model Overrides
+
+`[[tiers]]` can optionally target a virtual model as well as providers. This is
+useful when a cheap model lives behind the same provider as the default model.
+Without `model`, tier routing keeps the routed model name and only changes the
+provider order.
+
+```toml
+[[tiers]]
+name = "trivial"
+model = "fast-cheap"
+providers = ["anthropic"]
+```
+
 ## Full Configuration Example
 
 ```toml
@@ -220,4 +234,9 @@ name = "opus-model"
 priority = 1
 provider = "anthropic"
 actual_model = "claude-opus-4-20250514"
+
+[[tiers]]
+name = "trivial"
+model = "fast-cheap"
+providers = ["anthropic"]
 ```

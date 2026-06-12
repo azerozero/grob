@@ -391,6 +391,7 @@ mod tests {
             }],
             tiers: vec![TierConfig {
                 name: "trivial".to_string(),
+                model: None,
                 providers: vec!["openrouter".to_string(), "anthropic".to_string()],
                 fanout: true,
                 match_conditions: None,
@@ -410,8 +411,10 @@ mod tests {
             version: None,
             user: Default::default(),
             otel: Default::default(),
+            metrics: Default::default(),
             log_export: Default::default(),
             pledge: Default::default(),
+            tool_validation: Default::default(),
             policies: vec![],
             tool_layer: Default::default(),
             tee: Default::default(),

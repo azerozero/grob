@@ -22,6 +22,16 @@ pub struct ModelPricing {
     pub output_per_million: f64,
 }
 
+/// Prompt-cache *read* price as a fraction of the input price.
+///
+/// Anthropic bills cache reads at 0.1× the input rate across models; the same
+/// 10% factor is a sound cold-start default for other providers (the live
+/// OpenRouter feed in [`crate::features::token_pricing`] takes precedence at
+/// runtime). Cache *writes* are billed at the full input rate via the request's
+/// `cache_creation_input_tokens` (already folded into billable input upstream),
+/// so only reads need this extra dimension — without it, cache reads cost $0.
+pub const CACHE_READ_COST_RATIO: f64 = 0.1;
+
 impl ModelPricing {
     /// Calculates cost for a given number of tokens.
     ///
@@ -37,6 +47,24 @@ impl ModelPricing {
         (input_tokens as f64 * self.input_per_million
             + output_tokens as f64 * self.output_per_million)
             / 1_000_000.0
+    }
+
+    /// Calculates the cost of prompt-cache *read* tokens (USD).
+    ///
+    /// Billed at [`CACHE_READ_COST_RATIO`] × the input rate. This is the
+    /// dimension that was missing: cache reads are excluded from billable input
+    /// upstream, so without this they were billed at $0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grob::pricing::ModelPricing;
+    /// let p = ModelPricing { model: "test", input_per_million: 3.0, output_per_million: 15.0 };
+    /// let cost = p.calculate_cache_read(1_000_000);
+    /// assert!((cost - 0.3).abs() < 1e-9); // 3.0 × 0.1
+    /// ```
+    pub fn calculate_cache_read(&self, cache_read_tokens: u32) -> f64 {
+        cache_read_tokens as f64 * self.input_per_million * CACHE_READ_COST_RATIO / 1_000_000.0
     }
 }
 

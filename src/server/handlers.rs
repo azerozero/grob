@@ -72,6 +72,8 @@ impl Drop for ActiveRequestGuard {
 struct ResponseTraceUsage {
     input_tokens: u32,
     output_tokens: u32,
+    cache_creation_input_tokens: u32,
+    cache_read_input_tokens: u32,
     saw_usage: bool,
 }
 
@@ -80,8 +82,14 @@ impl ResponseTraceUsage {
         self.saw_usage.then_some(crate::traits::StreamTraceUsage {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
+            cache_creation_input_tokens: nonzero(self.cache_creation_input_tokens),
+            cache_read_input_tokens: nonzero(self.cache_read_input_tokens),
         })
     }
+}
+
+fn nonzero(value: u32) -> Option<u32> {
+    (value > 0).then_some(value)
 }
 
 const TRACE_USAGE_MAX_CARRY: usize = 8 * 1024;
@@ -151,12 +159,22 @@ fn parse_response_trace_usage_json(data: &str, pointer: &str, usage: &mut Respon
 }
 
 fn update_response_trace_usage(value: &serde_json::Value, usage: &mut ResponseTraceUsage) {
+    let cache_read = value
+        .get("cache_read_input_tokens")
+        .or_else(|| value.pointer("/input_tokens_details/cached_tokens"))
+        .or_else(|| value.pointer("/prompt_tokens_details/cached_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX));
+
     let input = value
         .get("input_tokens")
         .or_else(|| value.get("prompt_tokens"))
         .and_then(serde_json::Value::as_u64);
     if let Some(input) = input {
-        let input = u32::try_from(input).unwrap_or(u32::MAX);
+        let mut input = u32::try_from(input).unwrap_or(u32::MAX);
+        if value.get("cache_read_input_tokens").is_none() {
+            input = input.saturating_sub(cache_read.unwrap_or(0));
+        }
         if input > 0 || usage.input_tokens == 0 {
             usage.input_tokens = input;
         }
@@ -171,6 +189,21 @@ fn update_response_trace_usage(value: &serde_json::Value, usage: &mut ResponseTr
         usage.output_tokens = usage
             .output_tokens
             .max(u32::try_from(output).unwrap_or(u32::MAX));
+        usage.saw_usage = true;
+    }
+
+    if let Some(cache_creation) = value
+        .get("cache_creation_input_tokens")
+        .and_then(serde_json::Value::as_u64)
+    {
+        usage.cache_creation_input_tokens = usage
+            .cache_creation_input_tokens
+            .max(u32::try_from(cache_creation).unwrap_or(u32::MAX));
+        usage.saw_usage = true;
+    }
+
+    if let Some(cache_read) = cache_read {
+        usage.cache_read_input_tokens = usage.cache_read_input_tokens.max(cache_read);
         usage.saw_usage = true;
     }
 }
@@ -306,6 +339,12 @@ struct DispatchPrelude {
     inner: Arc<super::ReloadableState>,
     dlp: Option<Arc<crate::features::dlp::DlpEngine>>,
     tenant_id: Option<String>,
+    /// Virtual-key model scope, threaded into dispatch so the post-routing
+    /// re-check can gate the resolved model. `None` for unscoped keys.
+    allowed_models: Option<Vec<String>>,
+    /// Virtual-key provider scope, threaded into dispatch so mapping resolution
+    /// can keep only permitted providers. Empty for unscoped keys.
+    allowed_providers: Vec<String>,
     peer_ip: String,
     transparency_enabled: bool,
     /// Set by the dispatch path when it has emitted an audit entry — used
@@ -322,13 +361,37 @@ fn mark_audited_if_set(audited: &Arc<std::sync::atomic::AtomicBool>, response: &
     }
 }
 
-/// Builds the shared pre-dispatch state common to all three handlers.
+/// Builds the shared pre-dispatch state common to the dispatch handlers.
+///
+/// Also enforces a virtual key's `allowed_models` scope: this is the single
+/// pre-dispatch choke point every generation surface (`/v1/messages`,
+/// `/v1/chat/completions`, `/v1/responses`) funnels through, so the check lives
+/// here rather than being duplicated — and forgotten — per handler.
+///
+/// # Errors
+///
+/// Returns [`RequestError::Forbidden`] when the key's `allowed_models` scope
+/// forbids `requested_model`.
 fn prepare_dispatch(
     state: &Arc<AppState>,
     claims: &Option<axum::Extension<crate::auth::GrobClaims>>,
     vk_ctx: &Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     headers: &HeaderMap,
-) -> DispatchPrelude {
+    requested_model: &str,
+) -> Result<DispatchPrelude, RequestError> {
+    // Fail fast before any provider work: reject a scoped key on the inbound
+    // model up front. The resolved model is re-checked post-routing in dispatch.
+    let allowed_models = vk_ctx
+        .as_ref()
+        .and_then(|axum::Extension(vk)| vk.allowed_models.clone());
+    if allowed_models.is_some() {
+        enforce_allowed_models(allowed_models.as_deref(), requested_model)?;
+    }
+    let allowed_providers = vk_ctx
+        .as_ref()
+        .map(|axum::Extension(vk)| vk.allowed_providers.clone())
+        .unwrap_or_default();
+
     let tenant_id = extract_tenant_id(vk_ctx, claims, headers);
     let peer_ip = extract_client_ip(headers);
     let inner = state.snapshot();
@@ -341,13 +404,60 @@ fn prepare_dispatch(
         .as_ref()
         .map(|mgr| mgr.engine_for(session_key));
     let transparency_enabled = should_apply_transparency(&inner.config);
-    DispatchPrelude {
+    Ok(DispatchPrelude {
         inner,
         dlp,
         tenant_id,
+        allowed_models,
+        allowed_providers,
         peer_ip,
         transparency_enabled,
         audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    })
+}
+
+/// Enforces a virtual key's `allowed_models` scope against the requested model.
+///
+/// Returns [`RequestError::Forbidden`] (HTTP 403) when the key carries a
+/// non-empty `allowed_models` list and `requested_model` is not in it. An empty
+/// or absent list disables the check, preserving the behaviour of unscoped keys
+/// (backward compatible).
+///
+/// Matching is **canonical-vs-canonical**: both the requested model and every
+/// allowed entry are normalised via [`canonicalize_model_name`] so dotted/dated
+/// aliases (e.g. `gpt-5.5` ↔ `gpt-5-5`) compare equal and never trip a false
+/// 403. A verbatim match is also accepted as a fast path.
+///
+/// The 403 body is deliberately generic and never echoes the allowed list, so a
+/// rejected caller cannot enumerate the key's scope.
+///
+/// # Note
+///
+/// This runs on the **inbound requested** model at the single pre-dispatch
+/// choke point. When routing overrides land (slice 3) and can rewrite the served
+/// model, re-invoke this on the rewritten model to close the cross-slice bypass.
+pub(crate) fn enforce_allowed_models(
+    allowed_models: Option<&[String]>,
+    requested_model: &str,
+) -> Result<(), RequestError> {
+    use crate::routing::classify::model_name::canonicalize_model_name;
+
+    let Some(allowed) = allowed_models.filter(|list| !list.is_empty()) else {
+        return Ok(());
+    };
+
+    let requested_canonical = canonicalize_model_name(requested_model);
+    let permitted = allowed.iter().any(|allowed_model| {
+        allowed_model == requested_model
+            || canonicalize_model_name(allowed_model) == requested_canonical
+    });
+
+    if permitted {
+        Ok(())
+    } else {
+        Err(RequestError::Forbidden(
+            "model not allowed for this key".to_string(),
+        ))
     }
 }
 
@@ -467,7 +577,7 @@ pub(crate) async fn handle_openai_chat_completions(
     let model = openai_request.model.clone();
     let is_streaming = openai_request.stream == Some(true);
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // Transform OpenAI → Anthropic format
@@ -489,6 +599,8 @@ pub(crate) async fn handle_openai_chat_completions(
         model: model.clone(),
         is_streaming,
         tenant_id: prelude.tenant_id,
+        allowed_models: prelude.allowed_models,
+        allowed_providers: prelude.allowed_providers,
         peer_ip: prelude.peer_ip,
         req_id: &request_id.0,
         start_time,
@@ -571,7 +683,7 @@ pub(crate) async fn handle_responses(
         is_streaming,
     );
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // Transform Responses → canonical format
@@ -593,6 +705,8 @@ pub(crate) async fn handle_responses(
         model: model.clone(),
         is_streaming,
         tenant_id: prelude.tenant_id,
+        allowed_models: prelude.allowed_models,
+        allowed_providers: prelude.allowed_providers,
         peer_ip: prelude.peer_ip,
         req_id: &request_id.0,
         start_time,
@@ -689,7 +803,7 @@ pub(crate) async fn handle_messages(
         .unwrap_or("unknown")
         .to_string();
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers);
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // DEBUG: Log request body for debugging (gate serialization on log level)
@@ -719,6 +833,8 @@ pub(crate) async fn handle_messages(
         model: model.clone(),
         is_streaming,
         tenant_id: prelude.tenant_id,
+        allowed_models: prelude.allowed_models,
+        allowed_providers: prelude.allowed_providers,
         peer_ip: prelude.peer_ip,
         req_id,
         start_time,
@@ -766,6 +882,7 @@ pub(crate) async fn handle_messages(
 /// Handle /v1/messages/count_tokens requests
 pub(crate) async fn handle_count_tokens(
     State(state): State<Arc<AppState>>,
+    vk_ctx: Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     Json(request_json): Json<serde_json::Value>,
 ) -> Result<Response, RequestError> {
     let model = request_json
@@ -773,6 +890,12 @@ pub(crate) async fn handle_count_tokens(
         .and_then(|m| m.as_str())
         .unwrap_or("unknown");
     debug!("Received count_tokens request for model: {}", model);
+
+    // count_tokens does not flow through prepare_dispatch, so enforce the
+    // virtual key's allowed_models scope here against the same shared helper.
+    if let Some(axum::Extension(vk)) = &vk_ctx {
+        enforce_allowed_models(vk.allowed_models.as_deref(), model)?;
+    }
 
     // Get snapshot of reloadable state
     let inner = state.snapshot();
@@ -804,60 +927,59 @@ pub(crate) async fn handle_count_tokens(
         model, decision.model_name, decision.route_type
     );
 
+    // count_tokens hits a real provider (credentials + cost), so it must honour
+    // the virtual-key scopes exactly like dispatch. Route through the shared
+    // resolver so `allowed_models` is enforced on the resolved model AND the
+    // mappings are filtered by `allowed_providers` (clean 403 if the scope leaves
+    // no provider), instead of touching `[[models]]` / pass-through mappings
+    // directly and bypassing the provider scope.
+    let allowed_models = vk_ctx
+        .as_ref()
+        .and_then(|axum::Extension(vk)| vk.allowed_models.clone());
+    let allowed_providers = vk_ctx
+        .as_ref()
+        .map(|axum::Extension(vk)| vk.allowed_providers.clone())
+        .unwrap_or_default();
+    let sorted_mappings = super::helpers::resolve_provider_mappings(
+        &inner,
+        &HeaderMap::new(),
+        &decision,
+        allowed_models.as_deref(),
+        &allowed_providers,
+    )?;
+
     // Deserialize the full count_tokens request (consumes the JSON value — no clone).
     use crate::models::CountTokensRequest;
     let count_request: CountTokensRequest = serde_json::from_value(request_json).map_err(|e| {
         RequestError::ParseError(format!("Invalid count_tokens request format: {}", e))
     })?;
 
-    // Try model mappings with fallback (1:N mapping)
-    if let Some(model_config) = inner.find_model(&decision.model_name) {
-        let mut sorted_mappings = model_config.mappings.clone();
-        sorted_mappings.sort_by_key(|m| m.priority);
+    for mapping in &sorted_mappings {
+        let Some(provider) = inner.provider_registry.provider(&mapping.provider) else {
+            continue;
+        };
 
-        for mapping in &sorted_mappings {
-            let Some(provider) = inner.provider_registry.provider(&mapping.provider) else {
+        let mut req = count_request.clone();
+        req.model = mapping.actual_model.clone();
+
+        match provider.count_tokens(req).await {
+            Ok(response) => return Ok(Json(response).into_response()),
+            Err(e) => {
+                debug!("Provider {} count_tokens failed: {}", mapping.provider, e);
                 continue;
-            };
-
-            let mut req = count_request.clone();
-            req.model = mapping.actual_model.clone();
-
-            match provider.count_tokens(req).await {
-                Ok(response) => return Ok(Json(response).into_response()),
-                Err(e) => {
-                    debug!("Provider {} count_tokens failed: {}", mapping.provider, e);
-                    continue;
-                }
             }
         }
-
-        Err(RequestError::ProviderUpstream {
-            provider: "all".to_string(),
-            status: 502,
-            body: Some(format!(
-                "All {} provider mappings failed for token counting: {}",
-                sorted_mappings.len(),
-                decision.model_name
-            )),
-        })
-    } else if let Ok(provider) = inner
-        .provider_registry
-        .provider_for_model(&decision.model_name)
-    {
-        let mut req = count_request.clone();
-        req.model = decision.model_name.clone();
-        let response = provider
-            .count_tokens(req)
-            .await
-            .map_err(RequestError::from)?;
-        Ok(Json(response).into_response())
-    } else {
-        Err(RequestError::RoutingError(format!(
-            "No model mapping or provider found for token counting: {}",
-            decision.model_name
-        )))
     }
+
+    Err(RequestError::ProviderUpstream {
+        provider: "all".to_string(),
+        status: 502,
+        body: Some(format!(
+            "All {} provider mappings failed for token counting: {}",
+            sorted_mappings.len(),
+            decision.model_name
+        )),
+    })
 }
 
 /// Evaluates the policy engine if configured. Returns `None` when no policies
@@ -891,4 +1013,122 @@ fn evaluate_policy_if_configured(
         estimated_cost: 0.0,
     };
     Some(matcher.evaluate(&ctx))
+}
+
+#[cfg(test)]
+mod allowed_models_tests {
+    use super::enforce_allowed_models;
+    use super::RequestError;
+
+    #[test]
+    fn absent_list_allows_any_model() {
+        // Unscoped key (no allowed_models) → unchanged behaviour.
+        assert!(enforce_allowed_models(None, "gpt-5.5").is_ok());
+    }
+
+    #[test]
+    fn empty_list_allows_any_model() {
+        // Empty list is treated as "no scope", not "deny all".
+        let allowed: Vec<String> = vec![];
+        assert!(enforce_allowed_models(Some(&allowed), "gpt-5.5").is_ok());
+    }
+
+    #[test]
+    fn scoped_key_rejects_disallowed_model() {
+        // allowed_models=["claude-haiku-4-5"] calling "gpt-5.5" → 403.
+        let allowed = vec!["claude-haiku-4-5".to_string()];
+        let err = enforce_allowed_models(Some(&allowed), "gpt-5.5").unwrap_err();
+        assert!(matches!(err, RequestError::Forbidden(_)));
+    }
+
+    #[test]
+    fn scoped_key_allows_a_listed_model() {
+        let allowed = vec!["claude-haiku-4-5".to_string(), "gpt-5.5".to_string()];
+        assert!(enforce_allowed_models(Some(&allowed), "gpt-5.5").is_ok());
+    }
+
+    #[test]
+    fn matches_across_dotted_and_dashed_canonical_forms() {
+        // The dotted alias in the list must match the canonical dashed request,
+        // and vice-versa — canonical-vs-canonical, no false 403.
+        let dotted = vec!["gpt-5.5".to_string()];
+        assert!(enforce_allowed_models(Some(&dotted), "gpt-5-5").is_ok());
+        let dashed = vec!["gpt-5-5".to_string()];
+        assert!(enforce_allowed_models(Some(&dashed), "gpt-5.5").is_ok());
+    }
+
+    #[test]
+    fn forbidden_message_does_not_leak_the_allowed_list() {
+        let allowed = vec![
+            "claude-haiku-4-5".to_string(),
+            "claude-opus-4-8".to_string(),
+        ];
+        let RequestError::Forbidden(msg) =
+            enforce_allowed_models(Some(&allowed), "gpt-5.5").unwrap_err()
+        else {
+            panic!("expected Forbidden");
+        };
+        // No scope disclosure: neither the allowed models nor the requested one.
+        assert!(!msg.contains("claude-haiku-4-5"));
+        assert!(!msg.contains("claude-opus-4-8"));
+        assert!(!msg.contains("gpt-5.5"));
+    }
+
+    #[tokio::test]
+    async fn count_tokens_rejects_provider_outside_key_scope() {
+        // Model "alpha" is served only by provider "anthropic"; a key scoped to a
+        // provider with no mapping must get a 403 from count_tokens BEFORE any
+        // provider is contacted (count_tokens hits a real provider — cost/creds).
+        let toml = r#"
+[server]
+host = "127.0.0.1"
+port = 18095
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "anthropic"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "alpha"
+"#;
+        let config = crate::cli::AppConfig::from_content(toml, "count_tokens_scope_test")
+            .expect("config parses");
+        // Empty registry: the 403 fires before any provider lookup/call.
+        let state =
+            crate::server::test_app_state(config, crate::providers::ProviderRegistry::new());
+
+        let vk = crate::auth::virtual_keys::VirtualKeyContext {
+            key_id: uuid::Uuid::new_v4(),
+            tenant_id: "t".to_string(),
+            name: "scoped".to_string(),
+            budget_usd: None,
+            rate_limit_rps: None,
+            allowed_models: None,
+            allowed_providers: vec!["gemini".to_string()],
+        };
+        let body = serde_json::json!({ "model": "alpha", "messages": [] });
+
+        let result = super::handle_count_tokens(
+            axum::extract::State(state),
+            Some(axum::Extension(vk)),
+            axum::Json(body),
+        )
+        .await;
+
+        assert!(
+            matches!(result, Err(RequestError::Forbidden(_))),
+            "count_tokens must 403 when the key's provider scope excludes every mapping"
+        );
+    }
 }

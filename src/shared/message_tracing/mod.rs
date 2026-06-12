@@ -48,6 +48,16 @@ struct ResponseTrace {
     stop_reason: String,
     input_tokens: u32,
     output_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_creation_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_read_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    billable_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_tokens: Option<u32>,
     content: serde_json::Value,
 }
 
@@ -77,6 +87,14 @@ struct StreamEndTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     output_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    cache_creation_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_read_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    billable_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_input_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     total_tokens: Option<u32>,
 }
 
@@ -87,6 +105,49 @@ struct ErrorTrace {
     dir: &'static str,
     id: String,
     error: String,
+}
+
+fn nonzero(value: u32) -> Option<u32> {
+    (value > 0).then_some(value)
+}
+
+#[derive(Clone, Copy)]
+struct CacheTraceFields {
+    cache_creation_input_tokens: Option<u32>,
+    cache_read_input_tokens: Option<u32>,
+    billable_input_tokens: Option<u32>,
+    total_input_tokens: Option<u32>,
+    total_tokens: Option<u32>,
+}
+
+fn cache_trace_fields(usage: &crate::providers::Usage) -> CacheTraceFields {
+    let cache_creation = usage.cache_creation_tokens();
+    let cache_read = usage.cache_read_tokens();
+    let has_cache = cache_creation > 0 || cache_read > 0;
+    CacheTraceFields {
+        cache_creation_input_tokens: nonzero(cache_creation),
+        cache_read_input_tokens: nonzero(cache_read),
+        billable_input_tokens: has_cache.then_some(usage.billable_input_tokens()),
+        total_input_tokens: has_cache.then_some(usage.total_input_tokens()),
+        total_tokens: has_cache.then_some(usage.total_tokens()),
+    }
+}
+
+fn stream_cache_trace_fields(usage: StreamTraceUsage) -> CacheTraceFields {
+    let cache_creation = usage.cache_creation_input_tokens.unwrap_or(0);
+    let cache_read = usage.cache_read_input_tokens.unwrap_or(0);
+    let has_cache = cache_creation > 0 || cache_read > 0;
+    let total_input = usage
+        .input_tokens
+        .saturating_add(cache_creation)
+        .saturating_add(cache_read);
+    CacheTraceFields {
+        cache_creation_input_tokens: nonzero(cache_creation),
+        cache_read_input_tokens: nonzero(cache_read),
+        billable_input_tokens: has_cache.then_some(usage.billable_input_tokens()),
+        total_input_tokens: has_cache.then_some(total_input),
+        total_tokens: has_cache.then_some(usage.total_tokens()),
+    }
 }
 
 impl MessageTracer {
@@ -208,6 +269,7 @@ impl MessageTracer {
             return;
         };
 
+        let cache = cache_trace_fields(&response.usage);
         let trace = ResponseTrace {
             ts: Utc::now(),
             dir: "res",
@@ -216,6 +278,11 @@ impl MessageTracer {
             stop_reason: response.stop_reason.clone().unwrap_or_default(),
             input_tokens: response.usage.input_tokens,
             output_tokens: response.usage.output_tokens,
+            cache_creation_input_tokens: cache.cache_creation_input_tokens,
+            cache_read_input_tokens: cache.cache_read_input_tokens,
+            billable_input_tokens: cache.billable_input_tokens,
+            total_input_tokens: cache.total_input_tokens,
+            total_tokens: cache.total_tokens,
             content: serde_json::to_value(&response.content).unwrap_or_default(),
         };
 
@@ -234,22 +301,27 @@ impl MessageTracer {
         id: &str,
         content: serde_json::Value,
         stop_reason: &str,
-        input_tokens: u32,
-        output_tokens: u32,
+        usage: StreamTraceUsage,
         latency_ms: u64,
     ) {
         let Some(ref file_mutex) = self.file else {
             return;
         };
 
+        let cache = stream_cache_trace_fields(usage);
         let trace = ResponseTrace {
             ts: Utc::now(),
             dir: "res",
             id: id.to_string(),
             latency_ms,
             stop_reason: stop_reason.to_string(),
-            input_tokens,
-            output_tokens,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_creation_input_tokens: cache.cache_creation_input_tokens,
+            cache_read_input_tokens: cache.cache_read_input_tokens,
+            billable_input_tokens: cache.billable_input_tokens,
+            total_input_tokens: cache.total_input_tokens,
+            total_tokens: cache.total_tokens,
             content,
         };
 
@@ -288,6 +360,7 @@ impl MessageTracer {
             return;
         };
 
+        let cache = usage.map(stream_cache_trace_fields);
         let trace = StreamEndTrace {
             ts: Utc::now(),
             dir: "res_end",
@@ -298,7 +371,13 @@ impl MessageTracer {
             status: status.to_string(),
             input_tokens: usage.map(|u| u.input_tokens),
             output_tokens: usage.map(|u| u.output_tokens),
-            total_tokens: usage.map(StreamTraceUsage::total_tokens),
+            cache_creation_input_tokens: cache.and_then(|c| c.cache_creation_input_tokens),
+            cache_read_input_tokens: cache.and_then(|c| c.cache_read_input_tokens),
+            billable_input_tokens: cache.and_then(|c| c.billable_input_tokens),
+            total_input_tokens: cache.and_then(|c| c.total_input_tokens),
+            total_tokens: usage
+                .map(StreamTraceUsage::total_tokens)
+                .or_else(|| cache.and_then(|c| c.total_tokens)),
         };
 
         self.write_trace(&trace, file_mutex);
@@ -420,18 +499,10 @@ impl crate::traits::Tracer for MessageTracer {
         id: &str,
         content: serde_json::Value,
         stop_reason: &str,
-        input_tokens: u32,
-        output_tokens: u32,
+        usage: StreamTraceUsage,
         latency_ms: u64,
     ) {
-        self.trace_response_stream(
-            id,
-            content,
-            stop_reason,
-            input_tokens,
-            output_tokens,
-            latency_ms,
-        );
+        self.trace_response_stream(id, content, stop_reason, usage, latency_ms);
     }
 
     fn is_enabled(&self) -> bool {
@@ -544,6 +615,58 @@ mod tests {
             compress,
             encrypt: false,
         }
+    }
+
+    fn usage(
+        input: u32,
+        output: u32,
+        creation: Option<u32>,
+        read: Option<u32>,
+    ) -> crate::providers::Usage {
+        crate::providers::Usage {
+            input_tokens: input,
+            output_tokens: output,
+            cache_creation_input_tokens: creation,
+            cache_read_input_tokens: read,
+        }
+    }
+
+    #[test]
+    fn cache_trace_fields_break_down_billable_and_total() {
+        let fields = cache_trace_fields(&usage(300, 42, Some(100), Some(700)));
+        assert_eq!(fields.cache_creation_input_tokens, Some(100));
+        assert_eq!(fields.cache_read_input_tokens, Some(700));
+        // billable = input + cache_creation (cache reads excluded from billing).
+        assert_eq!(fields.billable_input_tokens, Some(400));
+        // total_input = input + cache_creation + cache_read.
+        assert_eq!(fields.total_input_tokens, Some(1100));
+        // total = total_input + output.
+        assert_eq!(fields.total_tokens, Some(1142));
+    }
+
+    #[test]
+    fn cache_trace_fields_are_absent_without_caching() {
+        let fields = cache_trace_fields(&usage(500, 10, None, None));
+        assert_eq!(fields.cache_creation_input_tokens, None);
+        assert_eq!(fields.cache_read_input_tokens, None);
+        assert_eq!(fields.billable_input_tokens, None);
+        assert_eq!(fields.total_input_tokens, None);
+        assert_eq!(fields.total_tokens, None);
+    }
+
+    #[test]
+    fn stream_cache_trace_fields_match_the_non_stream_breakdown() {
+        let fields = stream_cache_trace_fields(crate::traits::StreamTraceUsage {
+            input_tokens: 300,
+            output_tokens: 42,
+            cache_creation_input_tokens: Some(100),
+            cache_read_input_tokens: Some(700),
+        });
+        assert_eq!(fields.cache_creation_input_tokens, Some(100));
+        assert_eq!(fields.cache_read_input_tokens, Some(700));
+        assert_eq!(fields.billable_input_tokens, Some(400));
+        assert_eq!(fields.total_input_tokens, Some(1100));
+        assert_eq!(fields.total_tokens, Some(1142));
     }
 
     #[test]

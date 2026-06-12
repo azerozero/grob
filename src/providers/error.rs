@@ -1,3 +1,9 @@
+//! Provider-level error types.
+//!
+//! This is a thin `thiserror` enum with no behavior of its own; its retry and
+//! HTTP-status semantics are exercised through the conversion and classification
+//! tests in [`crate::server::error`] and [`crate::server::budget`].
+
 use thiserror::Error;
 
 /// Provider-specific errors
@@ -24,9 +30,18 @@ pub enum ProviderError {
         message: String,
     },
 
+    /// Provider returned a syntactically successful response that Grob cannot
+    /// translate safely.
+    #[error("Provider protocol error: {0}")]
+    ProtocolError(String),
+
     /// Provider configuration is invalid or incomplete.
     #[error("Configuration error: {0}")]
     ConfigError(String),
+
+    /// The caller supplied a request this provider cannot translate safely.
+    #[error("Invalid provider request: {0}")]
+    InvalidRequest(String),
 
     /// Authentication with the upstream provider failed.
     #[error("Authentication error: {0}")]

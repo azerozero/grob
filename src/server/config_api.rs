@@ -239,6 +239,22 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
         }
     };
 
+    // 1b. Reject a reload that would change/break the `/metrics` bearer token: it
+    //     is resolved once at startup into non-reloadable state, so applying it
+    //     here is impossible and a silent success would falsely imply /metrics is
+    //     now gated (or opened). Shared guard — every reload path calls it.
+    if let Err(msg) = super::config_guard::ensure_metrics_auth_reloadable(&state, &new_config) {
+        warn!("config reload rejected: {msg}");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "status": "error",
+                "message": msg,
+            })),
+        )
+            .into_response();
+    }
+
     // 2. Build new router (compiles regexes)
     let new_router = Router::new(new_config.clone());
 

@@ -87,3 +87,16 @@ default = "dev"
 think = "codex"
 background = "fast"
 websearch = "dev"
+
+# Cost-aware agent-loop routing.
+# Trivial tool/status turns use the fast mini model; medium coding turns use
+# the dedicated Codex model. Complex/default turns stay on `dev` (gpt-5.5).
+[[tiers]]
+name = "trivial"
+model = "fast"
+providers = ["chatgpt-codex"]
+
+[[tiers]]
+name = "medium"
+model = "codex"
+providers = ["chatgpt-codex"]

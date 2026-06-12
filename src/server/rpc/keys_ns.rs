@@ -30,6 +30,7 @@ pub async fn create(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
     name: &str,
+    allowed_providers: Vec<String>,
 ) -> Result<serde_json::Value, ErrorObjectOwned> {
     require_role(caller, Role::Admin)?;
 
@@ -46,6 +47,7 @@ pub async fn create(
         budget_usd: None,
         rate_limit_rps: None,
         allowed_models: None,
+        allowed_providers,
         created_at: Utc::now(),
         expires_at: None,
         revoked: false,
@@ -140,6 +142,7 @@ pub async fn rotate(
     let budget_usd = old.budget_usd;
     let rate_limit_rps = old.rate_limit_rps;
     let allowed_models = old.allowed_models.clone();
+    let allowed_providers = old.allowed_providers.clone();
 
     // Revoke old key.
     state
@@ -161,6 +164,7 @@ pub async fn rotate(
         budget_usd,
         rate_limit_rps,
         allowed_models,
+        allowed_providers,
         created_at: Utc::now(),
         expires_at: None,
         revoked: false,
@@ -232,5 +236,55 @@ mod tests {
         let json_str = serde_json::to_string(&info).unwrap();
         let parsed: KeyInfo = serde_json::from_str(&json_str).unwrap();
         assert_eq!(parsed.name, "roundtrip");
+    }
+
+    #[tokio::test]
+    async fn rpc_create_persists_allowed_providers() {
+        use sha2::{Digest, Sha256};
+
+        let toml = r#"
+[router]
+default = "alpha"
+
+[[providers]]
+name = "p"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "p"
+actual_model = "alpha"
+"#;
+        let config = crate::cli::AppConfig::from_content(toml, "rpc_create_scope_test")
+            .expect("config parses");
+        let state =
+            crate::server::test_app_state(config, crate::providers::ProviderRegistry::new());
+
+        let admin = CallerIdentity {
+            role: Role::Admin,
+            ip: "127.0.0.1".into(),
+            tenant_id: String::new(),
+        };
+
+        // Create via the RPC handler with a provider scope, as the server does.
+        let result = create(&state, &admin, "rpc-key", vec!["anthropic".to_string()])
+            .await
+            .expect("create should succeed");
+        let secret = result["secret"].as_str().expect("secret returned");
+
+        // Look the key up by the same SHA-256 hashing the auth path uses; the
+        // provider scope must have been persisted.
+        let hash = hex::encode(Sha256::digest(secret.as_bytes()));
+        let record = state
+            .grob_store
+            .lookup_virtual_key(&hash)
+            .expect("created key is persisted");
+        assert_eq!(record.allowed_providers, vec!["anthropic".to_string()]);
     }
 }

@@ -14,12 +14,33 @@ use crate::security::{apply_security_headers, RateLimitKey, SecurityHeadersConfi
 use super::AppState;
 
 /// Constant-time string comparison to prevent timing side-channel attacks.
+///
+/// NOTE: the early length check leaks the *length* of `a`/`b` via timing (an
+/// observable early return on mismatch). For secrets whose length is itself
+/// sensitive, prefer [`constant_time_eq_hashed`], which hides it.
 pub(crate) fn constant_time_eq(a: &str, b: &str) -> bool {
     use subtle::ConstantTimeEq;
     if a.len() != b.len() {
         return false;
     }
     a.as_bytes().ct_eq(b.as_bytes()).into()
+}
+
+/// Constant-time, length-hiding string comparison.
+///
+/// Hashes both inputs to fixed-size 32-byte SHA-256 digests, then compares the
+/// digests in constant time. Because the digests are always 32 bytes, the
+/// comparison never short-circuits on a length mismatch — so, unlike
+/// [`constant_time_eq`], it leaks neither the value nor the *length* of either
+/// input via timing. Reuses the `sha2` crate already in the dependency tree
+/// (JWT/PKCE/AES); no new dependency. Use it for high-value bearer tokens such
+/// as the `/metrics` token.
+pub(crate) fn constant_time_eq_hashed(a: &str, b: &str) -> bool {
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+    let a_digest = Sha256::digest(a.as_bytes());
+    let b_digest = Sha256::digest(b.as_bytes());
+    a_digest.as_slice().ct_eq(b_digest.as_slice()).into()
 }
 
 /// Extract client IP from headers (X-Forwarded-For or fallback to "unknown").
@@ -233,6 +254,7 @@ fn resolve_virtual_key(
         budget_usd: record.budget_usd,
         rate_limit_rps: record.rate_limit_rps,
         allowed_models: record.allowed_models,
+        allowed_providers: record.allowed_providers,
     })
 }
 
@@ -590,6 +612,25 @@ mod tests {
     #[test]
     fn test_constant_time_eq_empty() {
         assert!(constant_time_eq("", ""));
+    }
+
+    #[test]
+    fn test_constant_time_eq_hashed_same() {
+        assert!(constant_time_eq_hashed("s3cr3t-token", "s3cr3t-token"));
+        assert!(constant_time_eq_hashed("", ""));
+    }
+
+    #[test]
+    fn test_constant_time_eq_hashed_different_same_length() {
+        assert!(!constant_time_eq_hashed("token-aaaa", "token-bbbb"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_hashed_different_length_rejected() {
+        // The length-hiding variant must still reject mismatched-length inputs;
+        // it just does so without an early-return that leaks the length.
+        assert!(!constant_time_eq_hashed("x", "s3cr3t-token"));
+        assert!(!constant_time_eq_hashed("s3cr3t-token", ""));
     }
 
     #[test]

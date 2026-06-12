@@ -94,6 +94,10 @@ struct StreamUsage {
     input_tokens: u32,
     /// Provider-reported output tokens (`message_delta`, cumulative max).
     output_tokens: u32,
+    /// Provider-reported prompt-cache write tokens.
+    cache_creation_input_tokens: u32,
+    /// Provider-reported prompt-cache read tokens.
+    cache_read_input_tokens: u32,
     /// Whether any provider usage field was seen.
     saw_usage: bool,
     /// Accumulated `text_delta` text length (bytes) for the output estimate.
@@ -403,8 +407,12 @@ fn trace_stream_response(ctx: &SpendStreamContext, usage: &StreamUsage) {
             trace_id,
             content,
             stop_reason,
-            usage.input_tokens,
-            usage.output_tokens,
+            crate::traits::StreamTraceUsage {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cache_creation_input_tokens: nonzero(usage.cache_creation_input_tokens),
+                cache_read_input_tokens: nonzero(usage.cache_read_input_tokens),
+            },
             latency_ms,
         );
 }
@@ -476,8 +484,13 @@ fn parse_usage_json(data: &str, pointer: &str, usage: &mut StreamUsage) {
     let Some(u) = json.pointer(pointer) else {
         return;
     };
+    let cache_read =
+        token_u32(u.get("cache_read_input_tokens")).or_else(|| cached_tokens_detail(u));
     if let Some(input) = u.get("input_tokens").and_then(serde_json::Value::as_u64) {
-        let input = u32::try_from(input).unwrap_or(u32::MAX);
+        let mut input = u32::try_from(input).unwrap_or(u32::MAX);
+        if u.get("cache_read_input_tokens").is_none() {
+            input = input.saturating_sub(cache_read.unwrap_or(0));
+        }
         // message_start carries the authoritative input; message_delta repeats
         // it only when message_start was absent.
         if input > 0 && (usage.input_tokens == 0 || pointer == "/message/usage") {
@@ -493,6 +506,38 @@ fn parse_usage_json(data: &str, pointer: &str, usage: &mut StreamUsage) {
             .max(u32::try_from(output).unwrap_or(u32::MAX));
         usage.saw_usage = true;
     }
+    if let Some(cache_creation) = token_u32(u.get("cache_creation_input_tokens")) {
+        usage.cache_creation_input_tokens = usage.cache_creation_input_tokens.max(cache_creation);
+        usage.saw_usage = true;
+    }
+    if let Some(cache_read) = cache_read {
+        usage.cache_read_input_tokens = usage.cache_read_input_tokens.max(cache_read);
+        usage.saw_usage = true;
+    }
+}
+
+fn token_u32(value: Option<&serde_json::Value>) -> Option<u32> {
+    value
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+}
+
+fn cached_tokens_detail(usage: &serde_json::Value) -> Option<u32> {
+    usage
+        .pointer("/input_tokens_details/cached_tokens")
+        .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+}
+
+fn nonzero(value: u32) -> Option<u32> {
+    (value > 0).then_some(value)
+}
+
+fn billed_input_tokens(usage: &StreamUsage) -> u32 {
+    usage
+        .input_tokens
+        .saturating_add(usage.cache_creation_input_tokens)
 }
 
 /// Resolves the `(input, output)` token counts to bill for a finished stream.
@@ -508,7 +553,7 @@ fn resolve_billed_tokens(
     estimated_input_tokens: u32,
 ) -> Option<(u32, u32)> {
     if usage.saw_usage {
-        return Some((usage.input_tokens, usage.output_tokens));
+        return Some((billed_input_tokens(usage), usage.output_tokens));
     }
     if estimate_mode {
         let output = estimate_tokens_from_bytes(usage.output_bytes);
@@ -554,6 +599,14 @@ fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
     let route_type = ctx.route_type;
     let tenant_id = ctx.tenant_id.clone();
     let is_subscription = ctx.is_subscription;
+    // Cache reads are priced separately (a fraction of input), so they are not
+    // folded into the billed input count above; pass them through only when the
+    // provider reported real usage (the estimate path has no cache breakdown).
+    let cache_read_tokens = if usage.saw_usage {
+        usage.cache_read_input_tokens
+    } else {
+        0
+    };
 
     tokio::spawn(async move {
         let cost = calculate_cost(
@@ -561,6 +614,7 @@ fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
             &actual_model,
             input_tokens,
             output_tokens,
+            cache_read_tokens,
             is_subscription,
         )
         .await;
@@ -647,6 +701,32 @@ mod tests {
         assert!(usage.saw_usage);
         assert_eq!(usage.input_tokens, 42);
         assert_eq!(usage.output_tokens, 17);
+    }
+
+    #[test]
+    fn captures_cache_usage_details() {
+        let sse = concat!(
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":300,\"output_tokens\":17,\"cache_read_input_tokens\":700}}\n\n",
+        );
+        let usage = scan_all(sse);
+        assert!(usage.saw_usage);
+        assert_eq!(usage.input_tokens, 300);
+        assert_eq!(usage.cache_read_input_tokens, 700);
+        assert_eq!(resolve_billed_tokens(&usage, false, 0), Some((300, 17)));
+    }
+
+    #[test]
+    fn captures_openai_cached_token_details() {
+        let sse = concat!(
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":1000,\"output_tokens\":17,\"input_tokens_details\":{\"cached_tokens\":700}}}\n\n",
+        );
+        let usage = scan_all(sse);
+        assert!(usage.saw_usage);
+        assert_eq!(usage.input_tokens, 300);
+        assert_eq!(usage.cache_read_input_tokens, 700);
+        assert_eq!(resolve_billed_tokens(&usage, false, 0), Some((300, 17)));
     }
 
     #[test]
@@ -891,5 +971,21 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(resolve_billed_tokens(&usage, false, 25), None);
+    }
+
+    #[test]
+    fn resolve_billed_includes_cache_creation_but_excludes_cache_read() {
+        // Cache writes are billable input; cache reads are not. A regression that
+        // dropped cache_creation (or folded in cache_read) would misbill spend.
+        let usage = StreamUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_creation_input_tokens: 40,
+            cache_read_input_tokens: 700,
+            saw_usage: true,
+            ..Default::default()
+        };
+        // billed input = input (100) + cache_creation (40); cache_read excluded.
+        assert_eq!(resolve_billed_tokens(&usage, false, 0), Some((140, 50)));
     }
 }

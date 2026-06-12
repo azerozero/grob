@@ -122,3 +122,34 @@ Grob exposes metrics at `/metrics` in Prometheus format:
 - `grob_circuit_breaker_state` -- per-provider circuit breaker state
 
 A Grafana dashboard is provided in `docs/grafana-dashboard.json`.
+
+### Protect `/metrics` with a bearer token
+
+`/metrics` is **public by default** (the Prometheus convention — rely on network
+policy / TLS). Because it exposes spend, budget, and tenant labels, you can
+require a bearer token instead:
+
+```toml
+[metrics]
+# Inline token, OR read it from a file (the file wins and is trimmed):
+bearer_token = "REPLACE_WITH_A_LONG_RANDOM_TOKEN"
+# bearer_token_file = "/etc/grob/metrics-token"
+```
+
+With a token set, `/metrics` requires `Authorization: Bearer <token>` (compared
+in constant time) and returns `401` otherwise. `/health`, `/live`, and `/ready`
+stay public. Point your scraper at the same token:
+
+```yaml
+scrape_configs:
+  - job_name: grob
+    scheme: https            # TLS is handled by grob's TLS/ACME layer or your ingress
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/grob-metrics-token
+    static_configs:
+      - targets: ["grob:13456"]
+```
+
+On Kubernetes, the Helm chart's `serviceMonitor.bearerTokenSecret` wires the
+token into a `ServiceMonitor` — see `deploy/helm/grob/README.md`.

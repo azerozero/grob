@@ -1,0 +1,223 @@
+# Default values for grob.
+# This is a YAML-formatted file. Override with `-f my-values.yaml` or `--set`.
+
+# ── Replicas / budget safety ─────────────────────────────────────────────────
+# IMPORTANT: grob enforces spend budgets from PER-POD append-only spend journals
+# stored under GROB_HOME (the PVC below). With a ReadWriteOnce PVC each pod has
+# its OWN journal, so running more than one replica makes budget enforcement
+# PER-POD: N replicas allow up to N× the configured budget, and the running
+# total diverges between pods. The default is a single replica.
+#
+# To run multiple replicas you MUST acknowledge this (budget.acknowledgeMultiReplicaRisk)
+# and ideally point persistence at a ReadWriteMany volume shared by all pods.
+replicaCount: 1
+
+budget:
+  # Set true to allow replicaCount>1 / autoscaling.maxReplicas>1. Without this,
+  # the chart refuses to render a multi-replica release so the budget cannot be
+  # silently broken. See README "Budget & replicas".
+  acknowledgeMultiReplicaRisk: false
+
+image:
+  repository: ghcr.io/azerozero/grob
+  pullPolicy: IfNotPresent
+  # Defaults to the chart appVersion when empty.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# ── Container entrypoint ─────────────────────────────────────────────────────
+# Leave empty to use the image's default entrypoint (starts the server).
+command: []
+args: []
+
+# Extra environment variables (provider keys belong in `secret`, not here).
+env:
+  RUST_LOG: "info"
+  RUST_BACKTRACE: "1"
+
+# ── Config (rendered into a ConfigMap as /etc/grob/config.toml) ───────────────
+# Full grob.toml rendered into the ConfigMap. Leave empty to use the chart's
+# bundled default (files/config.toml); set to your own grob.toml string to
+# override. GROB_CONFIG points the container at the rendered file.
+#
+# NOTE: kept as an empty string (not an inline block scalar) on purpose — a large
+# multi-line block scalar living in values.yaml can interact badly with Helm's
+# value coalescing; the default body lives in files/config.toml instead.
+config: ""
+
+# ── Secret (provider API keys / tokens, injected as env via envFrom) ──────────
+secret:
+  # Render a chart-managed Secret (default true) from `secret.data` (env vars).
+  # Defaults to an EMPTY Opaque Secret so a target for envFrom always exists; add
+  # keys via `secret.data`. In production prefer `existingSecret` and keep secrets
+  # out of values. Set create=false (and no existingSecret) to inject no Secret.
+  create: true
+  # Name of a pre-existing Secret to mount via envFrom instead of rendering one.
+  existingSecret: ""
+  # Env-var name -> value. Referenced from config.toml as `env:ANTHROPIC_API_KEY`.
+  data: {}
+  #  ANTHROPIC_API_KEY: "sk-ant-..."
+  #  OPENAI_API_KEY: "sk-..."
+
+# ── Persistence: PVC mounted at GROB_HOME (/var/lib/grob) ─────────────────────
+# REQUIRED for correctness: OAuth tokens are refreshed/rewritten at runtime and
+# spend journals are append-only. Without a PVC, every pod restart LOSES the
+# OAuth tokens (forcing re-auth) AND the month-to-date spend (resetting budgets).
+persistence:
+  enabled: true
+  # ReadWriteOnce is per-pod (see the budget note above). Use ReadWriteMany +
+  # a shared backend if you need a single budget across replicas.
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  storageClass: ""
+  # Reuse an existing PVC instead of creating one.
+  existingClaim: ""
+  # Mount path = GROB_HOME.
+  mountPath: /var/lib/grob
+
+# ── Service ──────────────────────────────────────────────────────────────────
+# ClusterIP by default: grob is NOT exposed outside the cluster. The control
+# plane (/api/config/reload, /rpc, /api/oauth/*) shares this port — see
+# `networkPolicy` and `ingress` below, and the README, before exposing it.
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+# Container port grob listens on (must match config server.port).
+containerPort: 8080
+
+# ── Ingress (optional, OFF) — PUBLIC LLM paths ONLY ──────────────────────────
+# SECURITY: only routes inference/health paths. It deliberately does NOT route
+# the control plane (/api/config/reload, /rpc, /api/oauth/*, /api/config). Do
+# NOT add those paths here — keep the control plane cluster-internal.
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: grob.example.com
+      # Public, safe-to-expose path prefixes.
+      paths:
+        - path: /v1
+          pathType: Prefix
+        - path: /health
+          pathType: Exact
+  tls: []
+
+# ── NetworkPolicy (optional, OFF) ────────────────────────────────────────────
+# Restricts ingress to the pod so the shared-port control plane is reachable
+# only from approved sources. Enable + set `from` to lock it down.
+networkPolicy:
+  enabled: false
+  # Sources allowed to reach the grob port (podSelector / namespaceSelector).
+  from: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: clients
+
+# ── Probes ───────────────────────────────────────────────────────────────────
+probes:
+  startup:
+    path: /health
+    initialDelaySeconds: 1
+    periodSeconds: 2
+    timeoutSeconds: 2
+    failureThreshold: 30
+  liveness:
+    path: /live
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readiness:
+    path: /ready
+    initialDelaySeconds: 2
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+
+# ── /metrics bearer-token auth (optional) ────────────────────────────────────
+# /metrics is PUBLIC by default. To gate it, put the token in a Secret and mount
+# it here as a FILE — never inline in `config` (that lands in the ConfigMap and
+# Helm release history). The token then lives at /etc/grob/metrics/<key>; set:
+#   config: |
+#     [metrics]
+#     bearer_token_file = "/etc/grob/metrics/token"
+# Create the Secret out of band (or via `secret.data` / `existingSecret`):
+#   kubectl create secret generic grob-metrics-token --from-literal=token=<TOKEN>
+# and point serviceMonitor.bearerTokenSecret at the SAME Secret/key below.
+metrics:
+  bearerTokenSecret: {}
+    # name: grob-metrics-token
+    # key: token
+
+# ── ServiceMonitor (Prometheus Operator) ─────────────────────────────────────
+# Scrapes /metrics in-cluster. /metrics is unauthenticated by default; keep it
+# internal, OR gate it with a bearer token (mount it via `metrics.bearerTokenSecret`
+# above) and point `bearerTokenSecret` below at the SAME Secret/key.
+serviceMonitor:
+  enabled: false
+  # Extra labels so your Prometheus selects it (e.g. release: kube-prometheus).
+  labels: {}
+  interval: 30s
+  scrapeTimeout: 10s
+  path: /metrics
+  # Optional: present a bearer token when scraping a gated /metrics. References
+  # an existing Secret holding the token; the SAME value must be configured in
+  # grob. Leave empty ({}) to scrape unauthenticated (the default).
+  bearerTokenSecret: {}
+    # name: grob-metrics-token
+    # key: token
+
+# ── Autoscaling (HPA on grob_active_requests) ────────────────────────────────
+# OFF by default. Scaling >1 replica triggers the per-pod budget caveat above —
+# you must set budget.acknowledgeMultiReplicaRisk=true. Requires a custom
+# metrics adapter (e.g. prometheus-adapter) exposing `grob_active_requests`.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 1
+  # Target average in-flight requests per pod.
+  targetActiveRequests: 10
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+# ── Pod / container security context (matches the scratch image, uid 65534) ──
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

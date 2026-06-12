@@ -39,7 +39,16 @@ mod tests {
     #[test]
     fn test_app_config_default_path() {
         let path = AppConfig::default_path().expect("Should create default path");
-        assert!(path.to_string_lossy().contains(".grob"));
+        // Neighbouring tests (setup wizard, responses e2e) point the
+        // process-wide GROB_HOME at a tempdir; under `cargo test` they share
+        // this process, so the default path is either the real `~/.grob` or
+        // whatever tempdir a concurrent test installed. Accept both — the
+        // env-free shape is covered by the `.grob` arm.
+        assert!(
+            path.to_string_lossy().contains(".grob") || path.starts_with(std::env::temp_dir()),
+            "unexpected default config path: {}",
+            path.display()
+        );
     }
 
     /// Test: validate rejects invalid auth mode
@@ -261,6 +270,7 @@ providers = ["cheap-provider"]
     fn test_tier_config_serialization() {
         let tier = TierConfig {
             name: "complex".to_string(),
+            model: None,
             providers: vec!["prov-a".to_string(), "prov-b".to_string()],
             fanout: true,
             match_conditions: None,

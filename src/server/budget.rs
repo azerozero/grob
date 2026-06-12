@@ -62,6 +62,32 @@ pub(crate) struct RequestMetrics<'a> {
 /// - Units in metric name as suffix (`_seconds`, `_usd`)
 /// - No label names embedded in metric names
 pub(crate) fn record_request_metrics(m: &RequestMetrics<'_>) {
+    // Attach the active request's OpenTelemetry span to the current OTel Context
+    // so a trace-based exemplar reservoir can capture its `trace_id` when the
+    // duration histogram is recorded below — this is grob's half of the
+    // "click latency → open trace" wiring. `tracing-opentelemetry` stores the
+    // OTel span in the tracing-span extensions but does NOT put it on the OTel
+    // thread-local Context, so without this attach `Context::current()` is empty
+    // at the metrics call-site.
+    //
+    // NOTE: opentelemetry-rust does NOT implement exemplar CAPTURE in any
+    // released version — verified through the latest stable opentelemetry_sdk
+    // 0.32.1: every metric aggregator still hardcodes `exemplars: vec![]` and
+    // there is no `ExemplarFilter` / reservoir / `with_exemplar_filter` API to
+    // enable. So this attach is currently a NO-OP for exemplars. It is grob's
+    // (correct) half of the wiring, ready for the day upstream lands exemplar
+    // capture — at which point only the bridge's `SdkMeterProvider` needs a
+    // trace-based filter. See `docs/explanation/otlp-exemplars.md`.
+    #[cfg(feature = "otel")]
+    let _otel_ctx_guard = {
+        use opentelemetry::trace::TraceContextExt;
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let cx = tracing::Span::current().context();
+        // Only attach when the span carries a valid (recording) OTel context, to
+        // avoid masking a parent context with an empty one when OTel is off.
+        cx.span().span_context().is_valid().then(|| cx.attach())
+    };
+
     let model_label = m.model.to_string();
     let provider_label = m.provider.to_string();
     let route_label = m.route_type.to_string();
@@ -262,7 +288,7 @@ pub(crate) fn effective_token_counts(
         );
         (input, output)
     } else {
-        (usage.input_tokens, usage.output_tokens)
+        (usage.billable_input_tokens(), usage.output_tokens)
     }
 }
 
@@ -331,6 +357,7 @@ pub(crate) async fn calculate_cost(
     actual_model: &str,
     input_tokens: u32,
     output_tokens: u32,
+    cache_read_tokens: u32,
     is_subscription: bool,
 ) -> TokenCounter {
     let table = state.observability.pricing_table.read().await;
@@ -338,12 +365,18 @@ pub(crate) async fn calculate_cost(
         actual_model,
         input_tokens,
         output_tokens,
+        cache_read_tokens,
         is_subscription,
         Some(&table),
     )
 }
 
-/// Check if a provider error is retryable (429, 500, 502, 503, network errors).
+/// Check if a provider error is retryable (429, 500, 502, 503, 504, network errors).
+///
+/// The retryable status set is kept in lockstep with
+/// [`crate::server::error::RequestError::is_retryable`] — the documented single
+/// source of truth — so an upstream gateway timeout (504) is retried at every
+/// layer rather than only at the request level.
 ///
 /// Notably excludes 401 (`authentication_error`): a revoked OAuth token is a
 /// permanent failure that requires operator action (`grob connect
@@ -351,7 +384,7 @@ pub(crate) async fn calculate_cost(
 pub(crate) fn is_retryable(e: &crate::providers::error::ProviderError) -> bool {
     match e {
         crate::providers::error::ProviderError::ApiError { status, message } => match status {
-            429 | 500 | 502 | 503 => true,
+            429 | 500 | 502 | 503 | 504 => true,
             401 => is_rate_limit_payload(message),
             _ => false,
         },
@@ -392,10 +425,18 @@ const BASE_RETRY_MS: u64 = 200;
 /// NOTE: Factor of 4 (not 2) reduces collision probability with other clients
 /// hitting the same rate-limit window, per AWS exponential-backoff guidance.
 const RETRY_BACKOFF_FACTOR: u64 = 4;
+/// Ceiling (ms) applied to the exponential delay before jitter.
+/// NOTE: `max_retries` is an operator-supplied, unbounded `Option<u32>`; without
+/// a cap `200 * 4^attempt` overflows `u64` (~attempt 28) and blocks a request for
+/// an absurd duration. 30s keeps the longest single wait bounded.
+const MAX_RETRY_DELAY_MS: u64 = 30_000;
 
 /// Calculate retry delay with exponential backoff and jitter.
 pub(crate) fn retry_delay(attempt: u32) -> std::time::Duration {
-    let base_ms = BASE_RETRY_MS * RETRY_BACKOFF_FACTOR.pow(attempt);
+    // Saturating arithmetic + ceiling so a large `max_retries` can never overflow.
+    let base_ms = BASE_RETRY_MS
+        .saturating_mul(RETRY_BACKOFF_FACTOR.saturating_pow(attempt))
+        .min(MAX_RETRY_DELAY_MS);
     let jitter = rand::random::<u64>() % (base_ms / 2 + 1);
     std::time::Duration::from_millis(base_ms + jitter)
 }
@@ -423,12 +464,62 @@ mod tests {
     }
 
     #[test]
+    fn test_is_retryable_504() {
+        // A gateway timeout is transient — it must be retried at the provider
+        // level, in lockstep with RequestError::is_retryable.
+        let err = crate::providers::error::ProviderError::ApiError {
+            status: 504,
+            message: "gateway timeout".to_string(),
+        };
+        assert!(is_retryable(&err));
+    }
+
+    #[test]
     fn test_is_not_retryable_400() {
         let err = crate::providers::error::ProviderError::ApiError {
             status: 400,
             message: "bad request".to_string(),
         };
         assert!(!is_retryable(&err));
+    }
+
+    #[test]
+    fn is_retryable_matches_the_documented_status_matrix() {
+        let api = |status: u16| crate::providers::error::ProviderError::ApiError {
+            status,
+            message: String::new(),
+        };
+        // Transient: 429 + the 5xx gateway/server set are retried at every layer.
+        for status in [429u16, 500, 502, 503, 504] {
+            assert!(is_retryable(&api(status)), "{status} should be retryable");
+        }
+        // Terminal client/auth errors must not retry.
+        for status in [400u16, 401, 403, 404, 409, 422, 501] {
+            assert!(!is_retryable(&api(status)), "{status} should not retry");
+        }
+        // 401 is the sole exception: retryable only when the payload is a
+        // rate-limit signal (some upstreams return 429-as-401).
+        let rate_limited_401 = crate::providers::error::ProviderError::ApiError {
+            status: 401,
+            message: r#"{"type":"rate_limit_error"}"#.to_string(),
+        };
+        assert!(is_retryable(&rate_limited_401));
+    }
+
+    #[test]
+    fn test_retry_delay_is_bounded_for_large_attempts() {
+        // A high `max_retries` must neither overflow nor produce an unbounded
+        // wait; the delay is capped at MAX_RETRY_DELAY_MS + at most half-jitter.
+        let max_with_jitter = (MAX_RETRY_DELAY_MS + MAX_RETRY_DELAY_MS / 2 + 1) as u128;
+        for attempt in [0_u32, 5, 28, 50, u32::MAX] {
+            let delay = retry_delay(attempt).as_millis();
+            assert!(
+                delay <= max_with_jitter,
+                "attempt {attempt}: delay {delay}ms exceeded cap {max_with_jitter}ms"
+            );
+        }
+        // The first retry still uses the short base delay (no premature capping).
+        assert!(retry_delay(0).as_millis() <= (BASE_RETRY_MS + BASE_RETRY_MS / 2 + 1) as u128);
     }
 
     #[test]
@@ -480,6 +571,14 @@ mod tests {
             message: "internal".to_string(),
         };
         assert!(is_retryable(&err));
+        assert!(!is_auth_revoked_error(&err));
+    }
+
+    #[test]
+    fn test_provider_protocol_error_is_not_retryable() {
+        let err =
+            crate::providers::error::ProviderError::ProtocolError("no content found".to_string());
+        assert!(!is_retryable(&err));
         assert!(!is_auth_revoked_error(&err));
     }
 

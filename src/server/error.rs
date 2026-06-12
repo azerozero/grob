@@ -55,6 +55,17 @@ pub enum RequestError {
         /// Optional upstream body excerpt for diagnostics.
         body: Option<String>,
     },
+    /// Indicates Grob received a provider payload it cannot translate safely.
+    ///
+    /// This is surfaced as HTTP 502 because the gateway could not produce a valid
+    /// client response, but it is not retryable: repeating the same local parse
+    /// against the same provider payload generally just burns another request.
+    ProviderProtocol {
+        /// Provider name (e.g. `"openai"`).
+        provider: String,
+        /// Redacted local protocol/translation error.
+        body: String,
+    },
     /// Indicates a budget cap (global, provider, or model) was exceeded (HTTP 402).
     BudgetExceeded {
         /// Configured monthly limit in USD.
@@ -71,6 +82,12 @@ pub enum RequestError {
     /// rejection (e.g. the tool-call spike anomaly detector, T-AD1) and
     /// is never retried against a sibling provider.
     ToolSpikeBlocked(String),
+    /// Indicates a per-policy rate-limit override rejected the request (HTTP 429).
+    ///
+    /// Like [`RequestError::ToolSpikeBlocked`] this is a terminal local 429 (not
+    /// retryable against a sibling provider), but it is raised by the in-dispatch
+    /// `[[policies]].rate_limit` check rather than the anomaly detector.
+    RateLimitedLocal(String),
     /// Indicates an upstream OAuth credential was revoked (HTTP 401).
     ///
     /// Surfaces a terminal authentication error — the user must run
@@ -149,6 +166,9 @@ impl RequestError {
                     .unwrap_or_else(|| format!("Provider '{}' returned HTTP {}", provider, status));
                 (status_code, "error", msg)
             }
+            RequestError::ProviderProtocol { body, .. } => {
+                (StatusCode::BAD_GATEWAY, "error", body.clone())
+            }
             RequestError::BudgetExceeded {
                 limit_usd,
                 actual_usd,
@@ -164,6 +184,11 @@ impl RequestError {
             RequestError::ToolSpikeBlocked(msg) => {
                 (StatusCode::TOO_MANY_REQUESTS, "rate_limited", msg.clone())
             }
+            RequestError::RateLimitedLocal(msg) => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "rate_limit_error",
+                msg.clone(),
+            ),
             RequestError::AuthRevoked(msg) => (
                 StatusCode::UNAUTHORIZED,
                 "authentication_error",
@@ -187,9 +212,11 @@ impl RequestError {
             RequestError::RoutingError(_) => "routing_error",
             RequestError::RateLimited { .. } => "rate_limited",
             RequestError::ProviderUpstream { .. } => "provider_upstream",
+            RequestError::ProviderProtocol { .. } => "provider_protocol",
             RequestError::BudgetExceeded { .. } => "budget_exceeded",
             RequestError::DlpBlocked(_) => "dlp_blocked",
             RequestError::ToolSpikeBlocked(_) => "tool_spike_blocked",
+            RequestError::RateLimitedLocal(_) => "rate_limited_local",
             RequestError::AuthRevoked(_) => "auth_revoked",
             RequestError::Internal(_) => "internal",
         }
@@ -235,6 +262,14 @@ impl IntoResponse for RequestError {
                     error.insert(
                         "upstream_status".to_string(),
                         serde_json::Value::from(*status),
+                    );
+                }
+            }
+            RequestError::ProviderProtocol { provider, .. } => {
+                if let Some(error) = body_obj.get_mut("error").and_then(|v| v.as_object_mut()) {
+                    error.insert(
+                        "provider".to_string(),
+                        serde_json::Value::String(provider.clone()),
                     );
                 }
             }
@@ -335,6 +370,10 @@ impl From<crate::providers::error::ProviderError> for RequestError {
             ProviderError::HttpError(e) => {
                 RequestError::Internal(anyhow::Error::new(e).context("HTTP request failed"))
             }
+            ProviderError::ProtocolError(msg) => RequestError::ProviderProtocol {
+                provider: "upstream".to_string(),
+                body: msg,
+            },
             ProviderError::SerializationError(e) => {
                 RequestError::ParseError(format!("serialization failed: {}", e))
             }
@@ -345,6 +384,7 @@ impl From<crate::providers::error::ProviderError> for RequestError {
             ProviderError::ConfigError(msg) => {
                 RequestError::Internal(anyhow::anyhow!("Provider config error: {}", msg))
             }
+            ProviderError::InvalidRequest(msg) => RequestError::ParseError(msg),
             ProviderError::AuthError(msg) => RequestError::AuthRevoked(msg),
             ProviderError::NoProviderAvailable => {
                 RequestError::RoutingError("No provider available for this request".to_string())
@@ -712,6 +752,14 @@ mod tests {
             "provider_upstream"
         );
         assert_eq!(
+            RequestError::ProviderProtocol {
+                provider: "x".to_string(),
+                body: "bad payload".to_string()
+            }
+            .variant_tag(),
+            "provider_protocol"
+        );
+        assert_eq!(
             RequestError::BudgetExceeded {
                 limit_usd: 1.0,
                 actual_usd: 2.0,
@@ -760,6 +808,22 @@ mod tests {
             other => panic!("unexpected variant: {:?}", other),
         }
         assert!(req_err.is_retryable());
+    }
+
+    #[test]
+    fn provider_protocol_error_converts_to_non_retryable_gateway_error() {
+        let err = crate::providers::error::ProviderError::ProtocolError(
+            "Failed to parse SSE response: no content found".to_string(),
+        );
+        let req_err: RequestError = err.into();
+        match &req_err {
+            RequestError::ProviderProtocol { provider, body } => {
+                assert_eq!(provider, "upstream");
+                assert!(body.contains("no content found"));
+            }
+            other => panic!("unexpected variant: {:?}", other),
+        }
+        assert!(!req_err.is_retryable());
     }
 
     #[test]

@@ -13,11 +13,11 @@ pub use config::HarnessConfig;
 pub use config::{
     AcmeConfig, AuthType, BudgetConfig, CacheConfig, CircuitBreakerProviderConfig, CodexOptions,
     ComplianceConfig, EnforcementMode, FanOutConfig, FanOutMode, FipsConfig,
-    HealthCheckProviderConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig, PoolConfig,
-    PoolStrategy, PresetConfig, PricingConfig, ProjectConfig, ProjectRouterOverlay, PromptRule,
-    ProviderConfig, RouterConfig, SecretsBackend, SecretsConfig, SecretsFileConfig, SecurityConfig,
-    ServerConfig, TeeConfig, TierConfig, TierMatchCondition, TimeoutConfig, TlsConfig,
-    TokenCountingMode, TracingConfig, UserConfig,
+    HealthCheckProviderConfig, MetricsConfig, ModelConfig, ModelMapping, ModelStrategy, OtelConfig,
+    PoolConfig, PoolStrategy, PresetConfig, PricingConfig, ProjectConfig, ProjectRouterOverlay,
+    PromptRule, ProviderConfig, RouterConfig, SecretsBackend, SecretsConfig, SecretsFileConfig,
+    SecurityConfig, ServerConfig, TeeConfig, TierConfig, TierMatchCondition, TimeoutConfig,
+    TlsConfig, TokenCountingMode, TracingConfig, UserConfig,
 };
 pub use newtypes::{BodySizeLimit, BudgetUsd, ConfigSource, Port};
 

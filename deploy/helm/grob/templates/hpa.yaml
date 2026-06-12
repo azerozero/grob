@@ -1,0 +1,26 @@
+{{- if .Values.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "grob.fullname" . }}
+  labels:
+    {{- include "grob.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "grob.fullname" . }}
+  minReplicas: {{ .Values.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.maxReplicas }}
+  metrics:
+    # Requires a custom-metrics adapter (e.g. prometheus-adapter) exposing the
+    # grob_active_requests gauge as a Pods metric. NOTE: scaling past one pod
+    # makes budget enforcement per-pod (see the chart README / values budget).
+    - type: Pods
+      pods:
+        metric:
+          name: grob_active_requests
+        target:
+          type: AverageValue
+          averageValue: {{ .Values.autoscaling.targetActiveRequests | quote }}
+{{- end }}

@@ -50,7 +50,7 @@ pub mod test_api {
     ) -> Result<ProviderResponse, String> {
         let openai_resp: super::types::OpenAIResponse =
             serde_json::from_value(openai_json).map_err(|e| e.to_string())?;
-        Ok(transform::transform_response(openai_resp))
+        transform::transform_response(openai_resp).map_err(|e| e.to_string())
     }
 
     /// Outbound: translates a canonical request to the OpenAI Responses API
@@ -73,7 +73,7 @@ pub mod test_api {
 }
 
 use super::{
-    base::ProviderBase, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse, Usage,
+    base::ProviderBase, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse,
 };
 use crate::auth::OAuthConfig;
 use crate::models::{CanonicalRequest, CountTokensRequest, CountTokensResponse};
@@ -269,7 +269,8 @@ impl OpenAIProvider {
             response_text.len()
         );
 
-        let content_blocks = transform::parse_sse_response(&response_text)?;
+        let parsed = transform::parse_sse_response(&response_text)?;
+        let content_blocks = parsed.content;
 
         // A function_call in the output means the model wants to use a tool.
         let stop_reason = if content_blocks.iter().any(|b| {
@@ -282,7 +283,7 @@ impl OpenAIProvider {
         }) {
             "tool_use"
         } else {
-            "end_turn"
+            parsed.stop_reason.as_deref().unwrap_or("end_turn")
         };
 
         Ok(ProviderResponse {
@@ -293,12 +294,7 @@ impl OpenAIProvider {
             model: request.model.clone(),
             stop_reason: Some(stop_reason.to_string()),
             stop_sequence: None,
-            usage: Usage {
-                input_tokens: 0,
-                output_tokens: 0,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
-            },
+            usage: parsed.usage,
         })
     }
 
@@ -351,7 +347,7 @@ impl OpenAIProvider {
                 e
             })?;
 
-        Ok(transform::transform_response(openai_response))
+        transform::transform_response(openai_response)
     }
 }
 
@@ -556,13 +552,14 @@ fn process_codex_sse_event(
         return Ok(Bytes::new());
     }
 
-    let sse_output = streaming::transform_codex_event_to_anthropic_sse(
-        data,
-        message_id,
-        model,
-        &mut state.lock().unwrap_or_else(|e| e.into_inner()),
-    );
-    Ok(Bytes::from(sse_output))
+    let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+    match streaming::transform_codex_event_to_anthropic_sse(data, message_id, model, &mut state) {
+        Ok(sse_output) => Ok(Bytes::from(sse_output)),
+        Err(err) => {
+            state.stream_ended = true;
+            Err(err)
+        }
+    }
 }
 
 /// Transform a single OpenAI SSE event into Anthropic SSE format.
@@ -611,12 +608,24 @@ fn process_sse_event(
         }
         Err(e) => {
             tracing::warn!(
-                "{} failed to parse chunk: {} - Data: {}",
+                "{} failed to parse streaming JSON chunk: {} (payload_bytes={})",
                 provider_name,
                 e,
-                data
+                data.len()
             );
-            Ok(Bytes::new())
+            state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .stream_ended = true;
+            Err(ProviderError::ApiError {
+                status: 502,
+                message: format!(
+                    "{} emitted malformed JSON SSE payload ({} bytes): {}",
+                    provider_name,
+                    data.len(),
+                    e
+                ),
+            })
         }
     }
 }
@@ -624,6 +633,17 @@ fn process_sse_event(
 /// Build finalization SSE output for streams that ended without finish_reason.
 fn build_stream_finalization_output(state: &StreamTransformState) -> String {
     let mut output = String::new();
+
+    if state.thinking_block_open {
+        let block_stop = serde_json::json!({
+            "type": "content_block_stop",
+            "index": state.thinking_block_index
+        });
+        output.push_str(&format!(
+            "event: content_block_stop\ndata: {}\n\n",
+            block_stop
+        ));
+    }
 
     if state.text_block_open {
         let block_stop = serde_json::json!({
@@ -684,6 +704,8 @@ fn build_stream_finalization_output(state: &StreamTransformState) -> String {
 mod tests {
     use super::streaming::transform_openai_chunk_to_anthropic_sse;
     use super::types::*;
+    use crate::providers::streaming::parse_sse_events;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_parse_stream_error_response() {
@@ -718,6 +740,125 @@ mod tests {
     fn transform_chunk(json: &str, msg_id: &str, state: &mut StreamTransformState) -> String {
         let chunk: OpenAIStreamChunk = serde_json::from_str(json).unwrap();
         transform_openai_chunk_to_anthropic_sse(&chunk, msg_id, state)
+    }
+
+    fn anthropic_json_events(output: &str, event_name: &str) -> Vec<serde_json::Value> {
+        parse_sse_events(output)
+            .into_iter()
+            .filter(|event| event.event.as_deref() == Some(event_name))
+            .map(|event| serde_json::from_str(&event.data).unwrap())
+            .collect()
+    }
+
+    fn collected_tool_input(output: &str) -> String {
+        anthropic_json_events(output, "content_block_delta")
+            .into_iter()
+            .filter(|json| json["delta"]["type"] == "input_json_delta")
+            .filter_map(|json| json["delta"]["partial_json"].as_str().map(str::to_string))
+            .collect::<String>()
+    }
+
+    #[test]
+    fn responses_reencode_preserves_multi_item_function_call_arguments() {
+        let upstream = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_up\",\"model\":\"gpt-5.5\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.reasoning_summary_text.delta\n",
+            "data: {\"type\":\"response.reasoning_summary_text.delta\",\"item_id\":\"rs_1\",\"output_index\":0,\"delta\":\"Need a shell command.\"}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"status\":\"in_progress\"}}\n\n",
+            "event: response.content_part.added\n",
+            "data: {\"type\":\"response.content_part.added\",\"item_id\":\"msg_1\",\"output_index\":1,\"content_index\":0,\"part\":{\"type\":\"output_text\",\"text\":\"\"}}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":1,\"content_index\":0,\"delta\":\"Je lance la commande.\"}\n\n",
+            "event: response.output_text.done\n",
+            "data: {\"type\":\"response.output_text.done\",\"item_id\":\"msg_1\",\"output_index\":1,\"content_index\":0,\"text\":\"Je lance la commande.\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":1,\"item\":{\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"status\":\"completed\",\"content\":[{\"type\":\"output_text\",\"text\":\"Je lance la commande.\"}]}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_exec\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"output_index\":2,\"delta\":\"{\\\"cmd\\\":\"}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"output_index\":2,\"delta\":\"\\\"ls\"}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_1\",\"output_index\":2,\"delta\":\"\\\"}\"}\n\n",
+            "event: response.function_call_arguments.done\n",
+            "data: {\"type\":\"response.function_call_arguments.done\",\"item_id\":\"fc_1\",\"output_index\":2,\"arguments\":\"\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item_id\":\"fc_1\",\"output_index\":2,\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"call_id\":\"call_exec\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"completed\"}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_up\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let provider_state = Arc::new(Mutex::new(StreamTransformState::default()));
+        let mut anthropic = String::new();
+
+        for event in parse_sse_events(upstream) {
+            let bytes =
+                super::process_codex_sse_event(&event.data, &provider_state, "msg_test", "gpt-5.5")
+                    .unwrap();
+            anthropic.push_str(std::str::from_utf8(&bytes).unwrap());
+        }
+
+        assert!(anthropic.contains(r#""type":"tool_use""#));
+        assert!(anthropic.contains(r#""id":"call_exec""#));
+        assert!(anthropic.contains(r#""name":"exec_command""#));
+
+        let consolidated_delta = collected_tool_input(&anthropic);
+        assert!(
+            !consolidated_delta.is_empty(),
+            "function_call argument deltas must not be dropped when the function_call starts under one Responses index but later chunks use the real output_index"
+        );
+        assert_eq!(consolidated_delta, r#"{"cmd":"ls"}"#);
+        assert!(anthropic.contains(r#""stop_reason":"tool_use""#));
+    }
+
+    #[test]
+    fn parallel_function_calls_without_output_index_are_not_dropped() {
+        // Two parallel function_calls whose `output_item.added` carries no
+        // `output_index`. Both previously collided on default index 0 — the
+        // second was dropped by the duplicate guard and its deltas leaked onto
+        // the first block. Each must now get its own tool_use block.
+        let upstream = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_up\",\"model\":\"gpt-5.5\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_a\",\"type\":\"function_call\",\"call_id\":\"call_a\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_b\",\"type\":\"function_call\",\"call_id\":\"call_b\",\"name\":\"read_file\",\"arguments\":\"\",\"status\":\"in_progress\"}}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_a\",\"delta\":\"{\\\"cmd\\\":\\\"ls\\\"}\"}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_b\",\"delta\":\"{\\\"path\\\":\\\"/tmp\\\"}\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item_id\":\"fc_a\",\"item\":{\"id\":\"fc_a\",\"type\":\"function_call\",\"call_id\":\"call_a\",\"name\":\"exec_command\",\"arguments\":\"\",\"status\":\"completed\"}}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"item_id\":\"fc_b\",\"item\":{\"id\":\"fc_b\",\"type\":\"function_call\",\"call_id\":\"call_b\",\"name\":\"read_file\",\"arguments\":\"\",\"status\":\"completed\"}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_up\",\"status\":\"completed\"}}\n\n",
+            "data: [DONE]\n\n",
+        );
+
+        let provider_state = Arc::new(Mutex::new(StreamTransformState::default()));
+        let mut anthropic = String::new();
+        for event in parse_sse_events(upstream) {
+            let bytes =
+                super::process_codex_sse_event(&event.data, &provider_state, "msg_test", "gpt-5.5")
+                    .unwrap();
+            anthropic.push_str(std::str::from_utf8(&bytes).unwrap());
+        }
+
+        // Both calls surface as distinct tool_use blocks (second not dropped)...
+        assert!(anthropic.contains(r#""id":"call_a""#), "first call missing");
+        assert!(
+            anthropic.contains(r#""id":"call_b""#),
+            "second parallel index-less call was dropped"
+        );
+        // ...and each carries its own arguments (no cross-block leakage).
+        assert!(anthropic.contains("cmd"), "first call args missing");
+        assert!(anthropic.contains("path"), "second call args missing");
     }
 
     #[test]

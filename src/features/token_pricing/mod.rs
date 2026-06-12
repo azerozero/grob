@@ -16,11 +16,14 @@ use tokio::sync::RwLock;
 // paths keep working without any downstream changes.
 pub use crate::pricing::{pricing, ModelPricing, KNOWN_PRICING};
 
-/// Dynamic pricing table with model -> (input_per_million, output_per_million) in USD
+/// Dynamic pricing table: model -> (input, output, cache_read) per 1M tokens (USD).
 #[derive(Debug, Clone)]
 pub struct PricingTable {
-    /// model_id -> (input_per_million, output_per_million) in USD
-    prices: HashMap<String, (f64, f64)>,
+    /// `model_id -> (input_per_million, output_per_million, cache_read_per_million)`.
+    /// The third element is the explicit prompt-cache *read* rate when the source
+    /// provides one (OpenRouter `input_cache_read`); `None` falls back to the
+    /// [`crate::pricing::CACHE_READ_COST_RATIO`] fraction of input at cost time.
+    prices: HashMap<String, (f64, f64, Option<f64>)>,
 }
 
 impl PricingTable {
@@ -30,7 +33,7 @@ impl PricingTable {
         for p in KNOWN_PRICING {
             prices.insert(
                 p.model.to_lowercase(),
-                (p.input_per_million, p.output_per_million),
+                (p.input_per_million, p.output_per_million, None),
             );
         }
         Self { prices }
@@ -61,7 +64,7 @@ impl PricingTable {
 
     /// Fetch pricing from OpenRouter API (no auth required)
     /// Returns model_id -> (input_per_million, output_per_million) in USD
-    async fn fetch_openrouter() -> anyhow::Result<HashMap<String, (f64, f64)>> {
+    async fn fetch_openrouter() -> anyhow::Result<HashMap<String, (f64, f64, Option<f64>)>> {
         let client = reqwest::Client::new();
         let resp = client
             .get("https://openrouter.ai/api/v1/models")
@@ -101,12 +104,28 @@ impl PricingTable {
                     .and_then(|s| s.parse::<f64>().ok())
                     .unwrap_or(0.0);
 
+                // OpenRouter exposes the prompt-cache *read* rate for models that
+                // support caching; prefer it over the input-ratio approximation.
+                let cache_read_per_million = pricing
+                    .get("input_cache_read")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+                    .filter(|p| *p > 0.0)
+                    .map(|p| p * 1_000_000.0);
+
                 // Convert per-token to per-million-tokens
                 let input_per_million = prompt_price * 1_000_000.0;
                 let output_per_million = completion_price * 1_000_000.0;
 
                 if input_per_million > 0.0 || output_per_million > 0.0 {
-                    prices.insert(id.to_string(), (input_per_million, output_per_million));
+                    prices.insert(
+                        id.to_string(),
+                        (
+                            input_per_million,
+                            output_per_million,
+                            cache_read_per_million,
+                        ),
+                    );
                 }
             }
         }
@@ -115,7 +134,7 @@ impl PricingTable {
     }
 
     /// Get price per million tokens for a model (case-insensitive, fuzzy match)
-    pub fn get(&self, model: &str) -> Option<(f64, f64)> {
+    pub fn get(&self, model: &str) -> Option<(f64, f64, Option<f64>)> {
         // Try exact (case-sensitive) first - zero allocation
         if let Some(prices) = self.prices.get(model) {
             return Some(*prices);
@@ -206,6 +225,7 @@ impl TokenCounter {
         model: &str,
         input_tokens: u32,
         output_tokens: u32,
+        cache_read_tokens: u32,
         is_subscription: bool,
         pricing_table: Option<&PricingTable>,
     ) -> Self {
@@ -214,19 +234,30 @@ impl TokenCounter {
         } else if let Some(table) = pricing_table {
             table
                 .get(model)
-                .map(|(inp, out)| {
+                .map(|(inp, out, cache_read_rate)| {
+                    // Prefer the feed's explicit cache-read rate; otherwise derive
+                    // it from input (see `pricing::CACHE_READ_COST_RATIO`).
+                    let cache_read_rate =
+                        cache_read_rate.unwrap_or(inp * crate::pricing::CACHE_READ_COST_RATIO);
                     (input_tokens as f64 / 1_000_000.0) * inp
                         + (output_tokens as f64 / 1_000_000.0) * out
+                        + (cache_read_tokens as f64 / 1_000_000.0) * cache_read_rate
                 })
                 .unwrap_or_else(|| {
                     // Fall back to static table
                     pricing(model)
-                        .map(|p| p.calculate(input_tokens, output_tokens))
+                        .map(|p| {
+                            p.calculate(input_tokens, output_tokens)
+                                + p.calculate_cache_read(cache_read_tokens)
+                        })
                         .unwrap_or(0.0)
                 })
         } else {
             pricing(model)
-                .map(|p| p.calculate(input_tokens, output_tokens))
+                .map(|p| {
+                    p.calculate(input_tokens, output_tokens)
+                        + p.calculate_cache_read(cache_read_tokens)
+                })
                 .unwrap_or(0.0)
         };
 
@@ -267,9 +298,11 @@ mod tests {
         assert!(!table.is_empty());
 
         // Exact match — Opus 4.6 moved to $5/$25 in early 2026 (was $15/$75).
-        let (inp, out) = table.get("claude-opus-4-6").unwrap();
+        let (inp, out, cache_read) = table.get("claude-opus-4-6").unwrap();
         assert_eq!(inp, 5.0);
         assert_eq!(out, 25.0);
+        // The static table carries no explicit cache-read rate (ratio fallback).
+        assert_eq!(cache_read, None);
     }
 
     #[test]
@@ -281,8 +314,25 @@ mod tests {
     }
 
     #[test]
+    fn explicit_feed_cache_read_rate_overrides_the_input_ratio() {
+        // A feed that reports an explicit input_cache_read rate must be billed
+        // verbatim, not via the 0.1× input approximation.
+        let mut prices = HashMap::new();
+        // input $10/1M, output $30/1M, explicit cache-read $0.50/1M.
+        prices.insert("widget-1".to_string(), (10.0, 30.0, Some(0.5)));
+        let table = PricingTable { prices };
+        let counter = TokenCounter::with_pricing("widget-1", 0, 0, 1_000_000, false, Some(&table));
+        // Explicit 0.50, NOT the ratio fallback 10.0 × 0.1 = 1.00.
+        assert!(
+            (counter.estimated_cost_usd - 0.50).abs() < 1e-9,
+            "explicit cache rate billed {} (expected 0.50)",
+            counter.estimated_cost_usd
+        );
+    }
+
+    #[test]
     fn test_subscription_zero_cost() {
-        let counter = TokenCounter::with_pricing("claude-opus-4-6", 10000, 5000, true, None);
+        let counter = TokenCounter::with_pricing("claude-opus-4-6", 10000, 5000, 0, true, None);
         assert_eq!(counter.estimated_cost_usd, 0.0);
     }
 
@@ -290,8 +340,30 @@ mod tests {
     fn test_with_pricing_table() {
         let table = PricingTable::from_known();
         let counter =
-            TokenCounter::with_pricing("claude-sonnet-4-6", 1000, 500, false, Some(&table));
+            TokenCounter::with_pricing("claude-sonnet-4-6", 1000, 500, 0, false, Some(&table));
         assert!(counter.estimated_cost_usd > 0.0);
+    }
+
+    #[test]
+    fn cache_read_tokens_are_billed_at_a_fraction_of_input() {
+        // sonnet-4-6 input = $3/1M. 1M cache-read tokens must cost
+        // 3.0 × CACHE_READ_COST_RATIO (0.1) = $0.30, not $0 (the old bug).
+        let table = PricingTable::from_known();
+        let with_cache =
+            TokenCounter::with_pricing("claude-sonnet-4-6", 0, 0, 1_000_000, false, Some(&table));
+        assert!(
+            (with_cache.estimated_cost_usd - 0.30).abs() < 1e-6,
+            "cache reads billed at {} (expected 0.30)",
+            with_cache.estimated_cost_usd
+        );
+        // And the static-fallback path (no dynamic table) agrees.
+        let fallback =
+            TokenCounter::with_pricing("claude-sonnet-4-6", 0, 0, 1_000_000, false, None);
+        assert!((fallback.estimated_cost_usd - 0.30).abs() < 1e-6);
+        // Subscription still overrides everything to $0.
+        let sub =
+            TokenCounter::with_pricing("claude-sonnet-4-6", 0, 0, 1_000_000, true, Some(&table));
+        assert_eq!(sub.estimated_cost_usd, 0.0);
     }
 
     #[tokio::test]

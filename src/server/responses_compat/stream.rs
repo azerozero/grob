@@ -28,19 +28,36 @@ enum ActiveOutputItem {
 struct StreamUsage {
     input_tokens: u32,
     output_tokens: u32,
+    cache_creation_input_tokens: u32,
+    cache_read_input_tokens: u32,
 }
 
 impl StreamUsage {
+    fn total_input_tokens(&self) -> u32 {
+        self.input_tokens
+            .saturating_add(self.cache_creation_input_tokens)
+            .saturating_add(self.cache_read_input_tokens)
+    }
+
     fn total_tokens(&self) -> u32 {
-        self.input_tokens.saturating_add(self.output_tokens)
+        self.total_input_tokens().saturating_add(self.output_tokens)
     }
 
     fn to_json(&self) -> serde_json::Value {
-        serde_json::json!({
-            "input_tokens": self.input_tokens,
+        let mut value = serde_json::json!({
+            "input_tokens": self.total_input_tokens(),
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens(),
-        })
+        });
+        if self.cache_read_input_tokens > 0 {
+            if let Some(map) = value.as_object_mut() {
+                map.insert(
+                    "input_tokens_details".to_string(),
+                    serde_json::json!({ "cached_tokens": self.cache_read_input_tokens }),
+                );
+            }
+        }
+        value
     }
 }
 
@@ -119,8 +136,18 @@ impl AnthropicToResponsesStream {
             return;
         };
 
+        let cache_read = usage
+            .get("cache_read_input_tokens")
+            .or_else(|| usage.pointer("/input_tokens_details/cached_tokens"))
+            .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+            .and_then(|v| v.as_u64())
+            .map(|v| u32::try_from(v).unwrap_or(u32::MAX));
+
         if let Some(input) = usage.get("input_tokens").and_then(|v| v.as_u64()) {
-            let input = u32::try_from(input).unwrap_or(u32::MAX);
+            let mut input = u32::try_from(input).unwrap_or(u32::MAX);
+            if usage.get("cache_read_input_tokens").is_none() {
+                input = input.saturating_sub(cache_read.unwrap_or(0));
+            }
             if input > 0 || self.usage.input_tokens == 0 {
                 self.usage.input_tokens = input;
             }
@@ -130,6 +157,18 @@ impl AnthropicToResponsesStream {
                 .usage
                 .output_tokens
                 .max(u32::try_from(output).unwrap_or(u32::MAX));
+        }
+        if let Some(cache_creation) = usage
+            .get("cache_creation_input_tokens")
+            .and_then(|v| v.as_u64())
+        {
+            self.usage.cache_creation_input_tokens = self
+                .usage
+                .cache_creation_input_tokens
+                .max(u32::try_from(cache_creation).unwrap_or(u32::MAX));
+        }
+        if let Some(cache_read) = cache_read {
+            self.usage.cache_read_input_tokens = self.usage.cache_read_input_tokens.max(cache_read);
         }
     }
 
@@ -686,5 +725,32 @@ mod tests {
         assert_eq!(completed["response"]["usage"]["input_tokens"], 456);
         assert_eq!(completed["response"]["usage"]["output_tokens"], 78);
         assert_eq!(completed["response"]["usage"]["total_tokens"], 534);
+    }
+
+    #[test]
+    fn response_completed_includes_cached_token_details() {
+        let mut stream = AnthropicToResponsesStream::new("gpt-5.5".to_string());
+        let mut out = String::new();
+
+        for ev in [
+            event(
+                "message_delta",
+                r#"{"type":"message_delta","usage":{"input_tokens":300,"output_tokens":78,"cache_read_input_tokens":700}}"#,
+            ),
+            event("message_stop", r#"{"type":"message_stop"}"#),
+        ] {
+            append_events(&mut out, stream.transform_event(&ev));
+        }
+
+        let completed = json_events(&out, "response.completed")
+            .pop()
+            .expect("response.completed");
+        assert_eq!(completed["response"]["usage"]["input_tokens"], 1000);
+        assert_eq!(completed["response"]["usage"]["output_tokens"], 78);
+        assert_eq!(completed["response"]["usage"]["total_tokens"], 1078);
+        assert_eq!(
+            completed["response"]["usage"]["input_tokens_details"]["cached_tokens"],
+            700
+        );
     }
 }

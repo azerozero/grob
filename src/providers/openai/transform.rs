@@ -1,8 +1,10 @@
 use super::types::*;
 use crate::models::{CanonicalRequest, MessageContent};
 use crate::providers::error::ProviderError;
+use crate::providers::streaming::parse_sse_events;
 use crate::providers::{CodexOptions, ContentBlock, KnownContentBlock, ProviderResponse, Usage};
 use serde::Serialize;
+use std::collections::{BTreeMap, HashMap};
 use thiserror::Error;
 
 /// Errors raised while translating a [`CanonicalRequest`] into OpenAI wire format.
@@ -29,6 +31,12 @@ pub(crate) enum TransformError {
         #[source]
         source: serde_json::Error,
     },
+    /// Client-supplied OpenAI tool metadata cannot be translated safely.
+    #[error("{message}")]
+    RequestValidation {
+        /// Redacted validation message safe to return to callers.
+        message: String,
+    },
 }
 
 impl From<TransformError> for ProviderError {
@@ -37,6 +45,7 @@ impl From<TransformError> for ProviderError {
             TransformError::ToolInputSerialization { source, .. } => {
                 ProviderError::SerializationError(source)
             }
+            TransformError::RequestValidation { message } => ProviderError::InvalidRequest(message),
         }
     }
 }
@@ -143,7 +152,8 @@ pub(crate) fn transform_request(
     );
 
     // Transform tools if present
-    let tools = transform_tools(request);
+    let tools = transform_tools(request)?;
+    let tool_choice = transform_tool_choice(request, tools.as_ref())?;
 
     // Request usage data in streaming responses
     let stream_options = if request.stream == Some(true) {
@@ -166,7 +176,7 @@ pub(crate) fn transform_request(
         stream: request.stream,
         stream_options,
         tools,
-        tool_choice: transform_tool_choice(request),
+        tool_choice,
         // Restore provider-specific fields from extensions
         response_format: ext.response_format.clone(),
         reasoning_effort: ext.reasoning_effort.clone(),
@@ -319,49 +329,118 @@ fn extract_content_parts(blocks: &[ContentBlock]) -> Vec<OpenAIContentPart> {
 }
 
 /// Transform Anthropic tool definitions to OpenAI format.
-fn transform_tools(request: &CanonicalRequest) -> Option<Vec<OpenAITool>> {
-    request.tools.as_ref().map(|anthropic_tools| {
-        anthropic_tools
-            .iter()
-            .filter_map(|tool| {
-                Some(OpenAITool {
-                    r#type: "function".to_string(),
-                    function: OpenAIFunctionDef {
-                        name: tool.name.as_ref()?.clone(),
-                        description: tool.description.clone(),
-                        parameters: tool.input_schema.clone(),
-                    },
-                })
-            })
-            .collect()
-    })
+fn transform_tools(request: &CanonicalRequest) -> Result<Option<Vec<OpenAITool>>, TransformError> {
+    let Some(anthropic_tools) = request.tools.as_ref() else {
+        return Ok(None);
+    };
+
+    let mut tools = Vec::with_capacity(anthropic_tools.len());
+    for (index, tool) in anthropic_tools.iter().enumerate() {
+        let Some(name) = tool
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            return Err(TransformError::RequestValidation {
+                message: format!(
+                    "OpenAI tool definition at index {index} is missing a non-empty name"
+                ),
+            });
+        };
+        tools.push(OpenAITool {
+            r#type: "function".to_string(),
+            function: OpenAIFunctionDef {
+                name: name.to_string(),
+                description: tool.description.clone(),
+                parameters: tool.input_schema.clone(),
+            },
+        });
+    }
+
+    Ok((!tools.is_empty()).then_some(tools))
 }
 
 /// Transform Anthropic tool_choice to OpenAI format.
-fn transform_tool_choice(request: &CanonicalRequest) -> Option<serde_json::Value> {
-    request.tool_choice.as_ref().and_then(|tc| {
-        let tc_type = tc.get("type").and_then(|v| v.as_str()).unwrap_or("");
-        match tc_type {
-            "auto" => Some(serde_json::json!("auto")),
-            "any" => Some(serde_json::json!("required")),
-            "tool" => {
-                let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                Some(serde_json::json!({
-                    "type": "function",
-                    "function": { "name": name }
-                }))
+fn transform_tool_choice(
+    request: &CanonicalRequest,
+    tools: Option<&Vec<OpenAITool>>,
+) -> Result<Option<serde_json::Value>, TransformError> {
+    let Some(tc) = request.tool_choice.as_ref() else {
+        return Ok(None);
+    };
+    let tc_type = tc.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    match tc_type {
+        "auto" => Ok(tools.map(|_| serde_json::json!("auto"))),
+        "any" => {
+            if tools.is_none() {
+                return Err(TransformError::RequestValidation {
+                    message: "OpenAI tool_choice 'any' requires at least one tool definition"
+                        .to_string(),
+                });
             }
-            _ => None,
+            Ok(Some(serde_json::json!("required")))
         }
+        "tool" => {
+            let Some(name) = tc
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            else {
+                return Err(TransformError::RequestValidation {
+                    message: "OpenAI named tool_choice requires a non-empty name".to_string(),
+                });
+            };
+            if let Some(tools) = tools {
+                if !tools.iter().any(|tool| tool.function.name == name) {
+                    return Err(TransformError::RequestValidation {
+                        message: format!("OpenAI tool_choice references unknown tool '{name}'"),
+                    });
+                }
+            } else {
+                return Err(TransformError::RequestValidation {
+                    message: "OpenAI named tool_choice requires declared tools".to_string(),
+                });
+            }
+            Ok(Some(serde_json::json!({
+                "type": "function",
+                "function": { "name": name }
+            })))
+        }
+        other => Err(TransformError::RequestValidation {
+            message: format!("unsupported OpenAI tool_choice type '{other}'"),
+        }),
+    }
+}
+
+fn parse_provider_tool_arguments(
+    context: &str,
+    tool_name: &str,
+    arguments: &str,
+) -> Result<serde_json::Value, ProviderError> {
+    serde_json::from_str(arguments).map_err(|e| {
+        ProviderError::ProtocolError(format!(
+            "OpenAI returned malformed tool arguments for {context} tool '{tool_name}': {e}"
+        ))
     })
 }
 
 /// Transform OpenAI Chat Completions response to Anthropic Messages format.
-pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
+pub(crate) fn transform_response(
+    response: OpenAIResponse,
+) -> Result<ProviderResponse, ProviderError> {
+    let cached_tokens = response.usage.cached_tokens();
+    let usage = Usage {
+        input_tokens: response.usage.prompt_tokens.saturating_sub(cached_tokens),
+        output_tokens: response.usage.completion_tokens,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: (cached_tokens > 0).then_some(cached_tokens),
+    };
     let choice = match response.choices.into_iter().next() {
         Some(c) => c,
         None => {
-            return ProviderResponse {
+            return Ok(ProviderResponse {
                 id: response.id,
                 r#type: "message".to_string(),
                 role: "assistant".to_string(),
@@ -369,13 +448,8 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
                 model: response.model,
                 stop_reason: Some("error".to_string()),
                 stop_sequence: None,
-                usage: Usage {
-                    input_tokens: 0,
-                    output_tokens: 0,
-                    cache_creation_input_tokens: None,
-                    cache_read_input_tokens: None,
-                },
-            };
+                usage,
+            });
         }
     };
 
@@ -435,8 +509,11 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
     // Transform tool_calls to tool_use content blocks
     if let Some(tool_calls) = choice.message.tool_calls {
         for tool_call in tool_calls {
-            let input = serde_json::from_str(&tool_call.function.arguments)
-                .unwrap_or(serde_json::json!({}));
+            let input = parse_provider_tool_arguments(
+                "Chat Completions",
+                &tool_call.function.name,
+                &tool_call.function.arguments,
+            )?;
             content_blocks.push(ContentBlock::tool_use(
                 tool_call.id,
                 tool_call.function.name,
@@ -455,7 +532,7 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
         _ => "end_turn".to_string(),
     });
 
-    ProviderResponse {
+    Ok(ProviderResponse {
         id: response.id,
         r#type: "message".to_string(),
         role: "assistant".to_string(),
@@ -463,13 +540,8 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
         model: response.model,
         stop_reason,
         stop_sequence: None,
-        usage: Usage {
-            input_tokens: response.usage.prompt_tokens,
-            output_tokens: response.usage.completion_tokens,
-            cache_creation_input_tokens: None,
-            cache_read_input_tokens: None,
-        },
-    }
+        usage,
+    })
 }
 
 /// Parse SSE response from ChatGPT Codex and extract content blocks.
@@ -479,105 +551,378 @@ pub(crate) fn transform_response(response: OpenAIResponse) -> ProviderResponse {
 /// empty, whereas the standard Responses API populates `output[]` in the
 /// `response.completed` event. Both layouts are handled: per-item events win,
 /// with the completed-event output as a fallback.
-pub(crate) fn parse_sse_response(sse_text: &str) -> Result<Vec<ContentBlock>, ProviderError> {
-    let lines: Vec<&str> = sse_text.lines().collect();
+#[derive(Debug)]
+pub(crate) struct ParsedSseResponse {
+    pub content: Vec<ContentBlock>,
+    pub usage: Usage,
+    pub stop_reason: Option<String>,
+}
 
+pub(crate) fn parse_sse_response(sse_text: &str) -> Result<ParsedSseResponse, ProviderError> {
     let mut item_blocks: Vec<ContentBlock> = Vec::new();
     let mut completed_blocks: Vec<ContentBlock> = Vec::new();
+    let mut delta_text: BTreeMap<u64, String> = BTreeMap::new();
+    let mut delta_reasoning: BTreeMap<u64, String> = BTreeMap::new();
+    let mut pending_calls: BTreeMap<u64, PendingResponsesFunctionCall> = BTreeMap::new();
+    let mut item_indexes: HashMap<String, u64> = HashMap::new();
+    let mut stop_reason = Some("end_turn".to_string());
+    let mut usage = Usage {
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: None,
+    };
+    let mut saw_terminal_event = false;
 
-    for (i, line) in lines.iter().enumerate() {
-        let Some(event) = line.strip_prefix("event: ").map(str::trim) else {
+    for sse_event in parse_sse_events(sse_text) {
+        let data = sse_event.data.trim();
+        if data.is_empty() || data == "[DONE]" {
             continue;
         };
-        if event != "response.output_item.done" && event != "response.completed" {
-            continue;
-        }
+        let json = parse_responses_sse_json(data)?;
+        let event_type = sse_event
+            .event
+            .as_deref()
+            .or_else(|| json.get("type").and_then(|v| v.as_str()))
+            .unwrap_or_default();
 
-        // The SSE `data:` payload sits on the line immediately after `event:`.
-        let Some(json_str) = lines.get(i + 1).and_then(|l| l.strip_prefix("data: ")) else {
-            continue;
-        };
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(json_str) else {
-            continue;
-        };
-
-        match event {
+        match event_type {
+            ty if ty.ends_with("output_text.delta") => {
+                if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                    let output_index = json
+                        .get("output_index")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    delta_text.entry(output_index).or_default().push_str(delta);
+                }
+            }
+            ty if ty.contains("reasoning") && ty.ends_with(".delta") => {
+                if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                    let output_index = json
+                        .get("output_index")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    delta_reasoning
+                        .entry(output_index)
+                        .or_default()
+                        .push_str(delta);
+                }
+            }
+            "response.output_item.added" => {
+                if let Some(item) = json.get("item") {
+                    record_pending_responses_function_call(
+                        &json,
+                        item,
+                        &mut pending_calls,
+                        &mut item_indexes,
+                    );
+                }
+            }
+            ty if ty.ends_with("function_call_arguments.delta") => {
+                if let Some(delta) = json.get("delta").and_then(|v| v.as_str()) {
+                    if let Some(output_index) =
+                        resolve_pending_call_output_index(&json, &pending_calls, &item_indexes)
+                    {
+                        pending_calls
+                            .entry(output_index)
+                            .or_default()
+                            .arguments
+                            .push_str(delta);
+                    }
+                }
+            }
             "response.output_item.done" => {
-                if let Some(block) = json.get("item").and_then(extract_codex_output_block) {
-                    item_blocks.push(block);
+                if let Some(item) = json.get("item") {
+                    if let Some(block) = extract_codex_output_block(item)? {
+                        item_blocks.push(block);
+                    }
                 }
             }
             "response.completed" => {
+                saw_terminal_event = true;
+                if let Some(response_usage) = json.get("response").and_then(|r| r.get("usage")) {
+                    usage = parse_responses_usage(response_usage);
+                }
                 if let Some(output) = json
                     .get("response")
                     .and_then(|r| r.get("output"))
                     .and_then(|v| v.as_array())
                 {
-                    completed_blocks.extend(output.iter().filter_map(extract_codex_output_block));
+                    for item in output {
+                        if let Some(block) = extract_codex_output_block(item)? {
+                            completed_blocks.push(block);
+                        }
+                    }
                 }
+            }
+            "response.incomplete" => {
+                saw_terminal_event = true;
+                stop_reason = Some("max_tokens".to_string());
+                if let Some(response_usage) = json.get("response").and_then(|r| r.get("usage")) {
+                    usage = parse_responses_usage(response_usage);
+                }
+            }
+            "response.failed" => {
+                return Err(ProviderError::ProtocolError(format!(
+                    "OpenAI Responses API returned response.failed: {}",
+                    responses_error_message(&json)
+                )));
             }
             _ => {}
         }
     }
 
+    let delta_blocks = build_delta_content_blocks(&delta_text, &delta_reasoning, &pending_calls)?;
+
     let content_blocks = if item_blocks.is_empty() {
-        completed_blocks
+        if completed_blocks.is_empty() {
+            delta_blocks
+        } else {
+            completed_blocks
+        }
     } else {
         item_blocks
     };
 
     if !content_blocks.is_empty() {
-        return Ok(content_blocks);
+        return Ok(ParsedSseResponse {
+            content: content_blocks,
+            usage,
+            stop_reason,
+        });
     }
 
-    Err(ProviderError::ApiError {
-        status: 500,
-        message: "Failed to parse SSE response: no content found".to_string(),
+    let terminal_hint = if saw_terminal_event {
+        " after terminal Responses event"
+    } else {
+        ""
+    };
+    Err(ProviderError::ProtocolError(format!(
+        "Failed to parse SSE response: no content found{terminal_hint}"
+    )))
+}
+
+#[derive(Debug, Default)]
+struct PendingResponsesFunctionCall {
+    call_id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+fn parse_responses_sse_json(data: &str) -> Result<serde_json::Value, ProviderError> {
+    serde_json::from_str(data).map_err(|e| {
+        ProviderError::ProtocolError(format!(
+            "OpenAI Responses API emitted malformed SSE JSON payload ({} bytes): {}",
+            data.len(),
+            e
+        ))
     })
+}
+
+fn responses_error_message(json: &serde_json::Value) -> String {
+    json.pointer("/response/error/message")
+        .or_else(|| json.pointer("/error/message"))
+        .or_else(|| json.get("detail"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Responses API request failed")
+        .to_string()
+}
+
+fn record_pending_responses_function_call(
+    json: &serde_json::Value,
+    item: &serde_json::Value,
+    pending_calls: &mut BTreeMap<u64, PendingResponsesFunctionCall>,
+    item_indexes: &mut HashMap<String, u64>,
+) {
+    if item.get("type").and_then(|v| v.as_str()) != Some("function_call") {
+        return;
+    }
+
+    let output_index = json
+        .get("output_index")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let pending = pending_calls.entry(output_index).or_default();
+    pending.call_id = item
+        .get("call_id")
+        .or_else(|| item.get("id"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| pending.call_id.take());
+    pending.name = item
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .or_else(|| pending.name.take());
+    if let Some(arguments) = item.get("arguments").and_then(|v| v.as_str()) {
+        pending.arguments.push_str(arguments);
+    }
+
+    for id in [
+        item.get("id").and_then(|v| v.as_str()),
+        item.get("call_id").and_then(|v| v.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        item_indexes.insert(id.to_string(), output_index);
+    }
+}
+
+fn resolve_pending_call_output_index(
+    json: &serde_json::Value,
+    pending_calls: &BTreeMap<u64, PendingResponsesFunctionCall>,
+    item_indexes: &HashMap<String, u64>,
+) -> Option<u64> {
+    if let Some(output_index) = json.get("output_index").and_then(|v| v.as_u64()) {
+        return Some(output_index);
+    }
+    if let Some(output_index) = json
+        .get("item_id")
+        .and_then(|v| v.as_str())
+        .and_then(|id| item_indexes.get(id))
+        .copied()
+    {
+        return Some(output_index);
+    }
+    if pending_calls.len() == 1 {
+        return pending_calls.keys().next().copied();
+    }
+    None
+}
+
+fn build_delta_content_blocks(
+    delta_text: &BTreeMap<u64, String>,
+    delta_reasoning: &BTreeMap<u64, String>,
+    pending_calls: &BTreeMap<u64, PendingResponsesFunctionCall>,
+) -> Result<Vec<ContentBlock>, ProviderError> {
+    let mut output_indexes = BTreeMap::new();
+    for output_index in delta_text.keys() {
+        output_indexes.insert(*output_index, ());
+    }
+    for output_index in delta_reasoning.keys() {
+        output_indexes.insert(*output_index, ());
+    }
+    for output_index in pending_calls.keys() {
+        output_indexes.insert(*output_index, ());
+    }
+
+    let mut blocks = Vec::new();
+    for output_index in output_indexes.keys() {
+        if let Some(reasoning) = delta_reasoning.get(output_index) {
+            if !reasoning.is_empty() {
+                blocks.push(ContentBlock::thinking(serde_json::json!({
+                    "thinking": reasoning
+                })));
+            }
+        }
+        if let Some(text) = delta_text.get(output_index) {
+            if !text.is_empty() {
+                blocks.push(ContentBlock::text(text.clone(), None));
+            }
+        }
+        if let Some(call) = pending_calls.get(output_index) {
+            if let (Some(call_id), Some(name)) = (&call.call_id, &call.name) {
+                let input = parse_responses_tool_arguments(name, &call.arguments)?;
+                blocks.push(ContentBlock::tool_use(call_id.clone(), name.clone(), input));
+            }
+        }
+    }
+
+    Ok(blocks)
+}
+
+fn parse_responses_usage(usage: &serde_json::Value) -> Usage {
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+        .unwrap_or(0);
+    let cached_tokens = usage
+        .pointer("/input_tokens_details/cached_tokens")
+        .or_else(|| usage.pointer("/prompt_tokens_details/cached_tokens"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
+        .unwrap_or(0);
+
+    Usage {
+        input_tokens: input_tokens.saturating_sub(cached_tokens),
+        output_tokens,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: (cached_tokens > 0).then_some(cached_tokens),
+    }
 }
 
 /// Maps a Codex `output[]` item to the corresponding Anthropic content block.
 ///
 /// Handles `function_call` (→ `tool_use`), `reasoning` (→ `thinking`), and
 /// `message` (→ `text`) items; anything else yields `None`.
-fn extract_codex_output_block(item: &serde_json::Value) -> Option<ContentBlock> {
-    let output_type = item.get("type").and_then(|v| v.as_str())?;
+fn extract_codex_output_block(
+    item: &serde_json::Value,
+) -> Result<Option<ContentBlock>, ProviderError> {
+    let Some(output_type) = item.get("type").and_then(|v| v.as_str()) else {
+        return Ok(None);
+    };
 
     if output_type == "function_call" {
-        let name = item.get("name").and_then(|v| v.as_str())?;
-        let call_id = item
+        let Some(name) = item.get("name").and_then(|v| v.as_str()) else {
+            return Ok(None);
+        };
+        let Some(call_id) = item
             .get("call_id")
             .or_else(|| item.get("id"))
-            .and_then(|v| v.as_str())?;
-        let input = item
+            .and_then(|v| v.as_str())
+        else {
+            return Ok(None);
+        };
+        let arguments = item
             .get("arguments")
             .and_then(|v| v.as_str())
-            .and_then(|s| serde_json::from_str(s).ok())
-            .unwrap_or_else(|| serde_json::json!({}));
-        return Some(ContentBlock::tool_use(
+            .unwrap_or("{}");
+        let input = parse_responses_tool_arguments(name, arguments)?;
+        return Ok(Some(ContentBlock::tool_use(
             call_id.to_string(),
             name.to_string(),
             input,
-        ));
+        )));
     }
 
     // `message` items carry text under `content[]`; `reasoning` items carry it
     // under `summary[]`. Accept whichever is present.
-    let text = item
+    let Some(text) = item
         .get("content")
         .or_else(|| item.get("summary"))
         .and_then(|v| v.as_array())
         .and_then(|arr| arr.first())
         .and_then(|first| first.get("text"))
-        .and_then(|v| v.as_str())?;
+        .and_then(|v| v.as_str())
+    else {
+        return Ok(None);
+    };
 
-    match output_type {
+    Ok(match output_type {
         "reasoning" => Some(ContentBlock::thinking(serde_json::json!({
             "thinking": text
         }))),
         "message" => Some(ContentBlock::text(text.to_string(), None)),
         _ => None,
+    })
+}
+
+fn parse_responses_tool_arguments(
+    tool_name: &str,
+    arguments: &str,
+) -> Result<serde_json::Value, ProviderError> {
+    if arguments.trim().is_empty() {
+        return Ok(serde_json::json!({}));
     }
+    let sanitized = super::streaming::sanitize_tool_input_delta(tool_name, arguments);
+    parse_provider_tool_arguments("Responses", tool_name, sanitized.as_ref())
 }
 
 /// Instructions used when the client forwards its own tools.
@@ -637,7 +982,8 @@ pub(crate) fn transform_to_responses_request(
     codex_instructions: &str,
     tuning: &CodexTuning<'_>,
 ) -> Result<OpenAIResponsesRequest, ProviderError> {
-    let tools = transform_responses_tools(request);
+    let tools = transform_responses_tools(request)?;
+    let tool_choice = transform_responses_tool_choice(request, tools.as_ref())?;
 
     // Codex CLI requests carry their own authoritative Codex agent prompt as
     // `instructions` (canonical `system`). Forward it verbatim as the
@@ -703,7 +1049,7 @@ pub(crate) fn transform_to_responses_request(
         // be set to false" otherwise), so this is fixed for every path.
         store: false,
         stream: true,
-        tool_choice: tools.as_ref().and(transform_responses_tool_choice(request)),
+        tool_choice,
         parallel_tool_calls: tools.as_ref().map(|_| true),
         tools,
         reasoning: resolve_reasoning_effort(request, tuning)
@@ -875,42 +1221,92 @@ fn flush_text_item(items: &mut Vec<OpenAIResponsesItem>, role: &str, text: &mut 
 }
 
 /// Transforms Anthropic tool definitions into Responses-API (flattened) tools.
-fn transform_responses_tools(request: &CanonicalRequest) -> Option<Vec<serde_json::Value>> {
-    let tools: Vec<serde_json::Value> = request
-        .tools
-        .as_ref()?
-        .iter()
-        .filter_map(|tool| {
-            let name = tool.name.as_ref()?;
-            let mut entry = serde_json::json!({
-                "type": "function",
-                "name": name,
-                "parameters": tool
-                    .input_schema
-                    .clone()
-                    .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} })),
-            });
-            if let Some(description) = &tool.description {
-                entry["description"] = serde_json::Value::String(description.clone());
-            }
-            Some(entry)
-        })
-        .collect();
+fn transform_responses_tools(
+    request: &CanonicalRequest,
+) -> Result<Option<Vec<serde_json::Value>>, ProviderError> {
+    let Some(anthropic_tools) = request.tools.as_ref() else {
+        return Ok(None);
+    };
 
-    (!tools.is_empty()).then_some(tools)
+    let mut tools = Vec::with_capacity(anthropic_tools.len());
+    for (index, tool) in anthropic_tools.iter().enumerate() {
+        let Some(name) = tool
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            return Err(ProviderError::InvalidRequest(format!(
+                "OpenAI Responses tool definition at index {index} is missing a non-empty name"
+            )));
+        };
+        let mut entry = serde_json::json!({
+            "type": "function",
+            "name": name,
+            "parameters": tool
+                .input_schema
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({ "type": "object", "properties": {} })),
+        });
+        if let Some(description) = &tool.description {
+            entry["description"] = serde_json::Value::String(description.clone());
+        }
+        tools.push(entry);
+    }
+
+    Ok((!tools.is_empty()).then_some(tools))
 }
 
 /// Transforms Anthropic `tool_choice` into the Responses-API shape.
-fn transform_responses_tool_choice(request: &CanonicalRequest) -> Option<serde_json::Value> {
-    let tc = request.tool_choice.as_ref()?;
+fn transform_responses_tool_choice(
+    request: &CanonicalRequest,
+    tools: Option<&Vec<serde_json::Value>>,
+) -> Result<Option<serde_json::Value>, ProviderError> {
+    let Some(tc) = request.tool_choice.as_ref() else {
+        return Ok(None);
+    };
     match tc.get("type").and_then(|v| v.as_str()).unwrap_or("") {
-        "auto" => Some(serde_json::json!("auto")),
-        "any" => Some(serde_json::json!("required")),
-        "tool" => {
-            let name = tc.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            Some(serde_json::json!({ "type": "function", "name": name }))
+        "auto" => Ok(tools.map(|_| serde_json::json!("auto"))),
+        "any" => {
+            if tools.is_none() {
+                return Err(ProviderError::InvalidRequest(
+                    "OpenAI Responses tool_choice 'any' requires at least one tool definition"
+                        .to_string(),
+                ));
+            }
+            Ok(Some(serde_json::json!("required")))
         }
-        _ => None,
+        "tool" => {
+            let Some(name) = tc
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            else {
+                return Err(ProviderError::InvalidRequest(
+                    "OpenAI Responses named tool_choice requires a non-empty name".to_string(),
+                ));
+            };
+            let Some(tools) = tools else {
+                return Err(ProviderError::InvalidRequest(
+                    "OpenAI Responses named tool_choice requires declared tools".to_string(),
+                ));
+            };
+            if !tools
+                .iter()
+                .any(|tool| tool.get("name").and_then(|v| v.as_str()) == Some(name))
+            {
+                return Err(ProviderError::InvalidRequest(format!(
+                    "OpenAI Responses tool_choice references unknown tool '{name}'"
+                )));
+            }
+            Ok(Some(
+                serde_json::json!({ "type": "function", "name": name }),
+            ))
+        }
+        other => Err(ProviderError::InvalidRequest(format!(
+            "unsupported OpenAI Responses tool_choice type '{other}'"
+        ))),
     }
 }
 
@@ -1390,6 +1786,9 @@ mod tests {
                     source
                 );
             }
+            TransformError::RequestValidation { message } => {
+                panic!("unexpected request validation error: {message}");
+            }
         }
     }
 
@@ -1404,6 +1803,17 @@ mod tests {
         };
         let provider_err: ProviderError = err.into();
         assert!(matches!(provider_err, ProviderError::SerializationError(_)));
+    }
+
+    #[test]
+    fn transform_maps_request_validation_to_invalid_request() {
+        let err = TransformError::RequestValidation {
+            message: "invalid tool definition".to_string(),
+        };
+        let provider_err: ProviderError = err.into();
+        assert!(
+            matches!(provider_err, ProviderError::InvalidRequest(message) if message == "invalid tool definition")
+        );
     }
 
     #[test]
@@ -1446,7 +1856,8 @@ mod tests {
             "data: {\"type\":\"response.completed\",\"response\":{\"output\":null}}\n",
         );
 
-        let blocks = parse_sse_response(sse).expect("should extract content");
+        let parsed = parse_sse_response(sse).expect("should extract content");
+        let blocks = parsed.content;
         assert_eq!(blocks.len(), 1);
         let value = serde_json::to_value(&blocks[0]).expect("serialize block");
         assert_eq!(value["type"], "text");
@@ -1462,7 +1873,8 @@ mod tests {
             "data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"final\"}]}]}}\n",
         );
 
-        let blocks = parse_sse_response(sse).expect("should extract content");
+        let parsed = parse_sse_response(sse).expect("should extract content");
+        let blocks = parsed.content;
         assert_eq!(blocks.len(), 1);
         let value = serde_json::to_value(&blocks[0]).expect("serialize block");
         assert_eq!(value["text"], "final");
@@ -1478,7 +1890,8 @@ mod tests {
             "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"answer\"}]}}\n",
         );
 
-        let blocks = parse_sse_response(sse).expect("should extract content");
+        let parsed = parse_sse_response(sse).expect("should extract content");
+        let blocks = parsed.content;
         assert_eq!(blocks.len(), 2);
         let thinking = serde_json::to_value(&blocks[0]).expect("serialize block");
         assert_eq!(thinking["type"], "thinking");
@@ -1488,6 +1901,130 @@ mod tests {
     #[test]
     fn parse_sse_errors_when_no_content() {
         let sse = "event: response.created\ndata: {\"type\":\"response.created\"}\n";
-        assert!(parse_sse_response(sse).is_err());
+        assert!(matches!(
+            parse_sse_response(sse),
+            Err(ProviderError::ProtocolError(message)) if message.contains("no content found")
+        ));
+    }
+
+    #[test]
+    fn parse_sse_collects_output_text_deltas_when_done_items_are_absent() {
+        let sse = concat!(
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\"}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Hel\"}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"lo\"}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":null}}\n",
+        );
+
+        let parsed = parse_sse_response(sse).expect("should extract delta text");
+        assert_eq!(parsed.stop_reason.as_deref(), Some("end_turn"));
+        let blocks = parsed.content;
+        assert_eq!(blocks.len(), 1);
+        let value = serde_json::to_value(&blocks[0]).expect("serialize block");
+        assert_eq!(value["type"], "text");
+        assert_eq!(value["text"], "Hello");
+    }
+
+    #[test]
+    fn parse_sse_incomplete_with_delta_content_maps_to_max_tokens() {
+        let sse = concat!(
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n",
+            "event: response.incomplete\n",
+            "data: {\"type\":\"response.incomplete\",\"response\":{\"status\":\"incomplete\",\"usage\":{\"input_tokens\":10,\"output_tokens\":2}}}\n",
+        );
+
+        let parsed = parse_sse_response(sse).expect("should preserve incomplete content");
+        assert_eq!(parsed.stop_reason.as_deref(), Some("max_tokens"));
+        assert_eq!(parsed.usage.input_tokens, 10);
+        assert_eq!(parsed.usage.output_tokens, 2);
+        let value = serde_json::to_value(&parsed.content[0]).expect("serialize block");
+        assert_eq!(value["text"], "partial");
+    }
+
+    #[test]
+    fn parse_sse_failed_surfaces_upstream_message() {
+        let sse = concat!(
+            "event: response.failed\n",
+            "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"boom\"}}}\n",
+        );
+
+        assert!(matches!(
+            parse_sse_response(sse),
+            Err(ProviderError::ProtocolError(message))
+                if message.contains("response.failed") && message.contains("boom")
+        ));
+    }
+
+    #[test]
+    fn parse_sse_rejects_malformed_terminal_json() {
+        let sse = "event: response.completed\ndata: {not-json}\n";
+        assert!(matches!(
+            parse_sse_response(sse),
+            Err(ProviderError::ProtocolError(message))
+                if message.contains("malformed SSE JSON")
+        ));
+    }
+
+    #[test]
+    fn parse_sse_builds_function_call_from_delta_events() {
+        let sse = concat!(
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"id\":\"fc_read\",\"type\":\"function_call\",\"call_id\":\"call_read\",\"name\":\"Read\",\"arguments\":\"\"}}\n\n",
+            "event: response.function_call_arguments.delta\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"item_id\":\"fc_read\",\"output_index\":0,\"delta\":\"{\\\"file_path\\\":\\\"/tmp/SKILL.md\\\",\\\"offset\\\":0,\\\"limit\\\":2000,\\\"pages\\\":\\\"\\\"}\"}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":null}}\n",
+        );
+
+        let parsed = parse_sse_response(sse).expect("should extract pending function call");
+        let value = serde_json::to_value(&parsed.content[0]).expect("serialize block");
+        assert_eq!(value["type"], "tool_use");
+        assert_eq!(value["name"], "Read");
+        assert_eq!(value["input"]["file_path"], "/tmp/SKILL.md");
+        assert!(value["input"].get("pages").is_none());
+    }
+
+    #[test]
+    fn parse_sse_preserves_responses_cached_tokens() {
+        let sse = concat!(
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1000,\"output_tokens\":42,\"input_tokens_details\":{\"cached_tokens\":700}},\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"done\"}]}]}}\n",
+        );
+
+        let parsed = parse_sse_response(sse).expect("should extract content and usage");
+        assert_eq!(parsed.usage.input_tokens, 300);
+        assert_eq!(parsed.usage.output_tokens, 42);
+        assert_eq!(parsed.usage.cache_read_input_tokens, Some(700));
+        assert_eq!(parsed.usage.total_input_tokens(), 1000);
+    }
+
+    #[test]
+    fn transform_response_preserves_openai_cached_tokens() {
+        let response: OpenAIResponse = serde_json::from_value(serde_json::json!({
+            "id": "chatcmpl_1",
+            "object": "chat.completion",
+            "model": "gpt-4.1",
+            "choices": [{
+                "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 1000,
+                "completion_tokens": 42,
+                "prompt_tokens_details": {"cached_tokens": 700}
+            }
+        }))
+        .expect("valid response");
+
+        let transformed = transform_response(response).expect("transform response");
+        assert_eq!(transformed.usage.input_tokens, 300);
+        assert_eq!(transformed.usage.output_tokens, 42);
+        assert_eq!(transformed.usage.cache_read_input_tokens, Some(700));
+        assert_eq!(transformed.usage.total_input_tokens(), 1000);
     }
 }

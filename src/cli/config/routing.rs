@@ -209,6 +209,9 @@ pub struct TierMatchCondition {
 pub struct TierConfig {
     /// Tier name — must match a `ComplexityTier` variant (case-insensitive).
     pub name: String,
+    /// Optional virtual model to use for this tier instead of the routed model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Ordered list of provider names to use for this tier.
     pub providers: Vec<String>,
     /// Send the request to all tier providers in parallel (fan-out).

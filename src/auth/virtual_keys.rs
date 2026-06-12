@@ -28,6 +28,12 @@ pub struct VirtualKeyRecord {
     pub rate_limit_rps: Option<u32>,
     /// Optional allowlist of model names this key may access.
     pub allowed_models: Option<Vec<String>>,
+    /// Allowlist of provider names this key may route to. Empty = unrestricted.
+    ///
+    /// `#[serde(default)]` keeps records written before this field deserialisable
+    /// (they decode to an empty list = no provider scoping).
+    #[serde(default)]
+    pub allowed_providers: Vec<String>,
     /// Timestamp when the key was created.
     pub created_at: DateTime<Utc>,
     /// Optional expiration timestamp.
@@ -53,6 +59,8 @@ pub struct VirtualKeyContext {
     pub rate_limit_rps: Option<u32>,
     /// Model allowlist (if set).
     pub allowed_models: Option<Vec<String>>,
+    /// Provider allowlist (empty = unrestricted).
+    pub allowed_providers: Vec<String>,
 }
 
 /// Generates a new virtual API key and its SHA-256 hash.
@@ -130,6 +138,7 @@ mod tests {
             budget_usd: Some(10.0),
             rate_limit_rps: Some(100),
             allowed_models: Some(vec!["claude-sonnet".to_string()]),
+            allowed_providers: Vec::new(),
             created_at: Utc::now(),
             expires_at: None,
             revoked: false,

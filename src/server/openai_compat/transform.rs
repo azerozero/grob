@@ -362,6 +362,9 @@ pub fn transform_canonical_to_openai(
         .to_string()
     });
 
+    let prompt_tokens = anthropic_resp.usage.total_input_tokens();
+    let cached_tokens = anthropic_resp.usage.cache_read_tokens();
+
     OpenAIResponse {
         id: anthropic_resp.id,
         object: "chat.completion".to_string(),
@@ -380,9 +383,11 @@ pub fn transform_canonical_to_openai(
             finish_reason,
         }],
         usage: OpenAIUsage {
-            prompt_tokens: anthropic_resp.usage.input_tokens,
+            prompt_tokens,
             completion_tokens: anthropic_resp.usage.output_tokens,
-            total_tokens: anthropic_resp.usage.input_tokens + anthropic_resp.usage.output_tokens,
+            total_tokens: prompt_tokens.saturating_add(anthropic_resp.usage.output_tokens),
+            prompt_tokens_details: (cached_tokens > 0)
+                .then_some(OpenAITokenDetails { cached_tokens }),
         },
     }
 }
