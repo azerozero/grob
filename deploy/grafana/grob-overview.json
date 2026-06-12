@@ -1,6 +1,6 @@
 {
   "uid": "grob-overview",
-  "title": "grob — Overview",
+  "title": "grob — OTel (metrics · logs · traces)",
   "tags": ["grob", "llm", "proxy"],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -82,9 +82,9 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } } },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95" },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p99" }
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p50", "exemplar": true },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95", "exemplar": true },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p99", "exemplar": true }
       ]
     },
     {
@@ -136,6 +136,13 @@
       "datasource": { "type": "tempo", "uid": "tempo" },
       "options": { "showHeader": true },
       "targets": [ { "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" }, "queryType": "traceql", "query": "{ resource.service.name=\"grob\" }", "limit": 20 } ]
+    },
+    {
+      "id": 32, "type": "nodeGraph", "title": "Service graph (Tempo metrics-generator)",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 48 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "description": "Populated by Tempo's service-graph metrics. Edges appear once the upstream providers are themselves traced (context propagation); with a single instrumented service it shows grob only.",
+      "targets": [ { "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" }, "queryType": "serviceMap" } ]
     }
   ]
 }
