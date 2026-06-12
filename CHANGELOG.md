@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.69](https://github.com/azerozero/grob/compare/v0.36.68...v0.36.69) - 2026-06-12
+
+### Fixed
+
+- *(openai)* codex streaming arg routing + SSE/routing/cache fixes + cli-cycle quality pass + cache-read pricing & tier-model validation ([#410](https://github.com/azerozero/grob/pull/410))
+
 ## [0.36.68](https://github.com/azerozero/grob/compare/v0.36.67...v0.36.68) - 2026-06-12
 
 ### Added
