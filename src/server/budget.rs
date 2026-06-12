@@ -62,6 +62,30 @@ pub(crate) struct RequestMetrics<'a> {
 /// - Units in metric name as suffix (`_seconds`, `_usd`)
 /// - No label names embedded in metric names
 pub(crate) fn record_request_metrics(m: &RequestMetrics<'_>) {
+    // Attach the active request's OpenTelemetry span to the current OTel Context
+    // so a trace-based exemplar reservoir can capture its `trace_id` when the
+    // duration histogram is recorded below — this is grob's half of the
+    // "click latency → open trace" wiring. `tracing-opentelemetry` stores the
+    // OTel span in the tracing-span extensions but does NOT put it on the OTel
+    // thread-local Context, so without this attach `Context::current()` is empty
+    // at the metrics call-site.
+    //
+    // NOTE: opentelemetry_sdk 0.28 does NOT implement exemplar capture (every
+    // aggregator hardcodes `exemplars: vec![]`, and there is no
+    // `with_exemplar_filter` / reservoir API), so this is currently a NO-OP for
+    // exemplars. It becomes effective after upgrading the OTel stack to >= 0.30
+    // and enabling `ExemplarFilter::TraceBased`. See
+    // `docs/explanation/otlp-exemplars.md`.
+    #[cfg(feature = "otel")]
+    let _otel_ctx_guard = {
+        use opentelemetry::trace::TraceContextExt;
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let cx = tracing::Span::current().context();
+        // Only attach when the span carries a valid (recording) OTel context, to
+        // avoid masking a parent context with an empty one when OTel is off.
+        cx.span().span_context().is_valid().then(|| cx.attach())
+    };
+
     let model_label = m.model.to_string();
     let provider_label = m.provider.to_string();
     let route_label = m.route_type.to_string();
