@@ -54,6 +54,8 @@ opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"], optional = true
 # exports over gRPC/tonic only, so it needs just grpc-tonic + trace + metrics.
 opentelemetry-otlp = { version = "0.28", default-features = false, features = ["grpc-tonic", "trace", "metrics"], optional = true }
 tracing-opentelemetry = { version = "0.29", optional = true }
+# Bridges `tracing` events into OTLP logs (the 3rd OTel signal). gRPC/tonic only.
+opentelemetry-appender-tracing = { version = "0.28", optional = true }
 
 # Error Handling
 anyhow = "1"
@@ -225,11 +227,15 @@ watch = ["ratatui", "crossterm"]
 otel = [
     "opentelemetry",
     "opentelemetry/metrics",
+    "opentelemetry/logs",
     "opentelemetry_sdk",
     "opentelemetry_sdk/metrics",
+    "opentelemetry_sdk/logs",
     "opentelemetry-otlp",
     "opentelemetry-otlp/metrics",
+    "opentelemetry-otlp/logs",
     "tracing-opentelemetry",
+    "opentelemetry-appender-tracing",
     "metrics-util",
 ]
 tls = ["axum-server", "rustls", "rustls-pemfile"]

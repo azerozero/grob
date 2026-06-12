@@ -79,6 +79,12 @@ pub struct OtelConfig {
     /// (default: 60). Ignored unless `metrics` is true.
     #[serde(default = "default_otel_metrics_interval_secs")]
     pub metrics_interval_secs: u64,
+    /// Export `tracing` events as OTLP logs (the 3rd OTel signal) alongside the
+    /// always-on stdout fmt layer. Requires the `otel` build feature and
+    /// `enabled = true`; reuses `endpoint` and `service_name` over gRPC/tonic.
+    /// Default: false.
+    #[serde(default)]
+    pub logs: bool,
 }
 
 impl Default for OtelConfig {
@@ -89,6 +95,7 @@ impl Default for OtelConfig {
             service_name: default_otel_service_name(),
             metrics: false,
             metrics_interval_secs: default_otel_metrics_interval_secs(),
+            logs: false,
         }
     }
 }
