@@ -173,6 +173,7 @@ fn daemon_command_args(
     port: Option<u16>,
     config: Option<String>,
     hot_upgrade: bool,
+    adopt_from_system: bool,
 ) -> Vec<String> {
     let mut args = Vec::new();
     if let Some(config) = config {
@@ -187,6 +188,9 @@ fn daemon_command_args(
     if hot_upgrade {
         args.push("--hot-upgrade".to_string());
     }
+    if adopt_from_system {
+        args.push("--adopt-from-system".to_string());
+    }
     args
 }
 
@@ -199,28 +203,38 @@ fn daemon_command_args(
 pub fn spawn_background_service(
     port: Option<u16>,
     config: Option<String>,
+    adopt_from_system: bool,
 ) -> anyhow::Result<Option<std::path::PathBuf>> {
-    spawn_background_service_with_mode(port, config, false)
+    spawn_background_service_with_mode(port, config, false, adopt_from_system)
 }
 
 /// Spawns a detached daemon for zero-downtime upgrade.
+///
+/// The upgraded daemon re-reads the config file, so credential adoption
+/// follows `[auth] adopt_from_system` rather than any per-invocation flag.
 pub fn spawn_upgrade_background_service(
     port: Option<u16>,
     config: Option<String>,
 ) -> anyhow::Result<Option<std::path::PathBuf>> {
-    spawn_background_service_with_mode(port, config, true)
+    spawn_background_service_with_mode(port, config, true, false)
 }
 
 fn spawn_background_service_with_mode(
     port: Option<u16>,
     config: Option<String>,
     hot_upgrade: bool,
+    adopt_from_system: bool,
 ) -> anyhow::Result<Option<std::path::PathBuf>> {
     use std::process::Stdio;
 
     let exe_path = std::env::current_exe()?;
     let mut cmd = Command::new(&exe_path);
-    cmd.args(daemon_command_args(port, config, hot_upgrade));
+    cmd.args(daemon_command_args(
+        port,
+        config,
+        hot_upgrade,
+        adopt_from_system,
+    ));
 
     #[cfg(all(unix, feature = "unix-signals"))]
     {
@@ -292,7 +306,12 @@ mod tests {
 
     #[test]
     fn daemon_args_with_config_parse_back_into_clap() {
-        let args = daemon_command_args(Some(13456), Some("/tmp/grob.toml".to_string()), false);
+        let args = daemon_command_args(
+            Some(13456),
+            Some("/tmp/grob.toml".to_string()),
+            false,
+            false,
+        );
 
         // The global flag must precede the subcommand.
         let start_idx = args.iter().position(|a| a == "start").unwrap();
@@ -309,14 +328,15 @@ mod tests {
             Some(Commands::Start {
                 port: Some(13456),
                 detach: false,
-                hot_upgrade: false
+                hot_upgrade: false,
+                adopt_from_system: false
             })
         ));
     }
 
     #[test]
     fn daemon_args_without_config_parse_back_into_clap() {
-        let args = daemon_command_args(None, None, false);
+        let args = daemon_command_args(None, None, false, false);
         let cli = parse(&args);
         assert_eq!(cli.config, None);
         assert!(matches!(
@@ -326,8 +346,22 @@ mod tests {
     }
 
     #[test]
+    fn daemon_args_forward_adopt_from_system_to_the_child() {
+        let args = daemon_command_args(None, None, false, true);
+        let cli = parse(&args);
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Start {
+                adopt_from_system: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn daemon_args_for_upgrade_parse_with_hot_upgrade_flag() {
-        let args = daemon_command_args(Some(13456), Some("/tmp/grob.toml".to_string()), true);
+        let args =
+            daemon_command_args(Some(13456), Some("/tmp/grob.toml".to_string()), true, false);
         assert!(args.iter().any(|arg| arg == "--hot-upgrade"));
 
         let cli = parse(&args);
@@ -337,7 +371,8 @@ mod tests {
             Some(Commands::Start {
                 port: Some(13456),
                 detach: false,
-                hot_upgrade: true
+                hot_upgrade: true,
+                adopt_from_system: false
             })
         ));
     }

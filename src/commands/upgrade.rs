@@ -153,7 +153,7 @@ async fn cmd_upgrade_windows(
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
     }
 
-    spawn_background_service(Some(config.server.port.value()), cli_config.clone())?;
+    spawn_background_service(Some(config.server.port.value()), cli_config.clone(), false)?;
     println!("   Spawned new process, waiting for health...");
 
     if !poll_health(base_url, HEALTH_POLL_MAX_ATTEMPTS, HEALTH_POLL_INTERVAL_MS).await {

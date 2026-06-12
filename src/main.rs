@@ -156,6 +156,7 @@ async fn main() -> anyhow::Result<()> {
             port,
             detach,
             hot_upgrade,
+            adopt_from_system,
         } => {
             commands::start::cmd_start(
                 config,
@@ -164,6 +165,7 @@ async fn main() -> anyhow::Result<()> {
                 detach,
                 cli_args.config,
                 hot_upgrade,
+                adopt_from_system,
             )
             .await?;
         }
@@ -180,7 +182,8 @@ async fn main() -> anyhow::Result<()> {
             host,
             log_level: _,
             json_logs: _,
-        } => commands::run::cmd_run(config, config_source, port, host).await?,
+            adopt_from_system,
+        } => commands::run::cmd_run(config, config_source, port, host, adopt_from_system).await?,
         Commands::Preset { action } => match action {
             PresetAction::List => commands::preset::cmd_preset_list(&config).await,
             PresetAction::Info { name } => commands::preset::cmd_preset_info(&name),
@@ -204,8 +207,21 @@ async fn main() -> anyhow::Result<()> {
                 commands::config_promote::cmd_config_pull(&from, &save).await?;
             }
         },
-        Commands::Exec { port, no_stop, cmd } => {
-            commands::exec::cmd_exec(&config, port, no_stop, cmd, cli_args.config).await?;
+        Commands::Exec {
+            port,
+            no_stop,
+            adopt_from_system,
+            cmd,
+        } => {
+            commands::exec::cmd_exec(
+                &config,
+                port,
+                no_stop,
+                adopt_from_system,
+                cmd,
+                cli_args.config,
+            )
+            .await?;
         }
         Commands::Completions { shell } => commands::completions::cmd_completions::<Cli>(shell),
         Commands::SetupCompletions => commands::setup_completions::cmd_setup_completions::<Cli>()?,

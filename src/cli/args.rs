@@ -122,6 +122,13 @@ pub enum Commands {
         /// Internal: allow binding beside an existing SO_REUSEPORT listener.
         #[arg(long, hide = true)]
         hot_upgrade: bool,
+        /// Adopt and self-heal OAuth tokens from co-installed CLIs (Codex,
+        /// Claude Code), as if `[auth] adopt_from_system = true`.
+        ///
+        /// Applies to this invocation only; `grob restart` falls back to the
+        /// config file value.
+        #[arg(long)]
+        adopt_from_system: bool,
     },
     /// Stop the router service
     Stop,
@@ -159,6 +166,10 @@ pub enum Commands {
         /// Emit structured JSON logs instead of human-readable
         #[arg(long, env = "GROB_JSON_LOGS")]
         json_logs: bool,
+        /// Adopt and self-heal OAuth tokens from co-installed CLIs (Codex,
+        /// Claude Code), as if `[auth] adopt_from_system = true` (env: GROB_ADOPT_FROM_SYSTEM)
+        #[arg(long, env = "GROB_ADOPT_FROM_SYSTEM")]
+        adopt_from_system: bool,
     },
     /// Launch a command behind the Grob proxy (auto-starts/stops service)
     ///
@@ -178,6 +189,12 @@ pub enum Commands {
         /// Keep Grob running after the child command exits
         #[arg(long)]
         no_stop: bool,
+        /// Adopt and self-heal OAuth tokens from co-installed CLIs (Codex,
+        /// Claude Code) in the proxy started for this exec.
+        ///
+        /// No effect when an already-running instance is reused.
+        #[arg(long)]
+        adopt_from_system: bool,
         /// Command and arguments to execute behind the proxy
         #[arg(last = true, required = true)]
         cmd: Vec<String>,

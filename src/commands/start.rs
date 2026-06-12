@@ -19,13 +19,20 @@ const MODEL_HINTS: &[(&str, &str)] = &[
 
 /// Starts the Grob service in foreground or detached background mode.
 pub async fn cmd_start(
-    config: cli::AppConfig,
+    mut config: cli::AppConfig,
     config_source: cli::ConfigSource,
     port: Option<u16>,
     detach: bool,
     cli_config: Option<String>,
     hot_upgrade: bool,
+    adopt_from_system: bool,
 ) -> anyhow::Result<()> {
+    // The flag covers the foreground path here; the detached child re-reads
+    // the config file, so the spawn below forwards it as argv instead.
+    if adopt_from_system {
+        config.auth.adopt_from_system = true;
+    }
+
     print_startup_warnings(&config);
 
     let effective_port = port.unwrap_or(config.server.port.value());
@@ -49,7 +56,7 @@ pub async fn cmd_start(
         }
         instance::cleanup_legacy_pid();
 
-        let log_path = spawn_background_service(port, cli_config)?;
+        let log_path = spawn_background_service(port, cli_config, adopt_from_system)?;
         let base_url = cli::format_base_url(&config.server.host, effective_port);
 
         // Wait for the listener to actually accept /health before claiming
