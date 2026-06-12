@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.68](https://github.com/azerozero/grob/compare/v0.36.67...v0.36.68) - 2026-06-12
+
+### Added
+
+- *(auth)* adopt OAuth credentials from co-installed CLIs
+
+### Fixed
+
+- *(deny)* sync advisory ignores with main
+- *(auth)* gate the Claude keychain helpers to macOS
+
 ## [0.36.67](https://github.com/azerozero/grob/compare/v0.36.66...v0.36.67) - 2026-06-04
 
 ### Fixed
