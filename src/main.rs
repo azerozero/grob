@@ -213,8 +213,16 @@ async fn main() -> anyhow::Result<()> {
         Commands::Connect {
             provider,
             force_reauth,
+            from_system,
         } => {
-            commands::connect::cmd_connect(&config, &config_source, provider, force_reauth).await?;
+            commands::connect::cmd_connect(
+                &config,
+                &config_source,
+                provider,
+                force_reauth,
+                from_system,
+            )
+            .await?;
         }
         Commands::Init => commands::init::cmd_init()?,
         Commands::ConfigDiff { target } => {

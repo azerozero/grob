@@ -16,6 +16,7 @@ pub async fn cmd_connect(
     config_source: &cli::ConfigSource,
     provider: Option<String>,
     force_reauth: bool,
+    from_system: bool,
 ) -> anyhow::Result<()> {
     let file_path = match config_source {
         cli::ConfigSource::File(p) => p.clone(),
@@ -67,6 +68,10 @@ pub async fn cmd_connect(
     } else {
         None
     };
+
+    if from_system {
+        return from_system_flow(config, resolved_provider.as_deref());
+    }
 
     if force_reauth {
         return force_reauth_flow(config, resolved_provider.as_deref()).await;
@@ -238,6 +243,75 @@ async fn force_reauth_flow(config: &cli::AppConfig, provider: Option<&str>) -> a
     }
 
     run_interactive_flow(filtered, &token_store).await?;
+    Ok(())
+}
+
+/// Adopts an existing OAuth token from a co-installed CLI into grob's store.
+///
+/// Mirrors Codex CLI's `~/.codex/auth.json` or Claude Code's macOS keychain
+/// credential — which share grob's OAuth apps — so the operator avoids a fresh
+/// browser flow. Requires a specific provider argument.
+fn from_system_flow(config: &cli::AppConfig, provider: Option<&str>) -> anyhow::Result<()> {
+    use crate::auth::system_creds;
+    use crate::auth::TokenStore;
+    use crate::storage::GrobStore;
+    use std::sync::Arc;
+
+    let Some(provider_name) = provider else {
+        eprintln!("❌ `--from-system` requires a provider argument, e.g.:");
+        eprintln!("     grob connect openai-codex --from-system");
+        return Ok(());
+    };
+
+    // Resolve the provider's OAuth id (the token-store key), which may differ
+    // from the provider name (e.g. provider 'chatgpt-codex' → 'openai-codex').
+    let target = config
+        .providers
+        .iter()
+        .find(|p| p.name == provider_name)
+        .expect("resolved provider exists by construction");
+    let Some(oauth_id) = target.oauth_provider.as_deref() else {
+        eprintln!(
+            "❌ Provider '{provider_name}' has no oauth_provider — `--from-system` only adopts OAuth tokens."
+        );
+        return Ok(());
+    };
+
+    let Some(source) = system_creds::source_for(oauth_id) else {
+        eprintln!(
+            "❌ No system credential source known for oauth_provider '{oauth_id}'.\n   Supported: openai-codex (Codex CLI), anthropic-max/claude-max (Claude Code keychain)."
+        );
+        return Ok(());
+    };
+
+    let grob_store = Arc::new(
+        GrobStore::open(&GrobStore::default_path())
+            .map_err(|e| anyhow::anyhow!("Failed to initialize credential storage: {}", e))?,
+    );
+    #[cfg(feature = "oauth")]
+    let token_store = TokenStore::with_store(grob_store.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to initialize token store: {}", e))?;
+    #[cfg(not(feature = "oauth"))]
+    let token_store = {
+        let _ = &grob_store;
+        TokenStore::new_empty()
+    };
+
+    println!("🔑 Adopting '{oauth_id}' token from {source:?}...");
+    let token = system_creds::adopt(&token_store, oauth_id)
+        .map_err(|e| anyhow::anyhow!("Failed to adopt system credential: {e:#}"))?;
+
+    println!(
+        "✅ Adopted OAuth token for '{}' (expires {}).",
+        provider_name,
+        token.expires_at.to_rfc3339()
+    );
+    if system_creds::grob_may_refresh(oauth_id) {
+        println!("   grob owns refresh for this token. Avoid a separate `codex login` / Codex.app on the same account, or it will be rotated out.");
+    } else {
+        println!("   Read-only mirror: grob will NOT refresh this token (shared with Claude Code). Re-run `--from-system` after Claude Code refreshes it.");
+    }
+    println!("   Restart the daemon to load it: grob stop && grob start -d");
     Ok(())
 }
 

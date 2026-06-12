@@ -207,6 +207,14 @@ pub enum Commands {
         /// Use when 'grob connect' reports a revoked token.
         #[arg(long)]
         force_reauth: bool,
+        /// Adopt an existing OAuth token from a co-installed CLI instead of
+        /// running a browser flow.
+        ///
+        /// Reads Codex CLI's `~/.codex/auth.json` (for OpenAI providers) or
+        /// Claude Code's macOS keychain credential (for Anthropic providers),
+        /// which share grob's OAuth apps. Requires a provider argument.
+        #[arg(long)]
+        from_system: bool,
     },
     /// Initialize a per-project .grob.toml in the current directory
     Init,

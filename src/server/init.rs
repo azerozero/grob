@@ -43,7 +43,8 @@ pub(crate) async fn init_core_services(
             // NOTE: Daemon handle is leaked intentionally — it lives for the
             // process lifetime. Graceful shutdown is driven by the tokio runtime
             // cancelling outstanding tasks.
-            let _daemon = crate::auth::refresh_daemon::spawn(ts.clone());
+            let _daemon =
+                crate::auth::refresh_daemon::spawn(ts.clone(), config.auth.adopt_from_system);
         }
         ts
     };

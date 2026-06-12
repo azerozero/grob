@@ -10,6 +10,8 @@ pub mod jwt;
 pub mod oauth;
 /// Background daemon that proactively refreshes OAuth tokens.
 pub mod refresh_daemon;
+/// Adoption of OAuth credentials from co-installed CLI tools.
+pub mod system_creds;
 /// Persistent token storage for OAuth credentials.
 pub mod token_store;
 /// Virtual API key management for multi-tenant access control.

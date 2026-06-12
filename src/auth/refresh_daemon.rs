@@ -103,21 +103,105 @@ pub(crate) enum RefreshOutcome {
     Skipped,
     /// Refresh succeeded and the new token was persisted.
     Refreshed,
+    /// Token was (re-)mirrored from a co-installed CLI's credential store.
+    Adopted,
     /// Refresh failed; the token was marked `needs_reauth`.
     MarkedNeedsReauth,
     /// Refresh failed transiently; the token was left untouched for retry.
     TransientFailure,
 }
 
-/// Refreshes a single token if it is eligible, updating the store accordingly.
+/// How a token should be serviced on a refresh tick.
+///
+/// Pure verdict extracted from [`refresh_one`] for unit testing — it performs
+/// no I/O, so the adoption / refresh decision can be asserted in isolation.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ServicePlan {
+    /// Not eligible — leave the token untouched.
+    Skip,
+    /// Mirror the token from its system source instead of an OAuth refresh.
+    AdoptFromSystem,
+    /// Run grob's own OAuth refresh against the authorization server.
+    Refresh,
+}
+
+/// Decides how `token` should be serviced this tick.
+///
+/// With `adopt_from_system` on, a token backed by a co-installed CLI is healed
+/// by re-adoption when it is flagged `needs_reauth`, and a Claude token (which
+/// grob must not refresh — its keychain item is shared) is always re-adopted
+/// rather than refreshed. Otherwise the eligibility rule is [`should_refresh`].
+pub(crate) fn plan_service(
+    token: &OAuthToken,
+    now: DateTime<Utc>,
+    window: chrono::Duration,
+    adopt_from_system: bool,
+) -> ServicePlan {
+    let has_system_source =
+        adopt_from_system && crate::auth::system_creds::source_for(&token.provider_id).is_some();
+
+    if !should_refresh(token, now, window) {
+        // A revoked token is normally stuck until manual re-auth; adoption can
+        // heal it by pulling the co-installed CLI's fresh credential.
+        if has_system_source && token.needs_reauth.unwrap_or(false) {
+            return ServicePlan::AdoptFromSystem;
+        }
+        return ServicePlan::Skip;
+    }
+
+    // Never let grob's own refresh rotate a token it only mirrors read-only
+    // (the Claude keychain item is shared by every Claude Code session).
+    if has_system_source && !crate::auth::system_creds::grob_may_refresh(&token.provider_id) {
+        return ServicePlan::AdoptFromSystem;
+    }
+
+    ServicePlan::Refresh
+}
+
+/// Mirrors `provider_id`'s system credential into the store.
+///
+/// On failure the token is flagged `needs_reauth` so the operator is prompted.
+fn adopt_one(store: &TokenStore, provider_id: &str) -> RefreshOutcome {
+    match crate::auth::system_creds::adopt(store, provider_id) {
+        Ok(_) => {
+            info!(provider = %provider_id, "adopted OAuth token from co-installed CLI");
+            RefreshOutcome::Adopted
+        }
+        Err(e) => {
+            warn!(
+                provider = %provider_id,
+                error = %e,
+                "system credential adoption failed — marking token as needing re-authentication"
+            );
+            if let Err(store_err) = store.mark_needs_reauth(provider_id) {
+                error!(
+                    provider = %provider_id,
+                    error = %store_err,
+                    "Failed to mark token as needs_reauth"
+                );
+            }
+            RefreshOutcome::MarkedNeedsReauth
+        }
+    }
+}
+
+/// Refreshes (or re-adopts) a single token if it is eligible, updating the store.
+///
+/// With `adopt_from_system`, tokens backed by a co-installed CLI are mirrored
+/// from that CLI rather than refreshed when grob must not rotate them, and a
+/// terminal refresh failure (revoked token) is healed by re-adoption instead of
+/// requiring manual re-authentication.
 pub(crate) async fn refresh_one(
     store: &TokenStore,
     token: &OAuthToken,
     now: DateTime<Utc>,
     window: chrono::Duration,
+    adopt_from_system: bool,
 ) -> RefreshOutcome {
-    if !should_refresh(token, now, window) {
-        return RefreshOutcome::Skipped;
+    match plan_service(token, now, window, adopt_from_system) {
+        ServicePlan::Skip => return RefreshOutcome::Skipped,
+        ServicePlan::AdoptFromSystem => return adopt_one(store, &token.provider_id),
+        ServicePlan::Refresh => {}
     }
 
     let Some(config) = config_for_provider_id(&token.provider_id) else {
@@ -141,6 +225,17 @@ pub(crate) async fn refresh_one(
             let msg = e.to_string();
             let classification = classify_refresh_error(&msg);
             if classification.is_terminal() {
+                // Self-heal a revoked token from the co-installed CLI before
+                // falling back to a manual re-auth prompt.
+                if adopt_from_system
+                    && crate::auth::system_creds::source_for(&token.provider_id).is_some()
+                {
+                    info!(
+                        provider = %token.provider_id,
+                        "OAuth refresh rejected — attempting recovery via system credential adoption"
+                    );
+                    return adopt_one(store, &token.provider_id);
+                }
                 warn!(
                     provider = %token.provider_id,
                     error = %msg,
@@ -170,8 +265,13 @@ pub(crate) async fn refresh_one(
 ///
 /// Returns a [`CancellationToken`] handle that, when cancelled, causes the
 /// daemon to terminate at the next tick boundary.
-pub fn spawn(store: TokenStore) -> CancellationToken {
-    spawn_with_config(store, DEFAULT_TICK_INTERVAL, DEFAULT_REFRESH_WINDOW)
+pub fn spawn(store: TokenStore, adopt_from_system: bool) -> CancellationToken {
+    spawn_with_config(
+        store,
+        DEFAULT_TICK_INTERVAL,
+        DEFAULT_REFRESH_WINDOW,
+        adopt_from_system,
+    )
 }
 
 /// Spawns the refresh daemon with a custom tick interval and refresh window.
@@ -182,6 +282,7 @@ pub fn spawn_with_config(
     store: TokenStore,
     tick: Duration,
     window: chrono::Duration,
+    adopt_from_system: bool,
 ) -> CancellationToken {
     let cancel = CancellationToken::new();
     let cancel_child = cancel.clone();
@@ -189,6 +290,7 @@ pub fn spawn_with_config(
         info!(
             tick_secs = tick.as_secs(),
             window_secs = window.num_seconds(),
+            adopt_from_system,
             "OAuth refresh daemon started"
         );
         loop {
@@ -198,7 +300,7 @@ pub fn spawn_with_config(
                     break;
                 }
                 _ = tokio::time::sleep(tick) => {
-                    run_tick(&store, window).await;
+                    run_tick(&store, window, adopt_from_system).await;
                 }
             }
         }
@@ -206,12 +308,16 @@ pub fn spawn_with_config(
     cancel
 }
 
-/// Iterates every stored token and triggers a refresh attempt for any that expire within `window`.
-pub(crate) async fn run_tick(store: &TokenStore, window: chrono::Duration) {
+/// Iterates every stored token and services any that expire within `window`.
+pub(crate) async fn run_tick(
+    store: &TokenStore,
+    window: chrono::Duration,
+    adopt_from_system: bool,
+) {
     let now = Utc::now();
     let tokens = store.all();
     for (_id, token) in tokens {
-        let _ = refresh_one(store, &token, now, window).await;
+        let _ = refresh_one(store, &token, now, window, adopt_from_system).await;
     }
 }
 
@@ -272,6 +378,81 @@ mod tests {
         ));
     }
 
+    fn provider_token(
+        provider_id: &str,
+        expires_in_minutes: i64,
+        needs_reauth: Option<bool>,
+    ) -> OAuthToken {
+        let mut t = make_token(expires_in_minutes, needs_reauth);
+        t.provider_id = provider_id.to_string();
+        t
+    }
+
+    const WINDOW: chrono::Duration = chrono::Duration::minutes(15);
+
+    #[test]
+    fn plan_service_skips_valid_token() {
+        let token = provider_token("openai-codex", 30, None);
+        assert_eq!(
+            plan_service(&token, Utc::now(), WINDOW, true),
+            ServicePlan::Skip
+        );
+    }
+
+    #[test]
+    fn plan_service_refreshes_eligible_codex_when_adopt_on() {
+        // Codex token becomes grob-private once adopted, so grob refreshes it.
+        let token = provider_token("openai-codex", 5, None);
+        assert_eq!(
+            plan_service(&token, Utc::now(), WINDOW, true),
+            ServicePlan::Refresh
+        );
+    }
+
+    #[test]
+    fn plan_service_adopts_claude_instead_of_refreshing() {
+        // The Claude keychain is shared — grob must mirror it, never rotate it.
+        let token = provider_token("anthropic-max", 5, None);
+        assert_eq!(
+            plan_service(&token, Utc::now(), WINDOW, true),
+            ServicePlan::AdoptFromSystem
+        );
+    }
+
+    #[test]
+    fn plan_service_heals_revoked_token_by_adoption() {
+        let token = provider_token("openai-codex", 5, Some(true));
+        assert_eq!(
+            plan_service(&token, Utc::now(), WINDOW, true),
+            ServicePlan::AdoptFromSystem
+        );
+    }
+
+    #[test]
+    fn plan_service_without_adopt_falls_back_to_refresh_rules() {
+        // Adoption off: eligible token refreshes, revoked token is left alone.
+        let eligible = provider_token("anthropic-max", 5, None);
+        assert_eq!(
+            plan_service(&eligible, Utc::now(), WINDOW, false),
+            ServicePlan::Refresh
+        );
+        let revoked = provider_token("openai-codex", 5, Some(true));
+        assert_eq!(
+            plan_service(&revoked, Utc::now(), WINDOW, false),
+            ServicePlan::Skip
+        );
+    }
+
+    #[test]
+    fn plan_service_refreshes_provider_without_system_source() {
+        // No known system source → adoption flag is inert; normal rules apply.
+        let token = provider_token("gemini", 5, None);
+        assert_eq!(
+            plan_service(&token, Utc::now(), WINDOW, true),
+            ServicePlan::Refresh
+        );
+    }
+
     #[tokio::test]
     async fn refresh_one_skips_when_outside_window() {
         let dir = tempfile::tempdir().unwrap();
@@ -279,7 +460,14 @@ mod tests {
         let token = make_token(30, None);
         store.save(token.clone()).unwrap();
 
-        let outcome = refresh_one(&store, &token, Utc::now(), chrono::Duration::minutes(15)).await;
+        let outcome = refresh_one(
+            &store,
+            &token,
+            Utc::now(),
+            chrono::Duration::minutes(15),
+            false,
+        )
+        .await;
         assert_eq!(outcome, RefreshOutcome::Skipped);
     }
 
@@ -291,7 +479,14 @@ mod tests {
         token.provider_id = "unknown-provider".into();
         store.save(token.clone()).unwrap();
 
-        let outcome = refresh_one(&store, &token, Utc::now(), chrono::Duration::minutes(15)).await;
+        let outcome = refresh_one(
+            &store,
+            &token,
+            Utc::now(),
+            chrono::Duration::minutes(15),
+            false,
+        )
+        .await;
         assert_eq!(outcome, RefreshOutcome::Skipped);
     }
 
@@ -304,6 +499,7 @@ mod tests {
             store,
             Duration::from_millis(10),
             chrono::Duration::minutes(15),
+            false,
         );
         // Let a few ticks run.
         tokio::time::sleep(Duration::from_millis(50)).await;
