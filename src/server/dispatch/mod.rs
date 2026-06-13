@@ -342,14 +342,7 @@ pub(crate) async fn dispatch(
         request,
         &ctx.inner.config.tool_validation,
     ) {
-        Ok(stripped) => {
-            if !stripped.is_empty() {
-                tracing::warn!(
-                    tools = ?stripped,
-                    "tool validation: stripped malformed inbound tools"
-                );
-            }
-        }
+        Ok(stripped) => warn_stripped_tools(&stripped),
         Err(reason) => return Err(RequestError::BadRequest(reason)),
     }
 
@@ -672,6 +665,29 @@ fn should_escalate_compliance(enabled: bool, risk_classification: bool) -> bool 
     enabled && risk_classification
 }
 
+/// Returns `true` when DLP produced at least one redact/warn report.
+///
+/// Extracted so the trigger flag in [`scan_dlp_input`] is unit-testable
+/// without constructing a full [`DispatchContext`].
+#[inline]
+fn dlp_reports_triggered<T>(reports: &[T]) -> bool {
+    !reports.is_empty()
+}
+
+/// Logs a warning when tool validation stripped malformed inbound tools.
+///
+/// Extracted so the non-empty guard is unit-testable; the inline `if` was
+/// otherwise only reachable through the full `dispatch` pipeline.
+#[inline]
+fn warn_stripped_tools(stripped: &[String]) {
+    if !stripped.is_empty() {
+        tracing::warn!(
+            tools = ?stripped,
+            "tool validation: stripped malformed inbound tools"
+        );
+    }
+}
+
 /// DLP input scanning with risk assessment and audit logging.
 ///
 /// Returns `Ok(true)` when DLP acted on the request (one or more redact/warn
@@ -690,7 +706,7 @@ fn scan_dlp_input(
 
     match dlp_engine.sanitize_request_checked(request) {
         Ok(reports) => {
-            let triggered = !reports.is_empty();
+            let triggered = dlp_reports_triggered(&reports);
             ctx.emit_dlp_events(&reports, DlpDirection::Request);
             Ok(triggered)
         }
@@ -985,6 +1001,7 @@ async fn record_fan_out_costs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tracing_test::traced_test;
 
     // ── scan_dlp_input guards ──
 
@@ -1004,6 +1021,25 @@ mod tests {
         assert!(!should_escalate_compliance(true, false));
         assert!(!should_escalate_compliance(false, true));
         assert!(!should_escalate_compliance(false, false));
+    }
+
+    #[test]
+    fn dlp_reports_triggered_flags_nonempty_reports() {
+        // `!reports.is_empty()`: triggered only when DLP produced a report.
+        // The "delete !" mutant would invert both outcomes.
+        assert!(!dlp_reports_triggered::<()>(&[]));
+        assert!(dlp_reports_triggered(&[()]));
+    }
+
+    #[traced_test]
+    #[test]
+    fn warn_stripped_tools_logs_only_when_nonempty() {
+        // The "delete !" mutant would warn on an empty strip list and stay
+        // silent on a real one — assert both directions against the log.
+        warn_stripped_tools(&[]);
+        assert!(!logs_contain("stripped malformed inbound tools"));
+        warn_stripped_tools(&["bogus_tool".to_string()]);
+        assert!(logs_contain("stripped malformed inbound tools"));
     }
 
     // ── dispatch routing guards ──
