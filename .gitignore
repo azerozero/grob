@@ -31,6 +31,7 @@ LICENSE-IDENTIFICATION.md
 cleancode-plan.md
 # Local personal grob config (committed example lives in docs/examples/)
 grob-openai.toml
+grob-chatgpt.toml
 codeql-db/
 codeql-results.sarif
 codeql-db/
