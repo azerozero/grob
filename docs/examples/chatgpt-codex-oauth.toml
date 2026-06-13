@@ -1,21 +1,15 @@
-# ChatGPT Codex OAuth Configuration Example
+# ChatGPT Codex OAuth — use a ChatGPT Plus/Pro subscription, no API key.
 #
-# Routes grob at OpenAI Codex using a ChatGPT Plus/Pro subscription via OAuth —
-# no API key and no pay-as-you-go credits required. grob authenticates with your
-# ChatGPT login and calls the Codex backend (`chatgpt.com/backend-api`) that the
-# subscription covers.
+# grob authenticates with your ChatGPT login and calls the Codex backend the
+# subscription covers — no pay-as-you-go credits required.
 #
 # Setup:
-#   1. grob -c chatgpt-codex-oauth.toml connect openai-codex   # one-time browser login
-#   2. grob -c chatgpt-codex-oauth.toml start
+#   grob -c chatgpt-codex-oauth.toml connect openai-codex   # one-time browser login
+#   grob -c chatgpt-codex-oauth.toml start
 #
-# Models exposed to a Plus account via Codex OAuth:
-#   gpt-5.5        newest frontier model — OpenAI's recommended default
-#   gpt-5.4        flagship reasoning + coding
-#   gpt-5.4-mini   fast / sub-agent tier
-#   gpt-5.3-codex  dedicated agentic-coding model (strongest on SWE-bench)
-# `gpt-5.3-codex-spark` requires ChatGPT Pro. There is no `gpt-5.5-codex`
-# (GPT-5.5 in Codex is just `gpt-5.5`).
+# Models (Plus account): gpt-5.5 (default), gpt-5.4, gpt-5.4-mini (fast),
+# gpt-5.3-codex (agentic coding). `gpt-5.3-codex-spark` needs Pro; there is no
+# `gpt-5.5-codex` (GPT-5.5 in Codex is just `gpt-5.5`).
 
 [server]
 host = "127.0.0.1"
@@ -26,36 +20,23 @@ log_level = "info"
 api_timeout_ms = 600000
 connect_timeout_ms = 10000
 
-# OAuth provider — authenticates with ChatGPT instead of an API key.
-# `base_url` is ignored under OAuth: grob targets the ChatGPT Codex backend.
+# OAuth provider — `base_url` is ignored; grob targets the ChatGPT Codex backend.
 [[providers]]
 name = "chatgpt-codex"
 provider_type = "openai"
-auth_type = "oauth"           # Use OAuth instead of api_key.
+auth_type = "oauth"
 oauth_provider = "openai-codex"  # Token key in the TokenStore (set by `grob connect`).
 enabled = true
-models = []                   # Models are declared in the [[models]] blocks below.
-service_tier = "priority"     # "Fast" tier (~1.5x speed). Applied only to models
-                              # that support it (gpt-5.5/gpt-5.4); ignored for the
-                              # rest. Remove this line for the standard tier.
+models = []
+service_tier = "priority"        # ~1.5x speed on gpt-5.5/gpt-5.4; ignored elsewhere. Remove for standard.
 
-# Advanced Codex tuning (optional). The inline values below are the DEFAULTS,
-# shown for reference — omit the whole line to use them. Only affects the
-# OpenAI Responses (Codex) path.
-#   priority_models            Models that get the "priority" tier AND `xhigh`
-#                              reasoning effort by default. Prefix-matched;
-#                              `-mini` variants are excluded unless listed verbatim.
-#                              Add new flagship names here — no grob release needed.
-#   reasoning_auto_map         false → flat default effort (xhigh for the models
-#                              above, unset otherwise). true → map the request's
-#                              extended-thinking budget → effort (legacy).
-#   reasoning_xhigh_min_budget Thinking-budget threshold for `xhigh` in auto-map
-#                              mode (ignored when reasoning_auto_map = false).
-# An explicit `reasoning_effort = "low"|"medium"|"high"|"xhigh"` overrides all of this.
-# codex = { priority_models = ["gpt-5.5", "gpt-5.4"], reasoning_auto_map = false, reasoning_xhigh_min_budget = 16000 }
+# Optional Codex tuning (Responses path), defaults shown — omit to use them:
+#   codex = { priority_models = ["gpt-5.5", "gpt-5.4"], reasoning_auto_map = false, reasoning_xhigh_min_budget = 16000 }
+# priority_models get the "priority" tier + `xhigh` effort (prefix-matched, -mini
+# excluded). reasoning_auto_map = true maps the thinking budget → effort (legacy).
+# An explicit `reasoning_effort = "low".."xhigh"` overrides all of this.
 
-# Default dev model: gpt-5.5 (OpenAI's recommended Codex default).
-# To prefer the dedicated coding model, set `default = "codex"` under [router].
+# Default dev model: gpt-5.5. Set `default = "codex"` under [router] for the coding model.
 [[models]]
 name = "dev"
 
@@ -88,9 +69,8 @@ think = "codex"
 background = "fast"
 websearch = "dev"
 
-# Cost-aware agent-loop routing.
-# Trivial tool/status turns use the fast mini model; medium coding turns use
-# the dedicated Codex model. Complex/default turns stay on `dev` (gpt-5.5).
+# Cost-aware agent-loop routing: trivial → fast, medium → codex.
+# Complex/default turns stay on `dev` (gpt-5.5).
 [[tiers]]
 name = "trivial"
 model = "fast"
