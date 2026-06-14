@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.72](https://github.com/azerozero/grob/compare/v0.36.71...v0.36.72) - 2026-06-14
+
+### Added
+
+- *(audit)* classify caviardages as C1/C2 in the audit log
+
+### Other
+
+- *(licensing)* fix AGPL framing, add edition matrix and §13 wording
+- *(adr)* add ADR-0028 open-core boundary (AGPL core vs commercial)
+
 ## [0.36.71](https://github.com/azerozero/grob/compare/v0.36.70...v0.36.71) - 2026-06-14
 
 ### Fixed
