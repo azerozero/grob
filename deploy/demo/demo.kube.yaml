@@ -970,57 +970,61 @@ data:
     \ {\n      .dot.live { animation: none; }\n      .flip, tr.just-revoked { transition:\
     \ none !important; animation: none !important; }\n      td.right .num, td.right\
     \ .num.bump { transition: none !important; transform: none !important; }\n   \
-    \ }\n\n    main { padding: 22px 32px 16px; max-width: 1360px; margin: 0 auto;\
+    \ }\n\n    main { padding: 22px 24px 16px; max-width: 1360px; margin: 0 auto;\
     \ }\n\n    /* ---- Tableau par identit\xE9 ---- */\n    .card {\n      background:\
     \ linear-gradient(180deg, var(--surface), var(--surface-2));\n      border: 1px\
-    \ solid var(--line); border-radius: 18px; overflow: hidden;\n    }\n    .table-wrap\
-    \ { overflow-x: auto; }\n    table { width: 100%; border-collapse: collapse; min-width:\
-    \ 1100px; }\n    thead th {\n      text-align: left; font-size: 12px; font-weight:\
-    \ 700; letter-spacing: .1em;\n      text-transform: uppercase; color: var(--muted);\n\
-    \      padding: 16px 16px; border-bottom: 1px solid var(--line); white-space:\
-    \ nowrap;\n    }\n    thead th.right, tbody td.right { text-align: right; }\n\
-    \    thead th.center, tbody td.center { text-align: center; }\n    tbody td {\
-    \ padding: 16px; border-bottom: 1px solid rgba(51,65,85,.5); vertical-align: middle;\
-    \ }\n    tbody tr:last-child td { border-bottom: none; }\n\n    .agent { display:\
-    \ flex; align-items: center; gap: 14px; }\n    .avatar {\n      width: 44px; height:\
-    \ 44px; border-radius: 12px; flex: none;\n      display: grid; place-items: center;\n\
-    \      background: rgba(148,163,184,.12); border: 1px solid transparent;\n   \
-    \ }\n    .avatar svg { width: 23px; height: 23px; }\n    .avatar.human { background:\
-    \ rgba(56,189,248,.12); border-color: rgba(56,189,248,.28); color: var(--info);\
-    \ }\n    .avatar.agent { background: rgba(148,163,184,.14); border-color: rgba(148,163,184,.28);\
-    \ color: var(--muted); }\n    .agent .meta .name { font-weight: 700; font-size:\
-    \ 17px; }\n    .agent .meta .sub { color: var(--muted); font-size: 13px; margin-top:\
-    \ 2px; }\n    .kind {\n      display: inline-block; font-size: 11px; font-weight:\
-    \ 700; letter-spacing: .06em;\n      text-transform: uppercase; padding: 2px 8px;\
-    \ border-radius: 6px; margin-top: 4px;\n    }\n    .kind.human { color: var(--info);\
-    \ background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.35); }\n\
-    \    .kind.agent { color: var(--muted); background: rgba(148,163,184,.10); border:\
-    \ 1px solid rgba(148,163,184,.3); }\n\n    .num { font-size: clamp(22px, 2.4vw,\
-    \ 30px); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing:\
-    \ -1px; }\n    td.right .num { display: inline-block; transition: transform .22s\
-    \ cubic-bezier(.2,.8,.2,1); }\n    td.right .num.bump { transform: scale(1.14);\
-    \ }\n    .num.viol-0 { color: var(--ok); }\n    .num.viol-some { color: var(--warn);\
-    \ }\n    .num.viol-hot { color: var(--block); }\n    .spend { font-size: 18px;\
-    \ font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }\n\
-    \n    /* ---- Classes de donn\xE9es + chips ---- */\n    .chips { display: flex;\
-    \ flex-wrap: wrap; gap: 6px; }\n    .chip {\n      font-size: 12px; font-weight:\
-    \ 600; padding: 3px 9px; border-radius: 999px;\n      border: 1px solid transparent;\
-    \ white-space: nowrap;\n    }\n    .chip.menace    { color: var(--block); background:\
-    \ rgba(239,68,68,.12);  border-color: rgba(239,68,68,.4); }\n    .chip.secret\
-    \    { color: var(--warn);  background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.4);\
-    \ }\n    .chip.financier { color: var(--info);  background: rgba(56,189,248,.12);\
-    \ border-color: rgba(56,189,248,.4); }\n    .chip.pii       { color: #C084FC;\
-    \      background: rgba(192,132,252,.12); border-color: rgba(192,132,252,.4);\
-    \ }\n    .chip.none      { color: var(--muted); background: rgba(148,163,184,.08);\
-    \ border-color: var(--line); }\n\n    .decision { font-weight: 600; font-size:\
-    \ 14px; }\n    .decision.bloque   { color: var(--block); }\n    .decision.caviarde\
-    \ { color: var(--warn); }\n    .decision.none     { color: var(--muted); }\n\n\
-    \    /* ---- Type d'incident (classification d'audit Nc/C1/C2/C3) ---- */\n  \
-    \  .itype {\n      display: inline-flex; align-items: center; gap: 6px;\n    \
-    \  font-size: 12.5px; font-weight: 700; white-space: nowrap;\n      padding: 4px\
-    \ 10px 4px 8px; border-radius: 999px; border: 1px solid transparent;\n    }\n\
-    \    .itype svg { width: 14px; height: 14px; flex: none; }\n    .itype.nc { color:\
-    \ var(--ok);    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4);\
+    \ solid var(--line); border-radius: 18px; overflow: hidden;\n    }\n    /* overflow-x:\
+    \ filet de s\xE9curit\xE9 sous ~1100px ; au-dessus la table tient\n       sans\
+    \ barre horizontale gr\xE2ce au padding resserr\xE9 et aux en-t\xEAtes courts.\
+    \ */\n    .table-wrap { overflow-x: auto; }\n    table { width: 100%; border-collapse:\
+    \ collapse; min-width: 940px; table-layout: auto; }\n    thead th {\n      text-align:\
+    \ left; font-size: 11.5px; font-weight: 700; letter-spacing: .06em;\n      text-transform:\
+    \ uppercase; color: var(--muted);\n      padding: 14px 11px; border-bottom: 1px\
+    \ solid var(--line); white-space: nowrap;\n    }\n    thead th.right, tbody td.right\
+    \ { text-align: right; }\n    thead th.center, tbody td.center { text-align: center;\
+    \ }\n    tbody td { padding: 13px 11px; border-bottom: 1px solid rgba(51,65,85,.5);\
+    \ vertical-align: middle; }\n    tbody tr:last-child td { border-bottom: none;\
+    \ }\n\n    .agent { display: flex; align-items: center; gap: 12px; }\n    .avatar\
+    \ {\n      width: 40px; height: 40px; border-radius: 11px; flex: none;\n     \
+    \ display: grid; place-items: center;\n      background: rgba(148,163,184,.12);\
+    \ border: 1px solid transparent;\n    }\n    .avatar svg { width: 21px; height:\
+    \ 21px; }\n    .avatar.human { background: rgba(56,189,248,.12); border-color:\
+    \ rgba(56,189,248,.28); color: var(--info); }\n    .avatar.agent { background:\
+    \ rgba(148,163,184,.14); border-color: rgba(148,163,184,.28); color: var(--muted);\
+    \ }\n    .agent .meta .name { font-weight: 700; font-size: 17px; }\n    .agent\
+    \ .meta .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }\n    .kind\
+    \ {\n      display: inline-block; font-size: 11px; font-weight: 700; letter-spacing:\
+    \ .06em;\n      text-transform: uppercase; padding: 2px 8px; border-radius: 6px;\
+    \ margin-top: 4px;\n    }\n    .kind.human { color: var(--info); background: rgba(56,189,248,.12);\
+    \ border: 1px solid rgba(56,189,248,.35); }\n    .kind.agent { color: var(--muted);\
+    \ background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); }\n\
+    \n    .num { font-size: clamp(22px, 2.4vw, 30px); font-weight: 800; font-variant-numeric:\
+    \ tabular-nums; letter-spacing: -1px; }\n    td.right .num { display: inline-block;\
+    \ transition: transform .22s cubic-bezier(.2,.8,.2,1); }\n    td.right .num.bump\
+    \ { transform: scale(1.14); }\n    .num.viol-0 { color: var(--ok); }\n    .num.viol-some\
+    \ { color: var(--warn); }\n    .num.viol-hot { color: var(--block); }\n    .spend\
+    \ { font-size: 18px; font-weight: 600; color: var(--muted); font-variant-numeric:\
+    \ tabular-nums; }\n\n    /* ---- Classes de donn\xE9es + chips ---- */\n    /*\
+    \ max-width borne la colonne : les chips se replient (\u22482 par ligne) au lieu\n\
+    \       d'\xE9largir la table et de provoquer un d\xE9filement horizontal. */\n\
+    \    .chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 184px; }\n\
+    \    .chip {\n      font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius:\
+    \ 999px;\n      border: 1px solid transparent; white-space: nowrap;\n    }\n \
+    \   .chip.menace    { color: var(--block); background: rgba(239,68,68,.12);  border-color:\
+    \ rgba(239,68,68,.4); }\n    .chip.secret    { color: var(--warn);  background:\
+    \ rgba(245,158,11,.12); border-color: rgba(245,158,11,.4); }\n    .chip.financier\
+    \ { color: var(--info);  background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.4);\
+    \ }\n    .chip.pii       { color: #C084FC;      background: rgba(192,132,252,.12);\
+    \ border-color: rgba(192,132,252,.4); }\n    .chip.none      { color: var(--muted);\
+    \ background: rgba(148,163,184,.08); border-color: var(--line); }\n\n    .decision\
+    \ { font-weight: 600; font-size: 14px; }\n    .decision.bloque   { color: var(--block);\
+    \ }\n    .decision.caviarde { color: var(--warn); }\n    .decision.none     {\
+    \ color: var(--muted); }\n\n    /* ---- Type d'incident (classification d'audit\
+    \ Nc/C1/C2/C3) ---- */\n    .itype {\n      display: inline-flex; align-items:\
+    \ center; gap: 6px;\n      font-size: 12.5px; font-weight: 700; white-space: nowrap;\n\
+    \      padding: 4px 10px 4px 8px; border-radius: 999px; border: 1px solid transparent;\n\
+    \    }\n    .itype svg { width: 14px; height: 14px; flex: none; }\n    .itype.nc\
+    \ { color: var(--ok);    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4);\
     \ }\n    .itype.c1 { color: var(--warn);  background: rgba(245,158,11,.12); border-color:\
     \ rgba(245,158,11,.4); }\n    .itype.c2 { color: #FACC15;      background: rgba(250,204,21,.12);\
     \ border-color: rgba(250,204,21,.4); }\n    .itype.c3 { color: var(--block); background:\
@@ -1084,12 +1088,12 @@ data:
     >\n      <div class=\"table-wrap\">\n        <table>\n          <thead>\n    \
     \        <tr>\n              <th>Identit\xE9</th>\n              <th class=\"\
     right\">Requ\xEAtes</th>\n              <th class=\"right\">Conso \u20AC</th>\n\
-    \              <th class=\"right\">Violations</th>\n              <th>Classe de\
-    \ donn\xE9e capt\xE9e</th>\n              <th>Type d'incident</th>\n         \
-    \     <th>D\xE9cision</th>\n              <th class=\"center\">Preuve sign\xE9\
-    e</th>\n              <th class=\"center\">Statut</th>\n              <th class=\"\
-    center\">Investigation</th>\n            </tr>\n          </thead>\n         \
-    \ <tbody id=\"rows\">\n            <tr><td colspan=\"10\" style=\"text-align:center;color:var(--muted);padding:40px\"\
+    \              <th class=\"right\">Violations</th>\n              <th>Donn\xE9\
+    es capt\xE9es</th>\n              <th>Type d'incident</th>\n              <th>D\xE9\
+    cision</th>\n              <th class=\"center\">Preuve</th>\n              <th\
+    \ class=\"center\">Statut</th>\n              <th class=\"center\">Logs</th>\n\
+    \            </tr>\n          </thead>\n          <tbody id=\"rows\">\n      \
+    \      <tr><td colspan=\"10\" style=\"text-align:center;color:var(--muted);padding:40px\"\
     >En attente des donn\xE9es de gouvernance\u2026</td></tr>\n          </tbody>\n\
     \        </table>\n      </div>\n    </div>\n    <p class=\"footnote\">\n    \
     \  Conso indicative (backend simul\xE9, aucun co\xFBt r\xE9el). Une <strong>violation</strong>\

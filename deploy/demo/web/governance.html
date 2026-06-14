@@ -58,32 +58,34 @@
       td.right .num, td.right .num.bump { transition: none !important; transform: none !important; }
     }
 
-    main { padding: 22px 32px 16px; max-width: 1360px; margin: 0 auto; }
+    main { padding: 22px 24px 16px; max-width: 1360px; margin: 0 auto; }
 
     /* ---- Tableau par identité ---- */
     .card {
       background: linear-gradient(180deg, var(--surface), var(--surface-2));
       border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
     }
+    /* overflow-x: filet de sécurité sous ~1100px ; au-dessus la table tient
+       sans barre horizontale grâce au padding resserré et aux en-têtes courts. */
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+    table { width: 100%; border-collapse: collapse; min-width: 940px; table-layout: auto; }
     thead th {
-      text-align: left; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+      text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .06em;
       text-transform: uppercase; color: var(--muted);
-      padding: 16px 16px; border-bottom: 1px solid var(--line); white-space: nowrap;
+      padding: 14px 11px; border-bottom: 1px solid var(--line); white-space: nowrap;
     }
     thead th.right, tbody td.right { text-align: right; }
     thead th.center, tbody td.center { text-align: center; }
-    tbody td { padding: 16px; border-bottom: 1px solid rgba(51,65,85,.5); vertical-align: middle; }
+    tbody td { padding: 13px 11px; border-bottom: 1px solid rgba(51,65,85,.5); vertical-align: middle; }
     tbody tr:last-child td { border-bottom: none; }
 
-    .agent { display: flex; align-items: center; gap: 14px; }
+    .agent { display: flex; align-items: center; gap: 12px; }
     .avatar {
-      width: 44px; height: 44px; border-radius: 12px; flex: none;
+      width: 40px; height: 40px; border-radius: 11px; flex: none;
       display: grid; place-items: center;
       background: rgba(148,163,184,.12); border: 1px solid transparent;
     }
-    .avatar svg { width: 23px; height: 23px; }
+    .avatar svg { width: 21px; height: 21px; }
     .avatar.human { background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.28); color: var(--info); }
     .avatar.agent { background: rgba(148,163,184,.14); border-color: rgba(148,163,184,.28); color: var(--muted); }
     .agent .meta .name { font-weight: 700; font-size: 17px; }
@@ -104,7 +106,9 @@
     .spend { font-size: 18px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 
     /* ---- Classes de données + chips ---- */
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    /* max-width borne la colonne : les chips se replient (≈2 par ligne) au lieu
+       d'élargir la table et de provoquer un défilement horizontal. */
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 184px; }
     .chip {
       font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
       border: 1px solid transparent; white-space: nowrap;
@@ -214,12 +218,12 @@
               <th class="right">Requêtes</th>
               <th class="right">Conso €</th>
               <th class="right">Violations</th>
-              <th>Classe de donnée captée</th>
+              <th>Données captées</th>
               <th>Type d'incident</th>
               <th>Décision</th>
-              <th class="center">Preuve signée</th>
+              <th class="center">Preuve</th>
               <th class="center">Statut</th>
-              <th class="center">Investigation</th>
+              <th class="center">Logs</th>
             </tr>
           </thead>
           <tbody id="rows">
