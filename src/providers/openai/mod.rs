@@ -404,15 +404,33 @@ impl LlmProvider for OpenAIProvider {
                 endpoint,
                 request.model
             );
-            let tuning = transform::CodexTuning::from_options(
-                &self.base.codex,
-                self.base.reasoning_effort.as_deref(),
-                self.base.service_tier.as_deref(),
-            );
-            let responses_request =
-                transform::transform_to_responses_request(&request, CODEX_INSTRUCTIONS, &tuning)?;
-            let body = serde_json::to_value(&responses_request)
-                .map_err(ProviderError::SerializationError)?;
+            let body = if let Some(mut raw) = request.extensions.responses_passthrough_body.clone()
+            {
+                // Verbatim passthrough: keep the native client's exact prefix
+                // (typed content, tool shape, prompt_cache_key) so the backend's
+                // prompt cache stays warm. Swap the model to the resolved upstream
+                // model and enforce the ChatGPT Codex contract (store=false, and
+                // grob always streams upstream) in case the client omitted them.
+                if let Some(obj) = raw.as_object_mut() {
+                    obj.insert("model".to_string(), serde_json::json!(request.model));
+                    obj.insert("store".to_string(), serde_json::json!(false));
+                    obj.insert("stream".to_string(), serde_json::json!(true));
+                }
+                raw
+            } else {
+                let tuning = transform::CodexTuning::from_options(
+                    &self.base.codex,
+                    self.base.reasoning_effort.as_deref(),
+                    self.base.service_tier.as_deref(),
+                );
+                let responses_request = transform::transform_to_responses_request(
+                    &request,
+                    CODEX_INSTRUCTIONS,
+                    &tuning,
+                )?;
+                serde_json::to_value(&responses_request)
+                    .map_err(ProviderError::SerializationError)?
+            };
             (format!("{}{}", base_url, endpoint), body)
         } else {
             let openai_request = transform::transform_request(&request)?;
@@ -420,6 +438,18 @@ impl LlmProvider for OpenAIProvider {
                 serde_json::to_value(&openai_request).map_err(ProviderError::SerializationError)?;
             (format!("{}/chat/completions", base_url), body)
         };
+
+        // Wire-debug: the verbatim outbound body sent upstream. Enabled by
+        // `log_level = "debug"`; serialization is gated so it costs nothing
+        // otherwise. Pair with the inbound `📥` log to diff prompt-cache prefixes.
+        if tracing::event_enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                target: "grob::wire",
+                "📤 Outbound to {}:\n{}",
+                url,
+                serde_json::to_string_pretty(&request_body).unwrap_or_default()
+            );
+        }
 
         let mut req_builder = self
             .base

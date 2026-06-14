@@ -77,6 +77,17 @@ pub(crate) struct OpenAIResponsesRequest {
     /// Processing tier, e.g. `"priority"` for faster handling.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
+    /// Stable per-conversation key that routes requests sharing a prefix to the
+    /// same OpenAI prompt-cache node, lifting cache-hit rates across agent-loop
+    /// turns. The Anthropic surface has no equivalent field, so grob derives it
+    /// from the reusable request prefix (see `derive_prompt_cache_key`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_cache_key: Option<String>,
+    /// Reasoning models need `["reasoning.encrypted_content"]` so the backend
+    /// returns (and caches) reasoning state under `store = false`. Codex CLI
+    /// sends this; without it gpt-5.5 gets zero prompt-cache hits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
 }
 
 /// Input for Responses API is an array of typed items.
@@ -95,11 +106,13 @@ pub(crate) enum OpenAIResponsesInput {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum OpenAIResponsesItem {
-    /// A conversational message; `content` is plain text.
+    /// A conversational message. `content` is the Responses-API typed-parts
+    /// array (`[{"type":"input_text","text":…}]`); a flat string defeats the
+    /// backend prompt cache for reasoning models, so grob always emits parts.
     Message {
         role: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        content: Option<String>,
+        content: Option<serde_json::Value>,
     },
     /// An assistant tool call replayed from history.
     FunctionCall {

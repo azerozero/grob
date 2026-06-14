@@ -229,6 +229,8 @@ pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<Canonic
         // This path only runs for Codex CLI (Responses API) requests, so its
         // `instructions` are the authoritative Codex agent prompt.
         codex_native: true,
+        // Codex has no `cache_control`; let an Anthropic backend cache the prefix.
+        inject_anthropic_cache: true,
         ..Default::default()
     };
 
