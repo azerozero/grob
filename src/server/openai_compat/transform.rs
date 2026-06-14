@@ -282,6 +282,9 @@ pub fn transform_openai_to_canonical(
         service_tier: openai_req.service_tier,
         openai_system_name,
         openai_message_names,
+        responses_passthrough_body: None,
+        // OpenAI clients have no `cache_control`; let an Anthropic backend cache.
+        inject_anthropic_cache: true,
         codex_native: false,
     };
 

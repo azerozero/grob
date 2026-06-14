@@ -39,6 +39,25 @@ pub struct RequestExtensions {
     /// Optional author names for canonical messages, indexed by message position.
     pub openai_message_names: Vec<Option<String>>,
 
+    /// Verbatim Responses-API request body from a native client (Codex CLI).
+    ///
+    /// When set, the OpenAI Responses backend forwards this body unchanged
+    /// (only the `model` is swapped to the resolved upstream model) instead of
+    /// rebuilding it from the canonical request. Round-tripping flattens typed
+    /// `input` content, reorders the `tools` shape, and replaces the client's
+    /// `prompt_cache_key` — all of which change the token prefix and defeat the
+    /// backend's prompt cache (gpt-5.5 returns zero cached tokens). Forwarding
+    /// the exact bytes keeps the cache warm.
+    pub responses_passthrough_body: Option<serde_json::Value>,
+
+    /// Set when the request was translated from a non-Anthropic client
+    /// (OpenAI/Codex), which has no `cache_control` concept. The Anthropic
+    /// provider then injects an ephemeral `cache_control` breakpoint on the
+    /// system prefix so the large stable prompt is cached instead of re-billed
+    /// every turn. Left `false` for Anthropic-native clients, which manage their
+    /// own breakpoints.
+    pub inject_anthropic_cache: bool,
+
     // Routing hints.
     /// Set when the request originates from the Codex CLI (Responses API).
     ///

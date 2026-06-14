@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::models::{CanonicalRequest, MessageContent};
+use crate::models::{CanonicalRequest, Message, MessageContent};
 use crate::providers::error::ProviderError;
 use crate::providers::streaming::parse_sse_events;
 use crate::providers::{CodexOptions, ContentBlock, KnownContentBlock, ProviderResponse, Usage};
@@ -1015,7 +1015,7 @@ pub(crate) fn transform_to_responses_request(
         if let Some(ref system) = request.system {
             items.push(OpenAIResponsesItem::Message {
                 role: "user".to_string(),
-                content: Some(system.to_text()),
+                content: Some(responses_message_content("user", system.to_text())),
             });
         }
     }
@@ -1033,13 +1033,27 @@ pub(crate) fn transform_to_responses_request(
         match &msg.content {
             MessageContent::Text(text) => items.push(OpenAIResponsesItem::Message {
                 role: role.to_string(),
-                content: Some(text.clone()),
+                content: Some(responses_message_content(role, text.clone())),
             }),
             MessageContent::Blocks(blocks) => {
                 push_blocks_as_items(&mut items, role, blocks)?;
             }
         }
     }
+
+    // Derive the cache key from the reusable prefix BEFORE `tools` is moved into
+    // the request below.
+    let prompt_cache_key =
+        derive_prompt_cache_key(&instructions, tools.as_deref(), request.messages.first());
+
+    let reasoning = resolve_reasoning_effort(request, tuning)
+        .map(|effort| serde_json::json!({ "effort": effort }));
+    // Reasoning models only engage prompt caching under `store = false` when the
+    // request opts into encrypted reasoning state (Codex CLI does this); without
+    // it gpt-5.5 returns zero cached tokens.
+    let include = reasoning
+        .is_some()
+        .then(|| vec!["reasoning.encrypted_content".to_string()]);
 
     Ok(OpenAIResponsesRequest {
         model: request.model.clone(),
@@ -1052,10 +1066,55 @@ pub(crate) fn transform_to_responses_request(
         tool_choice,
         parallel_tool_calls: tools.as_ref().map(|_| true),
         tools,
-        reasoning: resolve_reasoning_effort(request, tuning)
-            .map(|effort| serde_json::json!({ "effort": effort })),
+        reasoning,
         service_tier: resolve_service_tier(request, tuning),
+        prompt_cache_key: Some(prompt_cache_key),
+        include,
     })
+}
+
+/// Derives a stable `prompt_cache_key` from a request's reusable prefix.
+///
+/// OpenAI's prompt cache matches on the longest common token prefix of a
+/// request; the `prompt_cache_key` routes requests that share that prefix to the
+/// same cache node, which lifts hit rates on agent loops. Anthropic's surface
+/// expresses this through explicit `cache_control` breakpoints, which the
+/// Responses translation drops — so grob reconstructs an equivalent here.
+///
+/// The key hashes the parts that stay constant across one conversation's turns —
+/// the resolved `instructions`, the tool definitions, and the first message —
+/// so every turn of a session sends the same key while distinct sessions stay
+/// separated. SHA-256 with a fixed truncation keeps it deterministic across
+/// process restarts, preserving cache continuity.
+fn derive_prompt_cache_key(
+    instructions: &str,
+    tools: Option<&[serde_json::Value]>,
+    first_message: Option<&Message>,
+) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+
+    let mut hasher = Sha256::new();
+    hasher.update(instructions.as_bytes());
+    if let Some(tools) = tools {
+        if let Ok(bytes) = serde_json::to_vec(tools) {
+            hasher.update(&bytes);
+        }
+    }
+    if let Some(message) = first_message {
+        if let Ok(bytes) = serde_json::to_vec(message) {
+            hasher.update(&bytes);
+        }
+    }
+
+    // 128 bits of hex is collision-safe for cache routing and stays well under
+    // the backend's key-length limit.
+    let digest = hasher.finalize();
+    let mut key = String::from("grob-");
+    for byte in &digest[..16] {
+        let _ = write!(key, "{byte:02x}");
+    }
+    key
 }
 
 /// Resolves the Codex `service_tier` (processing speed) for a request.
@@ -1215,9 +1274,24 @@ fn flush_text_item(items: &mut Vec<OpenAIResponsesItem>, role: &str, text: &mut 
     if !text.is_empty() {
         items.push(OpenAIResponsesItem::Message {
             role: role.to_string(),
-            content: Some(std::mem::take(text)),
+            content: Some(responses_message_content(role, std::mem::take(text))),
         });
     }
+}
+
+/// Builds Responses-API typed message content (`[{"type":…,"text":…}]`).
+///
+/// The backend's prompt cache only matches when message content uses the
+/// structured parts; a flat string defeats caching for reasoning models like
+/// gpt-5.5. Assistant turns use `output_text`; every other role uses
+/// `input_text`.
+fn responses_message_content(role: &str, text: String) -> serde_json::Value {
+    let part_type = if role == "assistant" {
+        "output_text"
+    } else {
+        "input_text"
+    };
+    serde_json::json!([{ "type": part_type, "text": text }])
 }
 
 /// Transforms Anthropic tool definitions into Responses-API (flattened) tools.
@@ -1438,10 +1512,10 @@ mod tests {
 
         // No system-role items survive (the Codex backend rejects them)...
         assert!(input.iter().all(|i| i["role"] != "system"));
-        // ...but the content is preserved as a user item.
-        assert!(input
-            .iter()
-            .any(|i| i["role"] == "user" && i["content"] == "be terse"));
+        // ...but the content is preserved as a user item (typed-parts form).
+        assert!(input.iter().any(|i| i["role"] == "user"
+            && i["content"][0]["type"] == "input_text"
+            && i["content"][0]["text"] == "be terse"));
     }
 
     #[test]
@@ -1481,10 +1555,11 @@ mod tests {
         let input = json["input"].as_array().unwrap();
         assert_eq!(input.len(), 1);
         assert_eq!(input[0]["role"], "user");
-        assert_eq!(input[0]["content"], "run ls");
+        assert_eq!(input[0]["content"][0]["type"], "input_text");
+        assert_eq!(input[0]["content"][0]["text"], "run ls");
         assert!(!input
             .iter()
-            .any(|item| item["content"] == "FULL CODEX CLI PROMPT"));
+            .any(|item| item["content"][0]["text"] == "FULL CODEX CLI PROMPT"));
     }
 
     #[test]
@@ -1678,6 +1753,76 @@ mod tests {
         let json = serde_json::to_value(&req).unwrap();
         assert_eq!(json["instructions"], "FULL CODEX PROMPT");
         assert!(json.get("tools").is_none() || json["tools"].is_null());
+    }
+
+    #[test]
+    fn prompt_cache_key_is_stable_across_message_tails() {
+        // The key must stay identical as a conversation grows, so every turn
+        // routes to the same OpenAI prompt-cache node and hits the shared prefix.
+        let opts = CodexOptions::default();
+        let key = |messages: Vec<Message>| {
+            let mut req = base_request();
+            req.system = None;
+            req.messages = messages;
+            serde_json::to_value(
+                transform_to_responses_request(
+                    &req,
+                    "INSTR",
+                    &CodexTuning::from_options(&opts, None, None),
+                )
+                .unwrap(),
+            )
+            .unwrap()["prompt_cache_key"]
+                .clone()
+        };
+        let user = |text: &str| Message {
+            role: "user".to_string(),
+            content: MessageContent::Text(text.to_string()),
+        };
+
+        let turn1 = key(vec![user("first prompt")]);
+        let turn2 = key(vec![
+            user("first prompt"),
+            Message {
+                role: "assistant".to_string(),
+                content: MessageContent::Text("reply".to_string()),
+            },
+            user("follow-up"),
+        ]);
+
+        assert!(turn1.as_str().unwrap().starts_with("grob-"));
+        assert_eq!(turn1, turn2, "key must be stable as the conversation grows");
+    }
+
+    #[test]
+    fn prompt_cache_key_separates_conversations_and_instructions() {
+        let opts = CodexOptions::default();
+        let key = |instructions: &str, first: &str| {
+            let mut req = base_request();
+            req.system = None;
+            req.messages = vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text(first.to_string()),
+            }];
+            serde_json::to_value(
+                transform_to_responses_request(
+                    &req,
+                    instructions,
+                    &CodexTuning::from_options(&opts, None, None),
+                )
+                .unwrap(),
+            )
+            .unwrap()["prompt_cache_key"]
+                .clone()
+        };
+
+        // A different opening message means a different conversation → different key.
+        assert_ne!(
+            key("INSTR", "conversation A"),
+            key("INSTR", "conversation B")
+        );
+        // Different system instructions also separate the cache namespace.
+        assert_ne!(key("INSTR ONE", "same"), key("INSTR TWO", "same"));
     }
 
     #[test]

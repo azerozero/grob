@@ -663,9 +663,17 @@ pub(crate) async fn handle_responses(
     vk_ctx: Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     axum::Extension(request_id): axum::Extension<RequestId>,
     headers: HeaderMap,
-    Json(responses_request): Json<responses_compat::ResponsesRequest>,
+    body_bytes: axum::body::Bytes,
 ) -> Result<Response, RequestError> {
     let _guard = ActiveRequestGuard::new(&state);
+    // Wire-debug: verbatim inbound Responses body (Codex CLI). Enabled by
+    // `log_level = "debug"`; pairs with the outbound `📤` log to diff the exact
+    // prompt-cache prefix the backend sees.
+    if tracing::event_enabled!(tracing::Level::DEBUG) {
+        tracing::debug!(target: "grob::wire", "📥 Inbound /v1/responses:\n{}", String::from_utf8_lossy(&body_bytes));
+    }
+    let responses_request: responses_compat::ResponsesRequest = serde_json::from_slice(&body_bytes)
+        .map_err(|e| RequestError::ParseError(format!("inbound responses parse: {e}")))?;
     let model = responses_request.model.clone();
     let is_streaming = responses_request.stream == Some(true);
 
@@ -691,6 +699,11 @@ pub(crate) async fn handle_responses(
         .map_err(|e| {
             RequestError::ParseError(format!("Failed to transform Responses request: {}", e))
         })?;
+    // Preserve the exact inbound body so an OpenAI Responses backend can forward
+    // it verbatim (keeping the prompt cache warm) instead of rebuilding it.
+    if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+        request.extensions.responses_passthrough_body = Some(raw);
+    }
     forward_beta_header(&mut request, &headers);
 
     let start_time = std::time::Instant::now();

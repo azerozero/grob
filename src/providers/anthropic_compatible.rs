@@ -8,7 +8,9 @@ use super::{
     LlmProvider, ProviderResponse, StreamResponse,
 };
 use crate::auth::OAuthConfig;
-use crate::models::{CanonicalRequest, CountTokensRequest, CountTokensResponse};
+use crate::models::{
+    CanonicalRequest, CountTokensRequest, CountTokensResponse, SystemBlock, SystemPrompt,
+};
 use async_trait::async_trait;
 use std::collections::HashMap;
 
@@ -172,6 +174,16 @@ impl AnthropicCompatibleProvider {
         auth_value: &str,
         request: &CanonicalRequest,
     ) -> Result<reqwest::Response, ProviderError> {
+        // Wire-debug: verbatim outbound body (canonical == Anthropic shape).
+        // Enabled by `log_level = "debug"`; pairs with the inbound `📥` log.
+        if tracing::event_enabled!(tracing::Level::DEBUG) {
+            tracing::debug!(
+                target: "grob::wire",
+                "📤 Outbound to {}:\n{}",
+                url,
+                serde_json::to_string_pretty(request).unwrap_or_default()
+            );
+        }
         let response = self
             .build_anthropic_request(url, auth_value, request.extensions.client_beta.as_deref())
             .timeout(self.base.api_timeout)
@@ -290,8 +302,44 @@ impl AnthropicCompatibleProvider {
             sanitize_tool_use_ids(request, &mut id_map);
             strip_non_anthropic_thinking(request);
         }
+        inject_anthropic_cache_control(request);
         let auth_value = self.base.resolve_auth(OAuthConfig::anthropic).await?;
         Ok((&self.messages_url, auth_value, is_anthropic, id_map))
+    }
+}
+
+/// Marks the system prefix cacheable when a non-Anthropic client was translated.
+///
+/// OpenAI and Codex clients have no `cache_control` concept, so a request
+/// translated from those surfaces reaches Anthropic with no breakpoint and its
+/// large, stable system prompt is re-billed every turn. When
+/// [`RequestExtensions::inject_anthropic_cache`] is set, this places an
+/// ephemeral breakpoint on the last system block (caching the tools + system
+/// prefix). Anthropic-native requests leave the flag unset and keep full control
+/// of their own breakpoints; an existing breakpoint is always respected.
+fn inject_anthropic_cache_control(request: &mut CanonicalRequest) {
+    if !request.extensions.inject_anthropic_cache {
+        return;
+    }
+    let ephemeral = serde_json::json!({ "type": "ephemeral" });
+    match request.system.take() {
+        Some(SystemPrompt::Text(text)) if !text.is_empty() => {
+            request.system = Some(SystemPrompt::Blocks(vec![SystemBlock {
+                r#type: "text".to_string(),
+                text,
+                cache_control: Some(ephemeral),
+            }]));
+        }
+        Some(SystemPrompt::Blocks(mut blocks)) => {
+            let has_breakpoint = blocks.iter().any(|b| b.cache_control.is_some());
+            if !has_breakpoint {
+                if let Some(last) = blocks.last_mut() {
+                    last.cache_control = Some(ephemeral);
+                }
+            }
+            request.system = Some(SystemPrompt::Blocks(blocks));
+        }
+        other => request.system = other,
     }
 }
 
