@@ -979,10 +979,10 @@ data:
     \ */\n    .table-wrap { overflow-x: auto; }\n    table { width: 100%; border-collapse:\
     \ collapse; min-width: 940px; table-layout: auto; }\n    thead th {\n      text-align:\
     \ left; font-size: 11.5px; font-weight: 700; letter-spacing: .06em;\n      text-transform:\
-    \ uppercase; color: var(--muted);\n      padding: 14px 11px; border-bottom: 1px\
+    \ uppercase; color: var(--muted);\n      padding: 12px 8px; border-bottom: 1px\
     \ solid var(--line); white-space: nowrap;\n    }\n    thead th.right, tbody td.right\
     \ { text-align: right; }\n    thead th.center, tbody td.center { text-align: center;\
-    \ }\n    tbody td { padding: 13px 11px; border-bottom: 1px solid rgba(51,65,85,.5);\
+    \ }\n    tbody td { padding: 11px 8px; border-bottom: 1px solid rgba(51,65,85,.5);\
     \ vertical-align: middle; }\n    tbody tr:last-child td { border-bottom: none;\
     \ }\n\n    .agent { display: flex; align-items: center; gap: 12px; }\n    .avatar\
     \ {\n      width: 40px; height: 40px; border-radius: 11px; flex: none;\n     \
@@ -1115,44 +1115,44 @@ data:
     </span> (C1) \xB7 <span class=\"itype c2\"><svg viewBox=\"0 0 24 24\" fill=\"\
     none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
     round\" aria-hidden=\"true\"><rect width=\"18\" height=\"11\" x=\"3\" y=\"11\"\
-    \ rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg> PII / restreint</span>\
-    \ (C2) \xB7 <span class=\"itype c3\"><svg viewBox=\"0 0 24 24\" fill=\"none\"\
-    \ stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
-    round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"\
-    m4.9 4.9 14.2 14.2\"/></svg> Attaque bloqu\xE9e</span> (C3). La <strong>classe\
-    \ de donn\xE9e capt\xE9e</strong> et la <strong>preuve sign\xE9e</strong> sont\
-    \ d\xE9riv\xE9es du journal d'audit sign\xE9. La coupure est appliqu\xE9e en direct\
-    \ : la cl\xE9 r\xE9voqu\xE9e est refus\xE9e d\xE8s la requ\xEAte suivante (401).\
-    \ \xAB <strong>Voir les logs</strong> \xBB ouvre le tableau de bord d'investigation\
-    \ par agent (Grafana), pr\xE9-filtr\xE9 sur l'identit\xE9 \u2014 chaque incident\
-    \ au niveau requ\xEAte, avec son type, sa preuve sign\xE9e, v\xE9rifiable.\n \
-    \   </p>\n  </main>\n\n  <script>\n    // Champs de /governance.json (\xE9crit\
-    \ par le watcher) :\n    //   { updated, threshold, agents: [ {\n    //      \
-    \ tenant, type:\"human\"|\"agent\", emoji, label, sub, owner, env,\n    //   \
-    \    requests, spend_eur, violations, data_classes:[\u2026],\n    //       decision:\"\
-    bloqu\xE9\"|\"caviard\xE9\"|\"\u2014\", incident_type:\"NC\"|\"C1\"|\"C2\"|\"\
-    C3\",\n    //       signed:bool, revoked:bool } ] }\n    // NOTE : `emoji` reste\
-    \ dans le contrat mais n'est plus rendu \u2014 l'ic\xF4ne\n    // d'identit\xE9\
-    \ (user/bot) est d\xE9riv\xE9e de `type` et trac\xE9e en SVG en ligne.\n    var\
-    \ THRESHOLD = 8;\n    var prevViol = {};      // m\xE9morise les violations pour\
-    \ animer les incr\xE9ments\n    var wasRevoked = {};    // m\xE9morise l'\xE9\
-    tat r\xE9voqu\xE9 pour flasher la bascule\n\n    // Grafana est servi par otel-lgtm\
-    \ sur le port 3000 (m\xEAme h\xF4te que la d\xE9mo).\n    var GRAFANA_BASE = location.protocol\
-    \ + \"//\" + location.hostname + \":3000\";\n\n    function violClass(v, revoked)\
-    \ {\n      if (revoked || v >= THRESHOLD) return \"viol-hot\";\n      if (v >\
-    \ 0) return \"viol-some\";\n      return \"viol-0\";\n    }\n\n    function eur(n)\
-    \ {\n      return Number(n).toLocaleString(\"fr-FR\", { minimumFractionDigits:\
-    \ 2, maximumFractionDigits: 2 }) + \" \u20AC\";\n    }\n\n    // Construit un\
-    \ lien profond vers le tableau de bord d'investigation par agent\n    // (uid\
-    \ stable \xAB grob-audit-agent \xBB), pr\xE9-filtr\xE9 sur l'identit\xE9 via la\
-    \ variable\n    // de gabarit $tenant. L'auditeur arrive sur la vue d\xE9di\xE9\
-    e (stats + journal\n    // sign\xE9 + violations dans le temps), pas sur l'Explore\
-    \ brut de Loki.\n    function auditDashboardUrl(tenant) {\n      // uid-only (sans\
-    \ slug) : \xE9vite la r\xE9\xE9criture d'URL c\xF4t\xE9 client de Grafana\n  \
-    \    // qui peut perdre le var-tenant et te faire atterrir sur le tenant par d\xE9\
-    faut.\n      return GRAFANA_BASE + \"/d/grob-audit-agent\" +\n        \"?var-tenant=\"\
-    \ + encodeURIComponent(tenant) +\n        \"&from=now-3h&to=now&theme=dark\";\n\
-    \    }\n\n    var CLASS_LABEL = { menace: \"Menace\", secret: \"Secret\", financier:\
+    \ rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg> Restreint</span>\
+    \ (C2, PII ou exfiltration bloqu\xE9e) \xB7 <span class=\"itype c3\"><svg viewBox=\"\
+    0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"\
+    round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"\
+    12\" r=\"10\"/><path d=\"m4.9 4.9 14.2 14.2\"/></svg> Attaque</span> (C3, injection\
+    \ bloqu\xE9e). La <strong>classe de donn\xE9e capt\xE9e</strong> et la <strong>preuve\
+    \ sign\xE9e</strong> sont d\xE9riv\xE9es du journal d'audit sign\xE9. La coupure\
+    \ est appliqu\xE9e en direct : la cl\xE9 r\xE9voqu\xE9e est refus\xE9e d\xE8s\
+    \ la requ\xEAte suivante (401). \xAB <strong>Logs</strong> \xBB ouvre le tableau\
+    \ de bord d'investigation par agent (Grafana), pr\xE9-filtr\xE9 sur l'identit\xE9\
+    \ \u2014 chaque incident au niveau requ\xEAte, avec son type, sa preuve sign\xE9\
+    e, v\xE9rifiable.\n    </p>\n  </main>\n\n  <script>\n    // Champs de /governance.json\
+    \ (\xE9crit par le watcher) :\n    //   { updated, threshold, agents: [ {\n  \
+    \  //       tenant, type:\"human\"|\"agent\", emoji, label, sub, owner, env,\n\
+    \    //       requests, spend_eur, violations, data_classes:[\u2026],\n    //\
+    \       decision:\"bloqu\xE9\"|\"caviard\xE9\"|\"\u2014\", incident_type:\"NC\"\
+    |\"C1\"|\"C2\"|\"C3\",\n    //       signed:bool, revoked:bool } ] }\n    // NOTE\
+    \ : `emoji` reste dans le contrat mais n'est plus rendu \u2014 l'ic\xF4ne\n  \
+    \  // d'identit\xE9 (user/bot) est d\xE9riv\xE9e de `type` et trac\xE9e en SVG\
+    \ en ligne.\n    var THRESHOLD = 8;\n    var prevViol = {};      // m\xE9morise\
+    \ les violations pour animer les incr\xE9ments\n    var wasRevoked = {};    //\
+    \ m\xE9morise l'\xE9tat r\xE9voqu\xE9 pour flasher la bascule\n\n    // Grafana\
+    \ est servi par otel-lgtm sur le port 3000 (m\xEAme h\xF4te que la d\xE9mo).\n\
+    \    var GRAFANA_BASE = location.protocol + \"//\" + location.hostname + \":3000\"\
+    ;\n\n    function violClass(v, revoked) {\n      if (revoked || v >= THRESHOLD)\
+    \ return \"viol-hot\";\n      if (v > 0) return \"viol-some\";\n      return \"\
+    viol-0\";\n    }\n\n    function eur(n) {\n      return Number(n).toLocaleString(\"\
+    fr-FR\", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + \" \u20AC\"\
+    ;\n    }\n\n    // Construit un lien profond vers le tableau de bord d'investigation\
+    \ par agent\n    // (uid stable \xAB grob-audit-agent \xBB), pr\xE9-filtr\xE9\
+    \ sur l'identit\xE9 via la variable\n    // de gabarit $tenant. L'auditeur arrive\
+    \ sur la vue d\xE9di\xE9e (stats + journal\n    // sign\xE9 + violations dans\
+    \ le temps), pas sur l'Explore brut de Loki.\n    function auditDashboardUrl(tenant)\
+    \ {\n      // uid-only (sans slug) : \xE9vite la r\xE9\xE9criture d'URL c\xF4\
+    t\xE9 client de Grafana\n      // qui peut perdre le var-tenant et te faire atterrir\
+    \ sur le tenant par d\xE9faut.\n      return GRAFANA_BASE + \"/d/grob-audit-agent\"\
+    \ +\n        \"?var-tenant=\" + encodeURIComponent(tenant) +\n        \"&from=now-3h&to=now&theme=dark\"\
+    ;\n    }\n\n    var CLASS_LABEL = { menace: \"Menace\", secret: \"Secret\", financier:\
     \ \"Financier\", pii: \"PII\" };\n\n    var SVG_NS = \"http://www.w3.org/2000/svg\"\
     ;\n\n    // Fabrique une ic\xF4ne SVG en ligne (style Lucide, trait `currentColor`,\
     \ sans\n    // requ\xEAte r\xE9seau). `paths` : tableau de sp\xE9cifications d'\xE9\
@@ -1203,16 +1203,15 @@ data:
     \ \xAB NC \xBB en majuscules ; on tol\xE8re \xAB Nc \xBB par s\xE9curit\xE9. Le\
     \ glyphe de\n    // t\xEAte est rendu en SVG (r\xE8gle design-system : pas d'emoji-ic\xF4\
     ne).\n    var ITYPE = {\n      NC: { cls: \"nc\", text: \"Propre\" },\n      C1:\
-    \ { cls: \"c1\", text: \"Caviard\xE9\" },\n      C2: { cls: \"c2\", text: \"PII\
-    \ / restreint\" },\n      C3: { cls: \"c3\", text: \"Attaque bloqu\xE9e\" }\n\
-    \    };\n\n    function buildIncidentType(it) {\n      var key = String(it ||\
-    \ \"NC\").toUpperCase();\n      var def = ITYPE[key] || ITYPE.NC;\n      var span\
-    \ = document.createElement(\"span\");\n      span.className = \"itype \" + def.cls;\n\
-    \      span.appendChild(incidentIcon(key in ITYPE ? key : \"NC\"));\n      var\
-    \ t = document.createElement(\"span\");\n      t.textContent = def.text;\n   \
-    \   span.appendChild(t);\n      return span;\n    }\n\n    function buildChips(classes)\
-    \ {\n      var wrap = document.createElement(\"div\"); wrap.className = \"chips\"\
-    ;\n      if (!classes || !classes.length) {\n        var c = document.createElement(\"\
+    \ { cls: \"c1\", text: \"Caviard\xE9\" },\n      C2: { cls: \"c2\", text: \"Restreint\"\
+    \ },\n      C3: { cls: \"c3\", text: \"Attaque\" }\n    };\n\n    function buildIncidentType(it)\
+    \ {\n      var key = String(it || \"NC\").toUpperCase();\n      var def = ITYPE[key]\
+    \ || ITYPE.NC;\n      var span = document.createElement(\"span\");\n      span.className\
+    \ = \"itype \" + def.cls;\n      span.appendChild(incidentIcon(key in ITYPE ?\
+    \ key : \"NC\"));\n      var t = document.createElement(\"span\");\n      t.textContent\
+    \ = def.text;\n      span.appendChild(t);\n      return span;\n    }\n\n    function\
+    \ buildChips(classes) {\n      var wrap = document.createElement(\"div\"); wrap.className\
+    \ = \"chips\";\n      if (!classes || !classes.length) {\n        var c = document.createElement(\"\
     span\"); c.className = \"chip none\"; c.textContent = \"aucune\"; wrap.appendChild(c);\n\
     \        return wrap;\n      }\n      classes.forEach(function (cl) {\n      \
     \  var c = document.createElement(\"span\");\n        c.className = \"chip \"\
@@ -1255,24 +1254,23 @@ data:
     \   } else {\n          sub.textContent = a.sub || \"\";\n        }\n        var\
     \ kind = document.createElement(\"span\");\n        kind.className = \"kind \"\
     \ + (isAgent ? \"agent\" : \"human\");\n        kind.textContent = isAgent ? \"\
-    Agent de service\" : \"Humain\";\n        meta.appendChild(nm); meta.appendChild(sub);\
-    \ meta.appendChild(kind);\n        wrap.appendChild(av); wrap.appendChild(meta);\
-    \ tdAgent.appendChild(wrap);\n\n        // --- Requ\xEAtes ---\n        var tdReq\
-    \ = td(\"right\");\n        var nReq = document.createElement(\"span\"); nReq.className\
-    \ = \"num\";\n        nReq.style.fontSize = \"24px\"; nReq.style.color = \"var(--text)\"\
-    ;\n        nReq.textContent = a.requests; tdReq.appendChild(nReq);\n\n       \
-    \ // --- Conso \u20AC ---\n        var tdEur = td(\"right\");\n        var nEur\
-    \ = document.createElement(\"span\"); nEur.className = \"spend\";\n        nEur.textContent\
-    \ = eur(a.spend_eur); tdEur.appendChild(nEur);\n\n        // --- Violations (gros\
-    \ chiffre s\xE9mantique) ---\n        var tdViol = td(\"right\");\n        var\
-    \ nViol = document.createElement(\"span\");\n        nViol.className = \"num \"\
-    \ + violClass(a.violations, a.revoked);\n        nViol.textContent = a.violations;\n\
-    \        if (prevViol[a.tenant] !== undefined && a.violations > prevViol[a.tenant])\
-    \ {\n          void nViol.offsetWidth; nViol.classList.add(\"bump\");\n      \
-    \  }\n        tdViol.appendChild(nViol);\n\n        // --- Classe de donn\xE9\
-    e capt\xE9e ---\n        var tdClass = td(); tdClass.appendChild(buildChips(a.data_classes));\n\
-    \n        // --- Type d'incident (classification d'audit dominante) ---\n    \
-    \    var tdItype = td(); tdItype.appendChild(buildIncidentType(a.incident_type));\n\
+    Agent\" : \"Humain\";\n        meta.appendChild(nm); meta.appendChild(sub); meta.appendChild(kind);\n\
+    \        wrap.appendChild(av); wrap.appendChild(meta); tdAgent.appendChild(wrap);\n\
+    \n        // --- Requ\xEAtes ---\n        var tdReq = td(\"right\");\n       \
+    \ var nReq = document.createElement(\"span\"); nReq.className = \"num\";\n   \
+    \     nReq.style.fontSize = \"24px\"; nReq.style.color = \"var(--text)\";\n  \
+    \      nReq.textContent = a.requests; tdReq.appendChild(nReq);\n\n        // ---\
+    \ Conso \u20AC ---\n        var tdEur = td(\"right\");\n        var nEur = document.createElement(\"\
+    span\"); nEur.className = \"spend\";\n        nEur.textContent = eur(a.spend_eur);\
+    \ tdEur.appendChild(nEur);\n\n        // --- Violations (gros chiffre s\xE9mantique)\
+    \ ---\n        var tdViol = td(\"right\");\n        var nViol = document.createElement(\"\
+    span\");\n        nViol.className = \"num \" + violClass(a.violations, a.revoked);\n\
+    \        nViol.textContent = a.violations;\n        if (prevViol[a.tenant] !==\
+    \ undefined && a.violations > prevViol[a.tenant]) {\n          void nViol.offsetWidth;\
+    \ nViol.classList.add(\"bump\");\n        }\n        tdViol.appendChild(nViol);\n\
+    \n        // --- Classe de donn\xE9e capt\xE9e ---\n        var tdClass = td();\
+    \ tdClass.appendChild(buildChips(a.data_classes));\n\n        // --- Type d'incident\
+    \ (classification d'audit dominante) ---\n        var tdItype = td(); tdItype.appendChild(buildIncidentType(a.incident_type));\n\
     \n        // --- D\xE9cision ---\n        var tdDec = td();\n        var dec =\
     \ document.createElement(\"span\");\n        var dv = a.decision || \"\u2014\"\
     ;\n        dec.className = \"decision \" + (dv === \"bloqu\xE9\" ? \"bloque\"\
@@ -1297,23 +1295,22 @@ data:
     \ = td(\"center\");\n        var link = document.createElement(\"a\");\n     \
     \   link.className = \"logs-link\";\n        link.href = auditDashboardUrl(a.tenant);\n\
     \        link.target = \"_blank\"; link.rel = \"noopener\";\n        link.appendChild(searchIcon());\n\
-    \        var lt = document.createElement(\"span\"); lt.textContent = \"Voir les\
-    \ logs\"; link.appendChild(lt);\n        tdLogs.appendChild(link);\n\n       \
-    \ tr.appendChild(tdAgent); tr.appendChild(tdReq); tr.appendChild(tdEur);\n   \
-    \     tr.appendChild(tdViol); tr.appendChild(tdClass); tr.appendChild(tdItype);\n\
-    \        tr.appendChild(tdDec); tr.appendChild(tdProof); tr.appendChild(tdStat);\n\
-    \        tr.appendChild(tdLogs);\n        rows.appendChild(tr);\n\n        prevViol[a.tenant]\
-    \ = a.violations;\n        wasRevoked[a.tenant] = a.revoked;\n      });\n    }\n\
-    \n    function poll() {\n      var dot = document.getElementById(\"dot\");\n \
-    \     var statusText = document.getElementById(\"statusText\");\n      fetch(\"\
-    /governance.json\", { cache: \"no-store\" })\n        .then(function (r) { if\
-    \ (!r.ok) throw new Error(r.status); return r.json(); })\n        .then(function\
-    \ (data) {\n          dot.classList.add(\"live\");\n          statusText.textContent\
-    \ = \"Connect\xE9 \u2014 surveillance active\";\n          render(data);\n   \
-    \     })\n        .catch(function () {\n          dot.classList.remove(\"live\"\
-    );\n          statusText.textContent = \"En attente des donn\xE9es\u2026\";\n\
-    \        });\n    }\n    poll();\n    setInterval(poll, 2000);\n  </script>\n\
-    </body>\n</html>\n"
+    \        var lt = document.createElement(\"span\"); lt.textContent = \"Logs\"\
+    ; link.appendChild(lt);\n        tdLogs.appendChild(link);\n\n        tr.appendChild(tdAgent);\
+    \ tr.appendChild(tdReq); tr.appendChild(tdEur);\n        tr.appendChild(tdViol);\
+    \ tr.appendChild(tdClass); tr.appendChild(tdItype);\n        tr.appendChild(tdDec);\
+    \ tr.appendChild(tdProof); tr.appendChild(tdStat);\n        tr.appendChild(tdLogs);\n\
+    \        rows.appendChild(tr);\n\n        prevViol[a.tenant] = a.violations;\n\
+    \        wasRevoked[a.tenant] = a.revoked;\n      });\n    }\n\n    function poll()\
+    \ {\n      var dot = document.getElementById(\"dot\");\n      var statusText =\
+    \ document.getElementById(\"statusText\");\n      fetch(\"/governance.json\",\
+    \ { cache: \"no-store\" })\n        .then(function (r) { if (!r.ok) throw new\
+    \ Error(r.status); return r.json(); })\n        .then(function (data) {\n    \
+    \      dot.classList.add(\"live\");\n          statusText.textContent = \"Connect\xE9\
+    \ \u2014 surveillance active\";\n          render(data);\n        })\n       \
+    \ .catch(function () {\n          dot.classList.remove(\"live\");\n          statusText.textContent\
+    \ = \"En attente des donn\xE9es\u2026\";\n        });\n    }\n    poll();\n  \
+    \  setInterval(poll, 2000);\n  </script>\n</body>\n</html>\n"
 ---
 apiVersion: v1
 kind: ConfigMap
