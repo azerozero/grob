@@ -742,49 +742,48 @@ data:
     \ pulse {\n      0%   { box-shadow: 0 0 0 0 rgba(34,197,94,.55); }\n      70%\
     \  { box-shadow: 0 0 0 9px rgba(34,197,94,0); }\n      100% { box-shadow: 0 0\
     \ 0 0 rgba(34,197,94,0); }\n    }\n    @media (prefers-reduced-motion: reduce)\
-    \ { .dot.live { animation: none; } .num { transition: none !important; } }\n\n\
-    \    /* ---- Compteurs h\xE9ros ---- */\n    .counters {\n      display: grid;\
-    \ grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px;\n      padding:\
-    \ 28px 40px 8px; max-width: 1280px; margin: 0 auto;\n    }\n    @media (max-width:\
-    \ 760px) { .counters { grid-template-columns: 1fr; } }\n    .counter {\n     \
-    \ background: linear-gradient(180deg, var(--surface), var(--surface-2));\n   \
-    \   border-radius: 18px; padding: 22px 26px;\n      border: 1px solid var(--line);\
-    \ position: relative; overflow: hidden;\n    }\n    .counter::before { content:\
-    \ \"\"; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--muted);\
-    \ }\n    .counter.block::before  { background: var(--block); }\n    .counter.redact::before\
-    \ { background: var(--warn); }\n    .counter.ok::before     { background: var(--ok);\
-    \ }\n    .counter .head { display: flex; align-items: center; gap: 10px; color:\
-    \ var(--muted); }\n    .counter .head svg { width: 22px; height: 22px; }\n   \
-    \ .counter.block .head svg  { color: var(--block); }\n    .counter.redact .head\
-    \ svg { color: var(--warn); }\n    .counter.ok .head svg     { color: var(--ok);\
-    \ }\n    .counter .lbl { font-size: 15px; font-weight: 600; }\n    .counter .num\
-    \ {\n      margin-top: 14px; font-size: clamp(48px, 7vw, 76px); font-weight: 800;\
-    \ line-height: 1;\n      font-variant-numeric: tabular-nums; letter-spacing: -2px;\
-    \ transition: transform .18s ease;\n    }\n    .counter .num.bump { transform:\
-    \ scale(1.1); }\n    .counter.block .num  { color: var(--block); }\n    .counter.redact\
-    \ .num { color: var(--warn); }\n    .counter.ok .num     { color: var(--ok); }\n\
-    \n    /* ---- Mur d'\xE9v\xE9nements ---- */\n    main { padding: 20px 40px 16px;\
-    \ max-width: 1280px; margin: 0 auto; }\n    .feed-head { display: flex; align-items:\
-    \ baseline; justify-content: space-between; margin: 6px 2px 14px; }\n    .feed-head\
-    \ h2 { font-size: 13px; color: var(--muted); font-weight: 700; text-transform:\
-    \ uppercase; letter-spacing: .14em; margin: 0; }\n    .feed-head .hint { color:\
-    \ var(--muted); font-size: 13px; }\n    #feed { display: flex; flex-direction:\
-    \ column; gap: 12px; }\n    .event {\n      display: flex; align-items: center;\
-    \ gap: 18px;\n      background: var(--surface); border-radius: 14px;\n      padding:\
-    \ 16px 22px; border-left: 6px solid var(--line);\n      animation: slidein .4s\
-    \ cubic-bezier(.2,.8,.2,1);\n    }\n    @keyframes slidein { from { opacity: 0;\
-    \ transform: translateY(-12px) scale(.99); } to { opacity: 1; transform: none;\
-    \ } }\n    @media (prefers-reduced-motion: reduce) { .event { animation: none;\
-    \ } }\n    .event.block  { border-left-color: var(--block); background: linear-gradient(90deg,\
-    \ rgba(239,68,68,.16) 0%, var(--surface) 58%); }\n    .event.redact { border-left-color:\
-    \ var(--warn);  background: linear-gradient(90deg, rgba(245,158,11,.14) 0%, var(--surface)\
-    \ 58%); }\n    .event .tag { font-weight: 700; font-size: 15px; white-space: nowrap;\
-    \ min-width: 150px; display: flex; align-items: center; gap: 10px; letter-spacing:\
-    \ .02em; }\n    /* badge carr\xE9 color\xE9 \xE0 la place d'un emoji (r\xE8gle\
-    \ design-system : pas d'emoji-ic\xF4ne) */\n    .event .tag .badge { width: 12px;\
-    \ height: 12px; border-radius: 4px; flex: none; }\n    .event.block  .tag { color:\
-    \ var(--block); } .event.block  .badge { background: var(--block); }\n    .event.redact\
-    \ .tag { color: var(--warn); }  .event.redact .badge { background: var(--warn);\
+    \ {\n      .dot.live { animation: none; }\n      .num, .num.bump { transition:\
+    \ none !important; transform: none !important; }\n    }\n\n    /* ---- Compteurs\
+    \ h\xE9ros ---- */\n    .counters {\n      display: grid; grid-template-columns:\
+    \ repeat(3, minmax(0, 1fr)); gap: 20px;\n      padding: 28px 40px 8px; max-width:\
+    \ 1280px; margin: 0 auto;\n    }\n    @media (max-width: 760px) { .counters {\
+    \ grid-template-columns: 1fr; } }\n    .counter {\n      background: linear-gradient(180deg,\
+    \ var(--surface), var(--surface-2));\n      border-radius: 18px; padding: 22px\
+    \ 26px;\n      border: 1px solid var(--line); position: relative; overflow: hidden;\n\
+    \    }\n    .counter::before { content: \"\"; position: absolute; inset: 0 0 auto\
+    \ 0; height: 4px; background: var(--muted); }\n    .counter.block::before  { background:\
+    \ var(--block); }\n    .counter.redact::before { background: var(--warn); }\n\
+    \    .counter.ok::before     { background: var(--ok); }\n    .counter .head {\
+    \ display: flex; align-items: center; gap: 10px; color: var(--muted); }\n    .counter\
+    \ .head svg { width: 22px; height: 22px; }\n    .counter.block .head svg  { color:\
+    \ var(--block); }\n    .counter.redact .head svg { color: var(--warn); }\n   \
+    \ .counter.ok .head svg     { color: var(--ok); }\n    .counter .lbl { font-size:\
+    \ 15px; font-weight: 600; }\n    .counter .num {\n      margin-top: 14px; font-size:\
+    \ clamp(48px, 7vw, 76px); font-weight: 800; line-height: 1;\n      font-variant-numeric:\
+    \ tabular-nums; letter-spacing: -2px;\n      transition: transform .22s cubic-bezier(.2,.8,.2,1);\n\
+    \    }\n    .counter .num.bump { transform: scale(1.1); }\n    .counter.block\
+    \ .num  { color: var(--block); }\n    .counter.redact .num { color: var(--warn);\
+    \ }\n    .counter.ok .num     { color: var(--ok); }\n\n    /* ---- Mur d'\xE9\
+    v\xE9nements ---- */\n    main { padding: 20px 40px 16px; max-width: 1280px; margin:\
+    \ 0 auto; }\n    .feed-head { display: flex; align-items: baseline; justify-content:\
+    \ space-between; margin: 6px 2px 14px; }\n    .feed-head h2 { font-size: 13px;\
+    \ color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing:\
+    \ .14em; margin: 0; }\n    .feed-head .hint { color: var(--muted); font-size:\
+    \ 13px; }\n    #feed { display: flex; flex-direction: column; gap: 12px; }\n \
+    \   .event {\n      display: flex; align-items: center; gap: 18px;\n      background:\
+    \ var(--surface); border-radius: 14px;\n      padding: 16px 22px; border-left:\
+    \ 6px solid var(--line);\n      animation: slidein .4s cubic-bezier(.2,.8,.2,1);\n\
+    \    }\n    @keyframes slidein { from { opacity: 0; transform: translateY(-12px)\
+    \ scale(.99); } to { opacity: 1; transform: none; } }\n    @media (prefers-reduced-motion:\
+    \ reduce) { .event { animation: none; } }\n    .event.block  { border-left-color:\
+    \ var(--block); background: linear-gradient(90deg, rgba(239,68,68,.16) 0%, var(--surface)\
+    \ 58%); }\n    .event.redact { border-left-color: var(--warn);  background: linear-gradient(90deg,\
+    \ rgba(245,158,11,.14) 0%, var(--surface) 58%); }\n    .event .tag { font-weight:\
+    \ 700; font-size: 15px; white-space: nowrap; min-width: 150px; display: flex;\
+    \ align-items: center; gap: 9px; letter-spacing: .02em; }\n    /* Ic\xF4ne SVG\
+    \ en ligne (Lucide) \xE0 la place d'un emoji (r\xE8gle design-system : pas d'emoji-ic\xF4\
+    ne). */\n    .event .tag svg { width: 18px; height: 18px; flex: none; }\n    .event.block\
+    \  .tag { color: var(--block); }\n    .event.redact .tag { color: var(--warn);\
     \ }\n    .event .what { flex: 1; min-width: 0; font-size: 17px; color: var(--text);\
     \ }\n    .event .time { color: var(--muted); font-size: 14px; white-space: nowrap;\
     \ font-variant-numeric: tabular-nums; }\n    .empty { color: var(--muted); padding:\
@@ -795,13 +794,20 @@ data:
     \ .seal {\n      display: inline-flex; align-items: center; gap: 8px; font-size:\
     \ 13px; color: var(--muted);\n      border: 1px solid var(--line); border-radius:\
     \ 999px; padding: 7px 14px; background: rgba(15,23,42,.5);\n    }\n    .trust\
-    \ .seal svg { width: 15px; height: 15px; color: var(--ok); }\n  </style>\n</head>\n\
-    <body>\n  <header>\n    <div class=\"brand\">\n      <!-- bouclier (Lucide shield-check)\
-    \ -->\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\"\
-    \ stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"\
-    true\"><path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18\
-    \ 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81\
-    \ 17 5 19 5a1 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/></svg>\n      <h1>Vos\
+    \ .seal svg { width: 15px; height: 15px; color: var(--ok); }\n\n    /* ---- Reflow\
+    \ gracieux sur \xE9crans \xE9troits (375 / 768) ---- */\n    @media (max-width:\
+    \ 768px) {\n      header { padding: 26px 20px 4px; }\n      .counters { padding:\
+    \ 22px 18px 6px; gap: 14px; }\n      main { padding: 18px 18px 12px; }\n     \
+    \ .trust { padding: 12px 18px 40px; }\n      /* Sur mobile, l'\xE9v\xE9nement\
+    \ passe en colonne pour rester lisible. */\n      .event { gap: 6px 14px; flex-wrap:\
+    \ wrap; padding: 14px 18px; }\n      .event .tag { min-width: 0; }\n      .event\
+    \ .what { flex-basis: 100%; order: 3; font-size: 16px; }\n    }\n  </style>\n\
+    </head>\n<body>\n  <header>\n    <div class=\"brand\">\n      <!-- bouclier (Lucide\
+    \ shield-check) -->\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"\
+    currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
+    round\" aria-hidden=\"true\"><path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5\
+    \ 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51\
+    \ 3.81 17 5 19 5a1 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/></svg>\n      <h1>Vos\
     \ donn\xE9es ne sortent pas</h1>\n    </div>\n    <p>Chaque \xE9change avec une\
     \ IA est inspect\xE9 <strong>avant</strong> de quitter votre syst\xE8me. Les secrets\
     \ sont caviard\xE9s, les attaques bloqu\xE9es \u2014 en direct.</p>\n    <div\
@@ -850,48 +856,69 @@ data:
     \ :\n    //   type=\"dlp_action\", action=\"block\"|\"redact\"|\"pseudonym\"|\u2026\
     ,\n    //   rule_type=\"injection\"|\"url_exfil\"|\"secret\"|\"pii\"|\"name\"\
     ,\n    //   detail=\"\u2026\", direction, timestamp (cha\xEEne ISO-8601).\n  \
-    \  var counts = { block: 0, redact: 0, total: 0 };\n    var MAX_ROWS = 40;\n\n\
-    \    function bump(el) {\n      el.classList.remove(\"bump\");\n      void el.offsetWidth;\
-    \ // force reflow -> relance l'animation \xE0 chaque incr\xE9ment\n      el.classList.add(\"\
-    bump\");\n    }\n\n    // (rule_type, detail) -> libell\xE9 m\xE9tier lisible\
-    \ par un RSSI.\n    function label(ev) {\n      var d = (ev.detail || \"\").toLowerCase();\n\
-    \      var rt = ev.rule_type || \"\";\n      if (rt === \"injection\" || rt ===\
-    \ \"indirect_injection\")\n        return \"Injection de prompt \u2014 tentative\
-    \ de d\xE9tournement de l'IA\";\n      if (rt === \"url_exfil\")\n        return\
-    \ \"Exfiltration de donn\xE9es \u2014 envoi vers un domaine externe\";\n     \
-    \ if (rt === \"pii\")\n        return \"Donn\xE9e personnelle \u2014 carte bancaire\
-    \ / IBAN\";\n      if (rt === \"name\")\n        return \"Nom de personne \u2014\
-    \ anonymis\xE9\";\n      if (rt === \"secret\") {\n        if (d.indexOf(\"aws\"\
-    ) !== -1) return \"Cl\xE9 d'acc\xE8s AWS\";\n        if (d.indexOf(\"github\"\
-    ) !== -1) return \"Token GitHub\";\n        if (d.indexOf(\"openai\") !== -1)\
-    \ return \"Cl\xE9 API OpenAI\";\n        if (d.indexOf(\"anthropic\") !== -1)\
-    \ return \"Cl\xE9 API Anthropic\";\n        if (d.indexOf(\"stripe\") !== -1)\
-    \ return \"Cl\xE9 secr\xE8te Stripe\";\n        return \"Secret / cl\xE9 d'API\"\
-    ;\n      }\n      return ev.detail || rt || \"Donn\xE9e sensible\";\n    }\n\n\
-    \    function render(ev) {\n      var isBlock = ev.action === \"block\";\n   \
-    \   var isRedact = ev.action === \"redact\" || ev.action === \"canary\";\n   \
-    \   if (!isBlock && !isRedact) return; // n'affiche que blocages et caviardages\n\
-    \n      var empty = document.getElementById(\"empty\");\n      if (empty) empty.remove();\n\
-    \n      counts.total++;\n      if (isBlock) counts.block++; else counts.redact++;\n\
-    \      var cBlock = document.getElementById(\"cBlock\");\n      var cRedact =\
-    \ document.getElementById(\"cRedact\");\n      var cTotal = document.getElementById(\"\
-    cTotal\");\n      cBlock.textContent = counts.block;\n      cRedact.textContent\
-    \ = counts.redact;\n      cTotal.textContent = counts.total;\n      bump(isBlock\
-    \ ? cBlock : cRedact);\n      bump(cTotal);\n\n      var row = document.createElement(\"\
-    div\");\n      row.className = \"event \" + (isBlock ? \"block\" : \"redact\"\
-    );\n      var t = new Date(ev.timestamp || Date.now());\n      var hh = isNaN(t.getTime())\
-    \ ? \"\" : t.toLocaleTimeString(\"fr-FR\");\n\n      var tag = document.createElement(\"\
-    div\");\n      tag.className = \"tag\";\n      var badge = document.createElement(\"\
-    span\");\n      badge.className = \"badge\";\n      var tagText = document.createElement(\"\
-    span\");\n      tagText.textContent = isBlock ? \"BLOQU\xC9\" : \"CAVIARD\xC9\"\
-    ;\n      tag.appendChild(badge);\n      tag.appendChild(tagText);\n\n      var\
-    \ what = document.createElement(\"div\");\n      what.className = \"what\";\n\
-    \      what.textContent = label(ev); // textContent : pas d'injection HTML depuis\
-    \ le flux\n\n      var time = document.createElement(\"div\");\n      time.className\
-    \ = \"time\";\n      time.textContent = hh;\n\n      row.appendChild(tag);\n \
-    \     row.appendChild(what);\n      row.appendChild(time);\n\n      var feed =\
-    \ document.getElementById(\"feed\");\n      feed.insertBefore(row, feed.firstChild);\n\
-    \      while (feed.children.length > MAX_ROWS) feed.removeChild(feed.lastChild);\n\
+    \  var counts = { block: 0, redact: 0, total: 0 };\n    var MAX_ROWS = 40;\n \
+    \   var SVG_NS = \"http://www.w3.org/2000/svg\";\n\n    // Fabrique une ic\xF4\
+    ne SVG en ligne (style Lucide, trait `currentColor`, sans\n    // requ\xEAte r\xE9\
+    seau). `paths` : tableau d'\xE9l\xE9ments enfants { tag, ...attrs }.\n    function\
+    \ svgIcon(paths) {\n      var s = document.createElementNS(SVG_NS, \"svg\");\n\
+    \      s.setAttribute(\"viewBox\", \"0 0 24 24\");\n      s.setAttribute(\"fill\"\
+    , \"none\");\n      s.setAttribute(\"stroke\", \"currentColor\");\n      s.setAttribute(\"\
+    stroke-width\", \"2\");\n      s.setAttribute(\"stroke-linecap\", \"round\");\n\
+    \      s.setAttribute(\"stroke-linejoin\", \"round\");\n      s.setAttribute(\"\
+    aria-hidden\", \"true\");\n      paths.forEach(function (spec) {\n        var\
+    \ el = document.createElementNS(SVG_NS, spec.tag);\n        Object.keys(spec).forEach(function\
+    \ (k) {\n          if (k !== \"tag\") el.setAttribute(k, spec[k]);\n        });\n\
+    \        s.appendChild(el);\n      });\n      return s;\n    }\n\n    // Marqueur\
+    \ de statut de l'\xE9v\xE9nement : \xAB ban \xBB (bloqu\xE9) ou \xAB scissors\
+    \ \xBB\n    // (caviard\xE9). Remplace l'ancien carr\xE9 color\xE9 \u2014 pas\
+    \ d'emoji-ic\xF4ne.\n    function statusIcon(isBlock) {\n      if (isBlock) {\n\
+    \        return svgIcon([\n          { tag: \"circle\", cx: \"12\", cy: \"12\"\
+    , r: \"10\" },\n          { tag: \"path\", d: \"m4.9 4.9 14.2 14.2\" }\n     \
+    \   ]);\n      }\n      // Lucide \xAB scissors \xBB \u2014 donn\xE9e caviard\xE9\
+    e / expurg\xE9e\n      return svgIcon([\n        { tag: \"circle\", cx: \"6\"\
+    , cy: \"6\", r: \"3\" },\n        { tag: \"path\", d: \"M8.12 8.12 12 12\" },\n\
+    \        { tag: \"path\", d: \"M20 4 8.12 15.88\" },\n        { tag: \"circle\"\
+    , cx: \"6\", cy: \"18\", r: \"3\" },\n        { tag: \"path\", d: \"M14.8 14.8\
+    \ 20 20\" }\n      ]);\n    }\n\n    function bump(el) {\n      el.classList.remove(\"\
+    bump\");\n      void el.offsetWidth; // force reflow -> relance l'animation \xE0\
+    \ chaque incr\xE9ment\n      el.classList.add(\"bump\");\n    }\n\n    // (rule_type,\
+    \ detail) -> libell\xE9 m\xE9tier lisible par un RSSI.\n    function label(ev)\
+    \ {\n      var d = (ev.detail || \"\").toLowerCase();\n      var rt = ev.rule_type\
+    \ || \"\";\n      if (rt === \"injection\" || rt === \"indirect_injection\")\n\
+    \        return \"Injection de prompt \u2014 tentative de d\xE9tournement de l'IA\"\
+    ;\n      if (rt === \"url_exfil\")\n        return \"Exfiltration de donn\xE9\
+    es \u2014 envoi vers un domaine externe\";\n      if (rt === \"pii\")\n      \
+    \  return \"Donn\xE9e personnelle \u2014 carte bancaire / IBAN\";\n      if (rt\
+    \ === \"name\")\n        return \"Nom de personne \u2014 anonymis\xE9\";\n   \
+    \   if (rt === \"secret\") {\n        if (d.indexOf(\"aws\") !== -1) return \"\
+    Cl\xE9 d'acc\xE8s AWS\";\n        if (d.indexOf(\"github\") !== -1) return \"\
+    Token GitHub\";\n        if (d.indexOf(\"openai\") !== -1) return \"Cl\xE9 API\
+    \ OpenAI\";\n        if (d.indexOf(\"anthropic\") !== -1) return \"Cl\xE9 API\
+    \ Anthropic\";\n        if (d.indexOf(\"stripe\") !== -1) return \"Cl\xE9 secr\xE8\
+    te Stripe\";\n        return \"Secret / cl\xE9 d'API\";\n      }\n      return\
+    \ ev.detail || rt || \"Donn\xE9e sensible\";\n    }\n\n    function render(ev)\
+    \ {\n      var isBlock = ev.action === \"block\";\n      var isRedact = ev.action\
+    \ === \"redact\" || ev.action === \"canary\";\n      if (!isBlock && !isRedact)\
+    \ return; // n'affiche que blocages et caviardages\n\n      var empty = document.getElementById(\"\
+    empty\");\n      if (empty) empty.remove();\n\n      counts.total++;\n      if\
+    \ (isBlock) counts.block++; else counts.redact++;\n      var cBlock = document.getElementById(\"\
+    cBlock\");\n      var cRedact = document.getElementById(\"cRedact\");\n      var\
+    \ cTotal = document.getElementById(\"cTotal\");\n      cBlock.textContent = counts.block;\n\
+    \      cRedact.textContent = counts.redact;\n      cTotal.textContent = counts.total;\n\
+    \      bump(isBlock ? cBlock : cRedact);\n      bump(cTotal);\n\n      var row\
+    \ = document.createElement(\"div\");\n      row.className = \"event \" + (isBlock\
+    \ ? \"block\" : \"redact\");\n      var t = new Date(ev.timestamp || Date.now());\n\
+    \      var hh = isNaN(t.getTime()) ? \"\" : t.toLocaleTimeString(\"fr-FR\");\n\
+    \n      var tag = document.createElement(\"div\");\n      tag.className = \"tag\"\
+    ;\n      var tagText = document.createElement(\"span\");\n      tagText.textContent\
+    \ = isBlock ? \"BLOQU\xC9\" : \"CAVIARD\xC9\";\n      tag.appendChild(statusIcon(isBlock));\n\
+    \      tag.appendChild(tagText);\n\n      var what = document.createElement(\"\
+    div\");\n      what.className = \"what\";\n      what.textContent = label(ev);\
+    \ // textContent : pas d'injection HTML depuis le flux\n\n      var time = document.createElement(\"\
+    div\");\n      time.className = \"time\";\n      time.textContent = hh;\n\n  \
+    \    row.appendChild(tag);\n      row.appendChild(what);\n      row.appendChild(time);\n\
+    \n      var feed = document.getElementById(\"feed\");\n      feed.insertBefore(row,\
+    \ feed.firstChild);\n      while (feed.children.length > MAX_ROWS) feed.removeChild(feed.lastChild);\n\
     \    }\n\n    function connect() {\n      var dot = document.getElementById(\"\
     dot\");\n      var statusText = document.getElementById(\"statusText\");\n   \
     \   var es = new EventSource(\"/api/events\");\n      es.onopen = function ()\
@@ -940,33 +967,38 @@ data:
     \ }\n    @keyframes pulse {\n      0%   { box-shadow: 0 0 0 0 rgba(34,197,94,.55);\
     \ }\n      70%  { box-shadow: 0 0 0 9px rgba(34,197,94,0); }\n      100% { box-shadow:\
     \ 0 0 0 0 rgba(34,197,94,0); }\n    }\n    @media (prefers-reduced-motion: reduce)\
-    \ { .dot.live { animation: none; } .flip { transition: none !important; } }\n\n\
-    \    main { padding: 22px 32px 16px; max-width: 1360px; margin: 0 auto; }\n\n\
-    \    /* ---- Tableau par identit\xE9 ---- */\n    .card {\n      background: linear-gradient(180deg,\
-    \ var(--surface), var(--surface-2));\n      border: 1px solid var(--line); border-radius:\
-    \ 18px; overflow: hidden;\n    }\n    .table-wrap { overflow-x: auto; }\n    table\
-    \ { width: 100%; border-collapse: collapse; min-width: 1100px; }\n    thead th\
-    \ {\n      text-align: left; font-size: 12px; font-weight: 700; letter-spacing:\
-    \ .1em;\n      text-transform: uppercase; color: var(--muted);\n      padding:\
-    \ 16px 16px; border-bottom: 1px solid var(--line); white-space: nowrap;\n    }\n\
-    \    thead th.right, tbody td.right { text-align: right; }\n    thead th.center,\
-    \ tbody td.center { text-align: center; }\n    tbody td { padding: 16px; border-bottom:\
-    \ 1px solid rgba(51,65,85,.5); vertical-align: middle; }\n    tbody tr:last-child\
-    \ td { border-bottom: none; }\n\n    .agent { display: flex; align-items: center;\
-    \ gap: 14px; }\n    .avatar {\n      width: 44px; height: 44px; border-radius:\
-    \ 12px; flex: none;\n      display: grid; place-items: center; font-size: 22px;\n\
-    \      background: rgba(148,163,184,.12);\n    }\n    .avatar.human { background:\
-    \ rgba(56,189,248,.12); }\n    .avatar.agent { background: rgba(148,163,184,.14);\
-    \ }\n    .agent .meta .name { font-weight: 700; font-size: 17px; }\n    .agent\
-    \ .meta .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }\n    .kind\
-    \ {\n      display: inline-block; font-size: 11px; font-weight: 700; letter-spacing:\
-    \ .06em;\n      text-transform: uppercase; padding: 2px 8px; border-radius: 6px;\
-    \ margin-top: 4px;\n    }\n    .kind.human { color: var(--info); background: rgba(56,189,248,.12);\
-    \ border: 1px solid rgba(56,189,248,.35); }\n    .kind.agent { color: var(--muted);\
-    \ background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); }\n\
-    \n    .num { font-size: clamp(22px, 2.4vw, 30px); font-weight: 800; font-variant-numeric:\
-    \ tabular-nums; letter-spacing: -1px; }\n    td.right .num { display: inline-block;\
-    \ transition: transform .18s ease; }\n    td.right .num.bump { transform: scale(1.14);\
+    \ {\n      .dot.live { animation: none; }\n      .flip, tr.just-revoked { transition:\
+    \ none !important; animation: none !important; }\n      td.right .num, td.right\
+    \ .num.bump { transition: none !important; transform: none !important; }\n   \
+    \ }\n\n    main { padding: 22px 32px 16px; max-width: 1360px; margin: 0 auto;\
+    \ }\n\n    /* ---- Tableau par identit\xE9 ---- */\n    .card {\n      background:\
+    \ linear-gradient(180deg, var(--surface), var(--surface-2));\n      border: 1px\
+    \ solid var(--line); border-radius: 18px; overflow: hidden;\n    }\n    .table-wrap\
+    \ { overflow-x: auto; }\n    table { width: 100%; border-collapse: collapse; min-width:\
+    \ 1100px; }\n    thead th {\n      text-align: left; font-size: 12px; font-weight:\
+    \ 700; letter-spacing: .1em;\n      text-transform: uppercase; color: var(--muted);\n\
+    \      padding: 16px 16px; border-bottom: 1px solid var(--line); white-space:\
+    \ nowrap;\n    }\n    thead th.right, tbody td.right { text-align: right; }\n\
+    \    thead th.center, tbody td.center { text-align: center; }\n    tbody td {\
+    \ padding: 16px; border-bottom: 1px solid rgba(51,65,85,.5); vertical-align: middle;\
+    \ }\n    tbody tr:last-child td { border-bottom: none; }\n\n    .agent { display:\
+    \ flex; align-items: center; gap: 14px; }\n    .avatar {\n      width: 44px; height:\
+    \ 44px; border-radius: 12px; flex: none;\n      display: grid; place-items: center;\n\
+    \      background: rgba(148,163,184,.12); border: 1px solid transparent;\n   \
+    \ }\n    .avatar svg { width: 23px; height: 23px; }\n    .avatar.human { background:\
+    \ rgba(56,189,248,.12); border-color: rgba(56,189,248,.28); color: var(--info);\
+    \ }\n    .avatar.agent { background: rgba(148,163,184,.14); border-color: rgba(148,163,184,.28);\
+    \ color: var(--muted); }\n    .agent .meta .name { font-weight: 700; font-size:\
+    \ 17px; }\n    .agent .meta .sub { color: var(--muted); font-size: 13px; margin-top:\
+    \ 2px; }\n    .kind {\n      display: inline-block; font-size: 11px; font-weight:\
+    \ 700; letter-spacing: .06em;\n      text-transform: uppercase; padding: 2px 8px;\
+    \ border-radius: 6px; margin-top: 4px;\n    }\n    .kind.human { color: var(--info);\
+    \ background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.35); }\n\
+    \    .kind.agent { color: var(--muted); background: rgba(148,163,184,.10); border:\
+    \ 1px solid rgba(148,163,184,.3); }\n\n    .num { font-size: clamp(22px, 2.4vw,\
+    \ 30px); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing:\
+    \ -1px; }\n    td.right .num { display: inline-block; transition: transform .22s\
+    \ cubic-bezier(.2,.8,.2,1); }\n    td.right .num.bump { transform: scale(1.14);\
     \ }\n    .num.viol-0 { color: var(--ok); }\n    .num.viol-some { color: var(--warn);\
     \ }\n    .num.viol-hot { color: var(--block); }\n    .spend { font-size: 18px;\
     \ font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }\n\
@@ -984,42 +1016,53 @@ data:
     \ 14px; }\n    .decision.bloque   { color: var(--block); }\n    .decision.caviarde\
     \ { color: var(--warn); }\n    .decision.none     { color: var(--muted); }\n\n\
     \    /* ---- Type d'incident (classification d'audit Nc/C1/C2/C3) ---- */\n  \
-    \  .itype {\n      display: inline-block; font-size: 12.5px; font-weight: 700;\
-    \ white-space: nowrap;\n      padding: 4px 10px; border-radius: 999px; border:\
-    \ 1px solid transparent;\n    }\n    .itype.nc { color: var(--ok);    background:\
-    \ rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4); }\n    .itype.c1 { color:\
-    \ var(--warn);  background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.4);\
-    \ }\n    .itype.c2 { color: #FACC15;      background: rgba(250,204,21,.12); border-color:\
-    \ rgba(250,204,21,.4); }\n    .itype.c3 { color: var(--block); background: rgba(239,68,68,.14);\
-    \  border-color: rgba(239,68,68,.5); }\n\n    .proof { display: inline-flex; align-items:\
-    \ center; gap: 6px; font-size: 13px; color: var(--ok); font-weight: 600; }\n \
-    \   .proof svg { width: 15px; height: 15px; }\n    .proof.no { color: var(--muted);\
-    \ }\n\n    /* ---- Pastille de statut ---- */\n    .pill {\n      display: inline-flex;\
-    \ align-items: center; gap: 8px;\n      font-weight: 700; font-size: 14px; padding:\
-    \ 8px 13px; border-radius: 999px;\n      border: 1px solid transparent; white-space:\
-    \ nowrap;\n    }\n    .pill .badge { width: 10px; height: 10px; border-radius:\
-    \ 50%; flex: none; }\n    .pill.actif   { color: var(--ok);    background: rgba(34,197,94,.12);\
-    \  border-color: rgba(34,197,94,.4); }\n    .pill.actif   .badge { background:\
-    \ var(--ok); }\n    .pill.revoque { color: var(--block); background: rgba(239,68,68,.14);\
-    \  border-color: rgba(239,68,68,.5); }\n    .pill.revoque .badge { background:\
-    \ var(--block); }\n    .remediation { display: block; margin-top: 6px; font-size:\
+    \  .itype {\n      display: inline-flex; align-items: center; gap: 6px;\n    \
+    \  font-size: 12.5px; font-weight: 700; white-space: nowrap;\n      padding: 4px\
+    \ 10px 4px 8px; border-radius: 999px; border: 1px solid transparent;\n    }\n\
+    \    .itype svg { width: 14px; height: 14px; flex: none; }\n    .itype.nc { color:\
+    \ var(--ok);    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4);\
+    \ }\n    .itype.c1 { color: var(--warn);  background: rgba(245,158,11,.12); border-color:\
+    \ rgba(245,158,11,.4); }\n    .itype.c2 { color: #FACC15;      background: rgba(250,204,21,.12);\
+    \ border-color: rgba(250,204,21,.4); }\n    .itype.c3 { color: var(--block); background:\
+    \ rgba(239,68,68,.14);  border-color: rgba(239,68,68,.5); }\n\n    .proof { display:\
+    \ inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ok);\
+    \ font-weight: 600; }\n    .proof svg { width: 15px; height: 15px; }\n    .proof.no\
+    \ { color: var(--muted); }\n\n    /* ---- Pastille de statut ---- */\n    .pill\
+    \ {\n      display: inline-flex; align-items: center; gap: 7px;\n      font-weight:\
+    \ 700; font-size: 14px; padding: 8px 14px 8px 11px; border-radius: 999px;\n  \
+    \    border: 1px solid transparent; white-space: nowrap;\n    }\n    .pill svg\
+    \ { width: 16px; height: 16px; flex: none; }\n    .pill.actif   { color: var(--ok);\
+    \    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4); }\n \
+    \   .pill.revoque { color: var(--block); background: rgba(239,68,68,.14);  border-color:\
+    \ rgba(239,68,68,.5); }\n    .remediation { display: block; margin-top: 6px; font-size:\
     \ 11px; color: var(--muted); max-width: 180px; }\n\n    /* ---- Lien drill-down\
     \ Loki ---- */\n    .logs-link {\n      display: inline-flex; align-items: center;\
-    \ gap: 7px;\n      font-size: 13px; font-weight: 600; color: var(--info); text-decoration:\
-    \ none;\n      padding: 7px 12px; border: 1px solid rgba(56,189,248,.35); border-radius:\
-    \ 9px;\n      background: rgba(56,189,248,.08); white-space: nowrap; transition:\
-    \ background .15s ease;\n    }\n    .logs-link:hover { background: rgba(56,189,248,.18);\
-    \ }\n    .logs-link svg { width: 15px; height: 15px; }\n\n    tr.flip { transition:\
-    \ background-color .5s ease; }\n    tr.just-revoked { background: rgba(239,68,68,.10);\
-    \ animation: flash 1.2s ease 1; }\n    @keyframes flash { 0%,100% { background:\
-    \ rgba(239,68,68,.10); } 40% { background: rgba(239,68,68,.28); } }\n\n    /*\
-    \ ---- L\xE9gende ---- */\n    .legend { display: flex; flex-wrap: wrap; gap:\
-    \ 10px 16px; justify-content: center; padding: 18px 40px 8px; color: var(--muted);\
-    \ font-size: 13px; }\n    .legend .item { display: inline-flex; align-items: center;\
-    \ gap: 8px; }\n    .legend .sw { width: 12px; height: 12px; border-radius: 3px;\
-    \ }\n    .footnote { text-align: center; color: var(--muted); font-size: 12.5px;\
-    \ padding: 12px 40px 44px; max-width: 1000px; margin: 0 auto; line-height: 1.55;\
-    \ }\n    .footnote a { color: var(--info); }\n  </style>\n</head>\n<body>\n  <header>\n\
+    \ gap: 7px; cursor: pointer;\n      font-size: 13px; font-weight: 600; color:\
+    \ var(--info); text-decoration: none;\n      padding: 7px 12px; border: 1px solid\
+    \ rgba(56,189,248,.35); border-radius: 9px;\n      background: rgba(56,189,248,.08);\
+    \ white-space: nowrap;\n      transition: background .2s ease, border-color .2s\
+    \ ease, transform .2s ease;\n    }\n    .logs-link:hover { background: rgba(56,189,248,.2);\
+    \ border-color: rgba(56,189,248,.55); transform: translateY(-1px); }\n    .logs-link\
+    \ svg { width: 15px; height: 15px; }\n\n    /* ---- Accessibilit\xE9 : anneau\
+    \ de focus visible au clavier ---- */\n    a:focus-visible, .logs-link:focus-visible\
+    \ {\n      outline: 2px solid var(--info); outline-offset: 2px; border-radius:\
+    \ 9px;\n    }\n    @media (prefers-reduced-motion: reduce) {\n      .logs-link,\
+    \ .logs-link:hover { transition: none; transform: none; }\n    }\n\n    tr.flip\
+    \ { transition: background-color .5s ease; }\n    tr.just-revoked { background:\
+    \ rgba(239,68,68,.10); animation: flash 1.2s ease 1; }\n    @keyframes flash {\
+    \ 0%,100% { background: rgba(239,68,68,.10); } 40% { background: rgba(239,68,68,.28);\
+    \ } }\n\n    /* ---- L\xE9gende ---- */\n    .legend { display: flex; flex-wrap:\
+    \ wrap; gap: 10px 16px; justify-content: center; padding: 18px 40px 8px; color:\
+    \ var(--muted); font-size: 13px; }\n    .legend .item { display: inline-flex;\
+    \ align-items: center; gap: 8px; }\n    .legend .sw { width: 12px; height: 12px;\
+    \ border-radius: 3px; }\n    .footnote { text-align: center; color: var(--muted);\
+    \ font-size: 12.5px; padding: 12px 40px 44px; max-width: 1000px; margin: 0 auto;\
+    \ line-height: 1.55; }\n    .footnote a { color: var(--info); }\n\n    /* ----\
+    \ Reflow gracieux sur \xE9crans \xE9troits (375 / 768) ---- */\n    @media (max-width:\
+    \ 768px) {\n      header { padding: 26px 20px 4px; }\n      main { padding: 16px\
+    \ 14px 12px; }\n      .legend { padding: 14px 20px 6px; }\n      .footnote { padding:\
+    \ 12px 20px 40px; }\n      /* La table reste lisible : d\xE9filement horizontal\
+    \ via .table-wrap (overflow-x). */\n    }\n  </style>\n</head>\n<body>\n  <header>\n\
     \    <div class=\"brand\">\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"\
     currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
     round\" aria-hidden=\"true\"><path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5\
@@ -1053,14 +1096,30 @@ data:
     \ = requ\xEAte <em>bloqu\xE9e</em> par la protection (injection de prompt, exfiltration)\
     \ ; les secrets et donn\xE9es personnelles sont <em>caviard\xE9s</em> (la requ\xEA\
     te aboutit, expurg\xE9e). Le <strong>type d'incident</strong> reprend la <strong>classification</strong>\
-    \ d'audit la plus grave vue pour l'identit\xE9 : <span class=\"itype nc\">\u2705\
-    \ Propre</span> (Nc, aucune action DLP) \xB7 <span class=\"itype c1\">\U0001F7E0\
-    \ Caviard\xE9</span> (C1) \xB7 <span class=\"itype c2\">\U0001F7E0 PII / restreint</span>\
-    \ (C2) \xB7 <span class=\"itype c3\">\U0001F534 Attaque bloqu\xE9e</span> (C3).\
-    \ La <strong>classe de donn\xE9e capt\xE9e</strong> et la <strong>preuve sign\xE9\
-    e</strong> sont d\xE9riv\xE9es du journal d'audit sign\xE9. La coupure est appliqu\xE9\
-    e en direct : la cl\xE9 r\xE9voqu\xE9e est refus\xE9e d\xE8s la requ\xEAte suivante\
-    \ (401). \xAB <strong>Voir les logs</strong> \xBB ouvre le tableau de bord d'investigation\
+    \ d'audit la plus grave vue pour l'identit\xE9 : <span class=\"itype nc\"><svg\
+    \ viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"\
+    2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path\
+    \ d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1\
+    \ 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1\
+    \ 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/></svg> Propre</span> (Nc, aucune\
+    \ action DLP) \xB7 <span class=\"itype c1\"><svg viewBox=\"0 0 24 24\" fill=\"\
+    none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
+    round\" aria-hidden=\"true\"><path d=\"M9.88 9.88a3 3 0 1 0 4.24 4.24\"/><path\
+    \ d=\"M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67\
+    \ 2.68\"/><path d=\"M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0\
+    \ 0 5.39-1.61\"/><line x1=\"2\" x2=\"22\" y1=\"2\" y2=\"22\"/></svg> Caviard\xE9\
+    </span> (C1) \xB7 <span class=\"itype c2\"><svg viewBox=\"0 0 24 24\" fill=\"\
+    none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
+    round\" aria-hidden=\"true\"><rect width=\"18\" height=\"11\" x=\"3\" y=\"11\"\
+    \ rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg> PII / restreint</span>\
+    \ (C2) \xB7 <span class=\"itype c3\"><svg viewBox=\"0 0 24 24\" fill=\"none\"\
+    \ stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
+    round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"\
+    m4.9 4.9 14.2 14.2\"/></svg> Attaque bloqu\xE9e</span> (C3). La <strong>classe\
+    \ de donn\xE9e capt\xE9e</strong> et la <strong>preuve sign\xE9e</strong> sont\
+    \ d\xE9riv\xE9es du journal d'audit sign\xE9. La coupure est appliqu\xE9e en direct\
+    \ : la cl\xE9 r\xE9voqu\xE9e est refus\xE9e d\xE8s la requ\xEAte suivante (401).\
+    \ \xAB <strong>Voir les logs</strong> \xBB ouvre le tableau de bord d'investigation\
     \ par agent (Grafana), pr\xE9-filtr\xE9 sur l'identit\xE9 \u2014 chaque incident\
     \ au niveau requ\xEAte, avec son type, sa preuve sign\xE9e, v\xE9rifiable.\n \
     \   </p>\n  </main>\n\n  <script>\n    // Champs de /governance.json (\xE9crit\
@@ -1068,11 +1127,13 @@ data:
     \ tenant, type:\"human\"|\"agent\", emoji, label, sub, owner, env,\n    //   \
     \    requests, spend_eur, violations, data_classes:[\u2026],\n    //       decision:\"\
     bloqu\xE9\"|\"caviard\xE9\"|\"\u2014\", incident_type:\"NC\"|\"C1\"|\"C2\"|\"\
-    C3\",\n    //       signed:bool, revoked:bool } ] }\n    var THRESHOLD = 8;\n\
-    \    var prevViol = {};      // m\xE9morise les violations pour animer les incr\xE9\
-    ments\n    var wasRevoked = {};    // m\xE9morise l'\xE9tat r\xE9voqu\xE9 pour\
-    \ flasher la bascule\n\n    // Grafana est servi par otel-lgtm sur le port 3000\
-    \ (m\xEAme h\xF4te que la d\xE9mo).\n    var GRAFANA_BASE = location.protocol\
+    C3\",\n    //       signed:bool, revoked:bool } ] }\n    // NOTE : `emoji` reste\
+    \ dans le contrat mais n'est plus rendu \u2014 l'ic\xF4ne\n    // d'identit\xE9\
+    \ (user/bot) est d\xE9riv\xE9e de `type` et trac\xE9e en SVG en ligne.\n    var\
+    \ THRESHOLD = 8;\n    var prevViol = {};      // m\xE9morise les violations pour\
+    \ animer les incr\xE9ments\n    var wasRevoked = {};    // m\xE9morise l'\xE9\
+    tat r\xE9voqu\xE9 pour flasher la bascule\n\n    // Grafana est servi par otel-lgtm\
+    \ sur le port 3000 (m\xEAme h\xF4te que la d\xE9mo).\n    var GRAFANA_BASE = location.protocol\
     \ + \"//\" + location.hostname + \":3000\";\n\n    function violClass(v, revoked)\
     \ {\n      if (revoked || v >= THRESHOLD) return \"viol-hot\";\n      if (v >\
     \ 0) return \"viol-some\";\n      return \"viol-0\";\n    }\n\n    function eur(n)\
@@ -1088,41 +1149,87 @@ data:
     faut.\n      return GRAFANA_BASE + \"/d/grob-audit-agent\" +\n        \"?var-tenant=\"\
     \ + encodeURIComponent(tenant) +\n        \"&from=now-3h&to=now&theme=dark\";\n\
     \    }\n\n    var CLASS_LABEL = { menace: \"Menace\", secret: \"Secret\", financier:\
-    \ \"Financier\", pii: \"PII\" };\n\n    // Type d'incident dominant, d\xE9riv\xE9\
-    \ de la classification d'audit la plus grave\n    // vue pour l'identit\xE9 (champ\
+    \ \"Financier\", pii: \"PII\" };\n\n    var SVG_NS = \"http://www.w3.org/2000/svg\"\
+    ;\n\n    // Fabrique une ic\xF4ne SVG en ligne (style Lucide, trait `currentColor`,\
+    \ sans\n    // requ\xEAte r\xE9seau). `paths` : tableau de sp\xE9cifications d'\xE9\
+    l\xE9ments enfants \u2014\n    // chaque entr\xE9e { tag, ...attrs }. La couleur\
+    \ suit le texte du conteneur.\n    function svgIcon(paths, stroke) {\n      var\
+    \ s = document.createElementNS(SVG_NS, \"svg\");\n      s.setAttribute(\"viewBox\"\
+    , \"0 0 24 24\");\n      s.setAttribute(\"fill\", \"none\");\n      s.setAttribute(\"\
+    stroke\", \"currentColor\");\n      s.setAttribute(\"stroke-width\", stroke ||\
+    \ \"2\");\n      s.setAttribute(\"stroke-linecap\", \"round\");\n      s.setAttribute(\"\
+    stroke-linejoin\", \"round\");\n      s.setAttribute(\"aria-hidden\", \"true\"\
+    );\n      paths.forEach(function (spec) {\n        var el = document.createElementNS(SVG_NS,\
+    \ spec.tag);\n        Object.keys(spec).forEach(function (k) {\n          if (k\
+    \ !== \"tag\") el.setAttribute(k, spec[k]);\n        });\n        s.appendChild(el);\n\
+    \      });\n      return s;\n    }\n\n    // Avatar d'identit\xE9 : \xAB user\
+    \ \xBB pour un humain, \xAB bot \xBB pour un agent de\n    // service. D\xE9riv\xE9\
+    \ de `type` (le champ `emoji` n'est plus rendu).\n    function identityIcon(isAgent)\
+    \ {\n      if (isAgent) {\n        // Lucide \xAB bot \xBB\n        return svgIcon([\n\
+    \          { tag: \"path\", d: \"M12 8V4H8\" },\n          { tag: \"rect\", width:\
+    \ \"16\", height: \"12\", x: \"4\", y: \"8\", rx: \"2\" },\n          { tag: \"\
+    path\", d: \"M2 14h2\" },\n          { tag: \"path\", d: \"M20 14h2\" },\n   \
+    \       { tag: \"path\", d: \"M15 13v2\" },\n          { tag: \"path\", d: \"\
+    M9 13v2\" }\n        ]);\n      }\n      // Lucide \xAB user \xBB\n      return\
+    \ svgIcon([\n        { tag: \"path\", d: \"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4\
+    \ 4v2\" },\n        { tag: \"circle\", cx: \"12\", cy: \"7\", r: \"4\" }\n   \
+    \   ]);\n    }\n\n    // Glyphe SVG en t\xEAte de badge de type d'incident (remplace\
+    \ l'emoji).\n    function incidentIcon(key) {\n      if (key === \"C1\") {\n \
+    \       // Lucide \xAB eye-off \xBB \u2014 donn\xE9e caviard\xE9e / masqu\xE9\
+    e\n        return svgIcon([\n          { tag: \"path\", d: \"M9.88 9.88a3 3 0\
+    \ 1 0 4.24 4.24\" },\n          { tag: \"path\", d: \"M10.73 5.08A10.43 10.43\
+    \ 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68\" },\n          { tag:\
+    \ \"path\", d: \"M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0\
+    \ 5.39-1.61\" },\n          { tag: \"line\", x1: \"2\", x2: \"22\", y1: \"2\"\
+    , y2: \"22\" }\n        ]);\n      }\n      if (key === \"C2\") {\n        //\
+    \ Lucide \xAB lock \xBB \u2014 donn\xE9e restreinte / PII\n        return svgIcon([\n\
+    \          { tag: \"rect\", width: \"18\", height: \"11\", x: \"3\", y: \"11\"\
+    , rx: \"2\", ry: \"2\" },\n          { tag: \"path\", d: \"M7 11V7a5 5 0 0 1 10\
+    \ 0v4\" }\n        ]);\n      }\n      if (key === \"C3\") {\n        // Lucide\
+    \ \xAB ban \xBB \u2014 attaque bloqu\xE9e\n        return svgIcon([\n        \
+    \  { tag: \"circle\", cx: \"12\", cy: \"12\", r: \"10\" },\n          { tag: \"\
+    path\", d: \"m4.9 4.9 14.2 14.2\" }\n        ]);\n      }\n      // NC : Lucide\
+    \ \xAB shield-check \xBB \u2014 trafic propre\n      return svgIcon([\n      \
+    \  { tag: \"path\", d: \"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5\
+    \ 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51\
+    \ 3.81 17 5 19 5a1 1 0 0 1 1 1z\" },\n        { tag: \"path\", d: \"m9 12 2 2\
+    \ 4-4\" }\n      ]);\n    }\n\n    // Type d'incident dominant, d\xE9riv\xE9 de\
+    \ la classification d'audit la plus grave\n    // vue pour l'identit\xE9 (champ\
     \ `classification`, source de v\xE9rit\xE9 grob). Le JSON\n    // s\xE9rialise\
-    \ \xAB NC \xBB en majuscules ; on tol\xE8re \xAB Nc \xBB par s\xE9curit\xE9.\n\
-    \    var ITYPE = {\n      NC: { cls: \"nc\", text: \"\u2705 Propre\" },\n    \
-    \  C1: { cls: \"c1\", text: \"\U0001F7E0 Caviard\xE9\" },\n      C2: { cls: \"\
-    c2\", text: \"\U0001F7E0 PII / restreint\" },\n      C3: { cls: \"c3\", text:\
-    \ \"\U0001F534 Attaque bloqu\xE9e\" }\n    };\n\n    function buildIncidentType(it)\
-    \ {\n      var key = String(it || \"NC\").toUpperCase();\n      var def = ITYPE[key]\
-    \ || ITYPE.NC;\n      var span = document.createElement(\"span\");\n      span.className\
-    \ = \"itype \" + def.cls;\n      span.textContent = def.text;\n      return span;\n\
-    \    }\n\n    function buildChips(classes) {\n      var wrap = document.createElement(\"\
-    div\"); wrap.className = \"chips\";\n      if (!classes || !classes.length) {\n\
-    \        var c = document.createElement(\"span\"); c.className = \"chip none\"\
-    ; c.textContent = \"aucune\"; wrap.appendChild(c);\n        return wrap;\n   \
-    \   }\n      classes.forEach(function (cl) {\n        var c = document.createElement(\"\
-    span\");\n        c.className = \"chip \" + cl;\n        c.textContent = CLASS_LABEL[cl]\
-    \ || cl;\n        wrap.appendChild(c);\n      });\n      return wrap;\n    }\n\
-    \n    function checkIcon() {\n      var s = document.createElementNS(\"http://www.w3.org/2000/svg\"\
-    , \"svg\");\n      s.setAttribute(\"viewBox\", \"0 0 24 24\"); s.setAttribute(\"\
-    fill\", \"none\");\n      s.setAttribute(\"stroke\", \"currentColor\"); s.setAttribute(\"\
-    stroke-width\", \"2.5\");\n      s.setAttribute(\"stroke-linecap\", \"round\"\
-    ); s.setAttribute(\"stroke-linejoin\", \"round\");\n      var p = document.createElementNS(\"\
-    http://www.w3.org/2000/svg\", \"path\");\n      p.setAttribute(\"d\", \"M20 6\
-    \ 9 17l-5-5\"); s.appendChild(p);\n      return s;\n    }\n\n    function searchIcon()\
-    \ {\n      var s = document.createElementNS(\"http://www.w3.org/2000/svg\", \"\
-    svg\");\n      s.setAttribute(\"viewBox\", \"0 0 24 24\"); s.setAttribute(\"fill\"\
-    , \"none\");\n      s.setAttribute(\"stroke\", \"currentColor\"); s.setAttribute(\"\
-    stroke-width\", \"2\");\n      s.setAttribute(\"stroke-linecap\", \"round\");\
-    \ s.setAttribute(\"stroke-linejoin\", \"round\");\n      var c = document.createElementNS(\"\
-    http://www.w3.org/2000/svg\", \"circle\");\n      c.setAttribute(\"cx\", \"11\"\
-    ); c.setAttribute(\"cy\", \"11\"); c.setAttribute(\"r\", \"8\");\n      var l\
-    \ = document.createElementNS(\"http://www.w3.org/2000/svg\", \"path\");\n    \
-    \  l.setAttribute(\"d\", \"m21 21-4.3-4.3\"); s.appendChild(c); s.appendChild(l);\n\
-    \      return s;\n    }\n\n    function td(cls) { var e = document.createElement(\"\
+    \ \xAB NC \xBB en majuscules ; on tol\xE8re \xAB Nc \xBB par s\xE9curit\xE9. Le\
+    \ glyphe de\n    // t\xEAte est rendu en SVG (r\xE8gle design-system : pas d'emoji-ic\xF4\
+    ne).\n    var ITYPE = {\n      NC: { cls: \"nc\", text: \"Propre\" },\n      C1:\
+    \ { cls: \"c1\", text: \"Caviard\xE9\" },\n      C2: { cls: \"c2\", text: \"PII\
+    \ / restreint\" },\n      C3: { cls: \"c3\", text: \"Attaque bloqu\xE9e\" }\n\
+    \    };\n\n    function buildIncidentType(it) {\n      var key = String(it ||\
+    \ \"NC\").toUpperCase();\n      var def = ITYPE[key] || ITYPE.NC;\n      var span\
+    \ = document.createElement(\"span\");\n      span.className = \"itype \" + def.cls;\n\
+    \      span.appendChild(incidentIcon(key in ITYPE ? key : \"NC\"));\n      var\
+    \ t = document.createElement(\"span\");\n      t.textContent = def.text;\n   \
+    \   span.appendChild(t);\n      return span;\n    }\n\n    function buildChips(classes)\
+    \ {\n      var wrap = document.createElement(\"div\"); wrap.className = \"chips\"\
+    ;\n      if (!classes || !classes.length) {\n        var c = document.createElement(\"\
+    span\"); c.className = \"chip none\"; c.textContent = \"aucune\"; wrap.appendChild(c);\n\
+    \        return wrap;\n      }\n      classes.forEach(function (cl) {\n      \
+    \  var c = document.createElement(\"span\");\n        c.className = \"chip \"\
+    \ + cl;\n        c.textContent = CLASS_LABEL[cl] || cl;\n        wrap.appendChild(c);\n\
+    \      });\n      return wrap;\n    }\n\n    // Preuve sign\xE9e : Lucide \xAB\
+    \ badge-check \xBB (sceau + coche) plut\xF4t qu'une\n    // simple coche, pour\
+    \ mieux signifier l'attestation d'audit sign\xE9e.\n    function checkIcon() {\n\
+    \      return svgIcon([\n        { tag: \"path\", d: \"M3.85 8.62a4 4 0 0 1 4.78-4.77\
+    \ 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4\
+    \ 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z\" },\n        { tag: \"\
+    path\", d: \"m9 12 2 2 4-4\" }\n      ], \"2.2\");\n    }\n\n    // Investigation\
+    \ : Lucide \xAB search \xBB (loupe).\n    function searchIcon() {\n      return\
+    \ svgIcon([\n        { tag: \"circle\", cx: \"11\", cy: \"11\", r: \"8\" },\n\
+    \        { tag: \"path\", d: \"m21 21-4.3-4.3\" }\n      ]);\n    }\n\n    //\
+    \ Statut d'identit\xE9 : \xAB circle-check \xBB (actif) ou \xAB ban \xBB (r\xE9\
+    voqu\xE9).\n    function statusIcon(revoked) {\n      if (revoked) {\n       \
+    \ return svgIcon([\n          { tag: \"circle\", cx: \"12\", cy: \"12\", r: \"\
+    10\" },\n          { tag: \"path\", d: \"m4.9 4.9 14.2 14.2\" }\n        ], \"\
+    2.2\");\n      }\n      return svgIcon([\n        { tag: \"circle\", cx: \"12\"\
+    , cy: \"12\", r: \"10\" },\n        { tag: \"path\", d: \"m9 12 2 2 4-4\" }\n\
+    \      ], \"2.2\");\n    }\n\n    function td(cls) { var e = document.createElement(\"\
     td\"); if (cls) e.className = cls; return e; }\n\n    function render(data) {\n\
     \      THRESHOLD = data.threshold || THRESHOLD;\n      document.getElementById(\"\
     thr\").textContent = THRESHOLD;\n\n      var rows = document.getElementById(\"\
@@ -1130,11 +1237,11 @@ data:
     \ (a) {\n        var isAgent = a.type === \"agent\";\n        var tr = document.createElement(\"\
     tr\");\n        tr.className = \"flip\";\n        var justRevoked = a.revoked\
     \ && !wasRevoked[a.tenant];\n        if (justRevoked) tr.classList.add(\"just-revoked\"\
-    );\n\n        // --- Identit\xE9 : avatar (\U0001F464/\U0001F916) + nom + sous-titre\
-    \ + badge type ---\n        var tdAgent = td();\n        var wrap = document.createElement(\"\
-    div\"); wrap.className = \"agent\";\n        var av = document.createElement(\"\
-    div\"); av.className = \"avatar \" + (isAgent ? \"agent\" : \"human\");\n    \
-    \    av.textContent = a.emoji || (isAgent ? \"\U0001F916\" : \"\U0001F464\");\n\
+    );\n\n        // --- Identit\xE9 : avatar SVG (user/bot, d\xE9riv\xE9 de `type`)\
+    \ + nom + sous-titre + badge type ---\n        var tdAgent = td();\n        var\
+    \ wrap = document.createElement(\"div\"); wrap.className = \"agent\";\n      \
+    \  var av = document.createElement(\"div\"); av.className = \"avatar \" + (isAgent\
+    \ ? \"agent\" : \"human\");\n        av.appendChild(identityIcon(isAgent));\n\
     \        var meta = document.createElement(\"div\"); meta.className = \"meta\"\
     ;\n        var nm = document.createElement(\"div\"); nm.className = \"name\";\
     \ nm.textContent = a.label || a.tenant;\n        var sub = document.createElement(\"\
@@ -1174,11 +1281,10 @@ data:
     \ { var t2 = document.createElement(\"span\"); t2.textContent = \"\u2014\"; proof.appendChild(t2);\
     \ }\n        tdProof.appendChild(proof);\n\n        // --- Statut (+ indice de\
     \ rem\xE9diation si r\xE9voqu\xE9) ---\n        var tdStat = td(\"center\");\n\
-    \        var pill = document.createElement(\"span\");\n        var badge = document.createElement(\"\
-    span\"); badge.className = \"badge\";\n        var lbl = document.createElement(\"\
+    \        var pill = document.createElement(\"span\");\n        var lbl = document.createElement(\"\
     span\");\n        if (a.revoked) { pill.className = \"pill revoque\"; lbl.textContent\
-    \ = \"\u26D4 R\xC9VOQU\xC9\"; }\n        else           { pill.className = \"\
-    pill actif\";   lbl.textContent = \"\u2705 Actif\"; }\n        pill.appendChild(badge);\
+    \ = \"R\xC9VOQU\xC9\"; }\n        else           { pill.className = \"pill actif\"\
+    ;   lbl.textContent = \"Actif\"; }\n        pill.appendChild(statusIcon(a.revoked));\
     \ pill.appendChild(lbl); tdStat.appendChild(pill);\n        if (a.revoked) {\n\
     \          var rem = document.createElement(\"span\"); rem.className = \"remediation\"\
     ;\n          rem.textContent = \"Cl\xE9 r\xE9voqu\xE9e \u2014 preuve sign\xE9\

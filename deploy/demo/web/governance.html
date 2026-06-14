@@ -52,7 +52,11 @@
       70%  { box-shadow: 0 0 0 9px rgba(34,197,94,0); }
       100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
     }
-    @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } .flip { transition: none !important; } }
+    @media (prefers-reduced-motion: reduce) {
+      .dot.live { animation: none; }
+      .flip, tr.just-revoked { transition: none !important; animation: none !important; }
+      td.right .num, td.right .num.bump { transition: none !important; transform: none !important; }
+    }
 
     main { padding: 22px 32px 16px; max-width: 1360px; margin: 0 auto; }
 
@@ -76,11 +80,12 @@
     .agent { display: flex; align-items: center; gap: 14px; }
     .avatar {
       width: 44px; height: 44px; border-radius: 12px; flex: none;
-      display: grid; place-items: center; font-size: 22px;
-      background: rgba(148,163,184,.12);
+      display: grid; place-items: center;
+      background: rgba(148,163,184,.12); border: 1px solid transparent;
     }
-    .avatar.human { background: rgba(56,189,248,.12); }
-    .avatar.agent { background: rgba(148,163,184,.14); }
+    .avatar svg { width: 23px; height: 23px; }
+    .avatar.human { background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.28); color: var(--info); }
+    .avatar.agent { background: rgba(148,163,184,.14); border-color: rgba(148,163,184,.28); color: var(--muted); }
     .agent .meta .name { font-weight: 700; font-size: 17px; }
     .agent .meta .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
     .kind {
@@ -91,7 +96,7 @@
     .kind.agent { color: var(--muted); background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); }
 
     .num { font-size: clamp(22px, 2.4vw, 30px); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
-    td.right .num { display: inline-block; transition: transform .18s ease; }
+    td.right .num { display: inline-block; transition: transform .22s cubic-bezier(.2,.8,.2,1); }
     td.right .num.bump { transform: scale(1.14); }
     .num.viol-0 { color: var(--ok); }
     .num.viol-some { color: var(--warn); }
@@ -117,9 +122,11 @@
 
     /* ---- Type d'incident (classification d'audit Nc/C1/C2/C3) ---- */
     .itype {
-      display: inline-block; font-size: 12.5px; font-weight: 700; white-space: nowrap;
-      padding: 4px 10px; border-radius: 999px; border: 1px solid transparent;
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 12.5px; font-weight: 700; white-space: nowrap;
+      padding: 4px 10px 4px 8px; border-radius: 999px; border: 1px solid transparent;
     }
+    .itype svg { width: 14px; height: 14px; flex: none; }
     .itype.nc { color: var(--ok);    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4); }
     .itype.c1 { color: var(--warn);  background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.4); }
     .itype.c2 { color: #FACC15;      background: rgba(250,204,21,.12); border-color: rgba(250,204,21,.4); }
@@ -131,26 +138,33 @@
 
     /* ---- Pastille de statut ---- */
     .pill {
-      display: inline-flex; align-items: center; gap: 8px;
-      font-weight: 700; font-size: 14px; padding: 8px 13px; border-radius: 999px;
+      display: inline-flex; align-items: center; gap: 7px;
+      font-weight: 700; font-size: 14px; padding: 8px 14px 8px 11px; border-radius: 999px;
       border: 1px solid transparent; white-space: nowrap;
     }
-    .pill .badge { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .pill svg { width: 16px; height: 16px; flex: none; }
     .pill.actif   { color: var(--ok);    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4); }
-    .pill.actif   .badge { background: var(--ok); }
     .pill.revoque { color: var(--block); background: rgba(239,68,68,.14);  border-color: rgba(239,68,68,.5); }
-    .pill.revoque .badge { background: var(--block); }
     .remediation { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); max-width: 180px; }
 
     /* ---- Lien drill-down Loki ---- */
     .logs-link {
-      display: inline-flex; align-items: center; gap: 7px;
+      display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
       font-size: 13px; font-weight: 600; color: var(--info); text-decoration: none;
       padding: 7px 12px; border: 1px solid rgba(56,189,248,.35); border-radius: 9px;
-      background: rgba(56,189,248,.08); white-space: nowrap; transition: background .15s ease;
+      background: rgba(56,189,248,.08); white-space: nowrap;
+      transition: background .2s ease, border-color .2s ease, transform .2s ease;
     }
-    .logs-link:hover { background: rgba(56,189,248,.18); }
+    .logs-link:hover { background: rgba(56,189,248,.2); border-color: rgba(56,189,248,.55); transform: translateY(-1px); }
     .logs-link svg { width: 15px; height: 15px; }
+
+    /* ---- Accessibilité : anneau de focus visible au clavier ---- */
+    a:focus-visible, .logs-link:focus-visible {
+      outline: 2px solid var(--info); outline-offset: 2px; border-radius: 9px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .logs-link, .logs-link:hover { transition: none; transform: none; }
+    }
 
     tr.flip { transition: background-color .5s ease; }
     tr.just-revoked { background: rgba(239,68,68,.10); animation: flash 1.2s ease 1; }
@@ -162,6 +176,15 @@
     .legend .sw { width: 12px; height: 12px; border-radius: 3px; }
     .footnote { text-align: center; color: var(--muted); font-size: 12.5px; padding: 12px 40px 44px; max-width: 1000px; margin: 0 auto; line-height: 1.55; }
     .footnote a { color: var(--info); }
+
+    /* ---- Reflow gracieux sur écrans étroits (375 / 768) ---- */
+    @media (max-width: 768px) {
+      header { padding: 26px 20px 4px; }
+      main { padding: 16px 14px 12px; }
+      .legend { padding: 14px 20px 6px; }
+      .footnote { padding: 12px 20px 40px; }
+      /* La table reste lisible : défilement horizontal via .table-wrap (overflow-x). */
+    }
   </style>
 </head>
 <body>
@@ -206,7 +229,7 @@
       </div>
     </div>
     <p class="footnote">
-      Conso indicative (backend simulé, aucun coût réel). Une <strong>violation</strong> = requête <em>bloquée</em> par la protection (injection de prompt, exfiltration) ; les secrets et données personnelles sont <em>caviardés</em> (la requête aboutit, expurgée). Le <strong>type d'incident</strong> reprend la <strong>classification</strong> d'audit la plus grave vue pour l'identité : <span class="itype nc">✅ Propre</span> (Nc, aucune action DLP) · <span class="itype c1">🟠 Caviardé</span> (C1) · <span class="itype c2">🟠 PII / restreint</span> (C2) · <span class="itype c3">🔴 Attaque bloquée</span> (C3). La <strong>classe de donnée captée</strong> et la <strong>preuve signée</strong> sont dérivées du journal d'audit signé. La coupure est appliquée en direct : la clé révoquée est refusée dès la requête suivante (401). « <strong>Voir les logs</strong> » ouvre le tableau de bord d'investigation par agent (Grafana), pré-filtré sur l'identité — chaque incident au niveau requête, avec son type, sa preuve signée, vérifiable.
+      Conso indicative (backend simulé, aucun coût réel). Une <strong>violation</strong> = requête <em>bloquée</em> par la protection (injection de prompt, exfiltration) ; les secrets et données personnelles sont <em>caviardés</em> (la requête aboutit, expurgée). Le <strong>type d'incident</strong> reprend la <strong>classification</strong> d'audit la plus grave vue pour l'identité : <span class="itype nc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg> Propre</span> (Nc, aucune action DLP) · <span class="itype c1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg> Caviardé</span> (C1) · <span class="itype c2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> PII / restreint</span> (C2) · <span class="itype c3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg> Attaque bloquée</span> (C3). La <strong>classe de donnée captée</strong> et la <strong>preuve signée</strong> sont dérivées du journal d'audit signé. La coupure est appliquée en direct : la clé révoquée est refusée dès la requête suivante (401). « <strong>Voir les logs</strong> » ouvre le tableau de bord d'investigation par agent (Grafana), pré-filtré sur l'identité — chaque incident au niveau requête, avec son type, sa preuve signée, vérifiable.
     </p>
   </main>
 
@@ -217,6 +240,8 @@
     //       requests, spend_eur, violations, data_classes:[…],
     //       decision:"bloqué"|"caviardé"|"—", incident_type:"NC"|"C1"|"C2"|"C3",
     //       signed:bool, revoked:bool } ] }
+    // NOTE : `emoji` reste dans le contrat mais n'est plus rendu — l'icône
+    // d'identité (user/bot) est dérivée de `type` et tracée en SVG en ligne.
     var THRESHOLD = 8;
     var prevViol = {};      // mémorise les violations pour animer les incréments
     var wasRevoked = {};    // mémorise l'état révoqué pour flasher la bascule
@@ -248,14 +273,92 @@
 
     var CLASS_LABEL = { menace: "Menace", secret: "Secret", financier: "Financier", pii: "PII" };
 
+    var SVG_NS = "http://www.w3.org/2000/svg";
+
+    // Fabrique une icône SVG en ligne (style Lucide, trait `currentColor`, sans
+    // requête réseau). `paths` : tableau de spécifications d'éléments enfants —
+    // chaque entrée { tag, ...attrs }. La couleur suit le texte du conteneur.
+    function svgIcon(paths, stroke) {
+      var s = document.createElementNS(SVG_NS, "svg");
+      s.setAttribute("viewBox", "0 0 24 24");
+      s.setAttribute("fill", "none");
+      s.setAttribute("stroke", "currentColor");
+      s.setAttribute("stroke-width", stroke || "2");
+      s.setAttribute("stroke-linecap", "round");
+      s.setAttribute("stroke-linejoin", "round");
+      s.setAttribute("aria-hidden", "true");
+      paths.forEach(function (spec) {
+        var el = document.createElementNS(SVG_NS, spec.tag);
+        Object.keys(spec).forEach(function (k) {
+          if (k !== "tag") el.setAttribute(k, spec[k]);
+        });
+        s.appendChild(el);
+      });
+      return s;
+    }
+
+    // Avatar d'identité : « user » pour un humain, « bot » pour un agent de
+    // service. Dérivé de `type` (le champ `emoji` n'est plus rendu).
+    function identityIcon(isAgent) {
+      if (isAgent) {
+        // Lucide « bot »
+        return svgIcon([
+          { tag: "path", d: "M12 8V4H8" },
+          { tag: "rect", width: "16", height: "12", x: "4", y: "8", rx: "2" },
+          { tag: "path", d: "M2 14h2" },
+          { tag: "path", d: "M20 14h2" },
+          { tag: "path", d: "M15 13v2" },
+          { tag: "path", d: "M9 13v2" }
+        ]);
+      }
+      // Lucide « user »
+      return svgIcon([
+        { tag: "path", d: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" },
+        { tag: "circle", cx: "12", cy: "7", r: "4" }
+      ]);
+    }
+
+    // Glyphe SVG en tête de badge de type d'incident (remplace l'emoji).
+    function incidentIcon(key) {
+      if (key === "C1") {
+        // Lucide « eye-off » — donnée caviardée / masquée
+        return svgIcon([
+          { tag: "path", d: "M9.88 9.88a3 3 0 1 0 4.24 4.24" },
+          { tag: "path", d: "M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" },
+          { tag: "path", d: "M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" },
+          { tag: "line", x1: "2", x2: "22", y1: "2", y2: "22" }
+        ]);
+      }
+      if (key === "C2") {
+        // Lucide « lock » — donnée restreinte / PII
+        return svgIcon([
+          { tag: "rect", width: "18", height: "11", x: "3", y: "11", rx: "2", ry: "2" },
+          { tag: "path", d: "M7 11V7a5 5 0 0 1 10 0v4" }
+        ]);
+      }
+      if (key === "C3") {
+        // Lucide « ban » — attaque bloquée
+        return svgIcon([
+          { tag: "circle", cx: "12", cy: "12", r: "10" },
+          { tag: "path", d: "m4.9 4.9 14.2 14.2" }
+        ]);
+      }
+      // NC : Lucide « shield-check » — trafic propre
+      return svgIcon([
+        { tag: "path", d: "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" },
+        { tag: "path", d: "m9 12 2 2 4-4" }
+      ]);
+    }
+
     // Type d'incident dominant, dérivé de la classification d'audit la plus grave
     // vue pour l'identité (champ `classification`, source de vérité grob). Le JSON
-    // sérialise « NC » en majuscules ; on tolère « Nc » par sécurité.
+    // sérialise « NC » en majuscules ; on tolère « Nc » par sécurité. Le glyphe de
+    // tête est rendu en SVG (règle design-system : pas d'emoji-icône).
     var ITYPE = {
-      NC: { cls: "nc", text: "✅ Propre" },
-      C1: { cls: "c1", text: "🟠 Caviardé" },
-      C2: { cls: "c2", text: "🟠 PII / restreint" },
-      C3: { cls: "c3", text: "🔴 Attaque bloquée" }
+      NC: { cls: "nc", text: "Propre" },
+      C1: { cls: "c1", text: "Caviardé" },
+      C2: { cls: "c2", text: "PII / restreint" },
+      C3: { cls: "c3", text: "Attaque bloquée" }
     };
 
     function buildIncidentType(it) {
@@ -263,7 +366,10 @@
       var def = ITYPE[key] || ITYPE.NC;
       var span = document.createElement("span");
       span.className = "itype " + def.cls;
-      span.textContent = def.text;
+      span.appendChild(incidentIcon(key in ITYPE ? key : "NC"));
+      var t = document.createElement("span");
+      t.textContent = def.text;
+      span.appendChild(t);
       return span;
     }
 
@@ -282,26 +388,35 @@
       return wrap;
     }
 
+    // Preuve signée : Lucide « badge-check » (sceau + coche) plutôt qu'une
+    // simple coche, pour mieux signifier l'attestation d'audit signée.
     function checkIcon() {
-      var s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("fill", "none");
-      s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", "2.5");
-      s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
-      var p = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      p.setAttribute("d", "M20 6 9 17l-5-5"); s.appendChild(p);
-      return s;
+      return svgIcon([
+        { tag: "path", d: "M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" },
+        { tag: "path", d: "m9 12 2 2 4-4" }
+      ], "2.2");
     }
 
+    // Investigation : Lucide « search » (loupe).
     function searchIcon() {
-      var s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("fill", "none");
-      s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", "2");
-      s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
-      var c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      c.setAttribute("cx", "11"); c.setAttribute("cy", "11"); c.setAttribute("r", "8");
-      var l = document.createElementNS("http://www.w3.org/2000/svg", "path");
-      l.setAttribute("d", "m21 21-4.3-4.3"); s.appendChild(c); s.appendChild(l);
-      return s;
+      return svgIcon([
+        { tag: "circle", cx: "11", cy: "11", r: "8" },
+        { tag: "path", d: "m21 21-4.3-4.3" }
+      ]);
+    }
+
+    // Statut d'identité : « circle-check » (actif) ou « ban » (révoqué).
+    function statusIcon(revoked) {
+      if (revoked) {
+        return svgIcon([
+          { tag: "circle", cx: "12", cy: "12", r: "10" },
+          { tag: "path", d: "m4.9 4.9 14.2 14.2" }
+        ], "2.2");
+      }
+      return svgIcon([
+        { tag: "circle", cx: "12", cy: "12", r: "10" },
+        { tag: "path", d: "m9 12 2 2 4-4" }
+      ], "2.2");
     }
 
     function td(cls) { var e = document.createElement("td"); if (cls) e.className = cls; return e; }
@@ -320,11 +435,11 @@
         var justRevoked = a.revoked && !wasRevoked[a.tenant];
         if (justRevoked) tr.classList.add("just-revoked");
 
-        // --- Identité : avatar (👤/🤖) + nom + sous-titre + badge type ---
+        // --- Identité : avatar SVG (user/bot, dérivé de `type`) + nom + sous-titre + badge type ---
         var tdAgent = td();
         var wrap = document.createElement("div"); wrap.className = "agent";
         var av = document.createElement("div"); av.className = "avatar " + (isAgent ? "agent" : "human");
-        av.textContent = a.emoji || (isAgent ? "🤖" : "👤");
+        av.appendChild(identityIcon(isAgent));
         var meta = document.createElement("div"); meta.className = "meta";
         var nm = document.createElement("div"); nm.className = "name"; nm.textContent = a.label || a.tenant;
         var sub = document.createElement("div"); sub.className = "sub";
@@ -386,11 +501,10 @@
         // --- Statut (+ indice de remédiation si révoqué) ---
         var tdStat = td("center");
         var pill = document.createElement("span");
-        var badge = document.createElement("span"); badge.className = "badge";
         var lbl = document.createElement("span");
-        if (a.revoked) { pill.className = "pill revoque"; lbl.textContent = "⛔ RÉVOQUÉ"; }
-        else           { pill.className = "pill actif";   lbl.textContent = "✅ Actif"; }
-        pill.appendChild(badge); pill.appendChild(lbl); tdStat.appendChild(pill);
+        if (a.revoked) { pill.className = "pill revoque"; lbl.textContent = "RÉVOQUÉ"; }
+        else           { pill.className = "pill actif";   lbl.textContent = "Actif"; }
+        pill.appendChild(statusIcon(a.revoked)); pill.appendChild(lbl); tdStat.appendChild(pill);
         if (a.revoked) {
           var rem = document.createElement("span"); rem.className = "remediation";
           rem.textContent = "Clé révoquée — preuve signée exportable.";
