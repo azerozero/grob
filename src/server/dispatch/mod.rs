@@ -684,6 +684,34 @@ fn dlp_reports_triggered<T>(reports: &[T]) -> bool {
     !reports.is_empty()
 }
 
+/// Builds the audit `dlp_rules_triggered` entries for a set of redact/warn reports.
+///
+/// Each entry is `"<rule_type>: <detail>"` (e.g. `"secret: AWS access key"`),
+/// mirroring the format the block path uses so a caviardage is named in the
+/// per-tenant audit log exactly like a block is.
+///
+/// Extracted so the formatting is unit-testable without a full pipeline.
+#[inline]
+fn redaction_audit_rules(reports: &[crate::features::dlp::DlpActionReport]) -> Vec<String> {
+    reports
+        .iter()
+        .map(|r| format!("{}: {}", r.rule_type, r.detail))
+        .collect()
+}
+
+/// Returns `true` when any DLP report concerns personally identifiable information.
+///
+/// Drives the C2 (Restricted) vs C1 (Internal) split for a caviardage: a
+/// redacted PII field is Restricted, a redacted secret is Internal.
+///
+/// Extracted so the PII guard is unit-testable without a full pipeline.
+#[inline]
+fn reports_have_pii(reports: &[crate::features::dlp::DlpActionReport]) -> bool {
+    reports
+        .iter()
+        .any(|r| matches!(r.rule_type, crate::features::dlp::DlpRuleType::Pii))
+}
+
 /// Logs a warning when tool validation stripped malformed inbound tools.
 ///
 /// Extracted so the non-empty guard is unit-testable; the inline `if` was
@@ -718,6 +746,28 @@ fn scan_dlp_input(
         Ok(reports) => {
             let triggered = dlp_reports_triggered(&reports);
             ctx.emit_dlp_events(&reports, DlpDirection::Request);
+            if triggered {
+                // A caviardage (redact/warn) is a security-relevant event in
+                // its own right, just like a block. Emit a classified audit
+                // entry here so the per-tenant audit log — and the Loki
+                // dashboards built on it — record the redaction as C1 (secret,
+                // Internal) or C2 (PII, Restricted), instead of leaving the
+                // request indistinguishable from clean (Nc) traffic on the
+                // later Response entry. Blocks already do this in the Err arm.
+                ctx.log_audit_if_enabled(AuditEntry {
+                    action: crate::security::audit_log::AuditEvent::DlpWarn,
+                    backend: "REDACTED",
+                    dlp_rules: redaction_audit_rules(&reports),
+                    duration_ms: ctx.start_time.elapsed().as_millis() as u64,
+                    model_name: Some(&ctx.model),
+                    token_counts: None,
+                    risk_level: Some(crate::security::audit_log::RiskLevel::Medium),
+                    dlp_blocked: false,
+                    dlp_had_injection: false,
+                    dlp_had_pii: reports_have_pii(&reports),
+                    dlp_had_redact_or_warn: true,
+                });
+            }
             Ok(triggered)
         }
         Err(block_err) => {
@@ -1039,6 +1089,44 @@ mod tests {
         // The "delete !" mutant would invert both outcomes.
         assert!(!dlp_reports_triggered::<()>(&[]));
         assert!(dlp_reports_triggered(&[()]));
+    }
+
+    fn report(
+        rule_type: crate::features::dlp::DlpRuleType,
+        detail: &str,
+    ) -> crate::features::dlp::DlpActionReport {
+        crate::features::dlp::DlpActionReport {
+            action: crate::features::dlp::DlpAction::Redact,
+            rule_type,
+            detail: detail.to_string(),
+        }
+    }
+
+    #[test]
+    fn redaction_audit_rules_names_each_report() {
+        use crate::features::dlp::DlpRuleType;
+        // Each report becomes "<rule_type>: <detail>" so the audit log names a
+        // caviardage like it names a block. Empty in, empty out.
+        assert!(redaction_audit_rules(&[]).is_empty());
+        let rules = redaction_audit_rules(&[
+            report(DlpRuleType::Secret, "AWS access key"),
+            report(DlpRuleType::Pii, "credit card"),
+        ]);
+        assert_eq!(rules, vec!["secret: AWS access key", "pii: credit card"]);
+    }
+
+    #[test]
+    fn reports_have_pii_detects_only_pii_rule_type() {
+        use crate::features::dlp::DlpRuleType;
+        // PII drives the C2-vs-C1 split. A secret-only set is C1 (false); any
+        // PII report flips it to C2 (true). The `any` → `all` mutant would miss
+        // a mixed set, so assert all three shapes.
+        assert!(!reports_have_pii(&[]));
+        assert!(!reports_have_pii(&[report(DlpRuleType::Secret, "token")]));
+        assert!(reports_have_pii(&[
+            report(DlpRuleType::Secret, "token"),
+            report(DlpRuleType::Pii, "iban"),
+        ]));
     }
 
     #[traced_test]
