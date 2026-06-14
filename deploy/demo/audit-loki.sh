@@ -57,6 +57,29 @@ tenant_of() {
   printf '%s' "$1" | sed -n 's/.*"tenant_id":"\([^"]*\)".*/\1/p'
 }
 
+# Dérive un NIVEAU de log (level) de la ligne d'audit, depuis son action et sa
+# classification. Sans niveau explicite, Loki affiche « detected_level=unknown »
+# (il ne sait pas deviner la gravité d'une ligne JSON métier). En émettant un
+# `level` standard, Grafana colore le journal par gravité et la gravité épouse
+# le TYPE d'incident : injection bloquée=critical, exfiltration bloquée=error,
+# caviardage=warning, trafic normal=info.
+#   C3 (blocage + injection)  -> critical
+#   blocage DLP (C2 exfil)     -> error
+#   DLP_WARN (caviardage C1/C2)-> warning
+#   ERROR (échec dispatch)     -> error
+#   reste (RESPONSE/NC, …)     -> info
+level_of() {
+  l="$1"
+  act=$(printf '%s' "$l" | sed -n 's/.*"action":"\([^"]*\)".*/\1/p')
+  cls=$(printf '%s' "$l" | sed -n 's/.*"classification":"\([^"]*\)".*/\1/p')
+  case "$act" in
+    *BLOCK*) [ "$cls" = "C3" ] && echo "critical" || echo "error" ;;
+    DLP_WARN) echo "warning" ;;
+    ERROR)    echo "error" ;;
+    *)        echo "info" ;;
+  esac
+}
+
 # Échappe une ligne pour l'embarquer comme valeur de chaîne JSON : antislash
 # d'abord, puis guillemets. (Les lignes d'audit n'ont ni saut de ligne ni
 # tabulation : une ligne JSONL = une ligne.)
@@ -92,11 +115,14 @@ push_line() {
   [ -n "$line" ] || return 0
   tenant=$(tenant_of "$line")
   [ -n "$tenant" ] || tenant="unknown"
+  lvl=$(level_of "$line")
   loki_ts            # met à jour TS (globale) sans sous-shell
   ts="$TS"
   esc=$(json_escape "$line")
-  payload=$(printf '{"streams":[{"stream":{"service":"%s","tenant":"%s"},"values":[["%s","%s"]]}]}' \
-    "$SERVICE" "$tenant" "$ts" "$esc")
+  # `level` est une étiquette de stream standard : Loki la reconnaît comme
+  # niveau (plus de detected_level=unknown) et Grafana colore le journal.
+  payload=$(printf '{"streams":[{"stream":{"service":"%s","tenant":"%s","level":"%s"},"values":[["%s","%s"]]}]}' \
+    "$SERVICE" "$tenant" "$lvl" "$ts" "$esc")
   # -s silencieux ; on ignore l'échec réseau ponctuel (la prochaine ligne suivra).
   curl -s -o /dev/null -X POST "$LOKI_URL" \
     -H 'Content-Type: application/json' \
