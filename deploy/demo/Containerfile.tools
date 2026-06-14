@@ -1,0 +1,23 @@
+# =============================================================================
+# Image « outils » de la démo gouvernance — grob CLI + shell POSIX
+# =============================================================================
+# L'image grob publiée est « scratch » : binaire statique, AUCUN shell. Les
+# étapes d'orchestration de la démo (provisionner les clés, surveiller l'audit,
+# révoquer en direct) ont besoin d'un shell + sed/grep + le binaire grob.
+#
+# On copie donc le binaire grob (statique musl, portable) de l'image publiée
+# vers une base alpine minimale. AUCUNE modification du code source de grob :
+# on réutilise tel quel le binaire de ghcr.io/azerozero/grob:0.36.
+#
+# Construite une fois par `make demo` / le générateur, mise en cache ensuite.
+# Tag attendu par le manifeste kube : localhost/grob-demo-tools:latest
+# =============================================================================
+
+FROM ghcr.io/azerozero/grob:0.36 AS grobimg
+
+FROM docker.io/library/alpine:3.20
+# coreutils non requis : sed/grep/sh de busybox suffisent. curl pour le seed.
+RUN apk add --no-cache curl
+# Binaire grob statique : fonctionne tel quel sur alpine.
+COPY --from=grobimg /usr/local/bin/grob /usr/local/bin/grob
+ENTRYPOINT []

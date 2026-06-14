@@ -1,0 +1,107 @@
+# =============================================================================
+# Démo grob « clé en main » pour RSSI / conformité / achats
+# =============================================================================
+# Une seule commande :   docker compose -f deploy/demo/docker-compose.yml up
+# (podman-compose fonctionne aussi.)
+#
+# Cinq services :
+#   grob   — la passerelle IA (image publiée), DLP + budget + /metrics + SSE
+#   mock   — backend « echo » local : aucun appel LLM réel, coût = 0
+#   lgtm   — Grafana + Prometheus + Loki + Tempo (image grafana/otel-lgtm)
+#   web    — page « blocages en direct » + relais SSE même-origine
+#   seed   — générateur de trafic déterministe (propre + secrets + attaques)
+#
+# Une fois lancé :
+#   • Tableau de bord RSSI  ->  http://localhost:3000  (admin / admin, ou anon)
+#   • Blocages en direct    ->  http://localhost:8088
+#   • API grob              ->  http://localhost:8080
+# =============================================================================
+
+name: grob-demo
+
+services:
+  # --- La passerelle grob -----------------------------------------------------
+  grob:
+    # Image grob PATCHÉE buildée localement (Containerfile à la racine de deploy/demo) :
+    # elle classe les caviardages en C1/C2 (DLP_WARN), contrairement à la release
+    # publiée. `docker compose up --build` la construit ; sinon `make grob-img`.
+    image: localhost/grob-demo:local
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Containerfile
+    command: ["run", "--json-logs", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      - GROB_CONFIG=/etc/grob/config.toml
+      - GROB_HOME=/var/lib/grob
+      # Renvoie TOUT le trafic fournisseur vers le backend echo -> coût LLM = 0.
+      # Le mock écoute sur 8889 (cf. mock-backend.conf : évite la collision avec
+      # les self-métriques d'otel-lgtm sur 8888 dans le déploiement kube).
+      - GROB_MOCK_BACKEND=http://mock:8889
+      - RUST_LOG=info
+    volumes:
+      - ./grob.config.toml:/etc/grob/config.toml:ro
+      - grob-data:/var/lib/grob
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mock
+    restart: unless-stopped
+
+  # --- Backend « echo » déterministe (zéro coût) ------------------------------
+  mock:
+    image: docker.io/library/nginx:1.27-alpine
+    volumes:
+      - ./mock-backend.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+
+  # --- Stack d'observabilité tout-en-un ---------------------------------------
+  lgtm:
+    image: docker.io/grafana/otel-lgtm:0.11.10
+    environment:
+      # Coupe l'accès anonyme Admin par défaut de l'image ; admin/admin suffit.
+      # (Laisser à true rendrait le tableau de bord visible sans login — au
+      # choix selon le contexte de démo.)
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      # Ouvre directement sur le tableau de bord métier.
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/otel-lgtm/grafana/conf/provisioning/dashboards/custom/grob-rssi-business.json
+    volumes:
+      # Ajoute le scrape de grob /metrics (le fichier par défaut n'en a aucun).
+      - ./prometheus.yaml:/otel-lgtm/prometheus.yaml:ro
+      # Provisionne le tableau de bord RSSI.
+      - ./grafana/provisioning/demo-dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/custom.yaml:ro
+      - ../grafana/grob-rssi-business.json:/otel-lgtm/grafana/conf/provisioning/dashboards/custom/grob-rssi-business.json:ro
+    ports:
+      - "3000:3000"   # Grafana
+      - "9090:9090"   # Prometheus (diagnostic)
+    depends_on:
+      - grob
+    restart: unless-stopped
+
+  # --- Page « blocages en direct » + relais SSE -------------------------------
+  web:
+    image: docker.io/library/nginx:1.27-alpine
+    volumes:
+      - ./web/index.html:/usr/share/nginx/html/index.html:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8088:80"
+    depends_on:
+      - grob
+    restart: unless-stopped
+
+  # --- Trafic déterministe 24/7 -----------------------------------------------
+  seed:
+    image: docker.io/curlimages/curl:8.11.1
+    entrypoint: ["sh", "/seed.sh"]
+    environment:
+      - GROB_URL=http://grob:8080
+      - INTERVAL=2
+    volumes:
+      - ./seed.sh:/seed.sh:ro
+    depends_on:
+      - grob
+    restart: unless-stopped
+
+volumes:
+  grob-data:

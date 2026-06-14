@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grob — Console de gouvernance des identités IA</title>
+  <!-- Design system « Trust & Authority » : Lexend (titres) + Source Sans 3 (corps). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg:        #020617;
+      --surface:   #0F172A;
+      --surface-2: #1E293B;
+      --line:      #334155;
+      --text:      #F8FAFC;
+      --muted:     #94A3B8;
+      --ok:        #22C55E;  /* actif / propre */
+      --warn:      #F59E0B;  /* alerte / caviardé */
+      --block:     #EF4444;  /* révoqué / violations */
+      --info:      #38BDF8;  /* liens / drill-down */
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(1100px 560px at 50% -12%, #0b1b3a 0%, var(--bg) 58%);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, .num { font-family: "Lexend", "Source Sans 3", sans-serif; }
+
+    header { padding: 34px 40px 4px; text-align: center; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; }
+    .brand svg { width: 34px; height: 34px; color: var(--ok); }
+    h1 { margin: 0; font-size: clamp(24px, 3.4vw, 34px); font-weight: 800; letter-spacing: -0.6px; }
+    header p { margin: 12px auto 0; max-width: 880px; color: var(--muted); font-size: 17px; line-height: 1.5; }
+    header p strong { color: var(--text); font-weight: 600; }
+    .status {
+      display: inline-flex; align-items: center; gap: 9px;
+      margin-top: 18px; font-size: 14px; color: var(--muted);
+      padding: 7px 15px; border: 1px solid var(--line); border-radius: 999px;
+      background: rgba(15,23,42,.7);
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .dot.live { background: var(--ok); box-shadow: 0 0 0 0 rgba(34,197,94,.6); animation: pulse 1.8s infinite; }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(34,197,94,.55); }
+      70%  { box-shadow: 0 0 0 9px rgba(34,197,94,0); }
+      100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+    }
+    @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } .flip { transition: none !important; } }
+
+    main { padding: 22px 32px 16px; max-width: 1360px; margin: 0 auto; }
+
+    /* ---- Tableau par identité ---- */
+    .card {
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
+    }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 1100px; }
+    thead th {
+      text-align: left; font-size: 12px; font-weight: 700; letter-spacing: .1em;
+      text-transform: uppercase; color: var(--muted);
+      padding: 16px 16px; border-bottom: 1px solid var(--line); white-space: nowrap;
+    }
+    thead th.right, tbody td.right { text-align: right; }
+    thead th.center, tbody td.center { text-align: center; }
+    tbody td { padding: 16px; border-bottom: 1px solid rgba(51,65,85,.5); vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: none; }
+
+    .agent { display: flex; align-items: center; gap: 14px; }
+    .avatar {
+      width: 44px; height: 44px; border-radius: 12px; flex: none;
+      display: grid; place-items: center; font-size: 22px;
+      background: rgba(148,163,184,.12);
+    }
+    .avatar.human { background: rgba(56,189,248,.12); }
+    .avatar.agent { background: rgba(148,163,184,.14); }
+    .agent .meta .name { font-weight: 700; font-size: 17px; }
+    .agent .meta .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+    .kind {
+      display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      text-transform: uppercase; padding: 2px 8px; border-radius: 6px; margin-top: 4px;
+    }
+    .kind.human { color: var(--info); background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.35); }
+    .kind.agent { color: var(--muted); background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); }
+
+    .num { font-size: clamp(22px, 2.4vw, 30px); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+    td.right .num { display: inline-block; transition: transform .18s ease; }
+    td.right .num.bump { transform: scale(1.14); }
+    .num.viol-0 { color: var(--ok); }
+    .num.viol-some { color: var(--warn); }
+    .num.viol-hot { color: var(--block); }
+    .spend { font-size: 18px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* ---- Classes de données + chips ---- */
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+      border: 1px solid transparent; white-space: nowrap;
+    }
+    .chip.menace    { color: var(--block); background: rgba(239,68,68,.12);  border-color: rgba(239,68,68,.4); }
+    .chip.secret    { color: var(--warn);  background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.4); }
+    .chip.financier { color: var(--info);  background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.4); }
+    .chip.pii       { color: #C084FC;      background: rgba(192,132,252,.12); border-color: rgba(192,132,252,.4); }
+    .chip.none      { color: var(--muted); background: rgba(148,163,184,.08); border-color: var(--line); }
+
+    .decision { font-weight: 600; font-size: 14px; }
+    .decision.bloque   { color: var(--block); }
+    .decision.caviarde { color: var(--warn); }
+    .decision.none     { color: var(--muted); }
+
+    /* ---- Type d'incident (classification d'audit Nc/C1/C2/C3) ---- */
+    .itype {
+      display: inline-block; font-size: 12.5px; font-weight: 700; white-space: nowrap;
+      padding: 4px 10px; border-radius: 999px; border: 1px solid transparent;
+    }
+    .itype.nc { color: var(--ok);    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4); }
+    .itype.c1 { color: var(--warn);  background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.4); }
+    .itype.c2 { color: #FACC15;      background: rgba(250,204,21,.12); border-color: rgba(250,204,21,.4); }
+    .itype.c3 { color: var(--block); background: rgba(239,68,68,.14);  border-color: rgba(239,68,68,.5); }
+
+    .proof { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ok); font-weight: 600; }
+    .proof svg { width: 15px; height: 15px; }
+    .proof.no { color: var(--muted); }
+
+    /* ---- Pastille de statut ---- */
+    .pill {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-weight: 700; font-size: 14px; padding: 8px 13px; border-radius: 999px;
+      border: 1px solid transparent; white-space: nowrap;
+    }
+    .pill .badge { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+    .pill.actif   { color: var(--ok);    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4); }
+    .pill.actif   .badge { background: var(--ok); }
+    .pill.revoque { color: var(--block); background: rgba(239,68,68,.14);  border-color: rgba(239,68,68,.5); }
+    .pill.revoque .badge { background: var(--block); }
+    .remediation { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); max-width: 180px; }
+
+    /* ---- Lien drill-down Loki ---- */
+    .logs-link {
+      display: inline-flex; align-items: center; gap: 7px;
+      font-size: 13px; font-weight: 600; color: var(--info); text-decoration: none;
+      padding: 7px 12px; border: 1px solid rgba(56,189,248,.35); border-radius: 9px;
+      background: rgba(56,189,248,.08); white-space: nowrap; transition: background .15s ease;
+    }
+    .logs-link:hover { background: rgba(56,189,248,.18); }
+    .logs-link svg { width: 15px; height: 15px; }
+
+    tr.flip { transition: background-color .5s ease; }
+    tr.just-revoked { background: rgba(239,68,68,.10); animation: flash 1.2s ease 1; }
+    @keyframes flash { 0%,100% { background: rgba(239,68,68,.10); } 40% { background: rgba(239,68,68,.28); } }
+
+    /* ---- Légende ---- */
+    .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: center; padding: 18px 40px 8px; color: var(--muted); font-size: 13px; }
+    .legend .item { display: inline-flex; align-items: center; gap: 8px; }
+    .legend .sw { width: 12px; height: 12px; border-radius: 3px; }
+    .footnote { text-align: center; color: var(--muted); font-size: 12.5px; padding: 12px 40px 44px; max-width: 1000px; margin: 0 auto; line-height: 1.55; }
+    .footnote a { color: var(--info); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+      <h1>Une identité, une clé, des preuves</h1>
+    </div>
+    <p>Humains et <strong>agents de service</strong> ont chacun <strong>leur clé</strong>. Conso, incidents et classe de données captée sont attribués <strong>individuellement</strong>, avec <strong>preuve signée</strong>. Un agent qui dérive voit sa clé <strong>coupée automatiquement</strong>.</p>
+    <div class="status"><span id="dot" class="dot"></span><span id="statusText">Connexion…</span></div>
+  </header>
+
+  <div class="legend">
+    <span class="item"><span class="sw" style="background:var(--ok)"></span> Actif / trafic propre</span>
+    <span class="item"><span class="sw" style="background:var(--warn)"></span> Donnée caviardée</span>
+    <span class="item"><span class="sw" style="background:var(--block)"></span> Menace bloquée → seuil → coupure</span>
+    <span class="item">Seuil de coupure : <strong id="thr" style="color:var(--text)">—</strong> violations</span>
+  </div>
+
+  <main>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Identité</th>
+              <th class="right">Requêtes</th>
+              <th class="right">Conso €</th>
+              <th class="right">Violations</th>
+              <th>Classe de donnée captée</th>
+              <th>Type d'incident</th>
+              <th>Décision</th>
+              <th class="center">Preuve signée</th>
+              <th class="center">Statut</th>
+              <th class="center">Investigation</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr><td colspan="10" style="text-align:center;color:var(--muted);padding:40px">En attente des données de gouvernance…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <p class="footnote">
+      Conso indicative (backend simulé, aucun coût réel). Une <strong>violation</strong> = requête <em>bloquée</em> par la protection (injection de prompt, exfiltration) ; les secrets et données personnelles sont <em>caviardés</em> (la requête aboutit, expurgée). Le <strong>type d'incident</strong> reprend la <strong>classification</strong> d'audit la plus grave vue pour l'identité : <span class="itype nc">✅ Propre</span> (Nc, aucune action DLP) · <span class="itype c1">🟠 Caviardé</span> (C1) · <span class="itype c2">🟠 PII / restreint</span> (C2) · <span class="itype c3">🔴 Attaque bloquée</span> (C3). La <strong>classe de donnée captée</strong> et la <strong>preuve signée</strong> sont dérivées du journal d'audit signé. La coupure est appliquée en direct : la clé révoquée est refusée dès la requête suivante (401). « <strong>Voir les logs</strong> » ouvre le tableau de bord d'investigation par agent (Grafana), pré-filtré sur l'identité — chaque incident au niveau requête, avec son type, sa preuve signée, vérifiable.
+    </p>
+  </main>
+
+  <script>
+    // Champs de /governance.json (écrit par le watcher) :
+    //   { updated, threshold, agents: [ {
+    //       tenant, type:"human"|"agent", emoji, label, sub, owner, env,
+    //       requests, spend_eur, violations, data_classes:[…],
+    //       decision:"bloqué"|"caviardé"|"—", incident_type:"NC"|"C1"|"C2"|"C3",
+    //       signed:bool, revoked:bool } ] }
+    var THRESHOLD = 8;
+    var prevViol = {};      // mémorise les violations pour animer les incréments
+    var wasRevoked = {};    // mémorise l'état révoqué pour flasher la bascule
+
+    // Grafana est servi par otel-lgtm sur le port 3000 (même hôte que la démo).
+    var GRAFANA_BASE = location.protocol + "//" + location.hostname + ":3000";
+
+    function violClass(v, revoked) {
+      if (revoked || v >= THRESHOLD) return "viol-hot";
+      if (v > 0) return "viol-some";
+      return "viol-0";
+    }
+
+    function eur(n) {
+      return Number(n).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+    }
+
+    // Construit un lien profond vers le tableau de bord d'investigation par agent
+    // (uid stable « grob-audit-agent »), pré-filtré sur l'identité via la variable
+    // de gabarit $tenant. L'auditeur arrive sur la vue dédiée (stats + journal
+    // signé + violations dans le temps), pas sur l'Explore brut de Loki.
+    function auditDashboardUrl(tenant) {
+      // uid-only (sans slug) : évite la réécriture d'URL côté client de Grafana
+      // qui peut perdre le var-tenant et te faire atterrir sur le tenant par défaut.
+      return GRAFANA_BASE + "/d/grob-audit-agent" +
+        "?var-tenant=" + encodeURIComponent(tenant) +
+        "&from=now-3h&to=now&theme=dark";
+    }
+
+    var CLASS_LABEL = { menace: "Menace", secret: "Secret", financier: "Financier", pii: "PII" };
+
+    // Type d'incident dominant, dérivé de la classification d'audit la plus grave
+    // vue pour l'identité (champ `classification`, source de vérité grob). Le JSON
+    // sérialise « NC » en majuscules ; on tolère « Nc » par sécurité.
+    var ITYPE = {
+      NC: { cls: "nc", text: "✅ Propre" },
+      C1: { cls: "c1", text: "🟠 Caviardé" },
+      C2: { cls: "c2", text: "🟠 PII / restreint" },
+      C3: { cls: "c3", text: "🔴 Attaque bloquée" }
+    };
+
+    function buildIncidentType(it) {
+      var key = String(it || "NC").toUpperCase();
+      var def = ITYPE[key] || ITYPE.NC;
+      var span = document.createElement("span");
+      span.className = "itype " + def.cls;
+      span.textContent = def.text;
+      return span;
+    }
+
+    function buildChips(classes) {
+      var wrap = document.createElement("div"); wrap.className = "chips";
+      if (!classes || !classes.length) {
+        var c = document.createElement("span"); c.className = "chip none"; c.textContent = "aucune"; wrap.appendChild(c);
+        return wrap;
+      }
+      classes.forEach(function (cl) {
+        var c = document.createElement("span");
+        c.className = "chip " + cl;
+        c.textContent = CLASS_LABEL[cl] || cl;
+        wrap.appendChild(c);
+      });
+      return wrap;
+    }
+
+    function checkIcon() {
+      var s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("fill", "none");
+      s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", "2.5");
+      s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
+      var p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", "M20 6 9 17l-5-5"); s.appendChild(p);
+      return s;
+    }
+
+    function searchIcon() {
+      var s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("fill", "none");
+      s.setAttribute("stroke", "currentColor"); s.setAttribute("stroke-width", "2");
+      s.setAttribute("stroke-linecap", "round"); s.setAttribute("stroke-linejoin", "round");
+      var c = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      c.setAttribute("cx", "11"); c.setAttribute("cy", "11"); c.setAttribute("r", "8");
+      var l = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      l.setAttribute("d", "m21 21-4.3-4.3"); s.appendChild(c); s.appendChild(l);
+      return s;
+    }
+
+    function td(cls) { var e = document.createElement("td"); if (cls) e.className = cls; return e; }
+
+    function render(data) {
+      THRESHOLD = data.threshold || THRESHOLD;
+      document.getElementById("thr").textContent = THRESHOLD;
+
+      var rows = document.getElementById("rows");
+      rows.innerHTML = "";
+
+      (data.agents || []).forEach(function (a) {
+        var isAgent = a.type === "agent";
+        var tr = document.createElement("tr");
+        tr.className = "flip";
+        var justRevoked = a.revoked && !wasRevoked[a.tenant];
+        if (justRevoked) tr.classList.add("just-revoked");
+
+        // --- Identité : avatar (👤/🤖) + nom + sous-titre + badge type ---
+        var tdAgent = td();
+        var wrap = document.createElement("div"); wrap.className = "agent";
+        var av = document.createElement("div"); av.className = "avatar " + (isAgent ? "agent" : "human");
+        av.textContent = a.emoji || (isAgent ? "🤖" : "👤");
+        var meta = document.createElement("div"); meta.className = "meta";
+        var nm = document.createElement("div"); nm.className = "name"; nm.textContent = a.label || a.tenant;
+        var sub = document.createElement("div"); sub.className = "sub";
+        // Humains → département ; agents → owner + env.
+        if (isAgent) {
+          sub.textContent = "owner : " + (a.owner || "?") + " · env : " + (a.env || "?");
+        } else {
+          sub.textContent = a.sub || "";
+        }
+        var kind = document.createElement("span");
+        kind.className = "kind " + (isAgent ? "agent" : "human");
+        kind.textContent = isAgent ? "Agent de service" : "Humain";
+        meta.appendChild(nm); meta.appendChild(sub); meta.appendChild(kind);
+        wrap.appendChild(av); wrap.appendChild(meta); tdAgent.appendChild(wrap);
+
+        // --- Requêtes ---
+        var tdReq = td("right");
+        var nReq = document.createElement("span"); nReq.className = "num";
+        nReq.style.fontSize = "24px"; nReq.style.color = "var(--text)";
+        nReq.textContent = a.requests; tdReq.appendChild(nReq);
+
+        // --- Conso € ---
+        var tdEur = td("right");
+        var nEur = document.createElement("span"); nEur.className = "spend";
+        nEur.textContent = eur(a.spend_eur); tdEur.appendChild(nEur);
+
+        // --- Violations (gros chiffre sémantique) ---
+        var tdViol = td("right");
+        var nViol = document.createElement("span");
+        nViol.className = "num " + violClass(a.violations, a.revoked);
+        nViol.textContent = a.violations;
+        if (prevViol[a.tenant] !== undefined && a.violations > prevViol[a.tenant]) {
+          void nViol.offsetWidth; nViol.classList.add("bump");
+        }
+        tdViol.appendChild(nViol);
+
+        // --- Classe de donnée captée ---
+        var tdClass = td(); tdClass.appendChild(buildChips(a.data_classes));
+
+        // --- Type d'incident (classification d'audit dominante) ---
+        var tdItype = td(); tdItype.appendChild(buildIncidentType(a.incident_type));
+
+        // --- Décision ---
+        var tdDec = td();
+        var dec = document.createElement("span");
+        var dv = a.decision || "—";
+        dec.className = "decision " + (dv === "bloqué" ? "bloque" : dv === "caviardé" ? "caviarde" : "none");
+        dec.textContent = dv;
+        tdDec.appendChild(dec);
+
+        // --- Preuve signée ---
+        var tdProof = td("center");
+        var proof = document.createElement("span");
+        proof.className = "proof" + (a.signed ? "" : " no");
+        if (a.signed) { proof.appendChild(checkIcon()); var t = document.createElement("span"); t.textContent = "Signée"; proof.appendChild(t); }
+        else { var t2 = document.createElement("span"); t2.textContent = "—"; proof.appendChild(t2); }
+        tdProof.appendChild(proof);
+
+        // --- Statut (+ indice de remédiation si révoqué) ---
+        var tdStat = td("center");
+        var pill = document.createElement("span");
+        var badge = document.createElement("span"); badge.className = "badge";
+        var lbl = document.createElement("span");
+        if (a.revoked) { pill.className = "pill revoque"; lbl.textContent = "⛔ RÉVOQUÉ"; }
+        else           { pill.className = "pill actif";   lbl.textContent = "✅ Actif"; }
+        pill.appendChild(badge); pill.appendChild(lbl); tdStat.appendChild(pill);
+        if (a.revoked) {
+          var rem = document.createElement("span"); rem.className = "remediation";
+          rem.textContent = "Clé révoquée — preuve signée exportable.";
+          tdStat.appendChild(rem);
+        }
+
+        // --- Investigation : drill-down Loki par identité ---
+        var tdLogs = td("center");
+        var link = document.createElement("a");
+        link.className = "logs-link";
+        link.href = auditDashboardUrl(a.tenant);
+        link.target = "_blank"; link.rel = "noopener";
+        link.appendChild(searchIcon());
+        var lt = document.createElement("span"); lt.textContent = "Voir les logs"; link.appendChild(lt);
+        tdLogs.appendChild(link);
+
+        tr.appendChild(tdAgent); tr.appendChild(tdReq); tr.appendChild(tdEur);
+        tr.appendChild(tdViol); tr.appendChild(tdClass); tr.appendChild(tdItype);
+        tr.appendChild(tdDec); tr.appendChild(tdProof); tr.appendChild(tdStat);
+        tr.appendChild(tdLogs);
+        rows.appendChild(tr);
+
+        prevViol[a.tenant] = a.violations;
+        wasRevoked[a.tenant] = a.revoked;
+      });
+    }
+
+    function poll() {
+      var dot = document.getElementById("dot");
+      var statusText = document.getElementById("statusText");
+      fetch("/governance.json", { cache: "no-store" })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function (data) {
+          dot.classList.add("live");
+          statusText.textContent = "Connecté — surveillance active";
+          render(data);
+        })
+        .catch(function () {
+          dot.classList.remove("live");
+          statusText.textContent = "En attente des données…";
+        });
+    }
+    poll();
+    setInterval(poll, 2000);
+  </script>
+</body>
+</html>

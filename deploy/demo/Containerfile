@@ -1,0 +1,62 @@
+# Local patched grob image for the governance demo.
+#
+# Builds grob from the working tree so the demo can show caviardages
+# (redactions) classified as C1/C2 in the audit log *before* the fix
+# (`feat(audit): classify caviardages as C1/C2`) ships in a published release.
+# Once that fix is in a release, the demo can instead pin the published tag
+# (`ghcr.io/azerozero/grob:<version>`) and drop this build.
+#
+# Native arch: built inside the podman VM, so it matches the host triple
+# (aarch64-unknown-linux-musl on Apple Silicon, x86_64 on amd64). No
+# cross-target is forced, unlike the production Containerfile.
+# Rust 1.93+ is required: a dependency declares edition 2024 (needs ≥1.85) and
+# grob itself uses str::floor/ceil_char_boundary (stabilised in 1.93). Pin 1.95
+# to match the host toolchain. The production Containerfile's 1.83 is stale (the
+# release pipeline cross-builds with a current host toolchain, not via that file).
+FROM rust:1.95-alpine AS builder
+# musl-dev + openssl for the crates; make builds the bundled jemalloc (C).
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static make
+WORKDIR /usr/src/grob
+
+# Demo build: disable fat LTO and the single codegen-unit so the image builds
+# in a few minutes inside a small VM (the release profile's `lto = true` +
+# `codegen-units = 1` is memory-hungry). Runtime behaviour is identical; only
+# optimisation depth differs, which is irrelevant for a local demo.
+ENV RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes" \
+    CARGO_PROFILE_RELEASE_LTO=false \
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16
+
+COPY . .
+# Build for the explicit host triple (aarch64/x86_64 -unknown-linux-musl):
+#   - An explicit `--target` scopes RUSTFLAGS to the target only, so
+#     `crt-static` no longer leaks onto host proc-macros (which must be dylibs
+#     and cannot be built static — otherwise the build dies on async-stream).
+#   - With `--target` set, cargo links host build-scripts with the triple's
+#     default cross-linker (`<arch>-linux-musl-gcc`), which Alpine does not
+#     ship; its native compiler is plain `gcc`. Point the triple's linker at
+#     `gcc` so both host build-scripts and the target binary link.
+# The binary lands under target/<triple>/release; copy it to a fixed path for
+# the scratch stage, which has no shell to compute the triple.
+RUN TARGET="$(rustc -vV | sed -n 's/^host: //p')" && \
+    LINKER_VAR="CARGO_TARGET_$(echo "$TARGET" | tr 'a-z-' 'A-Z_')_LINKER" && \
+    export "${LINKER_VAR}=gcc" && \
+    cargo build --release --locked --target "$TARGET" && \
+    cp "target/${TARGET}/release/grob" /grob && \
+    strip /grob && \
+    mkdir -p /runtime/var/lib/grob /runtime/tmp
+
+# Runtime: scratch (no shell). Runs as root (uid 0) — matching the PUBLISHED
+# grob image — so it can read the AES-256-GCM `encryption.key` that the (root)
+# init container writes 0600 into the shared GROB_HOME. A non-root uid here
+# would fail with "failed to initialize storage encryption" (permission denied).
+FROM scratch
+LABEL org.opencontainers.image.title="grob-demo"
+LABEL org.opencontainers.image.description="Local patched grob for the governance demo"
+LABEL org.opencontainers.image.licenses="AGPL-3.0"
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /grob /grob
+COPY --from=builder /runtime/var/lib/grob /var/lib/grob
+COPY --from=builder /runtime/tmp /tmp
+EXPOSE 8080
+ENTRYPOINT ["/grob"]
+CMD ["run", "--json-logs", "--host", "0.0.0.0", "--port", "8080"]

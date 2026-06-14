@@ -1,0 +1,209 @@
+{
+  "uid": "grob-rssi-business",
+  "title": "Grob — Conformité IA (vue RSSI)",
+  "tags": ["grob", "rssi", "conformité", "dlp", "démo"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 100,
+      "type": "text",
+      "title": "",
+      "transparent": true,
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "<div style=\"text-align:center\">\n\n# 🛡️ Vos données restent chez vous\n\n### Chaque échange avec une IA est inspecté **avant** de sortir — les fuites sont caviardées, les attaques bloquées, la dépense plafonnée.\n\n</div>"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Menaces bloquées",
+      "description": "Attaques (injection de prompt, exfiltration de données) rejetées AVANT tout envoi à l'IA. Sur ces tentatives, rien n'est sorti de votre système.",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "color": { "mode": "fixed", "fixedColor": "red" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background_solid",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "targets": [
+        { "refId": "A", "expr": "sum(grob_dlp_detections_total{action=\"block\"})" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Secrets & données caviardés",
+      "description": "Clés d'API, mots de passe, cartes bancaires, IBAN détectés et masqués avant l'envoi au fournisseur. Plus ce nombre monte, plus la protection travaille.",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "0",
+          "color": { "mode": "fixed", "fixedColor": "green" }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background_solid",
+        "graphMode": "area",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "targets": [
+        { "refId": "A", "expr": "sum(grob_dlp_detections_total{action=\"redact\"})" }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Dépense IA maîtrisée",
+      "description": "Part du budget IA mensuel déjà consommée. Le plafond est appliqué automatiquement : au-delà de 100 %, les requêtes sont refusées. Reste à 0 % tant que la dépense est nulle.",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 0,
+          "min": 0,
+          "max": 100,
+          "noValue": "0 %",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "red", "value": 95 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "targets": [
+        { "refId": "A", "expr": "clamp_max(sum(grob_spend_usd) / clamp_min(max(grob_budget_limit_usd), 1) * 100, 100)" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Traçabilité signée",
+      "description": "La configuration de sécurité appliquée est vérifiée cryptographiquement (signature valide) : les règles n'ont pas été altérées. Chaque action est journalisée et auditable.",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 3 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "noValue": "Garantie",
+          "color": { "mode": "fixed", "fixedColor": "green" },
+          "mappings": [
+            { "type": "special", "options": { "match": "null", "result": { "text": "Garantie", "index": 0 } } },
+            { "type": "range", "options": { "from": 0, "to": 0, "result": { "text": "Garantie", "index": 1 } } },
+            { "type": "range", "options": { "from": 1, "to": 1000000000, "result": { "text": "Garantie", "index": 2 } } }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "colorMode": "background_solid",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "targets": [
+        { "refId": "A", "expr": "sum(grob_dlp_signature_verified_total{result=\"valid\"})" }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Protection en action (interventions par minute)",
+      "description": "Rythme des protections déclenchées en temps réel. Vert = caviardage (secret / donnée perso), rouge = blocage (attaque). Plus la courbe vit, plus la protection est sollicitée.",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 1,
+          "custom": {
+            "fillOpacity": 30,
+            "lineWidth": 2,
+            "showPoints": "never",
+            "stacking": { "mode": "normal" },
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Caviardés (secrets / données perso)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "Bloqués (attaques)" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(grob_dlp_detections_total{action=\"redact\"}[$__rate_interval])) * 60", "legendFormat": "Caviardés (secrets / données perso)" },
+        { "refId": "B", "expr": "sum(rate(grob_dlp_detections_total{action=\"block\"}[$__rate_interval])) * 60", "legendFormat": "Bloqués (attaques)" }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "Nature des protections",
+      "description": "Répartition de ce que grob a protégé : secrets (clés d'API…), données personnelles, injections de prompt et tentatives d'exfiltration.",
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 11 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "secret" }, "properties": [{ "id": "displayName", "value": "Secrets (clés d'API…)" }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "pii" }, "properties": [{ "id": "displayName", "value": "Données personnelles" }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] },
+          { "matcher": { "id": "byName", "options": "injection" }, "properties": [{ "id": "displayName", "value": "Injections de prompt" }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "url_exfil" }, "properties": [{ "id": "displayName", "value": "Exfiltrations" }, { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }] }
+        ]
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "pieType": "donut",
+        "displayLabels": ["percent"],
+        "legend": { "displayMode": "table", "placement": "right", "values": ["value"] },
+        "tooltip": { "mode": "single" }
+      },
+      "targets": [
+        { "refId": "A", "expr": "sum by (type) (grob_dlp_detections_total)", "legendFormat": "{{type}}" }
+      ]
+    }
+  ]
+}

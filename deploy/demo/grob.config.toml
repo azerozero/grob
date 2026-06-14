@@ -1,0 +1,151 @@
+# =============================================================================
+# Configuration grob — DÉMO RSSI / conformité (déterministe, coût LLM = 0)
+# =============================================================================
+#
+# Cette configuration est conçue pour une démonstration reproductible destinée
+# à un public NON technique (RSSI, conformité, achats). Elle ne contacte JAMAIS
+# de vrai fournisseur LLM : tout le trafic est renvoyé vers un backend « echo »
+# local (service `mock` du docker-compose), via la variable d'environnement
+# GROB_MOCK_BACKEND. Le coût d'API est donc nul et le résultat identique à
+# chaque exécution.
+#
+# Ce que la démo prouve, visiblement :
+#   1. Les secrets (clé AWS, token GitHub…) sont CAVIARDÉS avant de sortir.
+#   2. Les données personnelles (carte bancaire, IBAN) sont CAVIARDÉES.
+#   3. Les injections de prompt sont BLOQUÉES (la requête ne part jamais).
+#   4. La dépense IA est plafonnée par un budget mensuel.
+#
+# IMPORTANT — distinction technique (cf. moteur DLP de grob) :
+#   - Les SECRETS et la PII déclenchent l'action « redact » (caviardage) : la
+#     requête continue, mais expurgée. Métrique : action="redact".
+#   - L'INJECTION DE PROMPT déclenche l'action « block » : la requête est
+#     rejetée AVANT le dispatch (donc zéro appel LLM). C'est l'événement
+#     « 🔴 BLOQUÉ » affiché en direct. Métrique : action="block".
+# =============================================================================
+
+[server]
+# Le conteneur écoute sur 0.0.0.0:8080 (cf. Containerfile). On le laisse tel quel.
+host = "0.0.0.0"
+port = 8080
+log_level = "info"
+
+# -----------------------------------------------------------------------------
+# Authentification : clé admin + clés virtuelles par agent (couche GOUVERNANCE).
+#
+# Régler [auth].api_key sur une valeur non vide ACTIVE le mode « api_key » :
+#   - une requête présentant cette clé admin passe (et reste anonyme) ;
+#   - une requête présentant un AUTRE jeton Bearer/x-api-key est cherchée
+#     comme CLÉ VIRTUELLE : valide → la requête continue, étiquetée avec le
+#     tenant de la clé ; invalide OU révoquée → 401.
+#
+# C'est ce qui permet : (1) une clé par agent, (2) la conso/les incidents
+# attribués par agent dans le journal d'audit, (3) la COUPURE EN DIRECT d'un
+# agent (révoquer sa clé → sa requête suivante = 401, sans redémarrage).
+#
+# Le flux SSE /api/events et /metrics restent servis via le relais nginx
+# (même origine) ; la page web n'envoie pas la clé admin. NE PAS réutiliser
+# cette clé en clair en production.
+# -----------------------------------------------------------------------------
+[auth]
+# mode = "api_key" ACTIVE l'authentification (sinon, avec mode "none" par
+# défaut, seule une clé sur [server].api_key l'activerait). En mode "api_key" :
+#   - la clé admin ci-dessous passe ;
+#   - tout autre jeton « grob_… » est résolu comme clé virtuelle.
+mode = "api_key"
+api_key = "grob-admin-demo"
+
+# -----------------------------------------------------------------------------
+# Sécurité : journal d'audit signé. enabled=true + audit_dir=/audit fait écrire
+# à grob le fichier /audit/current.jsonl, une ligne JSON par requête, avec les
+# champs tenant_id, dlp_rules_triggered (tableau), action, classification,
+# timestamp. C'est la SOURCE DE VÉRITÉ des incidents par agent : le conteneur
+# « watcher » la lit pour compter les violations et couper l'agent fautif.
+#
+# /audit est un volume PARTAGÉ entre grob (qui écrit) et le watcher (qui lit).
+# rate_limit_rps et max_body_size restent à 0 (désactivés) : seul l'audit nous
+# intéresse ici, rien d'autre ne doit bloquer la démo.
+# -----------------------------------------------------------------------------
+[security]
+enabled = true
+audit_dir = "/audit"
+
+[router]
+# Tout requête non classifiée part vers le modèle de démo.
+default = "demo-model"
+
+# -----------------------------------------------------------------------------
+# Fournisseur « mock » : un backend echo local, zéro coût.
+# base_url est ici fourni pour la lisibilité, mais GROB_MOCK_BACKEND (défini
+# dans le docker-compose) écrase l'URL de TOUS les fournisseurs au démarrage.
+# -----------------------------------------------------------------------------
+[[providers]]
+name = "mock"
+provider_type = "openai_compatible"
+api_key = "sk-demo-not-a-real-key"
+base_url = "http://mock:8889"
+models = ["echo-1"]
+
+[[models]]
+name = "demo-model"
+
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "echo-1"
+
+# -----------------------------------------------------------------------------
+# Budget : plafond mensuel. La jauge « dépense IA maîtrisée » du tableau de
+# bord lit grob_spend_usd / grob_budget_remaining_usd. Avec un backend echo le
+# coût réel reste à 0 ; le plafond illustre le garde-fou pour le RSSI.
+# -----------------------------------------------------------------------------
+[budget]
+monthly_limit_usd = 50.0
+warn_at_percent = 80
+
+# =============================================================================
+# Moteur DLP — le cœur de la démo
+# =============================================================================
+[dlp]
+enabled = true
+scan_input = true     # analyse des prompts entrants (secrets, PII, injection)
+scan_output = true    # analyse des réponses du modèle
+
+# Règles secrets intégrées (clé AWS AKIA…, token GitHub ghp_…, clé OpenAI sk-…,
+# clé Anthropic sk-ant-…, etc.) actives par défaut → action « redact ».
+# On laisse no_builtins = false pour en bénéficier sans rien déclarer.
+
+# --- PII : cartes bancaires (Luhn) + IBAN (mod-97), caviardées ---------------
+[dlp.pii]
+credit_cards = true
+iban = true
+bic = false           # désactivé : trop de faux positifs sur des sigles
+action = "redact"
+
+# --- Injection de prompt : BLOQUÉE (l'événement rouge de la démo) ------------
+# action = "block" → la requête est rejetée avant tout dispatch fournisseur.
+# Les motifs intégrés couvrent « ignore all previous instructions », « reveal
+# your system prompt », « jailbreak », « DAN mode », et leurs variantes dans
+# 28 langues (dont le français : « ignorer toutes les instructions précédentes »).
+[dlp.prompt_injection]
+enabled = true
+action = "block"
+scan_responses = true
+scan_tool_results = true
+response_action = "block"
+
+# --- Exfiltration par URL (anti-EchoLeak) : BLOQUÉE --------------------------
+# Détecte les tentatives de fuite via images/liens markdown vers un domaine
+# externe (vecteur EchoLeak / CVE-2025-32711).
+#
+# NOTE déterminisme : sans liste de domaines, le scanner ne bloque une URL que
+# si sa chaîne de requête dépasse max_query_length (200) ou contient du base64.
+# Pour un blocage GARANTI et lisible en démo, on déclare le domaine d'exfil
+# factice en liste noire — toute URL vers ce domaine est alors bloquée.
+[dlp.url_exfil]
+enabled = true
+action = "block"
+scan_markdown_images = true
+scan_markdown_links = true
+scan_raw_urls = true
+blacklist_domains = ["evil.example.com"]
+domain_match_mode = "suffix"

@@ -1,0 +1,12 @@
+# Provisionne automatiquement le tableau de bord métier dans grafana/otel-lgtm.
+# Monté sur /otel-lgtm/grafana/conf/provisioning/dashboards/custom.yaml
+# Les JSON sont lus dans le dossier custom/ (cf. docker-compose).
+apiVersion: 1
+providers:
+  - name: "Grob — Démo RSSI"
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards/custom
+      foldersFromFilesStructure: false
