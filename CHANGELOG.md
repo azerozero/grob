@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.71](https://github.com/azerozero/grob/compare/v0.36.70...v0.36.71) - 2026-06-14
+
+### Fixed
+
+- *(dlp)* apply DLP redaction to the Responses passthrough path
+
 ## [0.36.70](https://github.com/azerozero/grob/compare/v0.36.69...v0.36.70) - 2026-06-14
 
 ### Added
