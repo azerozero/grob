@@ -321,6 +321,16 @@ pub(crate) async fn dispatch(
     #[cfg_attr(not(feature = "policies"), allow(unused_variables))]
     let dlp_triggered = scan_dlp_input(ctx, request)?;
 
+    // Security: DLP sanitizes the canonical request in place. Drop any verbatim
+    // Responses passthrough body so the OpenAI provider rebuilds from the
+    // sanitized request — otherwise the original, un-redacted bytes would be
+    // forwarded upstream, bypassing DLP. The rebuild path stays cache-friendly
+    // (typed content + prompt_cache_key), so the only cost is a one-request cache
+    // miss when DLP actually fires.
+    if dlp_triggered {
+        request.extensions.responses_passthrough_body = None;
+    }
+
     // ── Step 1.4: Tool-call spike anomaly detection (T-AD1) ──
     // Runs after DLP so scoped DLP blocks take precedence, and before
     // routing so a runaway client cannot exhaust provider quotas before
