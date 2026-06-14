@@ -1,101 +1,127 @@
-# Licensing
+# Grob Licensing
 
-Grob is dual-licensed under the **GNU Affero General Public License v3.0 (AGPL-3.0)** and a **commercial license**.
+Grob Core is dual-licensed:
 
-## Open Source License (AGPL-3.0)
+1. **GNU Affero General Public License v3.0 (AGPL-3.0)**
+2. A **commercial license** from A00 SASU
 
-The AGPL-3.0 applies by default. You are free to use, modify, and distribute Grob under its terms. Key obligations:
+The AGPL-3.0 applies by default to the public source code. A commercial license
+is an alternative for organizations that do not want AGPL-3.0 obligations, need
+to keep modifications private, embed Grob in a proprietary product, require
+support / SLA / procurement terms, or need the Enterprise / Admin editions.
 
-- If you modify Grob and provide it as a network service, you must make the source code of your modifications available to users of that service.
-- Any derivative work must also be licensed under AGPL-3.0.
+> The AGPL-3.0 edition is fully functional and suitable for self-managed use.
+> **It is not limited by company size or user count** — open source rights cannot
+> be restricted that way. User counts and deployment scope only size the
+> commercial tiers below.
+
+## Open Source License: AGPL-3.0
+
+You may use, study, modify, and distribute Grob Core under AGPL-3.0, **at any
+scale**.
+
+- If you modify Grob and let users interact with the modified version over a
+  network, AGPL-3.0 **§13** requires you to offer those users the *Corresponding
+  Source* of your modified version.
+- Derivative works are licensed under AGPL-3.0.
 - See the [LICENSE](LICENSE) file for the full legal text.
 
 ## Commercial Licensing
 
-A commercial license is available for organizations that cannot or do not wish to comply with the AGPL-3.0 terms.
+A commercial license grants the right to use Grob outside AGPL-3.0 terms, under a
+separate agreement. Depending on the tier, you are buying: the AGPL waiver, the
+right to keep modifications private, redistribution / OEM rights, support & SLA,
+procurement-friendly terms (warranty / indemnity / SBOM / provenance), the
+Enterprise modules, the Admin console, and managed hosting.
 
-### Pricing
+Recommended when you need: proprietary deployment, private modifications,
+regulated environments, managed services, redistribution, OEM embedding,
+enterprise support, enterprise modules, air-gapped deployment, or non-AGPL
+procurement terms.
 
-| Tier | Use Case | Price |
-|------|----------|-------|
-| **Personal** | 1 user, local workstation only (no server) | Free |
-| **Community** | Internal use, < 50 people | AGPL-3.0, free |
-| **Pro** | Small team, AGPL-3.0 waiver | 5 000 EUR/year |
-| **Enterprise** | Internal use, > 50 people | Starting at 8 000 EUR/year |
-| **Integrator** | ESN / systems integrator deploying for clients | Starting at 15 000 EUR/year |
-| **OEM** | Embedded in a third-party product | Starting at 25 000 EUR/year (negotiated) |
-| **Source Available** | Audit without redistribution (defense sector) | 5 000 EUR/year |
+## Editions
 
-Pricing may change. Current prices are locked for 12 months from contract signature.
+| Edition | License | Includes |
+|---------|---------|----------|
+| **Grob Core** | AGPL-3.0 *or* commercial | LLM gateway & routing, OpenAI-compatible API, providers, DLP, signed audit log, policy engine, HIT approval (single-level), basic RBAC, compliance foundations (EU AI Act audit, GDPR/region flags, risk classification), CLI, OIDC, JSONL audit export, Helm chart |
+| **Grob Commercial** | Commercial | Grob Core under commercial terms — AGPL waiver, private modifications, support |
+| **Grob Enterprise** | Commercial | Enterprise modules: HA / clustering / active-active, multi-region, advanced SIEM connectors (Splunk/Sentinel/Elastic/QRadar), turnkey compliance packs (NIS2/DORA/ISO 27001/AI Act), advanced RBAC, multi-level approval, air-gap bundle, long-term retention |
+| **Grob Admin** | Commercial | Web console: policy builder, audit explorer, compliance dashboard, fleet & tenant management, GitOps manifest generation, license management, multi-instance health |
+| **Grob Cloud** | Commercial SaaS | Dedicated hosted instance-per-tenant, Admin included, managed operations |
 
-### What each tier includes
+The Core / Enterprise / Admin boundary follows
+[ADR-0028](docs/decisions/0028-open-core-boundary.md): security **primitives and
+foundations** are open (AGPL); **packaged products, advanced tiers, and the web
+console** are commercial.
 
-**Personal (free)**
-- Single user running Grob on their own workstation (localhost)
-- Full functionality, no restrictions
-- No AGPL-3.0 obligations (commercial license grant for local use)
-- Community support via GitHub Issues
-- **Not permitted:** running on a server, shared instance, or any deployment accessible by multiple users
+## Pricing (indicative)
 
-**Community (AGPL-3.0, free)**
-- Internal use for organizations under 50 people
-- Full functionality, no restrictions
-- AGPL-3.0 obligations apply (source disclosure for network services)
-- Community support via GitHub Issues
+| Plan | Use case | Starting price |
+|------|----------|---------------:|
+| **Developer** | Local workstation, evaluation, development | Free |
+| **Community** | AGPL-3.0 self-managed use, any size | Free |
+| **Pro** | Small production deployment under commercial terms | 5 000 EUR/year |
+| **Business** | Production deployment with support | 12 000 EUR/year |
+| **Enterprise** | Regulated or larger deployments + Enterprise modules | from 25 000 EUR/year |
+| **Regulated / Defense** | Source review under NDA, air-gap, security package | from 40 000 EUR/year |
+| **Integrator** | Deploy Grob for end clients (ESN / MSSP) | from 20 000 EUR/year + per-client terms |
+| **OEM** | Embed Grob in a third-party product | from 50 000 EUR/year |
+| **Grob Cloud** | Dedicated hosted tenant | from 1 000 EUR/month |
 
-**Pro**
-- Use Grob without AGPL-3.0 source disclosure obligations
-- Keep internal modifications private
-- Up to 50 users
-- Email support
+Prices are indicative and may vary with deployment size, support level,
+regulatory requirements, and redistribution rights. Quoted prices are locked for
+12 months from contract signature.
 
-**Enterprise**
-- Use Grob without AGPL-3.0 source disclosure obligations
-- Keep internal modifications private
-- Unlimited users
-- Priority support via email
+## Personal / local use
 
-**Integrator**
-- Deploy Grob for multiple end-clients
-- Redistribute as part of managed services
-- Priority support + dedicated onboarding
+For a single user on their own workstation (localhost), Grob is **free** under
+either:
 
-**OEM**
-- Embed Grob in your proprietary product
-- White-label rights
-- Custom SLA negotiated per contract
+- the **AGPL-3.0**, or
+- a **free commercial grant for localhost-only use** (no AGPL obligations).
 
-**Source Available (Defense)**
-- Full source code access for security audit
-- No redistribution rights
-- Compliant with defense procurement requirements (code audit without AGPL obligations)
+No license key, no sign-up.
 
-### Contact
+## Contributor License Agreement
 
-For commercial licensing: **licensing@a00.fr**
-
-## Contributing
-
-By submitting a pull request, you agree to the [Contributor License Agreement (CLA)](CLA.md). Contributors retain copyright on their contributions but grant A00 SASU the right to distribute those contributions under both the AGPL-3.0 and the commercial license.
-
-This CLA is required so that A00 SASU can offer commercial licenses while keeping the open source version under AGPL-3.0.
+Contributions are accepted under the [Grob CLA](CLA.md). The CLA lets A00 SASU
+distribute contributed code under **both** the AGPL-3.0 and the commercial
+license; contributors retain copyright in their contributions. It is enforced by
+the `cla-check` job in CI, and is what makes dual-licensing possible.
 
 ## FAQ
 
-### Can I use Grob internally at my company under AGPL-3.0?
-Yes. Internal deployment does not trigger AGPL-3.0 source disclosure obligations. The obligation only applies when you make the software available to external users over a network.
+### Can I use Grob internally under AGPL-3.0?
+Yes, at any scale. Running unmodified Grob internally under AGPL-3.0 is fine. If
+you **modify** Grob and let users interact with the modified version **over a
+network**, §13 requires you to offer those users the *Corresponding Source* of
+your modified version. Organizations that do not want to manage AGPL obligations
+can buy a commercial license.
 
-### What if I modify Grob for internal use only?
-You do not need to publish your modifications. AGPL-3.0 source disclosure only applies when providing the software as a service to third parties.
+### Do I have to publish my private internal modifications to the world?
+No. AGPL-3.0 requires offering source to users who **interact with the modified
+software over a network** — it does not, by itself, turn every private
+modification into a public release. For confidential, regulated, or proprietary
+deployments, a commercial license removes the obligation entirely.
 
-### Do I need a commercial license to use Grob with Claude Code?
-No. Running Grob locally on your own workstation is covered by the free **Personal** tier. No license key, no sign-up, no AGPL obligations.
+### Is the free edition limited by company size or user count?
+No. The AGPL-3.0 edition has **no** user-count or company-size limit — open
+source rights cannot be restricted that way. User counts only size the
+**commercial** tiers.
+
+### Do I need a commercial license to use Grob with Claude Code locally?
+No. Local single-user use on your own workstation is free (AGPL-3.0, or the free
+local commercial grant). No license key, no sign-up.
 
 ### I'm a developer — can I use Grob for free?
-Yes. As long as you run it on your own machine (localhost), it's free — even for commercial work. The license only kicks in when Grob is deployed on a server.
-
-### We are a 30-person company. Can we use Grob for free?
-Each developer can use Grob for free on their own workstation (Personal tier). For shared/server deployments, you can use the AGPL-3.0 Community tier if you comply with its source disclosure terms.
+Yes. On your own machine (localhost) it is free, even for commercial work, under
+the AGPL-3.0 or the free local commercial grant.
 
 ### We are a defense contractor and need to audit the code.
-The Source Available tier gives you full source access for audit purposes without AGPL-3.0 redistribution obligations. Contact licensing@a00.fr.
+The **Regulated / Defense** tier provides source review under NDA, an air-gap
+bundle, and a security package (SBOM / signatures / offline updates), without
+AGPL redistribution obligations. Contact licensing@a00.fr.
+
+## Contact
+
+For commercial licensing: **licensing@a00.fr**
