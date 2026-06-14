@@ -408,10 +408,13 @@ impl LlmProvider for OpenAIProvider {
             {
                 // Verbatim passthrough: keep the native client's exact prefix
                 // (typed content, tool shape, prompt_cache_key) so the backend's
-                // prompt cache stays warm. Only the model is swapped to the
-                // resolved upstream model.
+                // prompt cache stays warm. Swap the model to the resolved upstream
+                // model and enforce the ChatGPT Codex contract (store=false, and
+                // grob always streams upstream) in case the client omitted them.
                 if let Some(obj) = raw.as_object_mut() {
                     obj.insert("model".to_string(), serde_json::json!(request.model));
+                    obj.insert("store".to_string(), serde_json::json!(false));
+                    obj.insert("stream".to_string(), serde_json::json!(true));
                 }
                 raw
             } else {
