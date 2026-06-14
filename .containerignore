@@ -2,6 +2,7 @@ target/
 .git/
 docs/
 tests/
+deploy/
 *.md
 .github/
 .vscode/

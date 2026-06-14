@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Grob — Protection IA en direct</title>
+  <!-- Design system ui-ux-pro-max « Trust & Authority » : Lexend (titres) + Source Sans 3 (corps). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      /* Palette « Trust & Authority » (dark, navy + sémantique). */
+      --bg:        #020617;  /* fond navy quasi-noir */
+      --surface:   #0F172A;  /* cartes */
+      --surface-2: #1E293B;  /* dégradé bas de carte */
+      --muted-bg:  #1A1E2F;
+      --line:      #334155;  /* bordures */
+      --text:      #F8FAFC;
+      --muted:     #94A3B8;
+      --ok:        #22C55E;  /* protégé / caviardé secret */
+      --warn:      #F59E0B;  /* caviardage PII */
+      --block:     #EF4444;  /* menace bloquée */
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(1100px 560px at 50% -12%, #0b1b3a 0%, var(--bg) 58%);
+      color: var(--text);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, .num { font-family: "Lexend", "Source Sans 3", sans-serif; }
+
+    /* ---- En-tête : pitch + sceau de confiance ---- */
+    header { padding: 34px 40px 4px; text-align: center; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; }
+    .brand svg { width: 34px; height: 34px; color: var(--ok); }
+    h1 { margin: 0; font-size: clamp(26px, 4vw, 36px); font-weight: 800; letter-spacing: -0.6px; }
+    header p {
+      margin: 12px auto 0; max-width: 780px;
+      color: var(--muted); font-size: 18px; line-height: 1.5;
+    }
+    header p strong { color: var(--text); font-weight: 600; }
+    .status {
+      display: inline-flex; align-items: center; gap: 9px;
+      margin-top: 18px; font-size: 14px; color: var(--muted);
+      padding: 7px 15px; border: 1px solid var(--line); border-radius: 999px;
+      background: rgba(15,23,42,.7);
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .dot.live { background: var(--ok); box-shadow: 0 0 0 0 rgba(34,197,94,.6); animation: pulse 1.8s infinite; }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(34,197,94,.55); }
+      70%  { box-shadow: 0 0 0 9px rgba(34,197,94,0); }
+      100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); }
+    }
+    @media (prefers-reduced-motion: reduce) { .dot.live { animation: none; } .num { transition: none !important; } }
+
+    /* ---- Compteurs héros ---- */
+    .counters {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px;
+      padding: 28px 40px 8px; max-width: 1280px; margin: 0 auto;
+    }
+    @media (max-width: 760px) { .counters { grid-template-columns: 1fr; } }
+    .counter {
+      background: linear-gradient(180deg, var(--surface), var(--surface-2));
+      border-radius: 18px; padding: 22px 26px;
+      border: 1px solid var(--line); position: relative; overflow: hidden;
+    }
+    .counter::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 4px; background: var(--muted); }
+    .counter.block::before  { background: var(--block); }
+    .counter.redact::before { background: var(--warn); }
+    .counter.ok::before     { background: var(--ok); }
+    .counter .head { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+    .counter .head svg { width: 22px; height: 22px; }
+    .counter.block .head svg  { color: var(--block); }
+    .counter.redact .head svg { color: var(--warn); }
+    .counter.ok .head svg     { color: var(--ok); }
+    .counter .lbl { font-size: 15px; font-weight: 600; }
+    .counter .num {
+      margin-top: 14px; font-size: clamp(48px, 7vw, 76px); font-weight: 800; line-height: 1;
+      font-variant-numeric: tabular-nums; letter-spacing: -2px; transition: transform .18s ease;
+    }
+    .counter .num.bump { transform: scale(1.1); }
+    .counter.block .num  { color: var(--block); }
+    .counter.redact .num { color: var(--warn); }
+    .counter.ok .num     { color: var(--ok); }
+
+    /* ---- Mur d'événements ---- */
+    main { padding: 20px 40px 16px; max-width: 1280px; margin: 0 auto; }
+    .feed-head { display: flex; align-items: baseline; justify-content: space-between; margin: 6px 2px 14px; }
+    .feed-head h2 { font-size: 13px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .14em; margin: 0; }
+    .feed-head .hint { color: var(--muted); font-size: 13px; }
+    #feed { display: flex; flex-direction: column; gap: 12px; }
+    .event {
+      display: flex; align-items: center; gap: 18px;
+      background: var(--surface); border-radius: 14px;
+      padding: 16px 22px; border-left: 6px solid var(--line);
+      animation: slidein .4s cubic-bezier(.2,.8,.2,1);
+    }
+    @keyframes slidein { from { opacity: 0; transform: translateY(-12px) scale(.99); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .event { animation: none; } }
+    .event.block  { border-left-color: var(--block); background: linear-gradient(90deg, rgba(239,68,68,.16) 0%, var(--surface) 58%); }
+    .event.redact { border-left-color: var(--warn);  background: linear-gradient(90deg, rgba(245,158,11,.14) 0%, var(--surface) 58%); }
+    .event .tag { font-weight: 700; font-size: 15px; white-space: nowrap; min-width: 150px; display: flex; align-items: center; gap: 10px; letter-spacing: .02em; }
+    /* badge carré coloré à la place d'un emoji (règle design-system : pas d'emoji-icône) */
+    .event .tag .badge { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+    .event.block  .tag { color: var(--block); } .event.block  .badge { background: var(--block); }
+    .event.redact .tag { color: var(--warn); }  .event.redact .badge { background: var(--warn); }
+    .event .what { flex: 1; min-width: 0; font-size: 17px; color: var(--text); }
+    .event .time { color: var(--muted); font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .empty { color: var(--muted); padding: 40px; text-align: center; font-size: 16px; border: 1px dashed var(--line); border-radius: 14px; }
+
+    /* ---- Sceaux de confiance (Trust & Authority) ---- */
+    .trust { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 14px; padding: 14px 40px 44px; max-width: 1280px; margin: 0 auto; }
+    .trust .seal {
+      display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
+      border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px; background: rgba(15,23,42,.5);
+    }
+    .trust .seal svg { width: 15px; height: 15px; color: var(--ok); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <!-- bouclier (Lucide shield-check) -->
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+      <h1>Vos données ne sortent pas</h1>
+    </div>
+    <p>Chaque échange avec une IA est inspecté <strong>avant</strong> de quitter votre système. Les secrets sont caviardés, les attaques bloquées — en direct.</p>
+    <div class="status"><span id="dot" class="dot"></span><span id="statusText">Connexion…</span></div>
+  </header>
+
+  <section class="counters">
+    <div class="counter block">
+      <div class="head">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12.49 2.6 8 4A2 2 0 0 1 21.6 8.4l-1.5 9a2 2 0 0 1-1.13 1.5l-6 2.8a2 2 0 0 1-1.94 0l-6-2.8A2 2 0 0 1 3.9 17.4l-1.5-9A2 2 0 0 1 3.51 6.6l8-4a2 2 0 0 1 .98 0Z"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg>
+        <span class="lbl">Menaces bloquées</span>
+      </div>
+      <div class="num" id="cBlock">0</div>
+    </div>
+    <div class="counter redact">
+      <div class="head">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+        <span class="lbl">Secrets &amp; données caviardés</span>
+      </div>
+      <div class="num" id="cRedact">0</div>
+    </div>
+    <div class="counter ok">
+      <div class="head">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
+        <span class="lbl">Protections déclenchées</span>
+      </div>
+      <div class="num" id="cTotal">0</div>
+    </div>
+  </section>
+
+  <main>
+    <div class="feed-head">
+      <h2>Flux de protection en direct</h2>
+      <span class="hint">mise à jour automatique</span>
+    </div>
+    <div id="feed"><div class="empty" id="empty">En attente du premier événement de protection…</div></div>
+  </main>
+
+  <div class="trust">
+    <span class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Audit signé (EU AI Act)</span>
+    <span class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> 100&nbsp;% souverain</span>
+    <span class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Aucun prompt stocké</span>
+    <span class="seal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg> Vos clés, votre réseau</span>
+  </div>
+
+  <script>
+    // Champs du flux SSE /api/events (cf. WatchEvent::DlpAction) :
+    //   type="dlp_action", action="block"|"redact"|"pseudonym"|…,
+    //   rule_type="injection"|"url_exfil"|"secret"|"pii"|"name",
+    //   detail="…", direction, timestamp (chaîne ISO-8601).
+    var counts = { block: 0, redact: 0, total: 0 };
+    var MAX_ROWS = 40;
+
+    function bump(el) {
+      el.classList.remove("bump");
+      void el.offsetWidth; // force reflow -> relance l'animation à chaque incrément
+      el.classList.add("bump");
+    }
+
+    // (rule_type, detail) -> libellé métier lisible par un RSSI.
+    function label(ev) {
+      var d = (ev.detail || "").toLowerCase();
+      var rt = ev.rule_type || "";
+      if (rt === "injection" || rt === "indirect_injection")
+        return "Injection de prompt — tentative de détournement de l'IA";
+      if (rt === "url_exfil")
+        return "Exfiltration de données — envoi vers un domaine externe";
+      if (rt === "pii")
+        return "Donnée personnelle — carte bancaire / IBAN";
+      if (rt === "name")
+        return "Nom de personne — anonymisé";
+      if (rt === "secret") {
+        if (d.indexOf("aws") !== -1) return "Clé d'accès AWS";
+        if (d.indexOf("github") !== -1) return "Token GitHub";
+        if (d.indexOf("openai") !== -1) return "Clé API OpenAI";
+        if (d.indexOf("anthropic") !== -1) return "Clé API Anthropic";
+        if (d.indexOf("stripe") !== -1) return "Clé secrète Stripe";
+        return "Secret / clé d'API";
+      }
+      return ev.detail || rt || "Donnée sensible";
+    }
+
+    function render(ev) {
+      var isBlock = ev.action === "block";
+      var isRedact = ev.action === "redact" || ev.action === "canary";
+      if (!isBlock && !isRedact) return; // n'affiche que blocages et caviardages
+
+      var empty = document.getElementById("empty");
+      if (empty) empty.remove();
+
+      counts.total++;
+      if (isBlock) counts.block++; else counts.redact++;
+      var cBlock = document.getElementById("cBlock");
+      var cRedact = document.getElementById("cRedact");
+      var cTotal = document.getElementById("cTotal");
+      cBlock.textContent = counts.block;
+      cRedact.textContent = counts.redact;
+      cTotal.textContent = counts.total;
+      bump(isBlock ? cBlock : cRedact);
+      bump(cTotal);
+
+      var row = document.createElement("div");
+      row.className = "event " + (isBlock ? "block" : "redact");
+      var t = new Date(ev.timestamp || Date.now());
+      var hh = isNaN(t.getTime()) ? "" : t.toLocaleTimeString("fr-FR");
+
+      var tag = document.createElement("div");
+      tag.className = "tag";
+      var badge = document.createElement("span");
+      badge.className = "badge";
+      var tagText = document.createElement("span");
+      tagText.textContent = isBlock ? "BLOQUÉ" : "CAVIARDÉ";
+      tag.appendChild(badge);
+      tag.appendChild(tagText);
+
+      var what = document.createElement("div");
+      what.className = "what";
+      what.textContent = label(ev); // textContent : pas d'injection HTML depuis le flux
+
+      var time = document.createElement("div");
+      time.className = "time";
+      time.textContent = hh;
+
+      row.appendChild(tag);
+      row.appendChild(what);
+      row.appendChild(time);
+
+      var feed = document.getElementById("feed");
+      feed.insertBefore(row, feed.firstChild);
+      while (feed.children.length > MAX_ROWS) feed.removeChild(feed.lastChild);
+    }
+
+    function connect() {
+      var dot = document.getElementById("dot");
+      var statusText = document.getElementById("statusText");
+      var es = new EventSource("/api/events");
+      es.onopen = function () { dot.classList.add("live"); statusText.textContent = "Connecté — surveillance active"; };
+      es.onerror = function () { dot.classList.remove("live"); statusText.textContent = "Reconnexion…"; };
+      es.onmessage = function (e) {
+        try { var ev = JSON.parse(e.data); if (ev.type === "dlp_action") render(ev); }
+        catch (_) { /* keep-alive / non-JSON ignoré */ }
+      };
+    }
+    connect();
+  </script>
+</body>
+</html>

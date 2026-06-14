@@ -1,0 +1,42 @@
+# =============================================================================
+# Config minimale des conteneurs « outils » (init + watcher) — démo gouvernance
+# =============================================================================
+# init-keys.sh et watcher.sh appellent le binaire grob pour gérer les clés
+# virtuelles sur le store PARTAGÉ (GROB_HOME). Le binaire choisit son chemin
+# (RPC vers un serveur en cours, ou store local sur disque) en sondant
+# [server].host:[server].port via /health.
+#
+# On force ici un port mort (127.0.0.1:1) : la sonde échoue toujours, donc
+# `grob key create` / `grob key revoke` empruntent TOUJOURS le chemin « store
+# local ». C'est ce qu'on veut :
+#   - create local ENREGISTRE le tenant (le chemin RPC ne le fait pas) ;
+#   - revoke local écrit le flag revoked sur DISQUE dans GROB_HOME/vkeys/,
+#     que le serveur grob (qui lit la clé du disque à CHAQUE requête) prend en
+#     compte EN DIRECT — la révocation n'a pas besoin du serveur.
+# =============================================================================
+
+[server]
+host = "127.0.0.1"
+port = 1
+
+# grob exige un routeur + un modèle complet (avec mapping) même pour les
+# sous-commandes `key`. Ce fournisseur/modèle fictif n'est jamais sollicité
+# (les conteneurs outils ne servent aucune requête) ; il satisfait seulement
+# le parseur de config.
+[router]
+default = "noop"
+
+[[providers]]
+name = "noop"
+provider_type = "openai_compatible"
+api_key = "noop"
+base_url = "http://127.0.0.1:1"
+models = ["noop"]
+
+[[models]]
+name = "noop"
+
+[[models.mappings]]
+priority = 1
+provider = "noop"
+actual_model = "noop"
