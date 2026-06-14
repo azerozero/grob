@@ -1840,34 +1840,50 @@ data:
     \ do\n  echo \"[audit-loki] attente de Loki\u2026\"\n  sleep 2\ndone\necho \"\
     [audit-loki] Loki pr\xEAt, d\xE9marrage du suivi.\"\n\n# Extrait la valeur de\
     \ tenant_id d'une ligne d'audit JSON (sans jq).\ntenant_of() {\n  printf '%s'\
-    \ \"$1\" | sed -n 's/.*\"tenant_id\":\"\\([^\"]*\\)\".*/\\1/p'\n}\n\n# \xC9chappe\
-    \ une ligne pour l'embarquer comme valeur de cha\xEEne JSON : antislash\n# d'abord,\
-    \ puis guillemets. (Les lignes d'audit n'ont ni saut de ligne ni\n# tabulation\
-    \ : une ligne JSONL = une ligne.)\njson_escape() {\n  printf '%s' \"$1\" | sed\
-    \ 's/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'\n}\n\n# Horodatage Loki en nanosecondes,\
-    \ monotone et unique par ligne. \xC9crit le\n# r\xE9sultat dans la variable GLOBALE\
-    \ TS au lieu de l'\xE9mettre sur stdout : appel\xE9\n# via $(...), le compteur\
-    \ SEQ vivrait dans un sous-shell et serait perdu, donc\n# toutes les lignes d'une\
-    \ m\xEAme seconde partageraient le m\xEAme horodatage \u2014 Loki\n# d\xE9dupliquerait\
-    \ alors et perdrait des lignes d'audit. En mutant une globale\n# (appel direct,\
-    \ sans substitution de commande), le compteur PERSISTE le long\n# de la boucle\
-    \ while-read continue.\nLAST_SEC=0\nSEQ=0\nTS=\"\"\nloki_ts() {\n  now=$(date\
-    \ +%s)\n  if [ \"$now\" = \"$LAST_SEC\" ]; then\n    SEQ=$((SEQ + 1))\n  else\n\
-    \    LAST_SEC=\"$now\"\n    SEQ=0\n  fi\n  # 9 chiffres de \xAB nanosecondes \xBB\
-    \ synth\xE9tiques (compteur intra-seconde).\n  TS=$(printf '%s%09d' \"$now\" \"\
-    $SEQ\")\n}\n\n# Pousse une ligne d'audit dans Loki, \xE9tiquet\xE9e par tenant.\n\
-    push_line() {\n  line=\"$1\"\n  [ -n \"$line\" ] || return 0\n  tenant=$(tenant_of\
-    \ \"$line\")\n  [ -n \"$tenant\" ] || tenant=\"unknown\"\n  loki_ts          \
-    \  # met \xE0 jour TS (globale) sans sous-shell\n  ts=\"$TS\"\n  esc=$(json_escape\
-    \ \"$line\")\n  payload=$(printf '{\"streams\":[{\"stream\":{\"service\":\"%s\"\
-    ,\"tenant\":\"%s\"},\"values\":[[\"%s\",\"%s\"]]}]}' \\\n    \"$SERVICE\" \"$tenant\"\
-    \ \"$ts\" \"$esc\")\n  # -s silencieux ; on ignore l'\xE9chec r\xE9seau ponctuel\
-    \ (la prochaine ligne suivra).\n  curl -s -o /dev/null -X POST \"$LOKI_URL\" \\\
-    \n    -H 'Content-Type: application/json' \\\n    --max-time 5 \\\n    --data-binary\
-    \ \"$payload\" || true\n}\n\n# Suit le journal en continu, historique inclus (-n\
-    \ +1), et pousse chaque ligne.\n# tail -F rouvre le fichier s'il est tourn\xE9\
-    /recr\xE9\xE9 (reset de la d\xE9mo).\ntail -n +1 -F \"$AUDIT_FILE\" 2>/dev/null\
-    \ | while IFS= read -r line; do\n  push_line \"$line\"\ndone\n"
+    \ \"$1\" | sed -n 's/.*\"tenant_id\":\"\\([^\"]*\\)\".*/\\1/p'\n}\n\n# D\xE9rive\
+    \ un NIVEAU de log (level) de la ligne d'audit, depuis son action et sa\n# classification.\
+    \ Sans niveau explicite, Loki affiche \xAB detected_level=unknown \xBB\n# (il\
+    \ ne sait pas deviner la gravit\xE9 d'une ligne JSON m\xE9tier). En \xE9mettant\
+    \ un\n# `level` standard, Grafana colore le journal par gravit\xE9 et la gravit\xE9\
+    \ \xE9pouse\n# le TYPE d'incident : injection bloqu\xE9e=critical, exfiltration\
+    \ bloqu\xE9e=error,\n# caviardage=warning, trafic normal=info.\n#   C3 (blocage\
+    \ + injection)  -> critical\n#   blocage DLP (C2 exfil)     -> error\n#   DLP_WARN\
+    \ (caviardage C1/C2)-> warning\n#   ERROR (\xE9chec dispatch)     -> error\n#\
+    \   reste (RESPONSE/NC, \u2026)     -> info\nlevel_of() {\n  l=\"$1\"\n  act=$(printf\
+    \ '%s' \"$l\" | sed -n 's/.*\"action\":\"\\([^\"]*\\)\".*/\\1/p')\n  cls=$(printf\
+    \ '%s' \"$l\" | sed -n 's/.*\"classification\":\"\\([^\"]*\\)\".*/\\1/p')\n  case\
+    \ \"$act\" in\n    *BLOCK*) [ \"$cls\" = \"C3\" ] && echo \"critical\" || echo\
+    \ \"error\" ;;\n    DLP_WARN) echo \"warning\" ;;\n    ERROR)    echo \"error\"\
+    \ ;;\n    *)        echo \"info\" ;;\n  esac\n}\n\n# \xC9chappe une ligne pour\
+    \ l'embarquer comme valeur de cha\xEEne JSON : antislash\n# d'abord, puis guillemets.\
+    \ (Les lignes d'audit n'ont ni saut de ligne ni\n# tabulation : une ligne JSONL\
+    \ = une ligne.)\njson_escape() {\n  printf '%s' \"$1\" | sed 's/\\\\/\\\\\\\\\
+    /g; s/\"/\\\\\"/g'\n}\n\n# Horodatage Loki en nanosecondes, monotone et unique\
+    \ par ligne. \xC9crit le\n# r\xE9sultat dans la variable GLOBALE TS au lieu de\
+    \ l'\xE9mettre sur stdout : appel\xE9\n# via $(...), le compteur SEQ vivrait dans\
+    \ un sous-shell et serait perdu, donc\n# toutes les lignes d'une m\xEAme seconde\
+    \ partageraient le m\xEAme horodatage \u2014 Loki\n# d\xE9dupliquerait alors et\
+    \ perdrait des lignes d'audit. En mutant une globale\n# (appel direct, sans substitution\
+    \ de commande), le compteur PERSISTE le long\n# de la boucle while-read continue.\n\
+    LAST_SEC=0\nSEQ=0\nTS=\"\"\nloki_ts() {\n  now=$(date +%s)\n  if [ \"$now\" =\
+    \ \"$LAST_SEC\" ]; then\n    SEQ=$((SEQ + 1))\n  else\n    LAST_SEC=\"$now\"\n\
+    \    SEQ=0\n  fi\n  # 9 chiffres de \xAB nanosecondes \xBB synth\xE9tiques (compteur\
+    \ intra-seconde).\n  TS=$(printf '%s%09d' \"$now\" \"$SEQ\")\n}\n\n# Pousse une\
+    \ ligne d'audit dans Loki, \xE9tiquet\xE9e par tenant.\npush_line() {\n  line=\"\
+    $1\"\n  [ -n \"$line\" ] || return 0\n  tenant=$(tenant_of \"$line\")\n  [ -n\
+    \ \"$tenant\" ] || tenant=\"unknown\"\n  lvl=$(level_of \"$line\")\n  loki_ts\
+    \            # met \xE0 jour TS (globale) sans sous-shell\n  ts=\"$TS\"\n  esc=$(json_escape\
+    \ \"$line\")\n  # `level` est une \xE9tiquette de stream standard : Loki la reconna\xEE\
+    t comme\n  # niveau (plus de detected_level=unknown) et Grafana colore le journal.\n\
+    \  payload=$(printf '{\"streams\":[{\"stream\":{\"service\":\"%s\",\"tenant\"\
+    :\"%s\",\"level\":\"%s\"},\"values\":[[\"%s\",\"%s\"]]}]}' \\\n    \"$SERVICE\"\
+    \ \"$tenant\" \"$lvl\" \"$ts\" \"$esc\")\n  # -s silencieux ; on ignore l'\xE9\
+    chec r\xE9seau ponctuel (la prochaine ligne suivra).\n  curl -s -o /dev/null -X\
+    \ POST \"$LOKI_URL\" \\\n    -H 'Content-Type: application/json' \\\n    --max-time\
+    \ 5 \\\n    --data-binary \"$payload\" || true\n}\n\n# Suit le journal en continu,\
+    \ historique inclus (-n +1), et pousse chaque ligne.\n# tail -F rouvre le fichier\
+    \ s'il est tourn\xE9/recr\xE9\xE9 (reset de la d\xE9mo).\ntail -n +1 -F \"$AUDIT_FILE\"\
+    \ 2>/dev/null | while IFS= read -r line; do\n  push_line \"$line\"\ndone\n"
 ---
 apiVersion: v1
 kind: ConfigMap
