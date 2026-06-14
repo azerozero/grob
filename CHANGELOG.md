@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.70](https://github.com/azerozero/grob/compare/v0.36.69...v0.36.70) - 2026-06-14
+
+### Added
+
+- *(translation)* preserve prompt caching across Codex/Claude × OpenAI/Anthropic
+
+### Fixed
+
+- *(translation)* enforce store=false and stream on the Responses passthrough
+
+### Other
+
+- gitignore the local grob-chatgpt.toml config
+- *(examples)* trim the codex OAuth example to the essentials
+- *(dispatch)* kill three surviving mutants on main
+
 ## [0.36.69](https://github.com/azerozero/grob/compare/v0.36.68...v0.36.69) - 2026-06-12
 
 ### Fixed
