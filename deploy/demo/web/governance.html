@@ -72,11 +72,11 @@
     thead th {
       text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .06em;
       text-transform: uppercase; color: var(--muted);
-      padding: 14px 11px; border-bottom: 1px solid var(--line); white-space: nowrap;
+      padding: 12px 8px; border-bottom: 1px solid var(--line); white-space: nowrap;
     }
     thead th.right, tbody td.right { text-align: right; }
     thead th.center, tbody td.center { text-align: center; }
-    tbody td { padding: 13px 11px; border-bottom: 1px solid rgba(51,65,85,.5); vertical-align: middle; }
+    tbody td { padding: 11px 8px; border-bottom: 1px solid rgba(51,65,85,.5); vertical-align: middle; }
     tbody tr:last-child td { border-bottom: none; }
 
     .agent { display: flex; align-items: center; gap: 12px; }
@@ -233,7 +233,7 @@
       </div>
     </div>
     <p class="footnote">
-      Conso indicative (backend simulé, aucun coût réel). Une <strong>violation</strong> = requête <em>bloquée</em> par la protection (injection de prompt, exfiltration) ; les secrets et données personnelles sont <em>caviardés</em> (la requête aboutit, expurgée). Le <strong>type d'incident</strong> reprend la <strong>classification</strong> d'audit la plus grave vue pour l'identité : <span class="itype nc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg> Propre</span> (Nc, aucune action DLP) · <span class="itype c1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg> Caviardé</span> (C1) · <span class="itype c2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> PII / restreint</span> (C2) · <span class="itype c3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg> Attaque bloquée</span> (C3). La <strong>classe de donnée captée</strong> et la <strong>preuve signée</strong> sont dérivées du journal d'audit signé. La coupure est appliquée en direct : la clé révoquée est refusée dès la requête suivante (401). « <strong>Voir les logs</strong> » ouvre le tableau de bord d'investigation par agent (Grafana), pré-filtré sur l'identité — chaque incident au niveau requête, avec son type, sa preuve signée, vérifiable.
+      Conso indicative (backend simulé, aucun coût réel). Une <strong>violation</strong> = requête <em>bloquée</em> par la protection (injection de prompt, exfiltration) ; les secrets et données personnelles sont <em>caviardés</em> (la requête aboutit, expurgée). Le <strong>type d'incident</strong> reprend la <strong>classification</strong> d'audit la plus grave vue pour l'identité : <span class="itype nc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg> Propre</span> (Nc, aucune action DLP) · <span class="itype c1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg> Caviardé</span> (C1) · <span class="itype c2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Restreint</span> (C2, PII ou exfiltration bloquée) · <span class="itype c3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg> Attaque</span> (C3, injection bloquée). La <strong>classe de donnée captée</strong> et la <strong>preuve signée</strong> sont dérivées du journal d'audit signé. La coupure est appliquée en direct : la clé révoquée est refusée dès la requête suivante (401). « <strong>Logs</strong> » ouvre le tableau de bord d'investigation par agent (Grafana), pré-filtré sur l'identité — chaque incident au niveau requête, avec son type, sa preuve signée, vérifiable.
     </p>
   </main>
 
@@ -361,8 +361,8 @@
     var ITYPE = {
       NC: { cls: "nc", text: "Propre" },
       C1: { cls: "c1", text: "Caviardé" },
-      C2: { cls: "c2", text: "PII / restreint" },
-      C3: { cls: "c3", text: "Attaque bloquée" }
+      C2: { cls: "c2", text: "Restreint" },
+      C3: { cls: "c3", text: "Attaque" }
     };
 
     function buildIncidentType(it) {
@@ -455,7 +455,7 @@
         }
         var kind = document.createElement("span");
         kind.className = "kind " + (isAgent ? "agent" : "human");
-        kind.textContent = isAgent ? "Agent de service" : "Humain";
+        kind.textContent = isAgent ? "Agent" : "Humain";
         meta.appendChild(nm); meta.appendChild(sub); meta.appendChild(kind);
         wrap.appendChild(av); wrap.appendChild(meta); tdAgent.appendChild(wrap);
 
@@ -522,7 +522,7 @@
         link.href = auditDashboardUrl(a.tenant);
         link.target = "_blank"; link.rel = "noopener";
         link.appendChild(searchIcon());
-        var lt = document.createElement("span"); lt.textContent = "Voir les logs"; link.appendChild(lt);
+        var lt = document.createElement("span"); lt.textContent = "Logs"; link.appendChild(lt);
         tdLogs.appendChild(link);
 
         tr.appendChild(tdAgent); tr.appendChild(tdReq); tr.appendChild(tdEur);
