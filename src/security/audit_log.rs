@@ -142,6 +142,15 @@ pub struct AuditEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub risk_level: Option<RiskLevel>,
 
+    /// OpenTelemetry trace id (32-hex), captured from the current span when the
+    /// `otel` feature is active and tracing is enabled. Lets an audit line be
+    /// correlated to its distributed trace in Tempo. `None` when OTel is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trace_id: Option<String>,
+    /// OpenTelemetry span id (16-hex) of the request span. See [`AuditEntry::trace_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<String>,
+
     // ── Merkle batch fields ──
     /// Batch ID (UUID v4). Present when batch_size > 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -155,6 +164,35 @@ pub struct AuditEntry {
     /// Inclusion proof from this leaf to the Merkle root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merkle_proof: Option<Vec<ProofStep>>,
+}
+
+/// Returns the current OpenTelemetry `(trace_id, span_id)` as lowercase hex.
+///
+/// Yields `(None, None)` when the `otel` feature is off or the current span
+/// carries no valid trace context (OTel disabled at runtime). Used to stamp
+/// [`AuditEntry`] for log↔trace correlation. The hex forms (32/16 chars) match
+/// what Tempo and Grafana's Loki→Tempo derived field expect.
+#[cfg(feature = "otel")]
+pub(crate) fn current_trace_ids() -> (Option<String>, Option<String>) {
+    use opentelemetry::trace::TraceContextExt;
+    use tracing_opentelemetry::OpenTelemetrySpanExt;
+    let cx = tracing::Span::current().context();
+    let span = cx.span();
+    let sc = span.span_context();
+    if sc.is_valid() {
+        (
+            Some(sc.trace_id().to_string()),
+            Some(sc.span_id().to_string()),
+        )
+    } else {
+        (None, None)
+    }
+}
+
+/// Returns `(None, None)`: trace correlation needs the `otel` build feature.
+#[cfg(not(feature = "otel"))]
+pub(crate) fn current_trace_ids() -> (Option<String>, Option<String>) {
+    (None, None)
 }
 
 /// Risk classification levels per EU AI Act Article 14.
@@ -552,6 +590,8 @@ mod tests {
             input_tokens: None,
             output_tokens: None,
             risk_level: None,
+            trace_id: None,
+            span_id: None,
             batch_id: None,
             batch_index: None,
             merkle_root: None,

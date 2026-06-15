@@ -91,6 +91,8 @@ fn build_audit_entry(
         input_tokens: None,
         output_tokens: None,
         risk_level: None,
+        trace_id: None,
+        span_id: None,
         batch_id: None,
         batch_index: None,
         merkle_root: None,
