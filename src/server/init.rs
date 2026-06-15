@@ -822,6 +822,9 @@ pub(crate) fn emit_tee_attestation(
         input_tokens: None,
         output_tokens: None,
         risk_level: None,
+        // Startup attestation runs outside any request span → no trace context.
+        trace_id: None,
+        span_id: None,
         batch_id: None,
         batch_index: None,
         merkle_root: None,

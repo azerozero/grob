@@ -118,6 +118,9 @@ impl AuditEntryBuilder {
     pub fn build(self) -> crate::security::audit_log::AuditEntry {
         use crate::security::audit_log::AuditEntry;
         let classification = self.derive_classification();
+        // Stamp the current distributed-trace context so the audit line can be
+        // jumped to its trace in Tempo (no-op / None when OTel is off).
+        let (trace_id, span_id) = crate::security::audit_log::current_trace_ids();
         AuditEntry {
             timestamp: chrono::Utc::now(),
             event_id: uuid::Uuid::new_v4().to_string(),
@@ -137,6 +140,8 @@ impl AuditEntryBuilder {
             input_tokens: self.input_tokens,
             output_tokens: self.output_tokens,
             risk_level: self.risk_level,
+            trace_id,
+            span_id,
             batch_id: None,     // filled by batch flush
             batch_index: None,  // filled by batch flush
             merkle_root: None,  // filled by batch flush

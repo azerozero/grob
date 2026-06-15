@@ -199,6 +199,7 @@ pub(crate) fn write_hit_receipt(
         let Ok(receipt_json) = serde_json::to_string(&auth) else {
             return auth;
         };
+        let (trace_id, span_id) = crate::security::audit_log::current_trace_ids();
         let entry = AuditEntry {
             timestamp: chrono::Utc::now(),
             event_id: uuid::Uuid::new_v4().to_string(),
@@ -218,6 +219,8 @@ pub(crate) fn write_hit_receipt(
             input_tokens: None,
             output_tokens: None,
             risk_level: Some(RiskLevel::High),
+            trace_id,
+            span_id,
             batch_id: None,
             batch_index: None,
             merkle_root: None,
