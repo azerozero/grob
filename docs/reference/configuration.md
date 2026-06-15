@@ -143,6 +143,7 @@ Models define named routing targets with priority-based fallback chains.
 [[models]]
 name = "default"                  # Model name used by the router
 budget_usd = 2.0                  # Monthly spend limit for this model (optional)
+context_window_tokens = 200000     # Optional hard-window hint for compact guard
 
 [[models.mappings]]
 provider = "anthropic"            # Provider name (must match a [[providers]] entry)
@@ -157,6 +158,8 @@ inject_continuation_prompt = false # Inject a continuation prompt for non-Anthro
 ```
 
 When a request arrives, Grob tries providers in priority order. If a provider returns an error or times out, Grob moves to the next priority.
+
+`context_window_tokens` lets Grob reject oversized agent contexts before provider dispatch. At 80% of the window, Grob adds `x-grob-action: compact` warning headers. At 95%, it returns HTTP `400` with `context_length_exceeded` in the endpoint's native error format.
 
 ### Model strategies
 

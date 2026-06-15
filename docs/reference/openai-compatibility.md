@@ -195,10 +195,16 @@ Errors follow OpenAI's format:
   "error": {
     "message": "Error description",
     "type": "error_type",
+    "param": "optional_param",
     "code": "error_code"
   }
 }
 ```
+
+Context-window overflow is normalized to HTTP `400` with
+`code: context_length_exceeded` and `param: input`. Grob also adds
+`x-grob-action: compact` plus context-usage headers so Codex-compatible clients
+can compact and retry instead of surfacing an upstream 502.
 
 ## Source files
 

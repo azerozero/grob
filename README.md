@@ -4,7 +4,7 @@
     <strong>Your LLM traffic leaks data. Grob stops it.</strong>
   </p>
   <p align="center">
-    The only LLM proxy with built-in DLP, written in Rust, deployable air-gapped.
+    A Rust LLM control plane with inline DLP, routing, budgets, and signed audit logs.
   </p>
   <p align="center">
     <a href="https://github.com/azerozero/grob/actions/workflows/ci.yml"><img src="https://github.com/azerozero/grob/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -16,7 +16,7 @@
 
 ---
 
-**Grob** is a high-performance LLM routing proxy that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, and fits in a 6 MB container with zero dependencies.
+**Grob** is a high-performance LLM control plane that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, enforces budgets, records signed audit logs, and fits in a 6 MB container with zero dependencies.
 
 > **~90 µs pure overhead** with full DLP + routing + caching + rate limiting -- [40x faster than LiteLLM, every feature measured individually](docs/reference/benchmarks.md).
 
@@ -42,6 +42,7 @@ flowchart LR
 | Provider goes down during a coding session | **Multi-provider failover** with circuit breakers and exponential backoff. Zero client changes |
 | No visibility into what your AI tools send | **`grob watch`** -- live TUI showing every request, response, DLP action, and fallback in real time |
 | Bill shock from runaway LLM usage | **Spend tracking** with per-tenant budgets, monthly caps, and alerts at 80% |
+| Agent context grows until providers return opaque 5xx errors | **Context-window guard** estimates input tokens before dispatch, returns `context_length_exceeded`, and tells Codex/Claude to compact |
 | AI agent executes destructive tool calls without review | **HIT Gateway** -- intercepts every `tool_use` block, enforces per-policy approval rules (auto-approve / require human / deny), supports multisig and quorum |
 | Deploying in air-gapped / sovereign environments | **Single binary, 6 MB, zero dependencies** -- no Python, no PostgreSQL, no Redis |
 
@@ -97,7 +98,7 @@ enabled = true
 action = "block"             # Data exfiltration URLs → stripped
 ```
 
-No other LLM proxy does this. LiteLLM, Bifrost, Portkey, Kong -- none have inline DLP on the hot path.
+Most LLM proxies focus on routing and spend. Grob keeps inline DLP on the hot path, so sensitive data can be redacted or blocked before it reaches a provider.
 
 ## Live traffic inspector
 
@@ -221,6 +222,7 @@ grob preset apply gdpr        # EU-only routing + DLP
 - **Response caching** -- Dedup temperature=0 requests (saves tokens and money)
 - **Native TLS + ACME** -- Built-in HTTPS with Let's Encrypt auto-certificates
 - **Three API endpoints** -- `/v1/messages` (Anthropic), `/v1/chat/completions` (OpenAI), `/v1/responses` (Codex CLI)
+- **Context-window guard** -- pre-dispatch compact hints and OpenAI/Anthropic-compatible `context_length_exceeded` errors
 - **Prometheus + OpenTelemetry** -- `/metrics` endpoint, OTLP distributed tracing
 - **MCP tool matrix** -- JSON-RPC server for tool-calling orchestration
 
@@ -242,6 +244,7 @@ api_key = "$OPENROUTER_API_KEY"
 
 [[models]]
 name = "default"
+context_window_tokens = 200000
 [[models.mappings]]
 provider = "anthropic"
 actual_model = "claude-sonnet-4-6"

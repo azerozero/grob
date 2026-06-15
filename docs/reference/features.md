@@ -13,6 +13,7 @@ Exhaustive list of grob capabilities, extracted from the codebase. The current v
 | Prompt-based routing | Regex rules with capture groups route specific prompts | `[[router.prompt_rules]]` |
 | Auto-mapping | Regex model name transformation (e.g., `^claude-` → default) | `[router] auto_map_regex` |
 | Fan-out racing | Parallel dispatch: fastest, best_quality, or weighted selection | `strategy = "fan_out"` |
+| Context-window guard | Warn at 80% and block at 95% before provider dispatch, with compact hints | `context_window_tokens` |
 | Response caching | Dedup temperature=0 requests (moka LRU, configurable TTL) | `[cache] enabled = true` |
 | Streaming SSE | Full SSE streaming for all endpoints and providers | Built-in |
 | Tool calling | Function calling support across all providers | Built-in |
