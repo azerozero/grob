@@ -241,7 +241,7 @@ The OpenAI-compat endpoint accepts a few GLM-specific request fields that grob d
 - `request_id: string` — user-provided trace ID.
 - `tool_stream: bool` — streaming for function calls (GLM-4.6+).
 
-Grob requests pass through without these fields, which is harmless: the server applies its defaults. Error response shape (`{ code, message }` instead of OpenAI's `{ error: { message, type, code } }`) and finish reasons (`sensitive`, `model_context_window_exceeded`, `network_error`) are normalized into grob's standard error envelope at the dispatch layer.
+Grob requests pass through without these fields, which is harmless: the server applies its defaults. Error response shape (`{ code, message }` instead of OpenAI's `{ error: { message, type, code } }`) and finish reasons (`sensitive`, `model_context_window_exceeded`, `network_error`) are normalized into grob's standard error envelope at the dispatch layer. Context-window overflows are normalized further to HTTP `400` with `context_length_exceeded` and compact hint headers so clients can retry after `/compact`.
 
 If you need GLM thinking control end-to-end, use the Anthropic-compatible path — `provider_type = "z.ai"` + Anthropic `thinking` blocks map cleanly to GLM's reasoning mode at the upstream.
 

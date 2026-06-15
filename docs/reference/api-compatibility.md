@@ -483,6 +483,7 @@ All three endpoints return errors in OpenAI format when accessed via an OpenAI-c
   "error": {
     "message": "Error description",
     "type": "error_type",
+    "param": "optional_param",
     "code": "error_code"
   }
 }
@@ -498,6 +499,13 @@ All three endpoints return errors in OpenAI format when accessed via an OpenAI-c
   }
 }
 ```
+
+Context-window overflow is a special 400 path on every endpoint. Grob estimates
+input tokens before provider dispatch, emits `x-grob-action: compact` and
+`x-grob-context-*` headers, and returns `code: context_length_exceeded` in the
+endpoint's native error envelope. Upstream provider messages such as OpenAI
+Responses `response.failed` context-window errors are normalized to the same
+shape.
 
 ## Source files
 

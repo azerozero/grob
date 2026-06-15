@@ -277,6 +277,15 @@ The effort value is forwarded to providers that support it. Anthropic backends m
 | Response structure | `choices[].message` | `output[]` items |
 | Multi-turn state | Stateless | `previous_response_id` (accepted but ignored) |
 
+## Error handling
+
+The Responses endpoint uses the same OpenAI-compatible error envelope as
+`/v1/chat/completions`. Oversized agent histories are normalized to HTTP `400`
+with `code: context_length_exceeded`, `param: input`, and
+`x-grob-action: compact` headers. If a provider reports a terminal
+`response.failed` context-window error, Grob maps it to the same client-visible
+shape instead of returning a generic `502`.
+
 ## Source files
 
 | File | Purpose |
