@@ -385,6 +385,7 @@ mod tests {
                     mapping(1, "anthropic", "claude-sonnet"),
                 ],
                 budget_usd: None,
+                context_window_tokens: None,
                 strategy: crate::cli::ModelStrategy::Fallback,
                 fan_out: None,
                 deprecated: None,

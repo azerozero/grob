@@ -1,12 +1,32 @@
 {
   "uid": "grob-rssi-business",
-  "title": "Grob — Conformité IA (vue RSSI)",
+  "title": "Grob — Décision RSSI IA",
   "tags": ["grob", "rssi", "conformité", "dlp", "démo"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 2,
   "refresh": "5s",
   "time": { "from": "now-15m", "to": "now" },
+  "links": [
+    {
+      "type": "link",
+      "title": "Investiguer un agent",
+      "url": "/d/grob-audit-agent/grob-audit-agent?orgId=1&var-tenant=compta-bot",
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    },
+    {
+      "type": "link",
+      "title": "Observabilité technique",
+      "url": "/d/grob-overview/grob-otel-metrics-logs-traces?orgId=1",
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
   "panels": [
     {
       "id": 100,
@@ -16,14 +36,14 @@
       "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "<div style=\"text-align:center\">\n\n# 🛡️ Vos données restent chez vous\n\n### Chaque échange avec une IA est inspecté **avant** de sortir — les fuites sont caviardées, les attaques bloquées, la dépense plafonnée.\n\n</div>"
+        "content": "<div style=\"text-align:center\">\n\n# Grob protège les appels IA en temps réel\n\n### Fuites caviardées · attaques bloquées avant sortie · budget plafonné · audit signé.\n\n</div>"
       }
     },
     {
       "id": 3,
       "type": "stat",
-      "title": "Menaces bloquées",
-      "description": "Attaques (injection de prompt, exfiltration de données) rejetées AVANT tout envoi à l'IA. Sur ces tentatives, rien n'est sorti de votre système.",
+      "title": "Bloqué avant sortie",
+      "description": "Tentatives rejetées avant tout envoi au fournisseur IA : injection de prompt, exfiltration ou contenu interdit.",
       "gridPos": { "h": 8, "w": 6, "x": 0, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -49,8 +69,8 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Secrets & données caviardés",
-      "description": "Clés d'API, mots de passe, cartes bancaires, IBAN détectés et masqués avant l'envoi au fournisseur. Plus ce nombre monte, plus la protection travaille.",
+      "title": "Données caviardées",
+      "description": "Secrets, identifiants, cartes bancaires et IBAN masqués avant transmission. Le fournisseur ne reçoit que la version nettoyée.",
       "gridPos": { "h": 8, "w": 6, "x": 6, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -76,8 +96,8 @@
     {
       "id": 10,
       "type": "stat",
-      "title": "Dépense IA maîtrisée",
-      "description": "Part du budget IA mensuel déjà consommée. Le plafond est appliqué automatiquement : au-delà de 100 %, les requêtes sont refusées. Reste à 0 % tant que la dépense est nulle.",
+      "title": "Budget utilisé",
+      "description": "Part du budget IA mensuel consommée. Le plafond est appliqué automatiquement et les dépassements sont refusés.",
       "gridPos": { "h": 8, "w": 6, "x": 12, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -112,8 +132,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Traçabilité signée",
-      "description": "La configuration de sécurité appliquée est vérifiée cryptographiquement (signature valide) : les règles n'ont pas été altérées. Chaque action est journalisée et auditable.",
+      "title": "Audit signé",
+      "description": "Chaque action produit une ligne d'audit chaînée et signée. La preuve contient event_id, previous_hash, signature, trace_id et span_id.",
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 3 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -144,8 +164,8 @@
     {
       "id": 20,
       "type": "timeseries",
-      "title": "Protection en action (interventions par minute)",
-      "description": "Rythme des protections déclenchées en temps réel. Vert = caviardage (secret / donnée perso), rouge = blocage (attaque). Plus la courbe vit, plus la protection est sollicitée.",
+      "title": "Interventions DLP par minute",
+      "description": "Rythme des décisions de protection. Vert = caviardage accepté, rouge = blocage avant sortie.",
       "gridPos": { "h": 9, "w": 16, "x": 0, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -177,8 +197,8 @@
     {
       "id": 11,
       "type": "piechart",
-      "title": "Nature des protections",
-      "description": "Répartition de ce que grob a protégé : secrets (clés d'API…), données personnelles, injections de prompt et tentatives d'exfiltration.",
+      "title": "Types de risques détectés",
+      "description": "Répartition des risques interceptés par grob : secrets, données personnelles, injections de prompt et exfiltrations.",
       "gridPos": { "h": 9, "w": 8, "x": 16, "y": 11 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {

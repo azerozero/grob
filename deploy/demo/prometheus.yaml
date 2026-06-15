@@ -30,6 +30,8 @@ scrape_configs:
   - job_name: grob
     metrics_path: /metrics
     static_configs:
-      - targets: ["grob:8080"]
+      # Compose resout `grob`; le pod `podman kube play` partage le netns et
+      # atteint grob sur localhost. Garder les deux rend la meme config portable.
+      - targets: ["grob:8080", "localhost:8080"]
         labels:
           service_name: grob

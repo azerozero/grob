@@ -5,8 +5,8 @@ mod transform;
 pub(crate) mod types;
 
 use super::{
-    build_provider_client, key_pool::KeyPool, LlmProvider, ProviderError, ProviderResponse,
-    StreamResponse,
+    build_provider_client, error::is_context_window_exceeded_message, key_pool::KeyPool,
+    LlmProvider, ProviderError, ProviderResponse, StreamResponse,
 };
 use crate::auth::{OAuthConfig, TokenStore};
 use crate::models::CanonicalRequest;
@@ -412,6 +412,10 @@ impl GeminiProvider {
 
     /// Classifies an API error with model-not-found handling.
     fn classify_error(status: u16, error_text: &str, model: &str, is_oauth: bool) -> ProviderError {
+        if is_context_window_exceeded_message(error_text) {
+            return ProviderError::InvalidRequest(error_text.to_string());
+        }
+
         if status == 404 {
             let user_friendly_msg = if model.contains("gemini-3") || model.contains("preview") {
                 format!(

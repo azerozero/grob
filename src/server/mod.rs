@@ -6,6 +6,7 @@ mod budget;
 mod config_api;
 /// Centralized deny-list for configuration updates.
 pub(crate) mod config_guard;
+mod context_guard;
 /// Core dispatch pipeline: DLP, cache, route, provider loop.
 pub(crate) mod dispatch;
 mod endpoints;
@@ -39,6 +40,7 @@ pub(crate) use budget::{
     is_retryable, provider_max_retries, record_request_metrics, record_spend, retry_delay,
     tokens_from_chars, RequestMetrics,
 };
+pub(crate) use context_guard::{evaluate_context_guard, ContextGuardDecision, ContextGuardInfo};
 pub use error::{ErrorVariantTag, RequestError};
 pub(crate) use helpers::{
     format_route_type, inject_continuation_text, resolve_provider_mappings,

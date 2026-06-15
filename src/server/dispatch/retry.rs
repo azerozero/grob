@@ -50,21 +50,41 @@ pub(super) enum ProviderLoopAction {
 /// lets the loop surface the true upstream cause when every mapping fails,
 /// rather than a misleading fallback or a generic 502.
 pub(super) fn capture_upstream_error(provider: &str, err: &ProviderError) -> RequestError {
+    use crate::providers::error::is_context_window_exceeded_message;
+
     match err {
+        ProviderError::ApiError { message, .. } if is_context_window_exceeded_message(message) => {
+            context_window_error(message.clone())
+        }
         ProviderError::ApiError { status, message } => RequestError::ProviderUpstream {
             provider: provider.to_string(),
             status: *status,
             body: Some(message.clone()),
         },
+        ProviderError::ProtocolError(message) if is_context_window_exceeded_message(message) => {
+            context_window_error(message.clone())
+        }
         ProviderError::ProtocolError(message) => RequestError::ProviderProtocol {
             provider: provider.to_string(),
             body: message.clone(),
         },
+        ProviderError::InvalidRequest(message) if is_context_window_exceeded_message(message) => {
+            context_window_error(message.clone())
+        }
         other => RequestError::ProviderUpstream {
             provider: provider.to_string(),
             status: 502,
             body: Some(other.to_string()),
         },
+    }
+}
+
+fn context_window_error(_message: String) -> RequestError {
+    RequestError::ContextWindowExceeded {
+        message: "Input exceeds the configured context window. Compact the conversation and retry.\n\nSuggested action:\nRun /compact, then retry the last request.".to_string(),
+        estimated_input_tokens: 0,
+        context_window: 0,
+        usage_ratio: 1.0,
     }
 }
 
@@ -75,6 +95,7 @@ pub(super) struct ProviderAttempt<'a> {
     pub cache_key: &'a Option<String>,
     pub original_model: &'a str,
     pub is_subscription: bool,
+    pub context_guard: Option<crate::server::ContextGuardInfo>,
 }
 
 /// Per-provider dispatch parameters (streaming path).
@@ -85,6 +106,7 @@ pub(super) struct StreamingAttempt<'a> {
     pub mapping: &'a crate::cli::ModelMapping,
     pub decision: &'a crate::models::RouteDecision,
     pub is_subscription: bool,
+    pub context_guard: Option<crate::server::ContextGuardInfo>,
 }
 
 /// Traces cancellation before a streaming response body exists.
@@ -256,6 +278,7 @@ pub(super) async fn try_rotate_and_retry(
                     mapping: attempt.mapping,
                     decision: attempt.decision,
                     is_subscription: attempt.is_subscription,
+                    context_guard: attempt.context_guard.clone(),
                 },
             )
             .await
@@ -338,6 +361,7 @@ pub(super) async fn dispatch_streaming(
                 actual_model: mapping.actual_model.clone(),
                 upstream_headers,
                 overhead_ms,
+                context_guard: attempt.context_guard.clone(),
             })
         }
         Err(e) => {
@@ -545,6 +569,7 @@ pub(super) async fn dispatch_non_streaming(
                     provider: attempt.mapping.provider.clone(),
                     actual_model: attempt.mapping.actual_model.clone(),
                     provider_duration_ms,
+                    context_guard: attempt.context_guard.clone(),
                 });
             }
             Err(e) => {

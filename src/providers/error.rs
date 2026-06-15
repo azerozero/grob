@@ -55,3 +55,20 @@ pub enum ProviderError {
     #[error("All providers failed: {0}")]
     AllProvidersFailed(String),
 }
+
+/// Returns true when an upstream error message is a context-window overflow.
+///
+/// Some OpenAI-compatible gateways surface Responses API terminal failures as
+/// `response.failed` inside an otherwise successful HTTP/SSE exchange. Treating
+/// that as a protocol failure turns a user-fixable oversized prompt into a
+/// misleading 502, so centralize the phrase matching here for provider and
+/// server-side error mapping.
+pub(crate) fn is_context_window_exceeded_message(message: &str) -> bool {
+    let normalized = message.to_ascii_lowercase();
+    normalized.contains("context_length_exceeded")
+        || normalized.contains("exceeds the context window")
+        || normalized.contains("exceeded the context window")
+        || normalized.contains("exceeds context window")
+        || normalized.contains("context window of this model")
+        || normalized.contains("maximum context length")
+}

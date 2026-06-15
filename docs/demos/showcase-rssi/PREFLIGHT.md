@@ -16,6 +16,8 @@
 
 - [ ] **Lancer la stack** : `cd deploy/demo && make demo`.
 - [ ] **Vérifier les 3 accès** :
+      - [ ] `http://localhost:8088/governance` — les 4 identités apparaissent ;
+            `compta-bot` finit par passer en statut révoqué.
       - [ ] `http://localhost:8088` — des lignes tombent (rouge + ambre).
       - [ ] `http://localhost:3000` — le tableau de bord RSSI s'ouvre en page
             d'accueil, les chiffres montent (auto-refresh 5 s).
@@ -29,7 +31,8 @@
 
 - [ ] **Notifications coupées** (Ne pas déranger / mode présentation).
 - [ ] **Police du terminal agrandie** (≥ 18 pt) et zoom navigateur à ~125 %.
-- [ ] **Deux onglets** ouverts et positionnés : `8088` puis `3000`.
+- [ ] **Trois onglets** ouverts et positionnés : `8088/governance`, `8088`,
+      puis `3000`.
 - [ ] **Un terminal** prêt, dans `deploy/demo/`, historique des commandes des
       actes 2 et 3 pré-chargé (flèche haut).
 - [ ] **Plan réseau** : tout est local (`localhost`) — aucune dépendance

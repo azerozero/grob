@@ -97,6 +97,7 @@ mode = "kerberos"
                 budget_usd: None,
                 strategy: ModelStrategy::FanOut,
                 fan_out: None, // Missing fan_out config!
+                context_window_tokens: None,
                 deprecated: None,
             }],
             #[cfg(feature = "mcp")]
@@ -153,6 +154,7 @@ mode = "kerberos"
                     judge_criteria: None,
                     count: None,
                 }),
+                context_window_tokens: None,
                 deprecated: None,
             }],
             #[cfg(feature = "mcp")]

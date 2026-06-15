@@ -132,5 +132,6 @@ pub(super) async fn try_direct_provider_lookup(
         provider: model_name.to_string(),
         actual_model: model_name.to_string(),
         provider_duration_ms: 0,
+        context_guard: None,
     }))
 }

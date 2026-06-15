@@ -73,7 +73,9 @@ pub mod test_api {
 }
 
 use super::{
-    base::ProviderBase, error::ProviderError, LlmProvider, ProviderResponse, StreamResponse,
+    base::ProviderBase,
+    error::{is_context_window_exceeded_message, ProviderError},
+    LlmProvider, ProviderResponse, StreamResponse,
 };
 use crate::auth::OAuthConfig;
 use crate::models::{CanonicalRequest, CountTokensRequest, CountTokensResponse};
@@ -204,6 +206,9 @@ impl OpenAIProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
+            if is_context_window_exceeded_message(&error_text) {
+                return Err(ProviderError::InvalidRequest(error_text));
+            }
             return Err(ProviderError::ApiError {
                 status,
                 message: error_text,
