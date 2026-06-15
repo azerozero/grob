@@ -4,7 +4,7 @@ use super::{
         ANTHROPIC_API_VERSION, ANTHROPIC_BETA_FEATURES, ANTHROPIC_DOMAIN, RATE_LIMIT_REQUESTS_LOW,
         RATE_LIMIT_TOKENS_LOW,
     },
-    error::ProviderError,
+    error::{is_context_window_exceeded_message, ProviderError},
     LlmProvider, ProviderResponse, StreamResponse,
 };
 use crate::auth::OAuthConfig;
@@ -236,10 +236,11 @@ impl AnthropicCompatibleProvider {
                 }
             }
 
-            return Err(ProviderError::ApiError {
-                status,
-                message: format!("{} API error: {}", self.base.name, error_text),
-            });
+            let message = format!("{} API error: {}", self.base.name, error_text);
+            if is_context_window_exceeded_message(&message) {
+                return Err(ProviderError::InvalidRequest(message));
+            }
+            return Err(ProviderError::ApiError { status, message });
         }
 
         Ok(response)

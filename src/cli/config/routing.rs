@@ -112,6 +112,13 @@ pub struct ModelConfig {
     /// Per-model monthly budget in USD (optional, overrides provider and global)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_usd: Option<BudgetUsd>,
+    /// Context window size in tokens for this logical model.
+    ///
+    /// When unset, Grob falls back to a conservative model-name heuristic. Set
+    /// this for proxy aliases whose real upstream model has a larger/smaller
+    /// window than the heuristic can infer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window_tokens: Option<u32>,
     /// Strategy for using multiple mappings (default: fallback)
     #[serde(default)]
     pub strategy: ModelStrategy,

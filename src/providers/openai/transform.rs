@@ -1,6 +1,6 @@
 use super::types::*;
 use crate::models::{CanonicalRequest, Message, MessageContent};
-use crate::providers::error::ProviderError;
+use crate::providers::error::{is_context_window_exceeded_message, ProviderError};
 use crate::providers::streaming::parse_sse_events;
 use crate::providers::{CodexOptions, ContentBlock, KnownContentBlock, ProviderResponse, Usage};
 use serde::Serialize;
@@ -663,10 +663,14 @@ pub(crate) fn parse_sse_response(sse_text: &str) -> Result<ParsedSseResponse, Pr
                 }
             }
             "response.failed" => {
-                return Err(ProviderError::ProtocolError(format!(
+                let message = format!(
                     "OpenAI Responses API returned response.failed: {}",
                     responses_error_message(&json)
-                )));
+                );
+                if is_context_window_exceeded_message(&message) {
+                    return Err(ProviderError::InvalidRequest(message));
+                }
+                return Err(ProviderError::ProtocolError(message));
             }
             _ => {}
         }
@@ -2102,6 +2106,20 @@ mod tests {
             parse_sse_response(sse),
             Err(ProviderError::ProtocolError(message))
                 if message.contains("response.failed") && message.contains("boom")
+        ));
+    }
+
+    #[test]
+    fn parse_sse_failed_context_window_maps_to_invalid_request() {
+        let sse = concat!(
+            "event: response.failed\n",
+            "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\",\"error\":{\"message\":\"Your input exceeds the context window of this model. Please adjust your input and try again.\"}}}\n",
+        );
+
+        assert!(matches!(
+            parse_sse_response(sse),
+            Err(ProviderError::InvalidRequest(message))
+                if message.contains("context window") && message.contains("response.failed")
         ));
     }
 

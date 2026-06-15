@@ -2,7 +2,7 @@ use crate::models::CanonicalRequest;
 use axum::{
     body::Body,
     extract::State,
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -503,6 +503,7 @@ where
             actual_model,
             upstream_headers,
             overhead_ms,
+            context_guard,
         } => {
             let body = on_streaming(stream);
             let mut response_builder =
@@ -525,7 +526,7 @@ where
             let response = response_builder
                 .body(body)
                 .map_err(|e| RequestError::Internal(anyhow::anyhow!("response builder: {}", e)))?;
-            Ok(response)
+            Ok(with_context_guard_headers(response, context_guard.as_ref()))
         }
 
         dispatch::DispatchResult::Complete {
@@ -533,6 +534,7 @@ where
             provider,
             actual_model,
             provider_duration_ms,
+            context_guard,
         } => {
             // Overhead = total time - provider call time.
             let total_ms = start_time.elapsed().as_millis() as u64;
@@ -548,19 +550,98 @@ where
                 "x-grob-overhead-duration-ms",
                 axum::http::HeaderValue::from(overhead_ms),
             );
+            add_context_guard_headers(resp.headers_mut(), context_guard.as_ref());
             Ok(resp)
         }
 
-        dispatch::DispatchResult::FanOut { response } => {
+        dispatch::DispatchResult::FanOut {
+            response,
+            context_guard,
+        } => {
             let total_ms = start_time.elapsed().as_millis() as u64;
             let mut resp = on_fan_out(response);
             resp.headers_mut().insert(
                 "x-grob-overhead-duration-ms",
                 axum::http::HeaderValue::from(total_ms),
             );
+            add_context_guard_headers(resp.headers_mut(), context_guard.as_ref());
             Ok(resp)
         }
     }
+}
+
+fn with_context_guard_headers(
+    mut response: Response,
+    context_guard: Option<&crate::server::ContextGuardInfo>,
+) -> Response {
+    add_context_guard_headers(response.headers_mut(), context_guard);
+    response
+}
+
+fn add_context_guard_headers(
+    headers: &mut axum::http::HeaderMap,
+    context_guard: Option<&crate::server::ContextGuardInfo>,
+) {
+    let Some(info) = context_guard else {
+        return;
+    };
+    for (name, value) in info.compact_headers() {
+        if let Ok(value) = axum::http::HeaderValue::from_str(&value) {
+            headers.insert(axum::http::HeaderName::from_static(name), value);
+        }
+    }
+}
+
+fn context_window_anthropic_response(error: &RequestError) -> Option<Response> {
+    let RequestError::ContextWindowExceeded {
+        message,
+        estimated_input_tokens,
+        context_window,
+        usage_ratio,
+    } = error
+    else {
+        return None;
+    };
+
+    let body = serde_json::json!({
+        "type": "error",
+        "error": {
+            "type": "invalid_request_error",
+            "message": message,
+            "code": "context_length_exceeded",
+            "param": "input",
+            "estimated_input_tokens": estimated_input_tokens,
+            "context_window": context_window,
+            "usage_ratio": usage_ratio,
+        }
+    });
+
+    let mut response = (StatusCode::BAD_REQUEST, Json(body)).into_response();
+    response.headers_mut().insert(
+        "x-grob-action",
+        axum::http::HeaderValue::from_static("compact"),
+    );
+    if let Ok(value) = axum::http::HeaderValue::from_str(&format!("{usage_ratio:.4}")) {
+        response.headers_mut().insert("x-grob-context-used", value);
+    }
+    response.headers_mut().insert(
+        "x-grob-context-window",
+        axum::http::HeaderValue::from(*context_window),
+    );
+    response.headers_mut().insert(
+        "x-grob-context-estimated-input",
+        axum::http::HeaderValue::from(*estimated_input_tokens),
+    );
+    response.headers_mut().insert(
+        "x-grob-context-threshold",
+        axum::http::HeaderValue::from_static("hard"),
+    );
+    response
+        .extensions_mut()
+        .insert(crate::server::ErrorVariantTag(
+            "context_window_exceeded".to_string(),
+        ));
+    Some(response)
 }
 
 /// Handle /v1/chat/completions requests (OpenAI-compatible endpoint)
@@ -733,7 +814,8 @@ pub(crate) async fn handle_responses(
     let result = match dispatch::dispatch(&ctx, &mut request).await {
         Ok(r) => r,
         Err(e) => {
-            let mut response = e.into_response();
+            let mut response =
+                context_window_anthropic_response(&e).unwrap_or_else(|| e.into_response());
             mark_audited_if_set(&audited_flag, &mut response);
             return Ok(response);
         }

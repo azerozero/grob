@@ -23,10 +23,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use super::{
-    calculate_cost, check_budget_for_tenant, effective_token_counts, is_provider_subscription,
-    log_audit, record_request_metrics, record_spend, resolve_provider_mappings,
-    sanitize_provider_response_reported, AppState, AuditCompliance, AuditParams, ReloadableState,
-    RequestError, RequestMetrics,
+    calculate_cost, check_budget_for_tenant, effective_token_counts, evaluate_context_guard,
+    is_provider_subscription, log_audit, record_request_metrics, record_spend,
+    resolve_provider_mappings, sanitize_provider_response_reported, AppState, AuditCompliance,
+    AuditParams, ContextGuardDecision, ContextGuardInfo, ReloadableState, RequestError,
+    RequestMetrics,
 };
 use crate::features::watch::events::{DlpDirection, WatchEvent};
 
@@ -200,6 +201,8 @@ pub(crate) enum DispatchResult {
         upstream_headers: Vec<(String, String)>,
         /// Proxy overhead in ms (time from request receipt to first SSE byte).
         overhead_ms: u64,
+        /// Optional context-window warning metadata.
+        context_guard: Option<ContextGuardInfo>,
     },
     /// Non-streaming response from a provider.
     Complete {
@@ -208,9 +211,15 @@ pub(crate) enum DispatchResult {
         actual_model: String,
         /// Time spent inside the provider call (ms), used for overhead calculation.
         provider_duration_ms: u64,
+        /// Optional context-window warning metadata.
+        context_guard: Option<ContextGuardInfo>,
     },
     /// Fan-out response (multiple providers called in parallel).
-    FanOut { response: ProviderResponse },
+    FanOut {
+        response: ProviderResponse,
+        /// Optional context-window warning metadata.
+        context_guard: Option<ContextGuardInfo>,
+    },
 }
 
 /// Resolves the client complexity hint from available sources.
@@ -423,6 +432,41 @@ pub(crate) async fn dispatch(
         &ctx.allowed_providers,
     )?;
 
+    let context_guard = match evaluate_context_guard(
+        ctx.inner,
+        request,
+        &decision.model_name,
+        sorted_mappings.first(),
+    ) {
+        ContextGuardDecision::Ok => None,
+        ContextGuardDecision::Warn(info) => {
+            tracing::warn!(
+                estimated_input_tokens = info.estimated_input_tokens,
+                context_window = info.context_window,
+                usage_ratio = info.usage_ratio,
+                model = %decision.model_name,
+                "request is approaching the configured context window; compact soon"
+            );
+            metrics::counter!("grob_context_guard_warnings_total",
+                "model" => decision.model_name.clone(),
+            )
+            .increment(1);
+            Some(info)
+        }
+        ContextGuardDecision::Block(info) => {
+            metrics::counter!("grob_context_guard_blocks_total",
+                "model" => decision.model_name.clone(),
+            )
+            .increment(1);
+            return Err(RequestError::ContextWindowExceeded {
+                message: context_window_exceeded_message(&info),
+                estimated_input_tokens: info.estimated_input_tokens,
+                context_window: info.context_window,
+                usage_ratio: info.usage_ratio,
+            });
+        }
+    };
+
     // ── Step 4.5: Tool layer (aliasing, injection, capability gating) ──
     if let Some(ref tool_layer) = ctx.state.security.tool_layer {
         if let Some(primary) = sorted_mappings.first() {
@@ -470,6 +514,7 @@ pub(crate) async fn dispatch(
                     &fan_out_config,
                     &decision,
                     dlp_triggered,
+                    context_guard,
                 )
                 .await;
             }
@@ -487,6 +532,7 @@ pub(crate) async fn dispatch(
                     fan_out_config,
                     &decision,
                     dlp_triggered,
+                    context_guard,
                 )
                 .await;
             }
@@ -501,8 +547,23 @@ pub(crate) async fn dispatch(
         &decision,
         &cache_key,
         dlp_triggered,
+        context_guard,
     )
     .await
+}
+
+fn context_window_exceeded_message(info: &ContextGuardInfo) -> String {
+    let mut message =
+        "Input exceeds the configured context window. Compact the conversation and retry."
+            .to_string();
+    if let Some(handoff) = &info.handoff {
+        message.push_str("\n\nLast recap:\n");
+        message.push_str(handoff);
+        message.push_str("\n\nSuggested action:\nRun /compact, then retry the last request.");
+    } else {
+        message.push_str("\n\nSuggested action:\nRun /compact, then retry the last request.");
+    }
+    message
 }
 
 /// Re-evaluates `[[policies]]` with the *enriched* request context and applies
@@ -654,6 +715,7 @@ async fn check_cache(
         provider: cached.provider.clone(),
         actual_model: cached.model.clone(),
         provider_duration_ms: 0,
+        context_guard: None,
     })
 }
 
@@ -929,6 +991,7 @@ async fn dispatch_fan_out(
     fan_out_config: &crate::cli::FanOutConfig,
     decision: &crate::models::RouteDecision,
     dlp_triggered: bool,
+    context_guard: Option<ContextGuardInfo>,
 ) -> Result<DispatchResult, RequestError> {
     // Budget enforcement: fan-out returns from `dispatch()` *before* the
     // provider loop, which is where the per-attempt budget gate lives. Without
@@ -964,7 +1027,15 @@ async fn dispatch_fan_out(
     .await
     {
         Ok((response, provider_info)) => {
-            handle_fan_out_success(ctx, &fan_request, response, &provider_info, decision).await
+            handle_fan_out_success(
+                ctx,
+                &fan_request,
+                response,
+                &provider_info,
+                decision,
+                context_guard,
+            )
+            .await
         }
         Err(e) => Err(RequestError::ProviderUpstream {
             provider: "fan_out".to_string(),
@@ -981,6 +1052,7 @@ async fn handle_fan_out_success(
     mut response: ProviderResponse,
     provider_info: &[(String, String)],
     decision: &crate::models::RouteDecision,
+    context_guard: Option<ContextGuardInfo>,
 ) -> Result<DispatchResult, RequestError> {
     ctx.sanitize_output(&mut response);
 
@@ -1018,7 +1090,10 @@ async fn handle_fan_out_success(
     });
 
     response.model = ctx.model.clone();
-    Ok(DispatchResult::FanOut { response })
+    Ok(DispatchResult::FanOut {
+        response,
+        context_guard,
+    })
 }
 
 /// Track cost for each provider in a fan-out response.

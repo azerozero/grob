@@ -40,6 +40,7 @@ pub(super) async fn dispatch_provider_loop(
     decision: &crate::models::RouteDecision,
     cache_key: &Option<String>,
     dlp_triggered: bool,
+    context_guard: Option<crate::server::ContextGuardInfo>,
 ) -> Result<DispatchResult, RequestError> {
     // Re-sort mappings by adaptive score when scorer is enabled
     let rescored;
@@ -115,6 +116,7 @@ pub(super) async fn dispatch_provider_loop(
                     mapping,
                     decision,
                     is_subscription,
+                    context_guard: context_guard.clone(),
                 },
             )
             .await
@@ -129,6 +131,7 @@ pub(super) async fn dispatch_provider_loop(
                     cache_key,
                     original_model: &original_model,
                     is_subscription,
+                    context_guard: context_guard.clone(),
                 },
             )
             .await
@@ -148,6 +151,7 @@ pub(super) async fn dispatch_provider_loop(
                         cache_key,
                         original_model: &original_model,
                         is_subscription,
+                        context_guard: context_guard.clone(),
                     },
                 )
                 .await

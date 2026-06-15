@@ -1,6 +1,6 @@
 use super::tool_salvage::{drain_buffer, salvage_complete, SalvageEvent, SalvagedToolCall};
 use super::types::{OpenAIStreamChunk, StreamTransformState};
-use crate::providers::error::ProviderError;
+use crate::providers::error::{is_context_window_exceeded_message, ProviderError};
 
 /// Transform an OpenAI streaming chunk to Anthropic SSE format.
 ///
@@ -1074,10 +1074,15 @@ fn emit_codex_stream_failure(
         .or_else(|| json.get("detail"))
         .and_then(|v| v.as_str())
         .unwrap_or("Responses stream failed");
+    let error_type = if is_context_window_exceeded_message(message) {
+        "invalid_request_error"
+    } else {
+        "api_error"
+    };
     let event = serde_json::json!({
         "type": "error",
         "error": {
-            "type": "api_error",
+            "type": error_type,
             "message": message
         }
     });

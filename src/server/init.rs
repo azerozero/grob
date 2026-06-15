@@ -269,6 +269,16 @@ const METRIC_FAMILIES: &[(&str, MetricKind, &str)] = &[
         "Total provider errors, by provider.",
     ),
     (
+        "grob_context_guard_warnings_total",
+        MetricKind::Counter,
+        "Total requests that crossed the context-window warning threshold, by model.",
+    ),
+    (
+        "grob_context_guard_blocks_total",
+        MetricKind::Counter,
+        "Total requests blocked before dispatch because estimated input exceeded the context-window hard threshold, by model.",
+    ),
+    (
         "grob_ratelimit_hits_total",
         MetricKind::Counter,
         "Total upstream 429 rate-limit responses, by provider.",

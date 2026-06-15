@@ -36,6 +36,18 @@ pub enum RequestError {
     ParseError(String),
     /// Indicates routing could not resolve a model or provider (HTTP 400).
     RoutingError(String),
+    /// Indicates Grob blocked a request before dispatch because the estimated
+    /// input would overflow the target model context window.
+    ContextWindowExceeded {
+        /// Human-readable message, optionally including a recap handoff.
+        message: String,
+        /// Estimated input tokens for the request.
+        estimated_input_tokens: u32,
+        /// Target model context window in tokens.
+        context_window: u32,
+        /// Estimated input/context ratio.
+        usage_ratio: f32,
+    },
     /// Indicates the upstream provider rate-limited the request (HTTP 429).
     RateLimited {
         /// Provider that emitted the 429 (or the resolved alias).
@@ -148,6 +160,11 @@ impl RequestError {
                 msg.clone(),
             ),
             RequestError::RoutingError(msg) => (StatusCode::BAD_REQUEST, "error", msg.clone()),
+            RequestError::ContextWindowExceeded { message, .. } => (
+                StatusCode::BAD_REQUEST,
+                "invalid_request_error",
+                message.clone(),
+            ),
             RequestError::RateLimited { provider, .. } => (
                 StatusCode::TOO_MANY_REQUESTS,
                 "rate_limit_error",
@@ -218,6 +235,7 @@ impl RequestError {
             RequestError::ToolSpikeBlocked(_) => "tool_spike_blocked",
             RequestError::RateLimitedLocal(_) => "rate_limited_local",
             RequestError::AuthRevoked(_) => "auth_revoked",
+            RequestError::ContextWindowExceeded { .. } => "context_window_exceeded",
             RequestError::Internal(_) => "internal",
         }
     }
@@ -285,6 +303,35 @@ impl IntoResponse for RequestError {
                     );
                 }
             }
+            RequestError::ContextWindowExceeded {
+                estimated_input_tokens,
+                context_window,
+                usage_ratio,
+                ..
+            } => {
+                if let Some(error) = body_obj.get_mut("error").and_then(|v| v.as_object_mut()) {
+                    error.insert(
+                        "code".to_string(),
+                        serde_json::Value::String("context_length_exceeded".to_string()),
+                    );
+                    error.insert(
+                        "param".to_string(),
+                        serde_json::Value::String("input".to_string()),
+                    );
+                    error.insert(
+                        "estimated_input_tokens".to_string(),
+                        serde_json::Value::from(*estimated_input_tokens),
+                    );
+                    error.insert(
+                        "context_window".to_string(),
+                        serde_json::Value::from(*context_window),
+                    );
+                    error.insert(
+                        "usage_ratio".to_string(),
+                        serde_json::Value::from(*usage_ratio),
+                    );
+                }
+            }
             _ => {}
         }
 
@@ -307,6 +354,38 @@ impl IntoResponse for RequestError {
             if let Ok(value) = axum::http::HeaderValue::from_str(&secs.to_string()) {
                 response.headers_mut().insert("retry-after", value);
             }
+        }
+
+        if let RequestError::ContextWindowExceeded {
+            estimated_input_tokens,
+            context_window,
+            usage_ratio,
+            ..
+        } = &self
+        {
+            response.headers_mut().insert(
+                "x-grob-action",
+                axum::http::HeaderValue::from_static("compact"),
+            );
+            response.headers_mut().insert(
+                "x-grob-context-used",
+                axum::http::HeaderValue::from_str(&format!("{usage_ratio:.4}"))
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("1.0000")),
+            );
+            response.headers_mut().insert(
+                "x-grob-context-window",
+                axum::http::HeaderValue::from_str(&context_window.to_string())
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
+            );
+            response.headers_mut().insert(
+                "x-grob-context-estimated-input",
+                axum::http::HeaderValue::from_str(&estimated_input_tokens.to_string())
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("0")),
+            );
+            response.headers_mut().insert(
+                "x-grob-context-threshold",
+                axum::http::HeaderValue::from_static("hard"),
+            );
         }
 
         response
@@ -342,9 +421,10 @@ impl From<anyhow::Error> for RequestError {
 
 impl From<crate::providers::error::ProviderError> for RequestError {
     fn from(err: crate::providers::error::ProviderError) -> Self {
-        use crate::providers::error::ProviderError;
+        use crate::providers::error::{is_context_window_exceeded_message, ProviderError};
         match err {
             ProviderError::ApiError { status, message } => match status {
+                _ if is_context_window_exceeded_message(&message) => context_window_error(message),
                 429 => RequestError::RateLimited {
                     provider: "upstream".to_string(),
                     retry_after_ms: None,
@@ -370,10 +450,15 @@ impl From<crate::providers::error::ProviderError> for RequestError {
             ProviderError::HttpError(e) => {
                 RequestError::Internal(anyhow::Error::new(e).context("HTTP request failed"))
             }
-            ProviderError::ProtocolError(msg) => RequestError::ProviderProtocol {
-                provider: "upstream".to_string(),
-                body: msg,
-            },
+            ProviderError::ProtocolError(msg) if is_context_window_exceeded_message(&msg) => {
+                context_window_error(msg)
+            }
+            ProviderError::ProtocolError(msg) => {
+                RequestError::ProviderProtocol {
+                    provider: "upstream".to_string(),
+                    body: msg,
+                }
+            }
             ProviderError::SerializationError(e) => {
                 RequestError::ParseError(format!("serialization failed: {}", e))
             }
@@ -383,6 +468,9 @@ impl From<crate::providers::error::ProviderError> for RequestError {
             )),
             ProviderError::ConfigError(msg) => {
                 RequestError::Internal(anyhow::anyhow!("Provider config error: {}", msg))
+            }
+            ProviderError::InvalidRequest(msg) if is_context_window_exceeded_message(&msg) => {
+                context_window_error(msg)
             }
             ProviderError::InvalidRequest(msg) => RequestError::ParseError(msg),
             ProviderError::AuthError(msg) => RequestError::AuthRevoked(msg),
@@ -395,6 +483,15 @@ impl From<crate::providers::error::ProviderError> for RequestError {
                 body: Some(msg),
             },
         }
+    }
+}
+
+fn context_window_error(_message: String) -> RequestError {
+    RequestError::ContextWindowExceeded {
+        message: "Input exceeds the configured context window. Compact the conversation and retry.\n\nSuggested action:\nRun /compact, then retry the last request.".to_string(),
+        estimated_input_tokens: 0,
+        context_window: 0,
+        usage_ratio: 1.0,
     }
 }
 
@@ -780,6 +877,16 @@ mod tests {
             "auth_revoked"
         );
         assert_eq!(
+            RequestError::ContextWindowExceeded {
+                message: "x".to_string(),
+                estimated_input_tokens: 1,
+                context_window: 2,
+                usage_ratio: 0.5,
+            }
+            .variant_tag(),
+            "context_window_exceeded"
+        );
+        assert_eq!(
             RequestError::Internal(anyhow::anyhow!("x")).variant_tag(),
             "internal"
         );
@@ -824,6 +931,46 @@ mod tests {
             other => panic!("unexpected variant: {:?}", other),
         }
         assert!(!req_err.is_retryable());
+    }
+
+    #[test]
+    fn wrapped_context_window_error_converts_to_context_window_exceeded() {
+        let err = crate::providers::error::ProviderError::ProtocolError(
+            "API Error: 502 OpenAI Responses API returned response.failed: Your input exceeds the context window of this model. This is a server-side issue, usually temporary".to_string(),
+        );
+        let req_err: RequestError = err.into();
+        assert!(matches!(
+            req_err,
+            RequestError::ContextWindowExceeded { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn context_window_exceeded_returns_400_with_compact_headers() {
+        let err = RequestError::ContextWindowExceeded {
+            message:
+                "Input exceeds the configured context window. Compact the conversation and retry."
+                    .to_string(),
+            estimated_input_tokens: 193_421,
+            context_window: 200_000,
+            usage_ratio: 0.967105,
+        };
+
+        let response = err.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.headers().get("x-grob-action").unwrap(), "compact");
+        assert_eq!(
+            response.headers().get("x-grob-context-threshold").unwrap(),
+            "hard"
+        );
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"]["type"], "invalid_request_error");
+        assert_eq!(json["error"]["code"], "context_length_exceeded");
+        assert_eq!(json["error"]["param"], "input");
     }
 
     #[test]
