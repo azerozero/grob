@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.74](https://github.com/azerozero/grob/compare/v0.36.73...v0.36.74) - 2026-06-15
+
+### Added
+
+- *(api)* add context-window compact guard
+
+### Other
+
+- *(demo)* wire governance dashboards
+
 ## [0.36.73](https://github.com/azerozero/grob/compare/v0.36.72...v0.36.73) - 2026-06-15
 
 ### Added
