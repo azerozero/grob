@@ -1,12 +1,32 @@
 {
   "uid": "grob-overview",
-  "title": "grob — OTel (metrics · logs · traces)",
+  "title": "Grob — Observabilité technique",
   "tags": ["grob", "llm", "proxy"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "10s",
   "time": { "from": "now-30m", "to": "now" },
+  "links": [
+    {
+      "type": "link",
+      "title": "Vue RSSI",
+      "url": "/d/grob-rssi-business/grob-decision-rssi-ia?orgId=1",
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    },
+    {
+      "type": "link",
+      "title": "Audit agent",
+      "url": "/d/grob-audit-agent/grob-audit-agent?orgId=1&var-tenant=compta-bot",
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
   "templating": {
     "list": [
       {
@@ -31,7 +51,7 @@
   },
   "panels": [
     {
-      "id": 1, "type": "stat", "title": "Requests (total)",
+      "id": 1, "type": "stat", "title": "Requêtes totales",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "blue" } } },
@@ -39,7 +59,7 @@
       "targets": [ { "refId": "A", "expr": "sum(grob_requests_total{provider=~\"$provider\", model=~\"$model\"})" } ]
     },
     {
-      "id": 2, "type": "stat", "title": "Request rate",
+      "id": 2, "type": "stat", "title": "Débit requêtes",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps", "color": { "mode": "fixed", "fixedColor": "green" } } },
@@ -47,7 +67,7 @@
       "targets": [ { "refId": "A", "expr": "sum(rate(grob_requests_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))" } ]
     },
     {
-      "id": 3, "type": "stat", "title": "In-flight requests",
+      "id": 3, "type": "stat", "title": "Requêtes en cours",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 20 }, { "color": "red", "value": 50 } ] } } },
@@ -55,54 +75,54 @@
       "targets": [ { "refId": "A", "expr": "sum(grob_active_requests)" } ]
     },
     {
-      "id": 4, "type": "stat", "title": "p95 latency",
+      "id": 4, "type": "stat", "title": "Latence p95",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 } ] } } },
+      "fieldConfig": { "defaults": { "unit": "ms", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 200 }, { "color": "red", "value": 500 } ] } } },
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "area" },
-      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))" } ]
+      "targets": [ { "refId": "A", "expr": "max(grob_request_duration_seconds{provider=~\"$provider\", model=~\"$model\", quantile=\"0.95\"}) * 1000" } ]
     },
     {
-      "id": 10, "type": "timeseries", "title": "Request rate by model",
+      "id": 10, "type": "timeseries", "title": "Débit par modèle",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" }, "lineWidth": 1 } } },
       "targets": [ { "refId": "A", "expr": "sum by (model) (rate(grob_requests_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))", "legendFormat": "{{model}}" } ]
     },
     {
-      "id": 11, "type": "timeseries", "title": "Request rate by provider (fallback visible)",
+      "id": 11, "type": "timeseries", "title": "Débit par provider",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" }, "lineWidth": 1 } } },
       "targets": [ { "refId": "A", "expr": "sum by (provider) (rate(grob_requests_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))", "legendFormat": "{{provider}}" } ]
     },
     {
-      "id": 12, "type": "timeseries", "title": "Latency (p50 / p95 / p99)",
+      "id": 12, "type": "timeseries", "title": "Latence p50 / p95 / p99",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10, "lineWidth": 2 } } },
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "fillOpacity": 10, "lineWidth": 2 } } },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p50", "exemplar": true },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p95", "exemplar": true },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))", "legendFormat": "p99", "exemplar": true }
+        { "refId": "A", "expr": "max(grob_request_duration_seconds{provider=~\"$provider\", model=~\"$model\", quantile=\"0.5\"}) * 1000", "legendFormat": "p50" },
+        { "refId": "B", "expr": "max(grob_request_duration_seconds{provider=~\"$provider\", model=~\"$model\", quantile=\"0.95\"}) * 1000", "legendFormat": "p95" },
+        { "refId": "C", "expr": "max(grob_request_duration_seconds{provider=~\"$provider\", model=~\"$model\", quantile=\"0.99\"}) * 1000", "legendFormat": "p99" }
       ]
     },
     {
-      "id": 13, "type": "timeseries", "title": "Outcomes by status",
+      "id": 13, "type": "timeseries", "title": "Résultats par statut",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "fillOpacity": 30, "stacking": { "mode": "normal" }, "lineWidth": 1 } } },
       "targets": [ { "refId": "A", "expr": "sum by (status) (rate(grob_requests_total{provider=~\"$provider\", model=~\"$model\"}[$__rate_interval]))", "legendFormat": "{{status}}" } ]
     },
     {
-      "id": 20, "type": "timeseries", "title": "Provider errors /s",
+      "id": 20, "type": "timeseries", "title": "Erreurs provider / s",
       "gridPos": { "h": 8, "w": 8, "x": 0, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 20, "lineWidth": 1 }, "color": { "mode": "palette-classic" } } },
-      "targets": [ { "refId": "A", "expr": "sum by (provider) (rate(grob_provider_errors_total[$__rate_interval]))", "legendFormat": "{{provider}}" } ]
+      "targets": [ { "refId": "A", "expr": "sum(rate(grob_provider_errors_total[$__rate_interval])) or vector(0)", "legendFormat": "errors/s" } ]
     },
     {
-      "id": 21, "type": "timeseries", "title": "Tokens /s (input & output)",
+      "id": 21, "type": "timeseries", "title": "Tokens / s",
       "gridPos": { "h": 8, "w": 8, "x": 8, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short", "custom": { "fillOpacity": 10, "lineWidth": 2 } } },
@@ -112,7 +132,7 @@
       ]
     },
     {
-      "id": 22, "type": "bargauge", "title": "Spend & budget (USD)",
+      "id": 22, "type": "bargauge", "title": "Dépense et budget",
       "gridPos": { "h": 8, "w": 8, "x": 16, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "currencyUSD", "thresholds": { "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 0.5 }, { "color": "red", "value": 0.9 } ] } } },
@@ -124,25 +144,26 @@
       ]
     },
     {
-      "id": 30, "type": "logs", "title": "Logs (Loki) — service_name = grob",
+      "id": 30, "type": "logs", "title": "Audit signé Loki",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 28 },
       "datasource": { "type": "loki", "uid": "loki" },
       "options": { "showTime": true, "wrapLogMessage": true, "enableLogDetails": true, "sortOrder": "Descending", "dedupStrategy": "none", "prettifyLogMessage": false },
-      "targets": [ { "refId": "A", "datasource": { "type": "loki", "uid": "loki" }, "expr": "{service_name=\"grob\"}" } ]
+      "targets": [ { "refId": "A", "datasource": { "type": "loki", "uid": "loki" }, "expr": "{service=\"grob-audit\"}" } ]
     },
     {
-      "id": 31, "type": "table", "title": "Traces (Tempo) — service.name = grob",
+      "id": 31, "type": "table", "title": "Traces Tempo",
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 38 },
       "datasource": { "type": "tempo", "uid": "tempo" },
       "options": { "showHeader": true },
-      "targets": [ { "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" }, "queryType": "traceql", "query": "{ resource.service.name=\"grob\" }", "limit": 20 } ]
+      "targets": [ { "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" }, "queryType": "traceql", "query": "{ resource.service.name = \"grob\" }", "limit": 20 } ]
     },
     {
-      "id": 32, "type": "nodeGraph", "title": "Service graph (Tempo metrics-generator)",
+      "id": 32, "type": "text", "title": "Corrélation Loki vers Tempo",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 48 },
-      "datasource": { "type": "tempo", "uid": "tempo" },
-      "description": "Populated by Tempo's service-graph metrics. Edges appear once the upstream providers are themselves traced (context propagation); with a single instrumented service it shows grob only.",
-      "targets": [ { "refId": "A", "datasource": { "type": "tempo", "uid": "tempo" }, "queryType": "serviceMap" } ]
+      "options": {
+        "mode": "markdown",
+        "content": "Cette démo instrumente **grob** et pousse l'audit signé dans **Loki**. Chaque ligne d'audit porte `trace_id` et `span_id`; Tempo expose le span `http_request` correspondant.\n\nLe **service graph** Tempo est absent dans cette topologie : le fournisseur de démo est un mock nginx non instrumenté, donc Tempo ne voit pas de second service ni d'arête inter-service. Pour la preuve, ouvrez une ligne Loki, copiez `trace_id`, puis retrouvez le span dans **Traces Tempo**."
+      }
     }
   ]
 }

@@ -187,8 +187,11 @@ data:
     \    - service.namespace\n    - deployment.environment\n    - deployment.environment.name\n\
     \nstorage:\n  tsdb:\n    out_of_order_time_window: 10m\n\nscrape_configs:\n  #\
     \ /metrics est toujours actif sur grob (pas besoin de la feature otel).\n  - job_name:\
-    \ grob\n    metrics_path: /metrics\n    static_configs:\n      - targets: [\"\
-    grob:8080\"]\n        labels:\n          service_name: grob\n"
+    \ grob\n    metrics_path: /metrics\n    static_configs:\n      # Compose resout\
+    \ `grob`; le pod `podman kube play` partage le netns et\n      # atteint grob\
+    \ sur localhost. Garder les deux rend la meme config portable.\n      - targets:\
+    \ [\"grob:8080\", \"localhost:8080\"]\n        labels:\n          service_name:\
+    \ grob\n"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -208,48 +211,53 @@ metadata:
   name: cm-dash-json
 data:
   grob-rssi-business.json: "{\n  \"uid\": \"grob-rssi-business\",\n  \"title\": \"\
-    Grob \u2014 Conformit\xE9 IA (vue RSSI)\",\n  \"tags\": [\"grob\", \"rssi\", \"\
-    conformit\xE9\", \"dlp\", \"d\xE9mo\"],\n  \"timezone\": \"browser\",\n  \"schemaVersion\"\
+    Grob \u2014 D\xE9cision RSSI IA\",\n  \"tags\": [\"grob\", \"rssi\", \"conformit\xE9\
+    \", \"dlp\", \"d\xE9mo\"],\n  \"timezone\": \"browser\",\n  \"schemaVersion\"\
     : 39,\n  \"version\": 2,\n  \"refresh\": \"5s\",\n  \"time\": { \"from\": \"now-15m\"\
-    , \"to\": \"now\" },\n  \"panels\": [\n    {\n      \"id\": 100,\n      \"type\"\
-    : \"text\",\n      \"title\": \"\",\n      \"transparent\": true,\n      \"gridPos\"\
-    : { \"h\": 3, \"w\": 24, \"x\": 0, \"y\": 0 },\n      \"options\": {\n       \
-    \ \"mode\": \"markdown\",\n        \"content\": \"<div style=\\\"text-align:center\\\
-    \">\\n\\n# \U0001F6E1\uFE0F Vos donn\xE9es restent chez vous\\n\\n### Chaque \xE9\
-    change avec une IA est inspect\xE9 **avant** de sortir \u2014 les fuites sont\
-    \ caviard\xE9es, les attaques bloqu\xE9es, la d\xE9pense plafonn\xE9e.\\n\\n</div>\"\
-    \n      }\n    },\n    {\n      \"id\": 3,\n      \"type\": \"stat\",\n      \"\
-    title\": \"Menaces bloqu\xE9es\",\n      \"description\": \"Attaques (injection\
-    \ de prompt, exfiltration de donn\xE9es) rejet\xE9es AVANT tout envoi \xE0 l'IA.\
-    \ Sur ces tentatives, rien n'est sorti de votre syst\xE8me.\",\n      \"gridPos\"\
-    : { \"h\": 8, \"w\": 6, \"x\": 0, \"y\": 3 },\n      \"datasource\": { \"type\"\
-    : \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\": {\n     \
-    \   \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n\
-    \          \"noValue\": \"0\",\n          \"color\": { \"mode\": \"fixed\", \"\
-    fixedColor\": \"red\" }\n        }\n      },\n      \"options\": {\n        \"\
-    reduceOptions\": { \"calcs\": [\"lastNotNull\"] },\n        \"colorMode\": \"\
-    background_solid\",\n        \"graphMode\": \"area\",\n        \"textMode\": \"\
-    value\",\n        \"justifyMode\": \"center\",\n        \"wideLayout\": true\n\
-    \      },\n      \"targets\": [\n        { \"refId\": \"A\", \"expr\": \"sum(grob_dlp_detections_total{action=\\\
-    \"block\\\"})\" }\n      ]\n    },\n    {\n      \"id\": 2,\n      \"type\": \"\
-    stat\",\n      \"title\": \"Secrets & donn\xE9es caviard\xE9s\",\n      \"description\"\
-    : \"Cl\xE9s d'API, mots de passe, cartes bancaires, IBAN d\xE9tect\xE9s et masqu\xE9\
-    s avant l'envoi au fournisseur. Plus ce nombre monte, plus la protection travaille.\"\
-    ,\n      \"gridPos\": { \"h\": 8, \"w\": 6, \"x\": 6, \"y\": 3 },\n      \"datasource\"\
+    , \"to\": \"now\" },\n  \"links\": [\n    {\n      \"type\": \"link\",\n     \
+    \ \"title\": \"Investiguer un agent\",\n      \"url\": \"/d/grob-audit-agent/grob-audit-agent?orgId=1&var-tenant=compta-bot\"\
+    ,\n      \"icon\": \"external link\",\n      \"includeVars\": false,\n      \"\
+    keepTime\": true,\n      \"targetBlank\": false\n    },\n    {\n      \"type\"\
+    : \"link\",\n      \"title\": \"Observabilit\xE9 technique\",\n      \"url\":\
+    \ \"/d/grob-overview/grob-otel-metrics-logs-traces?orgId=1\",\n      \"icon\"\
+    : \"external link\",\n      \"includeVars\": false,\n      \"keepTime\": true,\n\
+    \      \"targetBlank\": false\n    }\n  ],\n  \"panels\": [\n    {\n      \"id\"\
+    : 100,\n      \"type\": \"text\",\n      \"title\": \"\",\n      \"transparent\"\
+    : true,\n      \"gridPos\": { \"h\": 3, \"w\": 24, \"x\": 0, \"y\": 0 },\n   \
+    \   \"options\": {\n        \"mode\": \"markdown\",\n        \"content\": \"<div\
+    \ style=\\\"text-align:center\\\">\\n\\n# Grob prot\xE8ge les appels IA en temps\
+    \ r\xE9el\\n\\n### Fuites caviard\xE9es \xB7 attaques bloqu\xE9es avant sortie\
+    \ \xB7 budget plafonn\xE9 \xB7 audit sign\xE9.\\n\\n</div>\"\n      }\n    },\n\
+    \    {\n      \"id\": 3,\n      \"type\": \"stat\",\n      \"title\": \"Bloqu\xE9\
+    \ avant sortie\",\n      \"description\": \"Tentatives rejet\xE9es avant tout\
+    \ envoi au fournisseur IA : injection de prompt, exfiltration ou contenu interdit.\"\
+    ,\n      \"gridPos\": { \"h\": 8, \"w\": 6, \"x\": 0, \"y\": 3 },\n      \"datasource\"\
     : { \"type\": \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\"\
     : {\n        \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\"\
     : 0,\n          \"noValue\": \"0\",\n          \"color\": { \"mode\": \"fixed\"\
-    , \"fixedColor\": \"green\" }\n        }\n      },\n      \"options\": {\n   \
-    \     \"reduceOptions\": { \"calcs\": [\"lastNotNull\"] },\n        \"colorMode\"\
+    , \"fixedColor\": \"red\" }\n        }\n      },\n      \"options\": {\n     \
+    \   \"reduceOptions\": { \"calcs\": [\"lastNotNull\"] },\n        \"colorMode\"\
+    : \"background_solid\",\n        \"graphMode\": \"area\",\n        \"textMode\"\
+    : \"value\",\n        \"justifyMode\": \"center\",\n        \"wideLayout\": true\n\
+    \      },\n      \"targets\": [\n        { \"refId\": \"A\", \"expr\": \"sum(grob_dlp_detections_total{action=\\\
+    \"block\\\"})\" }\n      ]\n    },\n    {\n      \"id\": 2,\n      \"type\": \"\
+    stat\",\n      \"title\": \"Donn\xE9es caviard\xE9es\",\n      \"description\"\
+    : \"Secrets, identifiants, cartes bancaires et IBAN masqu\xE9s avant transmission.\
+    \ Le fournisseur ne re\xE7oit que la version nettoy\xE9e.\",\n      \"gridPos\"\
+    : { \"h\": 8, \"w\": 6, \"x\": 6, \"y\": 3 },\n      \"datasource\": { \"type\"\
+    : \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\": {\n     \
+    \   \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n\
+    \          \"noValue\": \"0\",\n          \"color\": { \"mode\": \"fixed\", \"\
+    fixedColor\": \"green\" }\n        }\n      },\n      \"options\": {\n       \
+    \ \"reduceOptions\": { \"calcs\": [\"lastNotNull\"] },\n        \"colorMode\"\
     : \"background_solid\",\n        \"graphMode\": \"area\",\n        \"textMode\"\
     : \"value\",\n        \"justifyMode\": \"center\",\n        \"wideLayout\": true\n\
     \      },\n      \"targets\": [\n        { \"refId\": \"A\", \"expr\": \"sum(grob_dlp_detections_total{action=\\\
     \"redact\\\"})\" }\n      ]\n    },\n    {\n      \"id\": 10,\n      \"type\"\
-    : \"stat\",\n      \"title\": \"D\xE9pense IA ma\xEEtris\xE9e\",\n      \"description\"\
-    : \"Part du budget IA mensuel d\xE9j\xE0 consomm\xE9e. Le plafond est appliqu\xE9\
-    \ automatiquement : au-del\xE0 de 100 %, les requ\xEAtes sont refus\xE9es. Reste\
-    \ \xE0 0 % tant que la d\xE9pense est nulle.\",\n      \"gridPos\": { \"h\": 8,\
-    \ \"w\": 6, \"x\": 12, \"y\": 3 },\n      \"datasource\": { \"type\": \"prometheus\"\
+    : \"stat\",\n      \"title\": \"Budget utilis\xE9\",\n      \"description\": \"\
+    Part du budget IA mensuel consomm\xE9e. Le plafond est appliqu\xE9 automatiquement\
+    \ et les d\xE9passements sont refus\xE9s.\",\n      \"gridPos\": { \"h\": 8, \"\
+    w\": 6, \"x\": 12, \"y\": 3 },\n      \"datasource\": { \"type\": \"prometheus\"\
     , \"uid\": \"prometheus\" },\n      \"fieldConfig\": {\n        \"defaults\":\
     \ {\n          \"unit\": \"percent\",\n          \"decimals\": 0,\n          \"\
     min\": 0,\n          \"max\": 100,\n          \"noValue\": \"0 %\",\n        \
@@ -263,174 +271,178 @@ data:
     : true\n      },\n      \"targets\": [\n        { \"refId\": \"A\", \"expr\":\
     \ \"clamp_max(sum(grob_spend_usd) / clamp_min(max(grob_budget_limit_usd), 1) *\
     \ 100, 100)\" }\n      ]\n    },\n    {\n      \"id\": 4,\n      \"type\": \"\
-    stat\",\n      \"title\": \"Tra\xE7abilit\xE9 sign\xE9e\",\n      \"description\"\
-    : \"La configuration de s\xE9curit\xE9 appliqu\xE9e est v\xE9rifi\xE9e cryptographiquement\
-    \ (signature valide) : les r\xE8gles n'ont pas \xE9t\xE9 alt\xE9r\xE9es. Chaque\
-    \ action est journalis\xE9e et auditable.\",\n      \"gridPos\": { \"h\": 8, \"\
-    w\": 6, \"x\": 18, \"y\": 3 },\n      \"datasource\": { \"type\": \"prometheus\"\
-    , \"uid\": \"prometheus\" },\n      \"fieldConfig\": {\n        \"defaults\":\
-    \ {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n          \"\
-    noValue\": \"Garantie\",\n          \"color\": { \"mode\": \"fixed\", \"fixedColor\"\
-    : \"green\" },\n          \"mappings\": [\n            { \"type\": \"special\"\
-    , \"options\": { \"match\": \"null\", \"result\": { \"text\": \"Garantie\", \"\
-    index\": 0 } } },\n            { \"type\": \"range\", \"options\": { \"from\"\
-    : 0, \"to\": 0, \"result\": { \"text\": \"Garantie\", \"index\": 1 } } },\n  \
-    \          { \"type\": \"range\", \"options\": { \"from\": 1, \"to\": 1000000000,\
-    \ \"result\": { \"text\": \"Garantie\", \"index\": 2 } } }\n          ]\n    \
-    \    }\n      },\n      \"options\": {\n        \"reduceOptions\": { \"calcs\"\
-    : [\"lastNotNull\"] },\n        \"colorMode\": \"background_solid\",\n       \
-    \ \"graphMode\": \"none\",\n        \"textMode\": \"value\",\n        \"justifyMode\"\
-    : \"center\",\n        \"wideLayout\": true\n      },\n      \"targets\": [\n\
-    \        { \"refId\": \"A\", \"expr\": \"sum(grob_dlp_signature_verified_total{result=\\\
+    stat\",\n      \"title\": \"Audit sign\xE9\",\n      \"description\": \"Chaque\
+    \ action produit une ligne d'audit cha\xEEn\xE9e et sign\xE9e. La preuve contient\
+    \ event_id, previous_hash, signature, trace_id et span_id.\",\n      \"gridPos\"\
+    : { \"h\": 8, \"w\": 6, \"x\": 18, \"y\": 3 },\n      \"datasource\": { \"type\"\
+    : \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\": {\n     \
+    \   \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n\
+    \          \"noValue\": \"Garantie\",\n          \"color\": { \"mode\": \"fixed\"\
+    , \"fixedColor\": \"green\" },\n          \"mappings\": [\n            { \"type\"\
+    : \"special\", \"options\": { \"match\": \"null\", \"result\": { \"text\": \"\
+    Garantie\", \"index\": 0 } } },\n            { \"type\": \"range\", \"options\"\
+    : { \"from\": 0, \"to\": 0, \"result\": { \"text\": \"Garantie\", \"index\": 1\
+    \ } } },\n            { \"type\": \"range\", \"options\": { \"from\": 1, \"to\"\
+    : 1000000000, \"result\": { \"text\": \"Garantie\", \"index\": 2 } } }\n     \
+    \     ]\n        }\n      },\n      \"options\": {\n        \"reduceOptions\"\
+    : { \"calcs\": [\"lastNotNull\"] },\n        \"colorMode\": \"background_solid\"\
+    ,\n        \"graphMode\": \"none\",\n        \"textMode\": \"value\",\n      \
+    \  \"justifyMode\": \"center\",\n        \"wideLayout\": true\n      },\n    \
+    \  \"targets\": [\n        { \"refId\": \"A\", \"expr\": \"sum(grob_dlp_signature_verified_total{result=\\\
     \"valid\\\"})\" }\n      ]\n    },\n    {\n      \"id\": 20,\n      \"type\":\
-    \ \"timeseries\",\n      \"title\": \"Protection en action (interventions par\
-    \ minute)\",\n      \"description\": \"Rythme des protections d\xE9clench\xE9\
-    es en temps r\xE9el. Vert = caviardage (secret / donn\xE9e perso), rouge = blocage\
-    \ (attaque). Plus la courbe vit, plus la protection est sollicit\xE9e.\",\n  \
-    \    \"gridPos\": { \"h\": 9, \"w\": 16, \"x\": 0, \"y\": 11 },\n      \"datasource\"\
-    : { \"type\": \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\"\
-    : {\n        \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\"\
-    : 1,\n          \"custom\": {\n            \"fillOpacity\": 30,\n            \"\
-    lineWidth\": 2,\n            \"showPoints\": \"never\",\n            \"stacking\"\
-    : { \"mode\": \"normal\" },\n            \"gradientMode\": \"opacity\"\n     \
-    \     }\n        },\n        \"overrides\": [\n          { \"matcher\": { \"id\"\
-    : \"byName\", \"options\": \"Caviard\xE9s (secrets / donn\xE9es perso)\" }, \"\
-    properties\": [{ \"id\": \"color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\"\
-    : \"green\" } }] },\n          { \"matcher\": { \"id\": \"byName\", \"options\"\
-    : \"Bloqu\xE9s (attaques)\" }, \"properties\": [{ \"id\": \"color\", \"value\"\
-    : { \"mode\": \"fixed\", \"fixedColor\": \"red\" } }] }\n        ]\n      },\n\
-    \      \"options\": {\n        \"legend\": { \"displayMode\": \"list\", \"placement\"\
-    : \"bottom\", \"showLegend\": true },\n        \"tooltip\": { \"mode\": \"multi\"\
-    , \"sort\": \"desc\" }\n      },\n      \"targets\": [\n        { \"refId\": \"\
-    A\", \"expr\": \"sum(rate(grob_dlp_detections_total{action=\\\"redact\\\"}[$__rate_interval]))\
+    \ \"timeseries\",\n      \"title\": \"Interventions DLP par minute\",\n      \"\
+    description\": \"Rythme des d\xE9cisions de protection. Vert = caviardage accept\xE9\
+    , rouge = blocage avant sortie.\",\n      \"gridPos\": { \"h\": 9, \"w\": 16,\
+    \ \"x\": 0, \"y\": 11 },\n      \"datasource\": { \"type\": \"prometheus\", \"\
+    uid\": \"prometheus\" },\n      \"fieldConfig\": {\n        \"defaults\": {\n\
+    \          \"unit\": \"short\",\n          \"decimals\": 1,\n          \"custom\"\
+    : {\n            \"fillOpacity\": 30,\n            \"lineWidth\": 2,\n       \
+    \     \"showPoints\": \"never\",\n            \"stacking\": { \"mode\": \"normal\"\
+    \ },\n            \"gradientMode\": \"opacity\"\n          }\n        },\n   \
+    \     \"overrides\": [\n          { \"matcher\": { \"id\": \"byName\", \"options\"\
+    : \"Caviard\xE9s (secrets / donn\xE9es perso)\" }, \"properties\": [{ \"id\":\
+    \ \"color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"green\" } }]\
+    \ },\n          { \"matcher\": { \"id\": \"byName\", \"options\": \"Bloqu\xE9\
+    s (attaques)\" }, \"properties\": [{ \"id\": \"color\", \"value\": { \"mode\"\
+    : \"fixed\", \"fixedColor\": \"red\" } }] }\n        ]\n      },\n      \"options\"\
+    : {\n        \"legend\": { \"displayMode\": \"list\", \"placement\": \"bottom\"\
+    , \"showLegend\": true },\n        \"tooltip\": { \"mode\": \"multi\", \"sort\"\
+    : \"desc\" }\n      },\n      \"targets\": [\n        { \"refId\": \"A\", \"expr\"\
+    : \"sum(rate(grob_dlp_detections_total{action=\\\"redact\\\"}[$__rate_interval]))\
     \ * 60\", \"legendFormat\": \"Caviard\xE9s (secrets / donn\xE9es perso)\" },\n\
     \        { \"refId\": \"B\", \"expr\": \"sum(rate(grob_dlp_detections_total{action=\\\
     \"block\\\"}[$__rate_interval])) * 60\", \"legendFormat\": \"Bloqu\xE9s (attaques)\"\
     \ }\n      ]\n    },\n    {\n      \"id\": 11,\n      \"type\": \"piechart\",\n\
-    \      \"title\": \"Nature des protections\",\n      \"description\": \"R\xE9\
-    partition de ce que grob a prot\xE9g\xE9 : secrets (cl\xE9s d'API\u2026), donn\xE9\
-    es personnelles, injections de prompt et tentatives d'exfiltration.\",\n     \
-    \ \"gridPos\": { \"h\": 9, \"w\": 8, \"x\": 16, \"y\": 11 },\n      \"datasource\"\
-    : { \"type\": \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\"\
-    : {\n        \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\"\
-    : 0,\n          \"color\": { \"mode\": \"palette-classic\" }\n        },\n   \
-    \     \"overrides\": [\n          { \"matcher\": { \"id\": \"byName\", \"options\"\
-    : \"secret\" }, \"properties\": [{ \"id\": \"displayName\", \"value\": \"Secrets\
-    \ (cl\xE9s d'API\u2026)\" }, { \"id\": \"color\", \"value\": { \"mode\": \"fixed\"\
-    , \"fixedColor\": \"green\" } }] },\n          { \"matcher\": { \"id\": \"byName\"\
-    , \"options\": \"pii\" }, \"properties\": [{ \"id\": \"displayName\", \"value\"\
-    : \"Donn\xE9es personnelles\" }, { \"id\": \"color\", \"value\": { \"mode\": \"\
-    fixed\", \"fixedColor\": \"blue\" } }] },\n          { \"matcher\": { \"id\":\
-    \ \"byName\", \"options\": \"injection\" }, \"properties\": [{ \"id\": \"displayName\"\
-    , \"value\": \"Injections de prompt\" }, { \"id\": \"color\", \"value\": { \"\
-    mode\": \"fixed\", \"fixedColor\": \"red\" } }] },\n          { \"matcher\": {\
-    \ \"id\": \"byName\", \"options\": \"url_exfil\" }, \"properties\": [{ \"id\"\
-    : \"displayName\", \"value\": \"Exfiltrations\" }, { \"id\": \"color\", \"value\"\
-    : { \"mode\": \"fixed\", \"fixedColor\": \"orange\" } }] }\n        ]\n      },\n\
-    \      \"options\": {\n        \"reduceOptions\": { \"calcs\": [\"lastNotNull\"\
-    ] },\n        \"pieType\": \"donut\",\n        \"displayLabels\": [\"percent\"\
-    ],\n        \"legend\": { \"displayMode\": \"table\", \"placement\": \"right\"\
-    , \"values\": [\"value\"] },\n        \"tooltip\": { \"mode\": \"single\" }\n\
-    \      },\n      \"targets\": [\n        { \"refId\": \"A\", \"expr\": \"sum by\
-    \ (type) (grob_dlp_detections_total)\", \"legendFormat\": \"{{type}}\" }\n   \
-    \   ]\n    }\n  ]\n}\n"
+    \      \"title\": \"Types de risques d\xE9tect\xE9s\",\n      \"description\"\
+    : \"R\xE9partition des risques intercept\xE9s par grob : secrets, donn\xE9es personnelles,\
+    \ injections de prompt et exfiltrations.\",\n      \"gridPos\": { \"h\": 9, \"\
+    w\": 8, \"x\": 16, \"y\": 11 },\n      \"datasource\": { \"type\": \"prometheus\"\
+    , \"uid\": \"prometheus\" },\n      \"fieldConfig\": {\n        \"defaults\":\
+    \ {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n          \"\
+    color\": { \"mode\": \"palette-classic\" }\n        },\n        \"overrides\"\
+    : [\n          { \"matcher\": { \"id\": \"byName\", \"options\": \"secret\" },\
+    \ \"properties\": [{ \"id\": \"displayName\", \"value\": \"Secrets (cl\xE9s d'API\u2026\
+    )\" }, { \"id\": \"color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\":\
+    \ \"green\" } }] },\n          { \"matcher\": { \"id\": \"byName\", \"options\"\
+    : \"pii\" }, \"properties\": [{ \"id\": \"displayName\", \"value\": \"Donn\xE9\
+    es personnelles\" }, { \"id\": \"color\", \"value\": { \"mode\": \"fixed\", \"\
+    fixedColor\": \"blue\" } }] },\n          { \"matcher\": { \"id\": \"byName\"\
+    , \"options\": \"injection\" }, \"properties\": [{ \"id\": \"displayName\", \"\
+    value\": \"Injections de prompt\" }, { \"id\": \"color\", \"value\": { \"mode\"\
+    : \"fixed\", \"fixedColor\": \"red\" } }] },\n          { \"matcher\": { \"id\"\
+    : \"byName\", \"options\": \"url_exfil\" }, \"properties\": [{ \"id\": \"displayName\"\
+    , \"value\": \"Exfiltrations\" }, { \"id\": \"color\", \"value\": { \"mode\":\
+    \ \"fixed\", \"fixedColor\": \"orange\" } }] }\n        ]\n      },\n      \"\
+    options\": {\n        \"reduceOptions\": { \"calcs\": [\"lastNotNull\"] },\n \
+    \       \"pieType\": \"donut\",\n        \"displayLabels\": [\"percent\"],\n \
+    \       \"legend\": { \"displayMode\": \"table\", \"placement\": \"right\", \"\
+    values\": [\"value\"] },\n        \"tooltip\": { \"mode\": \"single\" }\n    \
+    \  },\n      \"targets\": [\n        { \"refId\": \"A\", \"expr\": \"sum by (type)\
+    \ (grob_dlp_detections_total)\", \"legendFormat\": \"{{type}}\" }\n      ]\n \
+    \   }\n  ]\n}\n"
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cm-dash-overview
 data:
-  grob-overview.json: "{\n  \"uid\": \"grob-overview\",\n  \"title\": \"grob \u2014\
-    \ OTel (metrics \xB7 logs \xB7 traces)\",\n  \"tags\": [\"grob\", \"llm\", \"\
-    proxy\"],\n  \"timezone\": \"browser\",\n  \"schemaVersion\": 39,\n  \"version\"\
-    : 1,\n  \"refresh\": \"10s\",\n  \"time\": { \"from\": \"now-30m\", \"to\": \"\
-    now\" },\n  \"templating\": {\n    \"list\": [\n      {\n        \"name\": \"\
-    provider\",\n        \"type\": \"query\",\n        \"datasource\": { \"type\"\
-    : \"prometheus\", \"uid\": \"prometheus\" },\n        \"query\": { \"query\":\
-    \ \"label_values(grob_requests_total, provider)\", \"refId\": \"A\" },\n     \
-    \   \"includeAll\": true,\n        \"multi\": true,\n        \"current\": { \"\
-    text\": \"All\", \"value\": \"$__all\" }\n      },\n      {\n        \"name\"\
-    : \"model\",\n        \"type\": \"query\",\n        \"datasource\": { \"type\"\
-    : \"prometheus\", \"uid\": \"prometheus\" },\n        \"query\": { \"query\":\
-    \ \"label_values(grob_requests_total, model)\", \"refId\": \"A\" },\n        \"\
-    includeAll\": true,\n        \"multi\": true,\n        \"current\": { \"text\"\
-    : \"All\", \"value\": \"$__all\" }\n      }\n    ]\n  },\n  \"panels\": [\n  \
-    \  {\n      \"id\": 1, \"type\": \"stat\", \"title\": \"Requests (total)\",\n\
-    \      \"gridPos\": { \"h\": 4, \"w\": 6, \"x\": 0, \"y\": 0 },\n      \"datasource\"\
-    : { \"type\": \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\"\
-    : { \"defaults\": { \"unit\": \"short\", \"color\": { \"mode\": \"fixed\", \"\
-    fixedColor\": \"blue\" } } },\n      \"options\": { \"reduceOptions\": { \"calcs\"\
-    : [\"lastNotNull\"] }, \"colorMode\": \"value\", \"graphMode\": \"area\" },\n\
-    \      \"targets\": [ { \"refId\": \"A\", \"expr\": \"sum(grob_requests_total{provider=~\\\
-    \"$provider\\\", model=~\\\"$model\\\"})\" } ]\n    },\n    {\n      \"id\": 2,\
-    \ \"type\": \"stat\", \"title\": \"Request rate\",\n      \"gridPos\": { \"h\"\
-    : 4, \"w\": 6, \"x\": 6, \"y\": 0 },\n      \"datasource\": { \"type\": \"prometheus\"\
+  grob-overview.json: "{\n  \"uid\": \"grob-overview\",\n  \"title\": \"Grob \u2014\
+    \ Observabilit\xE9 technique\",\n  \"tags\": [\"grob\", \"llm\", \"proxy\"],\n\
+    \  \"timezone\": \"browser\",\n  \"schemaVersion\": 39,\n  \"version\": 1,\n \
+    \ \"refresh\": \"10s\",\n  \"time\": { \"from\": \"now-30m\", \"to\": \"now\"\
+    \ },\n  \"links\": [\n    {\n      \"type\": \"link\",\n      \"title\": \"Vue\
+    \ RSSI\",\n      \"url\": \"/d/grob-rssi-business/grob-decision-rssi-ia?orgId=1\"\
+    ,\n      \"icon\": \"external link\",\n      \"includeVars\": false,\n      \"\
+    keepTime\": true,\n      \"targetBlank\": false\n    },\n    {\n      \"type\"\
+    : \"link\",\n      \"title\": \"Audit agent\",\n      \"url\": \"/d/grob-audit-agent/grob-audit-agent?orgId=1&var-tenant=compta-bot\"\
+    ,\n      \"icon\": \"external link\",\n      \"includeVars\": false,\n      \"\
+    keepTime\": true,\n      \"targetBlank\": false\n    }\n  ],\n  \"templating\"\
+    : {\n    \"list\": [\n      {\n        \"name\": \"provider\",\n        \"type\"\
+    : \"query\",\n        \"datasource\": { \"type\": \"prometheus\", \"uid\": \"\
+    prometheus\" },\n        \"query\": { \"query\": \"label_values(grob_requests_total,\
+    \ provider)\", \"refId\": \"A\" },\n        \"includeAll\": true,\n        \"\
+    multi\": true,\n        \"current\": { \"text\": \"All\", \"value\": \"$__all\"\
+    \ }\n      },\n      {\n        \"name\": \"model\",\n        \"type\": \"query\"\
+    ,\n        \"datasource\": { \"type\": \"prometheus\", \"uid\": \"prometheus\"\
+    \ },\n        \"query\": { \"query\": \"label_values(grob_requests_total, model)\"\
+    , \"refId\": \"A\" },\n        \"includeAll\": true,\n        \"multi\": true,\n\
+    \        \"current\": { \"text\": \"All\", \"value\": \"$__all\" }\n      }\n\
+    \    ]\n  },\n  \"panels\": [\n    {\n      \"id\": 1, \"type\": \"stat\", \"\
+    title\": \"Requ\xEAtes totales\",\n      \"gridPos\": { \"h\": 4, \"w\": 6, \"\
+    x\": 0, \"y\": 0 },\n      \"datasource\": { \"type\": \"prometheus\", \"uid\"\
+    : \"prometheus\" },\n      \"fieldConfig\": { \"defaults\": { \"unit\": \"short\"\
+    , \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"blue\" } } },\n      \"\
+    options\": { \"reduceOptions\": { \"calcs\": [\"lastNotNull\"] }, \"colorMode\"\
+    : \"value\", \"graphMode\": \"area\" },\n      \"targets\": [ { \"refId\": \"\
+    A\", \"expr\": \"sum(grob_requests_total{provider=~\\\"$provider\\\", model=~\\\
+    \"$model\\\"})\" } ]\n    },\n    {\n      \"id\": 2, \"type\": \"stat\", \"title\"\
+    : \"D\xE9bit requ\xEAtes\",\n      \"gridPos\": { \"h\": 4, \"w\": 6, \"x\": 6,\
+    \ \"y\": 0 },\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"prometheus\"\
+    \ },\n      \"fieldConfig\": { \"defaults\": { \"unit\": \"reqps\", \"color\"\
+    : { \"mode\": \"fixed\", \"fixedColor\": \"green\" } } },\n      \"options\":\
+    \ { \"reduceOptions\": { \"calcs\": [\"lastNotNull\"] }, \"colorMode\": \"value\"\
+    , \"graphMode\": \"area\" },\n      \"targets\": [ { \"refId\": \"A\", \"expr\"\
+    : \"sum(rate(grob_requests_total{provider=~\\\"$provider\\\", model=~\\\"$model\\\
+    \"}[$__rate_interval]))\" } ]\n    },\n    {\n      \"id\": 3, \"type\": \"stat\"\
+    , \"title\": \"Requ\xEAtes en cours\",\n      \"gridPos\": { \"h\": 4, \"w\":\
+    \ 6, \"x\": 12, \"y\": 0 },\n      \"datasource\": { \"type\": \"prometheus\"\
     , \"uid\": \"prometheus\" },\n      \"fieldConfig\": { \"defaults\": { \"unit\"\
-    : \"reqps\", \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"green\" } } },\n\
-    \      \"options\": { \"reduceOptions\": { \"calcs\": [\"lastNotNull\"] }, \"\
-    colorMode\": \"value\", \"graphMode\": \"area\" },\n      \"targets\": [ { \"\
-    refId\": \"A\", \"expr\": \"sum(rate(grob_requests_total{provider=~\\\"$provider\\\
-    \", model=~\\\"$model\\\"}[$__rate_interval]))\" } ]\n    },\n    {\n      \"\
-    id\": 3, \"type\": \"stat\", \"title\": \"In-flight requests\",\n      \"gridPos\"\
-    : { \"h\": 4, \"w\": 6, \"x\": 12, \"y\": 0 },\n      \"datasource\": { \"type\"\
-    : \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\": { \"defaults\"\
-    : { \"unit\": \"short\", \"thresholds\": { \"steps\": [ { \"color\": \"green\"\
-    , \"value\": null }, { \"color\": \"yellow\", \"value\": 20 }, { \"color\": \"\
-    red\", \"value\": 50 } ] } } },\n      \"options\": { \"reduceOptions\": { \"\
-    calcs\": [\"lastNotNull\"] }, \"colorMode\": \"background\", \"graphMode\": \"\
-    area\" },\n      \"targets\": [ { \"refId\": \"A\", \"expr\": \"sum(grob_active_requests)\"\
-    \ } ]\n    },\n    {\n      \"id\": 4, \"type\": \"stat\", \"title\": \"p95 latency\"\
-    ,\n      \"gridPos\": { \"h\": 4, \"w\": 6, \"x\": 18, \"y\": 0 },\n      \"datasource\"\
+    : \"short\", \"thresholds\": { \"steps\": [ { \"color\": \"green\", \"value\"\
+    : null }, { \"color\": \"yellow\", \"value\": 20 }, { \"color\": \"red\", \"value\"\
+    : 50 } ] } } },\n      \"options\": { \"reduceOptions\": { \"calcs\": [\"lastNotNull\"\
+    ] }, \"colorMode\": \"background\", \"graphMode\": \"area\" },\n      \"targets\"\
+    : [ { \"refId\": \"A\", \"expr\": \"sum(grob_active_requests)\" } ]\n    },\n\
+    \    {\n      \"id\": 4, \"type\": \"stat\", \"title\": \"Latence p95\",\n   \
+    \   \"gridPos\": { \"h\": 4, \"w\": 6, \"x\": 18, \"y\": 0 },\n      \"datasource\"\
     : { \"type\": \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\"\
-    : { \"defaults\": { \"unit\": \"s\", \"thresholds\": { \"steps\": [ { \"color\"\
-    : \"green\", \"value\": null }, { \"color\": \"yellow\", \"value\": 2 }, { \"\
-    color\": \"red\", \"value\": 5 } ] } } },\n      \"options\": { \"reduceOptions\"\
+    : { \"defaults\": { \"unit\": \"ms\", \"thresholds\": { \"steps\": [ { \"color\"\
+    : \"green\", \"value\": null }, { \"color\": \"yellow\", \"value\": 200 }, { \"\
+    color\": \"red\", \"value\": 500 } ] } } },\n      \"options\": { \"reduceOptions\"\
     : { \"calcs\": [\"lastNotNull\"] }, \"colorMode\": \"background\", \"graphMode\"\
-    : \"area\" },\n      \"targets\": [ { \"refId\": \"A\", \"expr\": \"histogram_quantile(0.95,\
-    \ sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))\"\
-    \ } ]\n    },\n    {\n      \"id\": 10, \"type\": \"timeseries\", \"title\": \"\
-    Request rate by model\",\n      \"gridPos\": { \"h\": 8, \"w\": 12, \"x\": 0,\
-    \ \"y\": 4 },\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"prometheus\"\
+    : \"area\" },\n      \"targets\": [ { \"refId\": \"A\", \"expr\": \"max(grob_request_duration_seconds{provider=~\\\
+    \"$provider\\\", model=~\\\"$model\\\", quantile=\\\"0.95\\\"}) * 1000\" } ]\n\
+    \    },\n    {\n      \"id\": 10, \"type\": \"timeseries\", \"title\": \"D\xE9\
+    bit par mod\xE8le\",\n      \"gridPos\": { \"h\": 8, \"w\": 12, \"x\": 0, \"y\"\
+    : 4 },\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"prometheus\"\
     \ },\n      \"fieldConfig\": { \"defaults\": { \"unit\": \"reqps\", \"custom\"\
     : { \"fillOpacity\": 20, \"stacking\": { \"mode\": \"normal\" }, \"lineWidth\"\
     : 1 } } },\n      \"targets\": [ { \"refId\": \"A\", \"expr\": \"sum by (model)\
     \ (rate(grob_requests_total{provider=~\\\"$provider\\\", model=~\\\"$model\\\"\
     }[$__rate_interval]))\", \"legendFormat\": \"{{model}}\" } ]\n    },\n    {\n\
-    \      \"id\": 11, \"type\": \"timeseries\", \"title\": \"Request rate by provider\
-    \ (fallback visible)\",\n      \"gridPos\": { \"h\": 8, \"w\": 12, \"x\": 12,\
-    \ \"y\": 4 },\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"prometheus\"\
-    \ },\n      \"fieldConfig\": { \"defaults\": { \"unit\": \"reqps\", \"custom\"\
-    : { \"fillOpacity\": 20, \"stacking\": { \"mode\": \"normal\" }, \"lineWidth\"\
-    : 1 } } },\n      \"targets\": [ { \"refId\": \"A\", \"expr\": \"sum by (provider)\
-    \ (rate(grob_requests_total{provider=~\\\"$provider\\\", model=~\\\"$model\\\"\
-    }[$__rate_interval]))\", \"legendFormat\": \"{{provider}}\" } ]\n    },\n    {\n\
-    \      \"id\": 12, \"type\": \"timeseries\", \"title\": \"Latency (p50 / p95 /\
-    \ p99)\",\n      \"gridPos\": { \"h\": 8, \"w\": 12, \"x\": 0, \"y\": 12 },\n\
-    \      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"prometheus\" },\n\
-    \      \"fieldConfig\": { \"defaults\": { \"unit\": \"s\", \"custom\": { \"fillOpacity\"\
-    : 10, \"lineWidth\": 2 } } },\n      \"targets\": [\n        { \"refId\": \"A\"\
-    , \"expr\": \"histogram_quantile(0.50, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))\"\
-    , \"legendFormat\": \"p50\", \"exemplar\": true },\n        { \"refId\": \"B\"\
-    , \"expr\": \"histogram_quantile(0.95, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))\"\
-    , \"legendFormat\": \"p95\", \"exemplar\": true },\n        { \"refId\": \"C\"\
-    , \"expr\": \"histogram_quantile(0.99, sum by (le) (rate(grob_request_duration_seconds_bucket[$__rate_interval])))\"\
-    , \"legendFormat\": \"p99\", \"exemplar\": true }\n      ]\n    },\n    {\n  \
-    \    \"id\": 13, \"type\": \"timeseries\", \"title\": \"Outcomes by status\",\n\
-    \      \"gridPos\": { \"h\": 8, \"w\": 12, \"x\": 12, \"y\": 12 },\n      \"datasource\"\
-    : { \"type\": \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\"\
-    : { \"defaults\": { \"unit\": \"reqps\", \"custom\": { \"fillOpacity\": 30, \"\
-    stacking\": { \"mode\": \"normal\" }, \"lineWidth\": 1 } } },\n      \"targets\"\
-    : [ { \"refId\": \"A\", \"expr\": \"sum by (status) (rate(grob_requests_total{provider=~\\\
+    \      \"id\": 11, \"type\": \"timeseries\", \"title\": \"D\xE9bit par provider\"\
+    ,\n      \"gridPos\": { \"h\": 8, \"w\": 12, \"x\": 12, \"y\": 4 },\n      \"\
+    datasource\": { \"type\": \"prometheus\", \"uid\": \"prometheus\" },\n      \"\
+    fieldConfig\": { \"defaults\": { \"unit\": \"reqps\", \"custom\": { \"fillOpacity\"\
+    : 20, \"stacking\": { \"mode\": \"normal\" }, \"lineWidth\": 1 } } },\n      \"\
+    targets\": [ { \"refId\": \"A\", \"expr\": \"sum by (provider) (rate(grob_requests_total{provider=~\\\
     \"$provider\\\", model=~\\\"$model\\\"}[$__rate_interval]))\", \"legendFormat\"\
-    : \"{{status}}\" } ]\n    },\n    {\n      \"id\": 20, \"type\": \"timeseries\"\
-    , \"title\": \"Provider errors /s\",\n      \"gridPos\": { \"h\": 8, \"w\": 8,\
-    \ \"x\": 0, \"y\": 20 },\n      \"datasource\": { \"type\": \"prometheus\", \"\
-    uid\": \"prometheus\" },\n      \"fieldConfig\": { \"defaults\": { \"unit\": \"\
-    short\", \"custom\": { \"fillOpacity\": 20, \"lineWidth\": 1 }, \"color\": { \"\
-    mode\": \"palette-classic\" } } },\n      \"targets\": [ { \"refId\": \"A\", \"\
-    expr\": \"sum by (provider) (rate(grob_provider_errors_total[$__rate_interval]))\"\
-    , \"legendFormat\": \"{{provider}}\" } ]\n    },\n    {\n      \"id\": 21, \"\
-    type\": \"timeseries\", \"title\": \"Tokens /s (input & output)\",\n      \"gridPos\"\
+    : \"{{provider}}\" } ]\n    },\n    {\n      \"id\": 12, \"type\": \"timeseries\"\
+    , \"title\": \"Latence p50 / p95 / p99\",\n      \"gridPos\": { \"h\": 8, \"w\"\
+    : 12, \"x\": 0, \"y\": 12 },\n      \"datasource\": { \"type\": \"prometheus\"\
+    , \"uid\": \"prometheus\" },\n      \"fieldConfig\": { \"defaults\": { \"unit\"\
+    : \"ms\", \"custom\": { \"fillOpacity\": 10, \"lineWidth\": 2 } } },\n      \"\
+    targets\": [\n        { \"refId\": \"A\", \"expr\": \"max(grob_request_duration_seconds{provider=~\\\
+    \"$provider\\\", model=~\\\"$model\\\", quantile=\\\"0.5\\\"}) * 1000\", \"legendFormat\"\
+    : \"p50\" },\n        { \"refId\": \"B\", \"expr\": \"max(grob_request_duration_seconds{provider=~\\\
+    \"$provider\\\", model=~\\\"$model\\\", quantile=\\\"0.95\\\"}) * 1000\", \"legendFormat\"\
+    : \"p95\" },\n        { \"refId\": \"C\", \"expr\": \"max(grob_request_duration_seconds{provider=~\\\
+    \"$provider\\\", model=~\\\"$model\\\", quantile=\\\"0.99\\\"}) * 1000\", \"legendFormat\"\
+    : \"p99\" }\n      ]\n    },\n    {\n      \"id\": 13, \"type\": \"timeseries\"\
+    , \"title\": \"R\xE9sultats par statut\",\n      \"gridPos\": { \"h\": 8, \"w\"\
+    : 12, \"x\": 12, \"y\": 12 },\n      \"datasource\": { \"type\": \"prometheus\"\
+    , \"uid\": \"prometheus\" },\n      \"fieldConfig\": { \"defaults\": { \"unit\"\
+    : \"reqps\", \"custom\": { \"fillOpacity\": 30, \"stacking\": { \"mode\": \"normal\"\
+    \ }, \"lineWidth\": 1 } } },\n      \"targets\": [ { \"refId\": \"A\", \"expr\"\
+    : \"sum by (status) (rate(grob_requests_total{provider=~\\\"$provider\\\", model=~\\\
+    \"$model\\\"}[$__rate_interval]))\", \"legendFormat\": \"{{status}}\" } ]\n  \
+    \  },\n    {\n      \"id\": 20, \"type\": \"timeseries\", \"title\": \"Erreurs\
+    \ provider / s\",\n      \"gridPos\": { \"h\": 8, \"w\": 8, \"x\": 0, \"y\": 20\
+    \ },\n      \"datasource\": { \"type\": \"prometheus\", \"uid\": \"prometheus\"\
+    \ },\n      \"fieldConfig\": { \"defaults\": { \"unit\": \"short\", \"custom\"\
+    : { \"fillOpacity\": 20, \"lineWidth\": 1 }, \"color\": { \"mode\": \"palette-classic\"\
+    \ } } },\n      \"targets\": [ { \"refId\": \"A\", \"expr\": \"sum(rate(grob_provider_errors_total[$__rate_interval]))\
+    \ or vector(0)\", \"legendFormat\": \"errors/s\" } ]\n    },\n    {\n      \"\
+    id\": 21, \"type\": \"timeseries\", \"title\": \"Tokens / s\",\n      \"gridPos\"\
     : { \"h\": 8, \"w\": 8, \"x\": 8, \"y\": 20 },\n      \"datasource\": { \"type\"\
     : \"prometheus\", \"uid\": \"prometheus\" },\n      \"fieldConfig\": { \"defaults\"\
     : { \"unit\": \"short\", \"custom\": { \"fillOpacity\": 10, \"lineWidth\": 2 }\
@@ -439,7 +451,7 @@ data:
     : \"input\" },\n        { \"refId\": \"B\", \"expr\": \"sum(rate(grob_output_tokens_total{provider=~\\\
     \"$provider\\\", model=~\\\"$model\\\"}[$__rate_interval]))\", \"legendFormat\"\
     : \"output\" }\n      ]\n    },\n    {\n      \"id\": 22, \"type\": \"bargauge\"\
-    , \"title\": \"Spend & budget (USD)\",\n      \"gridPos\": { \"h\": 8, \"w\":\
+    , \"title\": \"D\xE9pense et budget\",\n      \"gridPos\": { \"h\": 8, \"w\":\
     \ 8, \"x\": 16, \"y\": 20 },\n      \"datasource\": { \"type\": \"prometheus\"\
     , \"uid\": \"prometheus\" },\n      \"fieldConfig\": { \"defaults\": { \"unit\"\
     : \"currencyUSD\", \"thresholds\": { \"steps\": [ { \"color\": \"green\", \"value\"\
@@ -450,77 +462,82 @@ data:
     , \"legendFormat\": \"spend\" },\n        { \"refId\": \"B\", \"expr\": \"max(grob_budget_limit_usd)\"\
     , \"legendFormat\": \"budget limit\" },\n        { \"refId\": \"C\", \"expr\"\
     : \"max(grob_budget_remaining_usd)\", \"legendFormat\": \"remaining\" }\n    \
-    \  ]\n    },\n    {\n      \"id\": 30, \"type\": \"logs\", \"title\": \"Logs (Loki)\
-    \ \u2014 service_name = grob\",\n      \"gridPos\": { \"h\": 10, \"w\": 24, \"\
-    x\": 0, \"y\": 28 },\n      \"datasource\": { \"type\": \"loki\", \"uid\": \"\
-    loki\" },\n      \"options\": { \"showTime\": true, \"wrapLogMessage\": true,\
-    \ \"enableLogDetails\": true, \"sortOrder\": \"Descending\", \"dedupStrategy\"\
-    : \"none\", \"prettifyLogMessage\": false },\n      \"targets\": [ { \"refId\"\
-    : \"A\", \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\" }, \"expr\":\
-    \ \"{service_name=\\\"grob\\\"}\" } ]\n    },\n    {\n      \"id\": 31, \"type\"\
-    : \"table\", \"title\": \"Traces (Tempo) \u2014 service.name = grob\",\n     \
-    \ \"gridPos\": { \"h\": 10, \"w\": 24, \"x\": 0, \"y\": 38 },\n      \"datasource\"\
-    : { \"type\": \"tempo\", \"uid\": \"tempo\" },\n      \"options\": { \"showHeader\"\
-    : true },\n      \"targets\": [ { \"refId\": \"A\", \"datasource\": { \"type\"\
-    : \"tempo\", \"uid\": \"tempo\" }, \"queryType\": \"traceql\", \"query\": \"{\
-    \ resource.service.name=\\\"grob\\\" }\", \"limit\": 20 } ]\n    },\n    {\n \
-    \     \"id\": 32, \"type\": \"nodeGraph\", \"title\": \"Service graph (Tempo metrics-generator)\"\
-    ,\n      \"gridPos\": { \"h\": 9, \"w\": 24, \"x\": 0, \"y\": 48 },\n      \"\
-    datasource\": { \"type\": \"tempo\", \"uid\": \"tempo\" },\n      \"description\"\
-    : \"Populated by Tempo's service-graph metrics. Edges appear once the upstream\
-    \ providers are themselves traced (context propagation); with a single instrumented\
-    \ service it shows grob only.\",\n      \"targets\": [ { \"refId\": \"A\", \"\
-    datasource\": { \"type\": \"tempo\", \"uid\": \"tempo\" }, \"queryType\": \"serviceMap\"\
-    \ } ]\n    }\n  ]\n}\n"
+    \  ]\n    },\n    {\n      \"id\": 30, \"type\": \"logs\", \"title\": \"Audit\
+    \ sign\xE9 Loki\",\n      \"gridPos\": { \"h\": 10, \"w\": 24, \"x\": 0, \"y\"\
+    : 28 },\n      \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\" },\n  \
+    \    \"options\": { \"showTime\": true, \"wrapLogMessage\": true, \"enableLogDetails\"\
+    : true, \"sortOrder\": \"Descending\", \"dedupStrategy\": \"none\", \"prettifyLogMessage\"\
+    : false },\n      \"targets\": [ { \"refId\": \"A\", \"datasource\": { \"type\"\
+    : \"loki\", \"uid\": \"loki\" }, \"expr\": \"{service=\\\"grob-audit\\\"}\" }\
+    \ ]\n    },\n    {\n      \"id\": 31, \"type\": \"table\", \"title\": \"Traces\
+    \ Tempo\",\n      \"gridPos\": { \"h\": 10, \"w\": 24, \"x\": 0, \"y\": 38 },\n\
+    \      \"datasource\": { \"type\": \"tempo\", \"uid\": \"tempo\" },\n      \"\
+    options\": { \"showHeader\": true },\n      \"targets\": [ { \"refId\": \"A\"\
+    , \"datasource\": { \"type\": \"tempo\", \"uid\": \"tempo\" }, \"queryType\":\
+    \ \"traceql\", \"query\": \"{ resource.service.name = \\\"grob\\\" }\", \"limit\"\
+    : 20 } ]\n    },\n    {\n      \"id\": 32, \"type\": \"text\", \"title\": \"Corr\xE9\
+    lation Loki vers Tempo\",\n      \"gridPos\": { \"h\": 9, \"w\": 24, \"x\": 0,\
+    \ \"y\": 48 },\n      \"options\": {\n        \"mode\": \"markdown\",\n      \
+    \  \"content\": \"Cette d\xE9mo instrumente **grob** et pousse l'audit sign\xE9\
+    \ dans **Loki**. Chaque ligne d'audit porte `trace_id` et `span_id`; Tempo expose\
+    \ le span `http_request` correspondant.\\n\\nLe **service graph** Tempo est absent\
+    \ dans cette topologie : le fournisseur de d\xE9mo est un mock nginx non instrument\xE9\
+    , donc Tempo ne voit pas de second service ni d'ar\xEAte inter-service. Pour la\
+    \ preuve, ouvrez une ligne Loki, copiez `trace_id`, puis retrouvez le span dans\
+    \ **Traces Tempo**.\"\n      }\n    }\n  ]\n}\n"
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: cm-dash-audit-agent
 data:
-  audit-agent.json: "{\n  \"uid\": \"grob-audit-agent\",\n  \"title\": \"Audit par\
-    \ agent \u2014 investigation\",\n  \"tags\": [\"grob\", \"audit\", \"gouvernance\"\
-    , \"investigation\", \"d\xE9mo\"],\n  \"timezone\": \"browser\",\n  \"schemaVersion\"\
-    : 39,\n  \"version\": 2,\n  \"refresh\": \"5s\",\n  \"time\": { \"from\": \"now-3h\"\
-    , \"to\": \"now\" },\n  \"templating\": {\n    \"list\": [\n      {\n        \"\
-    name\": \"tenant\",\n        \"label\": \"Agent / identit\xE9\",\n        \"type\"\
-    : \"query\",\n        \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\"\
-    \ },\n        \"query\": {\n          \"label\": \"tenant\",\n          \"stream\"\
-    : \"{service=\\\"grob-audit\\\"}\",\n          \"type\": 1,\n          \"refId\"\
-    : \"LokiVariableQueryEditor-VariableQuery\"\n        },\n        \"definition\"\
-    : \"label_values({service=\\\"grob-audit\\\"}, tenant)\",\n        \"regex\":\
-    \ \"/^(alice|bob|dev-bot|compta-bot)$/\",\n        \"sort\": 1,\n        \"includeAll\"\
-    : false,\n        \"multi\": false,\n        \"current\": { \"text\": \"alice\"\
-    , \"value\": \"alice\" },\n        \"refresh\": 2\n      }\n    ]\n  },\n  \"\
-    panels\": [\n    {\n      \"id\": 100,\n      \"type\": \"text\",\n      \"title\"\
-    : \"\",\n      \"transparent\": true,\n      \"gridPos\": { \"h\": 3, \"w\": 24,\
-    \ \"x\": 0, \"y\": 0 },\n      \"options\": {\n        \"mode\": \"markdown\"\
-    ,\n        \"content\": \"<div style=\\\"text-align:center\\\">\\n\\n# \U0001F50E\
-    \ Investigation par agent \u2014 $tenant\\n\\n### Vue auditeur : chaque requ\xEA\
-    te de cette identit\xE9, sa d\xE9cision, sa classification et sa **preuve sign\xE9\
-    e**. Les blocages DLP sont mis en \xE9vidence.\\n\\n**Type d'incident (champ `classification`)\
-    \ :** \u2705 Propre (Nc) \xB7 \U0001F7E0 Caviard\xE9 (C1) \xB7 \U0001F7E0 PII\
-    \ / restreint (C2) \xB7 \U0001F534 Attaque bloqu\xE9e (C3)\\n\\n</div>\"\n   \
-    \   }\n    },\n    {\n      \"id\": 1,\n      \"type\": \"stat\",\n      \"title\"\
-    : \"Requ\xEAtes\",\n      \"description\": \"Nombre total d'\xE9v\xE9nements d'audit\
-    \ sign\xE9s pour l'identit\xE9 $tenant sur la fen\xEAtre. Chaque ligne du journal\
-    \ est une preuve horodat\xE9e et cha\xEEn\xE9e.\",\n      \"gridPos\": { \"h\"\
-    : 6, \"w\": 6, \"x\": 0, \"y\": 3 },\n      \"datasource\": { \"type\": \"loki\"\
-    , \"uid\": \"loki\" },\n      \"fieldConfig\": {\n        \"defaults\": {\n  \
-    \        \"unit\": \"short\",\n          \"decimals\": 0,\n          \"noValue\"\
-    : \"0\",\n          \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"blue\"\
-    \ }\n        }\n      },\n      \"options\": {\n        \"reduceOptions\": { \"\
-    calcs\": [\"sum\"] },\n        \"colorMode\": \"background_solid\",\n        \"\
-    graphMode\": \"area\",\n        \"textMode\": \"value\",\n        \"justifyMode\"\
-    : \"center\",\n        \"wideLayout\": true\n      },\n      \"targets\": [\n\
-    \        {\n          \"refId\": \"A\",\n          \"datasource\": { \"type\"\
-    : \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
+  audit-agent.json: "{\n  \"uid\": \"grob-audit-agent\",\n  \"title\": \"Grob \u2014\
+    \ Audit agent\",\n  \"tags\": [\"grob\", \"audit\", \"gouvernance\", \"investigation\"\
+    , \"d\xE9mo\"],\n  \"timezone\": \"browser\",\n  \"schemaVersion\": 39,\n  \"\
+    version\": 2,\n  \"refresh\": \"5s\",\n  \"time\": { \"from\": \"now-3h\", \"\
+    to\": \"now\" },\n  \"links\": [\n    {\n      \"type\": \"link\",\n      \"title\"\
+    : \"Vue RSSI\",\n      \"url\": \"/d/grob-rssi-business/grob-decision-rssi-ia?orgId=1\"\
+    ,\n      \"icon\": \"external link\",\n      \"includeVars\": false,\n      \"\
+    keepTime\": true,\n      \"targetBlank\": false\n    },\n    {\n      \"type\"\
+    : \"link\",\n      \"title\": \"Observabilit\xE9 technique\",\n      \"url\":\
+    \ \"/d/grob-overview/grob-otel-metrics-logs-traces?orgId=1\",\n      \"icon\"\
+    : \"external link\",\n      \"includeVars\": false,\n      \"keepTime\": true,\n\
+    \      \"targetBlank\": false\n    }\n  ],\n  \"templating\": {\n    \"list\"\
+    : [\n      {\n        \"name\": \"tenant\",\n        \"label\": \"Agent / identit\xE9\
+    \",\n        \"type\": \"query\",\n        \"datasource\": { \"type\": \"loki\"\
+    , \"uid\": \"loki\" },\n        \"query\": {\n          \"label\": \"tenant\"\
+    ,\n          \"stream\": \"{service=\\\"grob-audit\\\"}\",\n          \"type\"\
+    : 1,\n          \"refId\": \"LokiVariableQueryEditor-VariableQuery\"\n       \
+    \ },\n        \"definition\": \"label_values({service=\\\"grob-audit\\\"}, tenant)\"\
+    ,\n        \"regex\": \"/^(alice|bob|dev-bot|compta-bot)$/\",\n        \"sort\"\
+    : 1,\n        \"includeAll\": false,\n        \"multi\": false,\n        \"current\"\
+    : { \"text\": \"alice\", \"value\": \"alice\" },\n        \"refresh\": 2\n   \
+    \   }\n    ]\n  },\n  \"panels\": [\n    {\n      \"id\": 100,\n      \"type\"\
+    : \"text\",\n      \"title\": \"\",\n      \"transparent\": true,\n      \"gridPos\"\
+    : { \"h\": 3, \"w\": 24, \"x\": 0, \"y\": 0 },\n      \"options\": {\n       \
+    \ \"mode\": \"markdown\",\n        \"content\": \"<div style=\\\"text-align:center\\\
+    \">\\n\\n# Investigation agent \u2014 $tenant\\n\\n### D\xE9cision, incidents,\
+    \ preuve sign\xE9e et `trace_id` pour chaque requ\xEAte de cette identit\xE9.\\\
+    n\\n**Classification :** NC = propre \xB7 C1 = caviard\xE9 \xB7 C2 = PII / restreint\
+    \ \xB7 C3 = attaque bloqu\xE9e\\n\\n</div>\"\n      }\n    },\n    {\n      \"\
+    id\": 1,\n      \"type\": \"stat\",\n      \"title\": \"\xC9v\xE9nements sign\xE9\
+    s\",\n      \"description\": \"Volume d'audit pour $tenant sur la fen\xEAtre.\
+    \ Chaque \xE9v\xE9nement est horodat\xE9, cha\xEEn\xE9 et sign\xE9.\",\n     \
+    \ \"gridPos\": { \"h\": 6, \"w\": 6, \"x\": 0, \"y\": 3 },\n      \"datasource\"\
+    : { \"type\": \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n     \
+    \   \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n\
+    \          \"noValue\": \"0\",\n          \"color\": { \"mode\": \"fixed\", \"\
+    fixedColor\": \"blue\" }\n        }\n      },\n      \"options\": {\n        \"\
+    reduceOptions\": { \"calcs\": [\"sum\"] },\n        \"colorMode\": \"background_solid\"\
+    ,\n        \"graphMode\": \"area\",\n        \"textMode\": \"value\",\n      \
+    \  \"justifyMode\": \"center\",\n        \"wideLayout\": true\n      },\n    \
+    \  \"targets\": [\n        {\n          \"refId\": \"A\",\n          \"datasource\"\
+    : { \"type\": \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
     \"grob-audit\\\", tenant=\\\"$tenant\\\"}[$__range]))\",\n          \"queryType\"\
     : \"instant\"\n        }\n      ]\n    },\n    {\n      \"id\": 2,\n      \"type\"\
-    : \"stat\",\n      \"title\": \"Violations (DLP)\",\n      \"description\": \"\
-    Tentatives bloqu\xE9es par la DLP (action DLP_BLOCK) pour $tenant : injections\
-    \ de prompt, exfiltrations, secrets. Plus ce chiffre est \xE9lev\xE9, plus l'identit\xE9\
-    \ d\xE9rive.\",\n      \"gridPos\": { \"h\": 6, \"w\": 6, \"x\": 6, \"y\": 3 },\n\
+    : \"stat\",\n      \"title\": \"Blocages DLP\",\n      \"description\": \"Tentatives\
+    \ bloqu\xE9es pour $tenant avant sortie : injection, exfiltration ou donn\xE9\
+    e interdite.\",\n      \"gridPos\": { \"h\": 6, \"w\": 6, \"x\": 6, \"y\": 3 },\n\
     \      \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\"\
     : {\n        \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\"\
     : 0,\n          \"noValue\": \"0\",\n          \"thresholds\": {\n           \
@@ -535,179 +552,222 @@ data:
     : \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
     \"grob-audit\\\", tenant=\\\"$tenant\\\"} | json | action=`DLP_BLOCK` [$__range]))\"\
     ,\n          \"queryType\": \"instant\"\n        }\n      ]\n    },\n    {\n \
-    \     \"id\": 3,\n      \"type\": \"stat\",\n      \"title\": \"D\xE9cision dominante\"\
-    ,\n      \"description\": \"Action majoritaire prise par grob sur le trafic de\
-    \ $tenant : RESPONSE (laiss\xE9 passer), DLP_BLOCK (bloqu\xE9), REQUEST_PROCESSED\
-    \ (trait\xE9). Indique l'attitude globale de l'identit\xE9.\",\n      \"gridPos\"\
-    : { \"h\": 6, \"w\": 6, \"x\": 12, \"y\": 3 },\n      \"datasource\": { \"type\"\
+    \     \"id\": 3,\n      \"type\": \"stat\",\n      \"title\": \"D\xE9cision majoritaire\"\
+    ,\n      \"description\": \"Action la plus fr\xE9quente pour $tenant : r\xE9ponse\
+    \ autoris\xE9e, requ\xEAte trait\xE9e ou blocage DLP.\",\n      \"gridPos\": {\
+    \ \"h\": 6, \"w\": 6, \"x\": 12, \"y\": 3 },\n      \"datasource\": { \"type\"\
     : \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n        \"defaults\"\
     : {\n          \"unit\": \"string\",\n          \"noValue\": \"\u2014\",\n   \
     \       \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"purple\" },\n    \
     \      \"mappings\": [\n            { \"type\": \"value\", \"options\": { \"DLP_BLOCK\"\
-    : { \"text\": \"\u26D4 Bloqu\xE9\", \"color\": \"red\", \"index\": 0 } } },\n\
-    \            { \"type\": \"value\", \"options\": { \"RESPONSE\": { \"text\": \"\
-    \u2705 R\xE9ponse\", \"color\": \"green\", \"index\": 1 } } },\n            {\
-    \ \"type\": \"value\", \"options\": { \"REQUEST_PROCESSED\": { \"text\": \"\u2705\
-    \ Trait\xE9\", \"color\": \"green\", \"index\": 2 } } }\n          ]\n       \
+    : { \"text\": \"Bloqu\xE9\", \"color\": \"red\", \"index\": 0 } } },\n       \
+    \     { \"type\": \"value\", \"options\": { \"RESPONSE\": { \"text\": \"R\xE9\
+    ponse\", \"color\": \"green\", \"index\": 1 } } },\n            { \"type\": \"\
+    value\", \"options\": { \"REQUEST_PROCESSED\": { \"text\": \"Trait\xE9\", \"color\"\
+    : \"green\", \"index\": 2 } } }\n          ]\n        }\n      },\n      \"options\"\
+    : {\n        \"reduceOptions\": { \"calcs\": [\"lastNotNull\"], \"fields\": \"\
+    /^action$/\" },\n        \"colorMode\": \"background_solid\",\n        \"graphMode\"\
+    : \"none\",\n        \"textMode\": \"value\",\n        \"justifyMode\": \"center\"\
+    ,\n        \"wideLayout\": true\n      },\n      \"targets\": [\n        {\n \
+    \         \"refId\": \"A\",\n          \"datasource\": { \"type\": \"loki\", \"\
+    uid\": \"loki\" },\n          \"expr\": \"topk(1, sum by (action) (count_over_time({service=\\\
+    \"grob-audit\\\", tenant=\\\"$tenant\\\"} | json [$__range])))\",\n          \"\
+    queryType\": \"instant\"\n        }\n      ]\n    },\n    {\n      \"id\": 4,\n\
+    \      \"type\": \"stat\",\n      \"title\": \"Preuve d'int\xE9grit\xE9\",\n \
+    \     \"description\": \"Nombre de lignes sign\xE9es pour $tenant. Les d\xE9tails\
+    \ exposent signature, previous_hash, trace_id et span_id.\",\n      \"gridPos\"\
+    : { \"h\": 6, \"w\": 6, \"x\": 18, \"y\": 3 },\n      \"datasource\": { \"type\"\
+    : \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n        \"defaults\"\
+    : {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n          \"\
+    noValue\": \"\u2014\",\n          \"color\": { \"mode\": \"fixed\", \"fixedColor\"\
+    : \"green\" },\n          \"mappings\": [\n            { \"type\": \"range\",\
+    \ \"options\": { \"from\": 1, \"to\": 1000000000, \"result\": { \"text\": \"Sign\xE9\
+    e\", \"color\": \"green\", \"index\": 0 } } },\n            { \"type\": \"range\"\
+    , \"options\": { \"from\": 0, \"to\": 0, \"result\": { \"text\": \"\u2014\", \"\
+    color\": \"yellow\", \"index\": 1 } } }\n          ]\n        }\n      },\n  \
+    \    \"options\": {\n        \"reduceOptions\": { \"calcs\": [\"sum\"] },\n  \
+    \      \"colorMode\": \"background_solid\",\n        \"graphMode\": \"none\",\n\
+    \        \"textMode\": \"value\",\n        \"justifyMode\": \"center\",\n    \
+    \    \"wideLayout\": true\n      },\n      \"targets\": [\n        {\n       \
+    \   \"refId\": \"A\",\n          \"datasource\": { \"type\": \"loki\", \"uid\"\
+    : \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\"grob-audit\\\
+    \", tenant=\\\"$tenant\\\"} | json | signature=~`.+` [$__range]))\",\n       \
+    \   \"queryType\": \"instant\"\n        }\n      ]\n    },\n    {\n      \"id\"\
+    : 40,\n      \"type\": \"stat\",\n      \"title\": \"Incidents hors NC\",\n  \
+    \    \"description\": \"Nombre d'\xE9v\xE9nements non propres pour $tenant : C1,\
+    \ C2 ou C3. 0 signifie aucun incident sur la fen\xEAtre.\",\n      \"gridPos\"\
+    : { \"h\": 6, \"w\": 8, \"x\": 0, \"y\": 9 },\n      \"datasource\": { \"type\"\
+    : \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n        \"defaults\"\
+    : {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n          \"\
+    noValue\": \"0\",\n          \"thresholds\": {\n            \"mode\": \"absolute\"\
+    ,\n            \"steps\": [\n              { \"color\": \"green\", \"value\":\
+    \ null },\n              { \"color\": \"orange\", \"value\": 1 }\n           \
+    \ ]\n          },\n          \"color\": { \"mode\": \"thresholds\" }\n       \
     \ }\n      },\n      \"options\": {\n        \"reduceOptions\": { \"calcs\": [\"\
-    lastNotNull\"], \"fields\": \"/^action$/\" },\n        \"colorMode\": \"background_solid\"\
-    ,\n        \"graphMode\": \"none\",\n        \"textMode\": \"value\",\n      \
-    \  \"justifyMode\": \"center\",\n        \"wideLayout\": true\n      },\n    \
-    \  \"targets\": [\n        {\n          \"refId\": \"A\",\n          \"datasource\"\
-    : { \"type\": \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"topk(1, sum\
-    \ by (action) (count_over_time({service=\\\"grob-audit\\\", tenant=\\\"$tenant\\\
-    \"} | json [$__range])))\",\n          \"queryType\": \"instant\"\n        }\n\
-    \      ]\n    },\n    {\n      \"id\": 4,\n      \"type\": \"stat\",\n      \"\
-    title\": \"Preuve sign\xE9e\",\n      \"description\": \"Pr\xE9sence d'une signature\
-    \ cryptographique (ECDSA P-256) sur le journal de $tenant. \u2713 = chaque ligne\
-    \ est sign\xE9e et cha\xEEn\xE9e (previous_hash) : la trace est inalt\xE9rable\
-    \ et exportable.\",\n      \"gridPos\": { \"h\": 6, \"w\": 6, \"x\": 18, \"y\"\
-    : 3 },\n      \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\" },\n   \
-    \   \"fieldConfig\": {\n        \"defaults\": {\n          \"unit\": \"short\"\
-    ,\n          \"decimals\": 0,\n          \"noValue\": \"\u2014\",\n          \"\
-    color\": { \"mode\": \"fixed\", \"fixedColor\": \"green\" },\n          \"mappings\"\
-    : [\n            { \"type\": \"range\", \"options\": { \"from\": 1, \"to\": 1000000000,\
-    \ \"result\": { \"text\": \"\u2713 Sign\xE9e\", \"color\": \"green\", \"index\"\
-    : 0 } } },\n            { \"type\": \"range\", \"options\": { \"from\": 0, \"\
-    to\": 0, \"result\": { \"text\": \"\u2014\", \"color\": \"yellow\", \"index\"\
-    : 1 } } }\n          ]\n        }\n      },\n      \"options\": {\n        \"\
-    reduceOptions\": { \"calcs\": [\"sum\"] },\n        \"colorMode\": \"background_solid\"\
-    ,\n        \"graphMode\": \"none\",\n        \"textMode\": \"value\",\n      \
-    \  \"justifyMode\": \"center\",\n        \"wideLayout\": true\n      },\n    \
-    \  \"targets\": [\n        {\n          \"refId\": \"A\",\n          \"datasource\"\
-    : { \"type\": \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
-    \"grob-audit\\\", tenant=\\\"$tenant\\\"} | json | signature=~`.+` [$__range]))\"\
-    ,\n          \"queryType\": \"instant\"\n        }\n      ]\n    },\n    {\n \
-    \     \"id\": 40,\n      \"type\": \"stat\",\n      \"title\": \"Incidents classifi\xE9\
-    s (hors \u2705 Propre)\",\n      \"description\": \"Nombre de lignes d'audit de\
-    \ $tenant dont la classification n'est PAS \xAB Nc \xBB (propre) : caviardages\
-    \ internes (C1), PII / restreint (C2), attaques bloqu\xE9es (C3). 0 = identit\xE9\
-    \ exemplaire (alice). Source : champ `classification` du journal sign\xE9.\",\n\
-    \      \"gridPos\": { \"h\": 6, \"w\": 8, \"x\": 0, \"y\": 9 },\n      \"datasource\"\
-    : { \"type\": \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n     \
+    sum\"] },\n        \"colorMode\": \"background_solid\",\n        \"graphMode\"\
+    : \"area\",\n        \"textMode\": \"value\",\n        \"justifyMode\": \"center\"\
+    ,\n        \"wideLayout\": true\n      },\n      \"targets\": [\n        {\n \
+    \         \"refId\": \"A\",\n          \"datasource\": { \"type\": \"loki\", \"\
+    uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\"grob-audit\\\
+    \", tenant=\\\"$tenant\\\"} | json | classification!=`NC` [$__range]))\",\n  \
+    \        \"queryType\": \"instant\"\n        }\n      ]\n    },\n    {\n     \
+    \ \"id\": 41,\n      \"type\": \"piechart\",\n      \"title\": \"R\xE9partition\
+    \ des classifications \u2014 $tenant\",\n      \"description\": \"R\xE9partition\
+    \ NC/C1/C2/C3 issue du champ `classification` de l'audit sign\xE9.\",\n      \"\
+    gridPos\": { \"h\": 6, \"w\": 9, \"x\": 8, \"y\": 9 },\n      \"datasource\":\
+    \ { \"type\": \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n     \
     \   \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n\
-    \          \"noValue\": \"0\",\n          \"thresholds\": {\n            \"mode\"\
-    : \"absolute\",\n            \"steps\": [\n              { \"color\": \"green\"\
-    , \"value\": null },\n              { \"color\": \"orange\", \"value\": 1 }\n\
-    \            ]\n          },\n          \"color\": { \"mode\": \"thresholds\"\
-    \ }\n        }\n      },\n      \"options\": {\n        \"reduceOptions\": { \"\
-    calcs\": [\"sum\"] },\n        \"colorMode\": \"background_solid\",\n        \"\
-    graphMode\": \"area\",\n        \"textMode\": \"value\",\n        \"justifyMode\"\
-    : \"center\",\n        \"wideLayout\": true\n      },\n      \"targets\": [\n\
-    \        {\n          \"refId\": \"A\",\n          \"datasource\": { \"type\"\
-    : \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
-    \"grob-audit\\\", tenant=\\\"$tenant\\\"} | json | classification!=`NC` [$__range]))\"\
-    ,\n          \"queryType\": \"instant\"\n        }\n      ]\n    },\n    {\n \
-    \     \"id\": 41,\n      \"type\": \"piechart\",\n      \"title\": \"Type d'incident\
-    \ \u2014 r\xE9partition par classification \u2014 $tenant\",\n      \"description\"\
-    : \"R\xE9partition des requ\xEAtes de $tenant par TYPE d'incident, d\xE9riv\xE9\
-    \ du champ `classification` de l'audit sign\xE9 : \u2705 Propre (Nc), \U0001F7E0\
-    \ Caviard\xE9 (C1), \U0001F7E0 PII / restreint (C2), \U0001F534 Attaque bloqu\xE9\
-    e (C3). \xAB Propre \xBB est la part saine (r\xE9f\xE9rence) ; les autres parts\
-    \ sont les incidents typ\xE9s.\",\n      \"gridPos\": { \"h\": 6, \"w\": 9, \"\
-    x\": 8, \"y\": 9 },\n      \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\"\
-    \ },\n      \"fieldConfig\": {\n        \"defaults\": {\n          \"unit\": \"\
-    short\",\n          \"decimals\": 0,\n          \"color\": { \"mode\": \"palette-classic\"\
-    \ }\n        },\n        \"overrides\": [\n          { \"matcher\": { \"id\":\
-    \ \"byName\", \"options\": \"\u2705 Propre\" }, \"properties\": [ { \"id\": \"\
-    color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"green\" } } ] },\n\
-    \          { \"matcher\": { \"id\": \"byName\", \"options\": \"\U0001F7E0 Caviard\xE9\
-    \" }, \"properties\": [ { \"id\": \"color\", \"value\": { \"mode\": \"fixed\"\
-    , \"fixedColor\": \"orange\" } } ] },\n          { \"matcher\": { \"id\": \"byName\"\
-    , \"options\": \"\U0001F7E0 PII / restreint\" }, \"properties\": [ { \"id\": \"\
-    color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"yellow\" } } ] },\n\
-    \          { \"matcher\": { \"id\": \"byName\", \"options\": \"\U0001F534 Attaque\
-    \ bloqu\xE9e\" }, \"properties\": [ { \"id\": \"color\", \"value\": { \"mode\"\
-    : \"fixed\", \"fixedColor\": \"red\" } } ] }\n        ]\n      },\n      \"options\"\
-    : {\n        \"pieType\": \"donut\",\n        \"reduceOptions\": { \"calcs\":\
-    \ [\"sum\"], \"values\": false },\n        \"legend\": { \"displayMode\": \"table\"\
-    , \"placement\": \"right\", \"showLegend\": true, \"values\": [\"value\"] },\n\
-    \        \"tooltip\": { \"mode\": \"single\", \"sort\": \"none\" }\n      },\n\
-    \      \"targets\": [\n        {\n          \"refId\": \"A\",\n          \"datasource\"\
-    : { \"type\": \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
+    \          \"color\": { \"mode\": \"palette-classic\" }\n        },\n        \"\
+    overrides\": [\n          { \"matcher\": { \"id\": \"byName\", \"options\": \"\
+    NC - propre\" }, \"properties\": [ { \"id\": \"color\", \"value\": { \"mode\"\
+    : \"fixed\", \"fixedColor\": \"green\" } } ] },\n          { \"matcher\": { \"\
+    id\": \"byName\", \"options\": \"C1 - caviard\xE9\" }, \"properties\": [ { \"\
+    id\": \"color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"orange\"\
+    \ } } ] },\n          { \"matcher\": { \"id\": \"byName\", \"options\": \"C2 -\
+    \ PII / restreint\" }, \"properties\": [ { \"id\": \"color\", \"value\": { \"\
+    mode\": \"fixed\", \"fixedColor\": \"yellow\" } } ] },\n          { \"matcher\"\
+    : { \"id\": \"byName\", \"options\": \"C3 - attaque bloqu\xE9e\" }, \"properties\"\
+    : [ { \"id\": \"color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"\
+    red\" } } ] }\n        ]\n      },\n      \"options\": {\n        \"pieType\"\
+    : \"donut\",\n        \"reduceOptions\": { \"calcs\": [\"sum\"], \"values\": false\
+    \ },\n        \"legend\": { \"displayMode\": \"table\", \"placement\": \"right\"\
+    , \"showLegend\": true, \"values\": [\"value\"] },\n        \"tooltip\": { \"\
+    mode\": \"single\", \"sort\": \"none\" }\n      },\n      \"targets\": [\n   \
+    \     {\n          \"refId\": \"A\",\n          \"datasource\": { \"type\": \"\
+    loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
     \"grob-audit\\\", tenant=\\\"$tenant\\\"} | json | classification=`NC` [$__range]))\"\
-    ,\n          \"legendFormat\": \"\u2705 Propre\",\n          \"queryType\": \"\
-    instant\"\n        },\n        {\n          \"refId\": \"B\",\n          \"datasource\"\
+    ,\n          \"legendFormat\": \"NC - propre\",\n          \"queryType\": \"instant\"\
+    \n        },\n        {\n          \"refId\": \"B\",\n          \"datasource\"\
     : { \"type\": \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
     \"grob-audit\\\", tenant=\\\"$tenant\\\"} | json | classification=`C1` [$__range]))\"\
-    ,\n          \"legendFormat\": \"\U0001F7E0 Caviard\xE9\",\n          \"queryType\"\
+    ,\n          \"legendFormat\": \"C1 - caviard\xE9\",\n          \"queryType\"\
     : \"instant\"\n        },\n        {\n          \"refId\": \"C\",\n          \"\
     datasource\": { \"type\": \"loki\", \"uid\": \"loki\" },\n          \"expr\":\
     \ \"sum(count_over_time({service=\\\"grob-audit\\\", tenant=\\\"$tenant\\\"} |\
-    \ json | classification=`C2` [$__range]))\",\n          \"legendFormat\": \"\U0001F7E0\
-    \ PII / restreint\",\n          \"queryType\": \"instant\"\n        },\n     \
-    \   {\n          \"refId\": \"D\",\n          \"datasource\": { \"type\": \"loki\"\
-    , \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\"\
-    grob-audit\\\", tenant=\\\"$tenant\\\"} | json | classification=`C3` [$__range]))\"\
-    ,\n          \"legendFormat\": \"\U0001F534 Attaque bloqu\xE9e\",\n          \"\
-    queryType\": \"instant\"\n        }\n      ]\n    },\n    {\n      \"id\": 42,\n\
-    \      \"type\": \"timeseries\",\n      \"title\": \"Classification dans le temps\
-    \ \u2014 $tenant\",\n      \"description\": \"\xC9volution par minute des classifications\
-    \ d'audit de $tenant (barres empil\xE9es). R\xE9v\xE8le la d\xE9rive LENTE de\
-    \ compta-bot : les incidents C2 (exfiltration) et C3 (injection) s'accumulent\
-    \ jusqu'au seuil de coupure.\",\n      \"gridPos\": { \"h\": 6, \"w\": 7, \"x\"\
-    : 17, \"y\": 9 },\n      \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\"\
-    \ },\n      \"fieldConfig\": {\n        \"defaults\": {\n          \"unit\": \"\
-    short\",\n          \"decimals\": 0,\n          \"custom\": {\n            \"\
-    drawStyle\": \"bars\",\n            \"fillOpacity\": 70,\n            \"lineWidth\"\
-    : 1,\n            \"showPoints\": \"never\",\n            \"stacking\": { \"mode\"\
-    : \"normal\", \"group\": \"A\" }\n          }\n        },\n        \"overrides\"\
-    : [\n          { \"matcher\": { \"id\": \"byName\", \"options\": \"NC\" }, \"\
-    properties\": [ { \"id\": \"color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\"\
-    : \"green\" } }, { \"id\": \"displayName\", \"value\": \"\u2705 Propre\" } ] },\n\
-    \          { \"matcher\": { \"id\": \"byName\", \"options\": \"C1\" }, \"properties\"\
+    \ json | classification=`C2` [$__range]))\",\n          \"legendFormat\": \"C2\
+    \ - PII / restreint\",\n          \"queryType\": \"instant\"\n        },\n   \
+    \     {\n          \"refId\": \"D\",\n          \"datasource\": { \"type\": \"\
+    loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
+    \"grob-audit\\\", tenant=\\\"$tenant\\\"} | json | classification=`C3` [$__range]))\"\
+    ,\n          \"legendFormat\": \"C3 - attaque bloqu\xE9e\",\n          \"queryType\"\
+    : \"instant\"\n        }\n      ]\n    },\n    {\n      \"id\": 42,\n      \"\
+    type\": \"timeseries\",\n      \"title\": \"Classifications par minute \u2014\
+    \ $tenant\",\n      \"description\": \"\xC9volution NC/C1/C2/C3 par minute. Une\
+    \ mont\xE9e C2/C3 rend la d\xE9rive de l'agent visible avant coupure.\",\n   \
+    \   \"gridPos\": { \"h\": 6, \"w\": 7, \"x\": 17, \"y\": 9 },\n      \"datasource\"\
+    : { \"type\": \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n     \
+    \   \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n\
+    \          \"custom\": {\n            \"drawStyle\": \"bars\",\n            \"\
+    fillOpacity\": 70,\n            \"lineWidth\": 1,\n            \"showPoints\"\
+    : \"never\",\n            \"stacking\": { \"mode\": \"normal\", \"group\": \"\
+    A\" }\n          }\n        },\n        \"overrides\": [\n          { \"matcher\"\
+    : { \"id\": \"byName\", \"options\": \"NC\" }, \"properties\": [ { \"id\": \"\
+    color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"green\" } }, { \"\
+    id\": \"displayName\", \"value\": \"NC - propre\" } ] },\n          { \"matcher\"\
+    : { \"id\": \"byName\", \"options\": \"C1\" }, \"properties\": [ { \"id\": \"\
+    color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"orange\" } }, { \"\
+    id\": \"displayName\", \"value\": \"C1 - caviard\xE9\" } ] },\n          { \"\
+    matcher\": { \"id\": \"byName\", \"options\": \"C2\" }, \"properties\": [ { \"\
+    id\": \"color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"yellow\"\
+    \ } }, { \"id\": \"displayName\", \"value\": \"C2 - PII / restreint\" } ] },\n\
+    \          { \"matcher\": { \"id\": \"byName\", \"options\": \"C3\" }, \"properties\"\
     : [ { \"id\": \"color\", \"value\": { \"mode\": \"fixed\", \"fixedColor\": \"\
-    orange\" } }, { \"id\": \"displayName\", \"value\": \"\U0001F7E0 Caviard\xE9\"\
-    \ } ] },\n          { \"matcher\": { \"id\": \"byName\", \"options\": \"C2\" },\
-    \ \"properties\": [ { \"id\": \"color\", \"value\": { \"mode\": \"fixed\", \"\
-    fixedColor\": \"yellow\" } }, { \"id\": \"displayName\", \"value\": \"\U0001F7E0\
-    \ PII / restreint\" } ] },\n          { \"matcher\": { \"id\": \"byName\", \"\
-    options\": \"C3\" }, \"properties\": [ { \"id\": \"color\", \"value\": { \"mode\"\
-    : \"fixed\", \"fixedColor\": \"red\" } }, { \"id\": \"displayName\", \"value\"\
-    : \"\U0001F534 Attaque bloqu\xE9e\" } ] }\n        ]\n      },\n      \"options\"\
-    : {\n        \"legend\": { \"displayMode\": \"list\", \"placement\": \"bottom\"\
-    , \"showLegend\": true },\n        \"tooltip\": { \"mode\": \"multi\", \"sort\"\
-    : \"none\" }\n      },\n      \"targets\": [\n        {\n          \"refId\":\
-    \ \"A\",\n          \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\" },\n\
-    \          \"expr\": \"sum by (classification) (count_over_time({service=\\\"\
-    grob-audit\\\", tenant=\\\"$tenant\\\"} | json [1m]))\",\n          \"legendFormat\"\
-    : \"{{classification}}\"\n        }\n      ]\n    },\n    {\n      \"id\": 20,\n\
-    \      \"type\": \"timeseries\",\n      \"title\": \"Violations DLP dans le temps\
-    \ \u2014 $tenant\",\n      \"description\": \"Rythme des blocages DLP (DLP_BLOCK)\
-    \ de l'identit\xE9 $tenant, par minute. Un pic signale une d\xE9rive : c'est le\
-    \ signal que le watcher utilise pour couper la cl\xE9.\",\n      \"gridPos\":\
-    \ { \"h\": 8, \"w\": 24, \"x\": 0, \"y\": 15 },\n      \"datasource\": { \"type\"\
+    red\" } }, { \"id\": \"displayName\", \"value\": \"C3 - attaque bloqu\xE9e\" }\
+    \ ] }\n        ]\n      },\n      \"options\": {\n        \"legend\": { \"displayMode\"\
+    : \"list\", \"placement\": \"bottom\", \"showLegend\": true },\n        \"tooltip\"\
+    : { \"mode\": \"multi\", \"sort\": \"none\" }\n      },\n      \"targets\": [\n\
+    \        {\n          \"refId\": \"A\",\n          \"datasource\": { \"type\"\
+    : \"loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum by (classification)\
+    \ (count_over_time({service=\\\"grob-audit\\\", tenant=\\\"$tenant\\\"} | json\
+    \ [1m]))\",\n          \"legendFormat\": \"{{classification}}\"\n        }\n \
+    \     ]\n    },\n    {\n      \"id\": 50,\n      \"type\": \"timeseries\",\n \
+    \     \"title\": \"\xC9v\xE9nements sign\xE9s par minute \u2014 $tenant\",\n \
+    \     \"description\": \"Volume de lignes d'audit sign\xE9es pour $tenant. Sert\
+    \ de base de comparaison pour les incidents et blocages.\",\n      \"gridPos\"\
+    : { \"h\": 8, \"w\": 8, \"x\": 0, \"y\": 15 },\n      \"datasource\": { \"type\"\
     : \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n        \"defaults\"\
     : {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n          \"\
     custom\": {\n            \"drawStyle\": \"bars\",\n            \"fillOpacity\"\
-    : 50,\n            \"lineWidth\": 1,\n            \"showPoints\": \"never\",\n\
+    : 45,\n            \"lineWidth\": 1,\n            \"showPoints\": \"never\",\n\
     \            \"gradientMode\": \"opacity\"\n          },\n          \"color\"\
-    : { \"mode\": \"fixed\", \"fixedColor\": \"red\" }\n        }\n      },\n    \
-    \  \"options\": {\n        \"legend\": { \"displayMode\": \"list\", \"placement\"\
+    : { \"mode\": \"fixed\", \"fixedColor\": \"blue\" }\n        }\n      },\n   \
+    \   \"options\": {\n        \"legend\": { \"displayMode\": \"list\", \"placement\"\
     : \"bottom\", \"showLegend\": true },\n        \"tooltip\": { \"mode\": \"single\"\
     , \"sort\": \"none\" }\n      },\n      \"targets\": [\n        {\n          \"\
     refId\": \"A\",\n          \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\"\
     \ },\n          \"expr\": \"sum(count_over_time({service=\\\"grob-audit\\\", tenant=\\\
+    \"$tenant\\\"} | json | signature=~`.+` [1m]))\",\n          \"legendFormat\"\
+    : \"\xC9v\xE9nements sign\xE9s / min\"\n        }\n      ]\n    },\n    {\n  \
+    \    \"id\": 51,\n      \"type\": \"timeseries\",\n      \"title\": \"Incidents\
+    \ hors NC par minute \u2014 $tenant\",\n      \"description\": \"\xC9v\xE9nements\
+    \ C1/C2/C3 pour $tenant. La courbe isole ce qui n'est pas du trafic propre.\"\
+    ,\n      \"gridPos\": { \"h\": 8, \"w\": 8, \"x\": 8, \"y\": 15 },\n      \"datasource\"\
+    : { \"type\": \"loki\", \"uid\": \"loki\" },\n      \"fieldConfig\": {\n     \
+    \   \"defaults\": {\n          \"unit\": \"short\",\n          \"decimals\": 0,\n\
+    \          \"custom\": {\n            \"drawStyle\": \"bars\",\n            \"\
+    fillOpacity\": 50,\n            \"lineWidth\": 1,\n            \"showPoints\"\
+    : \"never\",\n            \"gradientMode\": \"opacity\"\n          },\n      \
+    \    \"color\": { \"mode\": \"fixed\", \"fixedColor\": \"orange\" }\n        }\n\
+    \      },\n      \"options\": {\n        \"legend\": { \"displayMode\": \"list\"\
+    , \"placement\": \"bottom\", \"showLegend\": true },\n        \"tooltip\": { \"\
+    mode\": \"single\", \"sort\": \"none\" }\n      },\n      \"targets\": [\n   \
+    \     {\n          \"refId\": \"A\",\n          \"datasource\": { \"type\": \"\
+    loki\", \"uid\": \"loki\" },\n          \"expr\": \"sum(count_over_time({service=\\\
+    \"grob-audit\\\", tenant=\\\"$tenant\\\"} | json | classification!=`NC` [1m]))\"\
+    ,\n          \"legendFormat\": \"Incidents hors NC / min\"\n        }\n      ]\n\
+    \    },\n    {\n      \"id\": 20,\n      \"type\": \"timeseries\",\n      \"title\"\
+    : \"Blocages DLP par minute \u2014 $tenant\",\n      \"description\": \"Rythme\
+    \ des blocages DLP de $tenant. Un pic signale une d\xE9rive exploitable par le\
+    \ watcher ou une policy de coupure.\",\n      \"gridPos\": { \"h\": 8, \"w\":\
+    \ 8, \"x\": 16, \"y\": 15 },\n      \"datasource\": { \"type\": \"loki\", \"uid\"\
+    : \"loki\" },\n      \"fieldConfig\": {\n        \"defaults\": {\n          \"\
+    unit\": \"short\",\n          \"decimals\": 0,\n          \"custom\": {\n    \
+    \        \"drawStyle\": \"bars\",\n            \"fillOpacity\": 50,\n        \
+    \    \"lineWidth\": 1,\n            \"showPoints\": \"never\",\n            \"\
+    gradientMode\": \"opacity\"\n          },\n          \"color\": { \"mode\": \"\
+    fixed\", \"fixedColor\": \"red\" }\n        }\n      },\n      \"options\": {\n\
+    \        \"legend\": { \"displayMode\": \"list\", \"placement\": \"bottom\", \"\
+    showLegend\": true },\n        \"tooltip\": { \"mode\": \"single\", \"sort\":\
+    \ \"none\" }\n      },\n      \"targets\": [\n        {\n          \"refId\":\
+    \ \"A\",\n          \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\" },\n\
+    \          \"expr\": \"sum(count_over_time({service=\\\"grob-audit\\\", tenant=\\\
     \"$tenant\\\"} | json | action=`DLP_BLOCK` [1m]))\",\n          \"legendFormat\"\
-    : \"Violations DLP / min\"\n        }\n      ]\n    },\n    {\n      \"id\": 30,\n\
-    \      \"type\": \"logs\",\n      \"title\": \"Journal d'audit sign\xE9 \u2014\
-    \ $tenant (le plus r\xE9cent en premier)\",\n      \"description\": \"Vue auditeur\
-    \ : chaque ligne d'audit sign\xE9e de $tenant, projet\xE9e pour montrer en clair\
-    \ son TYPE d'incident \u2014 [classification] action \xB7 r\xE8gles DLP d\xE9\
-    clench\xE9es \xB7 preuve sign\xE9e (sig). D\xE9plier une ligne (details) r\xE9\
-    v\xE8le le JSON complet : event_id, previous_hash, signature, etc.\",\n      \"\
-    gridPos\": { \"h\": 14, \"w\": 24, \"x\": 0, \"y\": 23 },\n      \"datasource\"\
-    : { \"type\": \"loki\", \"uid\": \"loki\" },\n      \"options\": {\n        \"\
-    showTime\": true,\n        \"showLabels\": false,\n        \"showCommonLabels\"\
-    : false,\n        \"wrapLogMessage\": true,\n        \"prettifyLogMessage\": false,\n\
-    \        \"enableLogDetails\": true,\n        \"dedupStrategy\": \"none\",\n \
-    \       \"sortOrder\": \"Descending\"\n      },\n      \"targets\": [\n      \
-    \  {\n          \"refId\": \"A\",\n          \"datasource\": { \"type\": \"loki\"\
-    , \"uid\": \"loki\" },\n          \"expr\": \"{service=\\\"grob-audit\\\", tenant=\\\
-    \"$tenant\\\"} | json classification=`classification`, action=`action`, dlp_rule=`dlp_rules_triggered[0]`,\
-    \ signature=`signature` | line_format `[{{.classification}}] {{.action}}{{if .dlp_rule}}\
-    \ \xB7 r\xE8gle DLP: {{.dlp_rule}}{{end}} \xB7 sig={{printf \\\"%.16s\\\" .signature}}\u2026\
-    `\",\n          \"queryType\": \"range\"\n        }\n      ]\n    }\n  ]\n}\n"
+    : \"Violations DLP / min\"\n        }\n      ]\n    },\n    {\n      \"id\": 60,\n\
+    \      \"type\": \"table\",\n      \"title\": \"Tempo traces \u2014 requ\xEAtes\
+    \ grob\",\n      \"description\": \"Liste les spans http_request \xE9mis par grob.\
+    \ Les trace_id correspondent aux champs trace_id pr\xE9sents dans le journal Loki\
+    \ sign\xE9.\",\n      \"gridPos\": { \"h\": 10, \"w\": 16, \"x\": 0, \"y\": 23\
+    \ },\n      \"datasource\": { \"type\": \"tempo\", \"uid\": \"tempo\" },\n   \
+    \   \"options\": { \"showHeader\": true },\n      \"targets\": [\n        {\n\
+    \          \"refId\": \"A\",\n          \"datasource\": { \"type\": \"tempo\"\
+    , \"uid\": \"tempo\" },\n          \"queryType\": \"traceql\",\n          \"query\"\
+    : \"{ resource.service.name = \\\"grob\\\" && name = \\\"http_request\\\" }\"\
+    ,\n          \"limit\": 50\n        }\n      ]\n    },\n    {\n      \"id\": 61,\n\
+    \      \"type\": \"text\",\n      \"title\": \"Corr\xE9lation trace_id\",\n  \
+    \    \"gridPos\": { \"h\": 10, \"w\": 8, \"x\": 16, \"y\": 23 },\n      \"options\"\
+    : {\n        \"mode\": \"markdown\",\n        \"content\": \"1. Ouvrir une ligne\
+    \ du **Journal sign\xE9**.\\n2. Copier `trace_id`.\\n3. Retrouver la m\xEAme trace\
+    \ dans **Tempo traces** ou Tempo Explore.\\n\\nChaque requ\xEAte audit\xE9e porte\
+    \ aussi `span_id`, `signature` et `previous_hash`.\\n\\nLe **service graph** reste\
+    \ vide dans cette d\xE9mo parce que seul `grob` \xE9met des spans OTel ; le provider\
+    \ mock nginx n'est pas instrument\xE9.\"\n      }\n    },\n    {\n      \"id\"\
+    : 30,\n      \"type\": \"logs\",\n      \"title\": \"Journal sign\xE9 avec trace_id\
+    \ \u2014 $tenant\",\n      \"description\": \"Chaque ligne r\xE9sume classification,\
+    \ action, r\xE8gle DLP, signature et trace_id. D\xE9plier la ligne expose le JSON\
+    \ complet et permet la corr\xE9lation Tempo.\",\n      \"gridPos\": { \"h\": 14,\
+    \ \"w\": 24, \"x\": 0, \"y\": 33 },\n      \"datasource\": { \"type\": \"loki\"\
+    , \"uid\": \"loki\" },\n      \"options\": {\n        \"showTime\": true,\n  \
+    \      \"showLabels\": false,\n        \"showCommonLabels\": false,\n        \"\
+    wrapLogMessage\": true,\n        \"prettifyLogMessage\": false,\n        \"enableLogDetails\"\
+    : true,\n        \"dedupStrategy\": \"none\",\n        \"sortOrder\": \"Descending\"\
+    \n      },\n      \"targets\": [\n        {\n          \"refId\": \"A\",\n   \
+    \       \"datasource\": { \"type\": \"loki\", \"uid\": \"loki\" },\n         \
+    \ \"expr\": \"{service=\\\"grob-audit\\\", tenant=\\\"$tenant\\\"} | json classification=`classification`,\
+    \ action=`action`, dlp_rule=`dlp_rules_triggered[0]`, signature=`signature`, trace_id=`trace_id`\
+    \ | line_format `[{{.classification}}] {{.action}}{{if .dlp_rule}} \xB7 r\xE8\
+    gle DLP: {{.dlp_rule}}{{end}} \xB7 sig={{printf \\\"%.16s\\\" .signature}}\u2026\
+    \ \xB7 trace={{printf \\\"%.16s\\\" .trace_id}}\u2026`\",\n          \"queryType\"\
+    : \"range\"\n        }\n      ]\n    }\n  ]\n}\n"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -1352,7 +1412,7 @@ data:
     \ PAS envoyer c\xF4t\xE9 navigateur.\n    # nginx injecte la cl\xE9 admin C\xD4\
     T\xC9 SERVEUR : la page reste sans jeton, la cl\xE9\n    # n'est jamais expos\xE9\
     e au navigateur, et le flux \xAB blocages en direct \xBB\n    # continue de fonctionner.\n\
-    \    location /api/events {\n        proxy_pass http://grob:8080/api/events;\n\
+    \    location /api/events {\n        proxy_pass http://localhost:8080/api/events;\n\
     \        proxy_set_header Authorization \"Bearer grob-admin-demo\";\n        proxy_http_version\
     \ 1.1;\n        proxy_set_header Connection \"\";\n        proxy_set_header Host\
     \ $host;\n\n        # R\xE9glages indispensables au Server-Sent Events.\n    \

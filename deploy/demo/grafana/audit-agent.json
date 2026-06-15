@@ -1,12 +1,32 @@
 {
   "uid": "grob-audit-agent",
-  "title": "Audit par agent — investigation",
+  "title": "Grob — Audit agent",
   "tags": ["grob", "audit", "gouvernance", "investigation", "démo"],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 2,
   "refresh": "5s",
   "time": { "from": "now-3h", "to": "now" },
+  "links": [
+    {
+      "type": "link",
+      "title": "Vue RSSI",
+      "url": "/d/grob-rssi-business/grob-decision-rssi-ia?orgId=1",
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    },
+    {
+      "type": "link",
+      "title": "Observabilité technique",
+      "url": "/d/grob-overview/grob-otel-metrics-logs-traces?orgId=1",
+      "icon": "external link",
+      "includeVars": false,
+      "keepTime": true,
+      "targetBlank": false
+    }
+  ],
   "templating": {
     "list": [
       {
@@ -39,14 +59,14 @@
       "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "<div style=\"text-align:center\">\n\n# 🔎 Investigation par agent — $tenant\n\n### Vue auditeur : chaque requête de cette identité, sa décision, sa classification et sa **preuve signée**. Les blocages DLP sont mis en évidence.\n\n**Type d'incident (champ `classification`) :** ✅ Propre (Nc) · 🟠 Caviardé (C1) · 🟠 PII / restreint (C2) · 🔴 Attaque bloquée (C3)\n\n</div>"
+        "content": "<div style=\"text-align:center\">\n\n# Investigation agent — $tenant\n\n### Décision, incidents, preuve signée et `trace_id` pour chaque requête de cette identité.\n\n**Classification :** NC = propre · C1 = caviardé · C2 = PII / restreint · C3 = attaque bloquée\n\n</div>"
       }
     },
     {
       "id": 1,
       "type": "stat",
-      "title": "Requêtes",
-      "description": "Nombre total d'événements d'audit signés pour l'identité $tenant sur la fenêtre. Chaque ligne du journal est une preuve horodatée et chaînée.",
+      "title": "Événements signés",
+      "description": "Volume d'audit pour $tenant sur la fenêtre. Chaque événement est horodaté, chaîné et signé.",
       "gridPos": { "h": 6, "w": 6, "x": 0, "y": 3 },
       "datasource": { "type": "loki", "uid": "loki" },
       "fieldConfig": {
@@ -77,8 +97,8 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Violations (DLP)",
-      "description": "Tentatives bloquées par la DLP (action DLP_BLOCK) pour $tenant : injections de prompt, exfiltrations, secrets. Plus ce chiffre est élevé, plus l'identité dérive.",
+      "title": "Blocages DLP",
+      "description": "Tentatives bloquées pour $tenant avant sortie : injection, exfiltration ou donnée interdite.",
       "gridPos": { "h": 6, "w": 6, "x": 6, "y": 3 },
       "datasource": { "type": "loki", "uid": "loki" },
       "fieldConfig": {
@@ -116,8 +136,8 @@
     {
       "id": 3,
       "type": "stat",
-      "title": "Décision dominante",
-      "description": "Action majoritaire prise par grob sur le trafic de $tenant : RESPONSE (laissé passer), DLP_BLOCK (bloqué), REQUEST_PROCESSED (traité). Indique l'attitude globale de l'identité.",
+      "title": "Décision majoritaire",
+      "description": "Action la plus fréquente pour $tenant : réponse autorisée, requête traitée ou blocage DLP.",
       "gridPos": { "h": 6, "w": 6, "x": 12, "y": 3 },
       "datasource": { "type": "loki", "uid": "loki" },
       "fieldConfig": {
@@ -126,9 +146,9 @@
           "noValue": "—",
           "color": { "mode": "fixed", "fixedColor": "purple" },
           "mappings": [
-            { "type": "value", "options": { "DLP_BLOCK": { "text": "⛔ Bloqué", "color": "red", "index": 0 } } },
-            { "type": "value", "options": { "RESPONSE": { "text": "✅ Réponse", "color": "green", "index": 1 } } },
-            { "type": "value", "options": { "REQUEST_PROCESSED": { "text": "✅ Traité", "color": "green", "index": 2 } } }
+            { "type": "value", "options": { "DLP_BLOCK": { "text": "Bloqué", "color": "red", "index": 0 } } },
+            { "type": "value", "options": { "RESPONSE": { "text": "Réponse", "color": "green", "index": 1 } } },
+            { "type": "value", "options": { "REQUEST_PROCESSED": { "text": "Traité", "color": "green", "index": 2 } } }
           ]
         }
       },
@@ -152,8 +172,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Preuve signée",
-      "description": "Présence d'une signature cryptographique (ECDSA P-256) sur le journal de $tenant. ✓ = chaque ligne est signée et chaînée (previous_hash) : la trace est inaltérable et exportable.",
+      "title": "Preuve d'intégrité",
+      "description": "Nombre de lignes signées pour $tenant. Les détails exposent signature, previous_hash, trace_id et span_id.",
       "gridPos": { "h": 6, "w": 6, "x": 18, "y": 3 },
       "datasource": { "type": "loki", "uid": "loki" },
       "fieldConfig": {
@@ -163,7 +183,7 @@
           "noValue": "—",
           "color": { "mode": "fixed", "fixedColor": "green" },
           "mappings": [
-            { "type": "range", "options": { "from": 1, "to": 1000000000, "result": { "text": "✓ Signée", "color": "green", "index": 0 } } },
+            { "type": "range", "options": { "from": 1, "to": 1000000000, "result": { "text": "Signée", "color": "green", "index": 0 } } },
             { "type": "range", "options": { "from": 0, "to": 0, "result": { "text": "—", "color": "yellow", "index": 1 } } }
           ]
         }
@@ -188,8 +208,8 @@
     {
       "id": 40,
       "type": "stat",
-      "title": "Incidents classifiés (hors ✅ Propre)",
-      "description": "Nombre de lignes d'audit de $tenant dont la classification n'est PAS « Nc » (propre) : caviardages internes (C1), PII / restreint (C2), attaques bloquées (C3). 0 = identité exemplaire (alice). Source : champ `classification` du journal signé.",
+      "title": "Incidents hors NC",
+      "description": "Nombre d'événements non propres pour $tenant : C1, C2 ou C3. 0 signifie aucun incident sur la fenêtre.",
       "gridPos": { "h": 6, "w": 8, "x": 0, "y": 9 },
       "datasource": { "type": "loki", "uid": "loki" },
       "fieldConfig": {
@@ -227,8 +247,8 @@
     {
       "id": 41,
       "type": "piechart",
-      "title": "Type d'incident — répartition par classification — $tenant",
-      "description": "Répartition des requêtes de $tenant par TYPE d'incident, dérivé du champ `classification` de l'audit signé : ✅ Propre (Nc), 🟠 Caviardé (C1), 🟠 PII / restreint (C2), 🔴 Attaque bloquée (C3). « Propre » est la part saine (référence) ; les autres parts sont les incidents typés.",
+      "title": "Répartition des classifications — $tenant",
+      "description": "Répartition NC/C1/C2/C3 issue du champ `classification` de l'audit signé.",
       "gridPos": { "h": 6, "w": 9, "x": 8, "y": 9 },
       "datasource": { "type": "loki", "uid": "loki" },
       "fieldConfig": {
@@ -238,10 +258,10 @@
           "color": { "mode": "palette-classic" }
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "✅ Propre" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
-          { "matcher": { "id": "byName", "options": "🟠 Caviardé" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
-          { "matcher": { "id": "byName", "options": "🟠 PII / restreint" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
-          { "matcher": { "id": "byName", "options": "🔴 Attaque bloquée" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+          { "matcher": { "id": "byName", "options": "NC - propre" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "C1 - caviardé" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "C2 - PII / restreint" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } } ] },
+          { "matcher": { "id": "byName", "options": "C3 - attaque bloquée" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
         ]
       },
       "options": {
@@ -255,28 +275,28 @@
           "refId": "A",
           "datasource": { "type": "loki", "uid": "loki" },
           "expr": "sum(count_over_time({service=\"grob-audit\", tenant=\"$tenant\"} | json | classification=`NC` [$__range]))",
-          "legendFormat": "✅ Propre",
+          "legendFormat": "NC - propre",
           "queryType": "instant"
         },
         {
           "refId": "B",
           "datasource": { "type": "loki", "uid": "loki" },
           "expr": "sum(count_over_time({service=\"grob-audit\", tenant=\"$tenant\"} | json | classification=`C1` [$__range]))",
-          "legendFormat": "🟠 Caviardé",
+          "legendFormat": "C1 - caviardé",
           "queryType": "instant"
         },
         {
           "refId": "C",
           "datasource": { "type": "loki", "uid": "loki" },
           "expr": "sum(count_over_time({service=\"grob-audit\", tenant=\"$tenant\"} | json | classification=`C2` [$__range]))",
-          "legendFormat": "🟠 PII / restreint",
+          "legendFormat": "C2 - PII / restreint",
           "queryType": "instant"
         },
         {
           "refId": "D",
           "datasource": { "type": "loki", "uid": "loki" },
           "expr": "sum(count_over_time({service=\"grob-audit\", tenant=\"$tenant\"} | json | classification=`C3` [$__range]))",
-          "legendFormat": "🔴 Attaque bloquée",
+          "legendFormat": "C3 - attaque bloquée",
           "queryType": "instant"
         }
       ]
@@ -284,8 +304,8 @@
     {
       "id": 42,
       "type": "timeseries",
-      "title": "Classification dans le temps — $tenant",
-      "description": "Évolution par minute des classifications d'audit de $tenant (barres empilées). Révèle la dérive LENTE de compta-bot : les incidents C2 (exfiltration) et C3 (injection) s'accumulent jusqu'au seuil de coupure.",
+      "title": "Classifications par minute — $tenant",
+      "description": "Évolution NC/C1/C2/C3 par minute. Une montée C2/C3 rend la dérive de l'agent visible avant coupure.",
       "gridPos": { "h": 6, "w": 7, "x": 17, "y": 9 },
       "datasource": { "type": "loki", "uid": "loki" },
       "fieldConfig": {
@@ -301,10 +321,10 @@
           }
         },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "NC" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }, { "id": "displayName", "value": "✅ Propre" } ] },
-          { "matcher": { "id": "byName", "options": "C1" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }, { "id": "displayName", "value": "🟠 Caviardé" } ] },
-          { "matcher": { "id": "byName", "options": "C2" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }, { "id": "displayName", "value": "🟠 PII / restreint" } ] },
-          { "matcher": { "id": "byName", "options": "C3" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }, { "id": "displayName", "value": "🔴 Attaque bloquée" } ] }
+          { "matcher": { "id": "byName", "options": "NC" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }, { "id": "displayName", "value": "NC - propre" } ] },
+          { "matcher": { "id": "byName", "options": "C1" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }, { "id": "displayName", "value": "C1 - caviardé" } ] },
+          { "matcher": { "id": "byName", "options": "C2" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "yellow" } }, { "id": "displayName", "value": "C2 - PII / restreint" } ] },
+          { "matcher": { "id": "byName", "options": "C3" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }, { "id": "displayName", "value": "C3 - attaque bloquée" } ] }
         ]
       },
       "options": {
@@ -321,11 +341,79 @@
       ]
     },
     {
+      "id": 50,
+      "type": "timeseries",
+      "title": "Événements signés par minute — $tenant",
+      "description": "Volume de lignes d'audit signées pour $tenant. Sert de base de comparaison pour les incidents et blocages.",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 15 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 45,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          },
+          "color": { "mode": "fixed", "fixedColor": "blue" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum(count_over_time({service=\"grob-audit\", tenant=\"$tenant\"} | json | signature=~`.+` [1m]))",
+          "legendFormat": "Événements signés / min"
+        }
+      ]
+    },
+    {
+      "id": 51,
+      "type": "timeseries",
+      "title": "Incidents hors NC par minute — $tenant",
+      "description": "Événements C1/C2/C3 pour $tenant. La courbe isole ce qui n'est pas du trafic propre.",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 15 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 50,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          },
+          "color": { "mode": "fixed", "fixedColor": "orange" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "loki", "uid": "loki" },
+          "expr": "sum(count_over_time({service=\"grob-audit\", tenant=\"$tenant\"} | json | classification!=`NC` [1m]))",
+          "legendFormat": "Incidents hors NC / min"
+        }
+      ]
+    },
+    {
       "id": 20,
       "type": "timeseries",
-      "title": "Violations DLP dans le temps — $tenant",
-      "description": "Rythme des blocages DLP (DLP_BLOCK) de l'identité $tenant, par minute. Un pic signale une dérive : c'est le signal que le watcher utilise pour couper la clé.",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 15 },
+      "title": "Blocages DLP par minute — $tenant",
+      "description": "Rythme des blocages DLP de $tenant. Un pic signale une dérive exploitable par le watcher ou une policy de coupure.",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 15 },
       "datasource": { "type": "loki", "uid": "loki" },
       "fieldConfig": {
         "defaults": {
@@ -355,11 +443,39 @@
       ]
     },
     {
+      "id": 60,
+      "type": "table",
+      "title": "Tempo traces — requêtes grob",
+      "description": "Liste les spans http_request émis par grob. Les trace_id correspondent aux champs trace_id présents dans le journal Loki signé.",
+      "gridPos": { "h": 10, "w": 16, "x": 0, "y": 23 },
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "options": { "showHeader": true },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "tempo", "uid": "tempo" },
+          "queryType": "traceql",
+          "query": "{ resource.service.name = \"grob\" && name = \"http_request\" }",
+          "limit": 50
+        }
+      ]
+    },
+    {
+      "id": 61,
+      "type": "text",
+      "title": "Corrélation trace_id",
+      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 23 },
+      "options": {
+        "mode": "markdown",
+        "content": "1. Ouvrir une ligne du **Journal signé**.\n2. Copier `trace_id`.\n3. Retrouver la même trace dans **Tempo traces** ou Tempo Explore.\n\nChaque requête auditée porte aussi `span_id`, `signature` et `previous_hash`.\n\nLe **service graph** reste vide dans cette démo parce que seul `grob` émet des spans OTel ; le provider mock nginx n'est pas instrumenté."
+      }
+    },
+    {
       "id": 30,
       "type": "logs",
-      "title": "Journal d'audit signé — $tenant (le plus récent en premier)",
-      "description": "Vue auditeur : chaque ligne d'audit signée de $tenant, projetée pour montrer en clair son TYPE d'incident — [classification] action · règles DLP déclenchées · preuve signée (sig). Déplier une ligne (details) révèle le JSON complet : event_id, previous_hash, signature, etc.",
-      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 23 },
+      "title": "Journal signé avec trace_id — $tenant",
+      "description": "Chaque ligne résume classification, action, règle DLP, signature et trace_id. Déplier la ligne expose le JSON complet et permet la corrélation Tempo.",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 33 },
       "datasource": { "type": "loki", "uid": "loki" },
       "options": {
         "showTime": true,
@@ -375,7 +491,7 @@
         {
           "refId": "A",
           "datasource": { "type": "loki", "uid": "loki" },
-          "expr": "{service=\"grob-audit\", tenant=\"$tenant\"} | json classification=`classification`, action=`action`, dlp_rule=`dlp_rules_triggered[0]`, signature=`signature` | line_format `[{{.classification}}] {{.action}}{{if .dlp_rule}} · règle DLP: {{.dlp_rule}}{{end}} · sig={{printf \"%.16s\" .signature}}…`",
+          "expr": "{service=\"grob-audit\", tenant=\"$tenant\"} | json classification=`classification`, action=`action`, dlp_rule=`dlp_rules_triggered[0]`, signature=`signature`, trace_id=`trace_id` | line_format `[{{.classification}}] {{.action}}{{if .dlp_rule}} · règle DLP: {{.dlp_rule}}{{end}} · sig={{printf \"%.16s\" .signature}}… · trace={{printf \"%.16s\" .trace_id}}…`",
           "queryType": "range"
         }
       ]

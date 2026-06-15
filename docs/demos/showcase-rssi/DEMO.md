@@ -15,24 +15,29 @@
 
 > **Avant de parler d'architecture, montrez le résultat.**
 
-Stack déjà lancée (voir Pré-vol). Deux onglets ouverts en plein écran :
-**Blocages en direct** (`http://localhost:8088`) et **Tableau de bord RSSI**
+Stack déjà lancée (voir Pré-vol). Trois onglets ouverts en plein écran :
+**Gouvernance des agents** (`http://localhost:8088/governance`), **Blocages en
+direct** (`http://localhost:8088`) et **Tableau de bord RSSI**
 (`http://localhost:3000`).
 
-**Marque** : basculez sur l'onglet « Blocages en direct ». Des lignes tombent
-toutes les ~2 secondes, dont des bandeaux rouges.
+**Marque** : basculez sur l'onglet « Gouvernance des agents ». La ligne
+`compta-bot` monte en violations, puis passe à **RÉVOQUÉ** quand le seuil est
+franchi. Ouvrez ensuite « Voir les logs » sur cette ligne si vous voulez montrer
+le drill-down Loki par identité.
 
 **Réplique** :
-> « Regardez cet écran. Chaque ligne rouge, c'est une donnée sensible ou une
-> attaque qu'on vient d'**empêcher de partir** vers l'IA. En ce moment, en
-> direct. Le compteur en haut, ce sont les fuites évitées depuis le démarrage. »
+> « Regardez cet écran. On ne voit pas seulement des requêtes : on voit **qui**
+> fait quoi. Alice reste propre, Bob caviarde parfois, et l'agent comptable
+> dérive lentement jusqu'à être coupé automatiquement. Chaque décision est
+> attribuée, signée, et inspectable dans les logs. »
 
-Pointez le bandeau **🔴 BLOQUÉ — Injection de prompt** puis **🟠 CAVIARDÉ —
-Clé d'accès AWS**.
+Pointez les colonnes **violations**, **type d'incident**, **preuve signée** et
+**statut**, puis le lien **Voir les logs**.
 
-> **Sortie de secours** : si l'écran est figé, dites *« je rafraîchis le flux »*
-> et rechargez la page (F5) ; EventSource se reconnecte seul. Si rien ne tombe
-> au bout de 10 s, passez à la doublure (cf. fin de document).
+> **Sortie de secours** : si l'écran est vide, dites *« le watcher n'a pas
+> encore écrit son premier état »* et rechargez la page après quelques secondes.
+> Si le statut ne bouge pas, passez sur l'onglet « Blocages en direct » puis à
+> la doublure (cf. fin de document).
 
 ---
 
@@ -71,9 +76,9 @@ curl -s -X POST http://localhost:8080/v1/chat/completions \
 > Mais la clé a été **remplacée** avant de sortir. L'IA n'a jamais vu le secret.
 > C'est la différence entre interdire et protéger. »
 
-> **Sortie de secours** : si le `curl` renvoie une erreur de connexion, dites
-> *« le port est occupé, je montre l'événement déjà capturé »* et pointez une
-> ligne CAVIARDÉE existante dans le flux (le trafic 24/7 en produit en continu).
+**Sortie de secours** : si le `curl` renvoie une erreur de connexion, dites
+*« le port est occupé, je montre l'événement déjà capturé »* et pointez une
+ligne CAVIARDÉE existante dans le flux (le trafic 24/7 en produit en continu).
 
 ---
 
@@ -115,17 +120,40 @@ d'accueil **est** le tableau de bord « Conformité IA (vue RSSI) ».
 **Réplique**, en pointant chaque grand chiffre :
 > « Pas besoin d'être technicien pour lire ça.
 > — En **vert**, les secrets et données personnelles caviardés : la protection
->   travaille.
+> travaille.
 > — En **rouge**, les menaces bloquées : les attaques stoppées.
 > — La jauge **dépense IA** : le budget mensuel, appliqué automatiquement. Au-delà
->   du plafond, les requêtes sont refusées — fini les factures qui dérapent.
+> du plafond, les requêtes sont refusées — fini les factures qui dérapent.
 > — Et **traçabilité signée** : les règles appliquées sont vérifiées
->   cryptographiquement, donc auditables. »
+> cryptographiquement, donc auditables. »
 
 Laissez l'auto-refresh (5 s) faire monter les chiffres pendant que vous parlez.
 
 > **Sortie de secours** : si Grafana met du temps à charger, dites *« le temps
 > qu'il agrège, revenons au flux temps réel »* et repassez sur l'onglet 8088.
+
+---
+
+## Acte 5 — Drill-down par agent — 60 s
+
+> **Beat** : on relie la vue décideur aux preuves auditables dans Loki.
+
+**Marque** : revenez sur `http://localhost:8088/governance`, choisissez
+`compta-bot`, puis cliquez **Voir les logs**.
+
+**Sortie attendue** : Grafana ouvre l'investigation par agent, filtrée sur le
+tenant `compta-bot`. Les lignes Loki montrent les événements d'audit signés,
+avec classification (`C1`/`C2`/`C3`), action DLP, règles déclenchées et
+signature.
+
+**Réplique** :
+> « Le tableau n'est pas une animation. Il est construit depuis le journal
+> d'audit signé, poussé dans Loki et filtré par identité. On peut partir d'un
+> agent révoqué et remonter à chaque décision qui a mené à la coupure. »
+
+**Sortie de secours** : si Grafana Explore met du temps à charger, gardez la
+page gouvernance à l'écran et dites *« le drill-down est une vue Loki sur les
+mêmes lignes signées ; le live continue ici »*.
 
 ---
 
@@ -135,7 +163,8 @@ Laissez l'auto-refresh (5 s) faire monter les chiffres pendant que vous parlez.
 > « Une seule commande pour tout lancer, un résultat identique à chaque fois.
 > Ce que vous venez de voir tourne en local, sans aucun coût d'IA, mais la
 > protection, elle, est exactement celle de la production : secrets caviardés,
-> attaques bloquées, dépense plafonnée, audit signé. Des questions ? »
+> attaques bloquées, dépense plafonnée, audit signé, et coupure par identité.
+> Des questions ? »
 
 ---
 

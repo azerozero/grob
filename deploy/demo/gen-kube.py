@@ -74,6 +74,16 @@ def read_source(rel):
         return fh.read()
 
 
+def kube_source(name, content):
+    """Adapte les sources partagees quand le reseau kube differe de Compose."""
+    if name == "cm-web-nginx":
+        # Dans le pod `podman kube play`, tous les conteneurs partagent le meme
+        # netns : grob est donc joignable sur localhost. Le fichier source reste
+        # compatible Compose, ou `grob:8080` est le bon nom de service.
+        return content.replace("http://grob:8080", "http://localhost:8080")
+    return content
+
+
 def configmap(name, key, content):
     """Construit un dict ConfigMap Kubernetes."""
     return {
@@ -292,7 +302,7 @@ def build_pod():
 def main():
     docs = []
     for name, key, src in CONFIGMAPS:
-        docs.append(configmap(name, key, read_source(src)))
+        docs.append(configmap(name, key, kube_source(name, read_source(src))))
     docs.append(configmap("cm-dash-empty", "empty.yaml", EMPTY_DASHBOARDS))
     docs.append(build_pod())
 
