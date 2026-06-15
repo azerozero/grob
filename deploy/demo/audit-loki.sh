@@ -57,6 +57,12 @@ tenant_of() {
   printf '%s' "$1" | sed -n 's/.*"tenant_id":"\([^"]*\)".*/\1/p'
 }
 
+# Extrait le trace_id OTel (présent quand grob tourne avec --features otel et
+# [otel].enabled). Vide sinon (ligne sans trace, ex. attestation au démarrage).
+trace_of() {
+  printf '%s' "$1" | sed -n 's/.*"trace_id":"\([^"]*\)".*/\1/p'
+}
+
 # Dérive un NIVEAU de log (level) de la ligne d'audit, depuis son action et sa
 # classification. Sans niveau explicite, Loki affiche « detected_level=unknown »
 # (il ne sait pas deviner la gravité d'une ligne JSON métier). En émettant un
@@ -116,13 +122,23 @@ push_line() {
   tenant=$(tenant_of "$line")
   [ -n "$tenant" ] || tenant="unknown"
   lvl=$(level_of "$line")
+  tid=$(trace_of "$line")
   loki_ts            # met à jour TS (globale) sans sous-shell
   ts="$TS"
   esc=$(json_escape "$line")
+  # trace_id en STRUCTURED METADATA (3e élément du tuple values), pas en label :
+  # forte cardinalité (unique par requête) → jamais un label indexé. Le derived
+  # field Loki d'otel-lgtm (matcher sur trace_id) en fait un lien « Voir le trace »
+  # vers Tempo. Absent (otel off / ligne hors requête) → tuple à 2 éléments.
+  if [ -n "$tid" ]; then
+    values=$(printf '[["%s","%s",{"trace_id":"%s"}]]' "$ts" "$esc" "$tid")
+  else
+    values=$(printf '[["%s","%s"]]' "$ts" "$esc")
+  fi
   # `level` est une étiquette de stream standard : Loki la reconnaît comme
   # niveau (plus de detected_level=unknown) et Grafana colore le journal.
-  payload=$(printf '{"streams":[{"stream":{"service":"%s","tenant":"%s","level":"%s"},"values":[["%s","%s"]]}]}' \
-    "$SERVICE" "$tenant" "$lvl" "$ts" "$esc")
+  payload=$(printf '{"streams":[{"stream":{"service":"%s","tenant":"%s","level":"%s"},"values":%s}]}' \
+    "$SERVICE" "$tenant" "$lvl" "$values")
   # -s silencieux ; on ignore l'échec réseau ponctuel (la prochaine ligne suivra).
   curl -s -o /dev/null -X POST "$LOKI_URL" \
     -H 'Content-Type: application/json' \

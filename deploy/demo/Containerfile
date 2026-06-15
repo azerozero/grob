@@ -37,10 +37,12 @@ COPY . .
 #     `gcc` so both host build-scripts and the target binary link.
 # The binary lands under target/<triple>/release; copy it to a fixed path for
 # the scratch stage, which has no shell to compute the triple.
+# --features otel: adds the OTLP trace exporter so the demo correlates audit
+# logs to traces in Tempo (the audit line carries the OTel trace_id).
 RUN TARGET="$(rustc -vV | sed -n 's/^host: //p')" && \
     LINKER_VAR="CARGO_TARGET_$(echo "$TARGET" | tr 'a-z-' 'A-Z_')_LINKER" && \
     export "${LINKER_VAR}=gcc" && \
-    cargo build --release --locked --target "$TARGET" && \
+    cargo build --release --locked --target "$TARGET" --features otel && \
     cp "target/${TARGET}/release/grob" /grob && \
     strip /grob && \
     mkdir -p /runtime/var/lib/grob /runtime/tmp
