@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.73](https://github.com/azerozero/grob/compare/v0.36.72...v0.36.73) - 2026-06-15
+
+### Added
+
+- *(audit)* add OpenTelemetry trace_id/span_id to audit entries
+
+### Other
+
+- *(demo)* emit a Loki level so audit logs stop showing detected_level=unknown
+- *(demo)* make governance table fit narrow viewports in alert state
+- *(demo)* fix horizontal scrollbar on the governance table
+- *(demo)* polish governance + live-block UI (ui-ux-pro-max pass)
+- *(demo)* add RSSI / agent-governance showcase kit
+
 ## [0.36.72](https://github.com/azerozero/grob/compare/v0.36.71...v0.36.72) - 2026-06-14
 
 ### Added
