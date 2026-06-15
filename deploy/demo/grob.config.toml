@@ -149,3 +149,14 @@ scan_markdown_links = true
 scan_raw_urls = true
 blacklist_domains = ["evil.example.com"]
 domain_match_mode = "suffix"
+
+# --- OpenTelemetry : export des traces vers Tempo (corrélation logs <-> traces) -
+# Active l'exportateur OTLP/gRPC (image construite avec --features otel). Chaque
+# requête devient un trace exporté vers le Tempo d'otel-lgtm ; la ligne d'audit
+# correspondante porte le meme trace_id (capté du span courant), ce qui permet le
+# saut "Voir le trace" depuis le journal Loki (derived field pré-câblé par
+# otel-lgtm). Endpoint = localhost car les conteneurs du pod partagent le netns.
+[otel]
+enabled = true
+endpoint = "http://localhost:4317"
+service_name = "grob"
