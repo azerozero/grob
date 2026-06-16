@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Grob — Console de gouvernance des identités IA</title>
-  <!-- Design system « Trust & Authority » : Lexend (titres) + Source Sans 3 (corps). -->
+  <title>Grob — AI identity governance console</title>
+  <!-- Trust & Authority design system: Lexend headings + Source Sans 3 body. -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -16,10 +16,10 @@
       --line:      #334155;
       --text:      #F8FAFC;
       --muted:     #94A3B8;
-      --ok:        #22C55E;  /* actif / propre */
-      --warn:      #F59E0B;  /* alerte / caviardé */
-      --block:     #EF4444;  /* révoqué / violations */
-      --info:      #38BDF8;  /* liens / drill-down */
+      --ok:        #22C55E;  /* active / clean */
+      --warn:      #F59E0B;  /* warning / redacted */
+      --block:     #EF4444;  /* revoked / violations */
+      --info:      #38BDF8;  /* links / drill-down */
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -60,13 +60,13 @@
 
     main { padding: 22px 24px 16px; max-width: 1360px; margin: 0 auto; }
 
-    /* ---- Tableau par identité ---- */
+    /* ---- Identity table ---- */
     .card {
       background: linear-gradient(180deg, var(--surface), var(--surface-2));
       border: 1px solid var(--line); border-radius: 18px; overflow: hidden;
     }
-    /* overflow-x: filet de sécurité sous ~1100px ; au-dessus la table tient
-       sans barre horizontale grâce au padding resserré et aux en-têtes courts. */
+    /* overflow-x is the safety net below ~1100px; above that, compact padding
+       and short headers keep the table visible without horizontal scrolling. */
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; min-width: 940px; table-layout: auto; }
     thead th {
@@ -105,9 +105,8 @@
     .num.viol-hot { color: var(--block); }
     .spend { font-size: 18px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
 
-    /* ---- Classes de données + chips ---- */
-    /* max-width borne la colonne : les chips se replient (≈2 par ligne) au lieu
-       d'élargir la table et de provoquer un défilement horizontal. */
+    /* ---- Data classes + chips ---- */
+    /* max-width bounds the column: chips wrap instead of widening the table. */
     .chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 184px; }
     .chip {
       font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
@@ -124,7 +123,7 @@
     .decision.caviarde { color: var(--warn); }
     .decision.none     { color: var(--muted); }
 
-    /* ---- Type d'incident (classification d'audit Nc/C1/C2/C3) ---- */
+    /* ---- Incident type (NC/C1/C2/C3 audit classification) ---- */
     .itype {
       display: inline-flex; align-items: center; gap: 6px;
       font-size: 12.5px; font-weight: 700; white-space: nowrap;
@@ -140,7 +139,7 @@
     .proof svg { width: 15px; height: 15px; }
     .proof.no { color: var(--muted); }
 
-    /* ---- Pastille de statut ---- */
+    /* ---- Status pill ---- */
     .pill {
       display: inline-flex; align-items: center; gap: 7px;
       font-weight: 700; font-size: 14px; padding: 8px 14px 8px 11px; border-radius: 999px;
@@ -151,7 +150,7 @@
     .pill.revoque { color: var(--block); background: rgba(239,68,68,.14);  border-color: rgba(239,68,68,.5); }
     .remediation { display: block; margin-top: 6px; font-size: 11px; color: var(--muted); max-width: 180px; }
 
-    /* ---- Lien drill-down Loki ---- */
+    /* ---- Loki drill-down link ---- */
     .logs-link {
       display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
       font-size: 13px; font-weight: 600; color: var(--info); text-decoration: none;
@@ -162,7 +161,7 @@
     .logs-link:hover { background: rgba(56,189,248,.2); border-color: rgba(56,189,248,.55); transform: translateY(-1px); }
     .logs-link svg { width: 15px; height: 15px; }
 
-    /* ---- Accessibilité : anneau de focus visible au clavier ---- */
+    /* ---- Accessibility: visible keyboard focus ring ---- */
     a:focus-visible, .logs-link:focus-visible {
       outline: 2px solid var(--info); outline-offset: 2px; border-radius: 9px;
     }
@@ -174,20 +173,20 @@
     tr.just-revoked { background: rgba(239,68,68,.10); animation: flash 1.2s ease 1; }
     @keyframes flash { 0%,100% { background: rgba(239,68,68,.10); } 40% { background: rgba(239,68,68,.28); } }
 
-    /* ---- Légende ---- */
+    /* ---- Legend ---- */
     .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: center; padding: 18px 40px 8px; color: var(--muted); font-size: 13px; }
     .legend .item { display: inline-flex; align-items: center; gap: 8px; }
     .legend .sw { width: 12px; height: 12px; border-radius: 3px; }
     .footnote { text-align: center; color: var(--muted); font-size: 12.5px; padding: 12px 40px 44px; max-width: 1000px; margin: 0 auto; line-height: 1.55; }
     .footnote a { color: var(--info); }
 
-    /* ---- Reflow gracieux sur écrans étroits (375 / 768) ---- */
+    /* ---- Graceful reflow on narrow screens (375 / 768) ---- */
     @media (max-width: 768px) {
       header { padding: 26px 20px 4px; }
       main { padding: 16px 14px 12px; }
       .legend { padding: 14px 20px 6px; }
       .footnote { padding: 12px 20px 40px; }
-      /* La table reste lisible : défilement horizontal via .table-wrap (overflow-x). */
+      /* The table stays readable: horizontal overflow is contained by .table-wrap. */
     }
   </style>
 </head>
@@ -195,17 +194,17 @@
   <header>
     <div class="brand">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
-      <h1>Une identité, une clé, des preuves</h1>
+      <h1>One identity, one key, signed proof</h1>
     </div>
-    <p>Humains et <strong>agents de service</strong> ont chacun <strong>leur clé</strong>. Conso, incidents et classe de données captée sont attribués <strong>individuellement</strong>, avec <strong>preuve signée</strong>. Un agent qui dérive voit sa clé <strong>coupée automatiquement</strong>.</p>
-    <div class="status"><span id="dot" class="dot"></span><span id="statusText">Connexion…</span></div>
+    <p>Humans and <strong>service agents</strong> each get their own key. Spend, incidents, data classes and signed audit proof stay tied to the exact identity. A drifting agent is <strong>cut off automatically</strong>.</p>
+    <div class="status"><span id="dot" class="dot"></span><span id="statusText">Connecting...</span></div>
   </header>
 
   <div class="legend">
-    <span class="item"><span class="sw" style="background:var(--ok)"></span> Actif / trafic propre</span>
-    <span class="item"><span class="sw" style="background:var(--warn)"></span> Donnée caviardée</span>
-    <span class="item"><span class="sw" style="background:var(--block)"></span> Menace bloquée → seuil → coupure</span>
-    <span class="item">Seuil de coupure : <strong id="thr" style="color:var(--text)">—</strong> violations</span>
+    <span class="item"><span class="sw" style="background:var(--ok)"></span> Active / clean traffic</span>
+    <span class="item"><span class="sw" style="background:var(--warn)"></span> Redacted data</span>
+    <span class="item"><span class="sw" style="background:var(--block)"></span> Blocked threat -> threshold -> cutoff</span>
+    <span class="item">Cutoff threshold: <strong id="thr" style="color:var(--text)">-</strong> violations</span>
   </div>
 
   <main>
@@ -214,43 +213,44 @@
         <table>
           <thead>
             <tr>
-              <th>Identité</th>
-              <th class="right">Requêtes</th>
-              <th class="right">Conso €</th>
+              <th>Identity</th>
+              <th class="right">Requests</th>
+              <th class="right">Spend €</th>
               <th class="right">Violations</th>
-              <th>Données captées</th>
-              <th>Type d'incident</th>
-              <th>Décision</th>
-              <th class="center">Preuve</th>
-              <th class="center">Statut</th>
+              <th>Data classes</th>
+              <th>Incident type</th>
+              <th>Decision</th>
+              <th class="center">Proof</th>
+              <th class="center">Status</th>
               <th class="center">Logs</th>
             </tr>
           </thead>
           <tbody id="rows">
-            <tr><td colspan="10" style="text-align:center;color:var(--muted);padding:40px">En attente des données de gouvernance…</td></tr>
+            <tr><td colspan="10" style="text-align:center;color:var(--muted);padding:40px">Waiting for governance data...</td></tr>
           </tbody>
         </table>
       </div>
     </div>
     <p class="footnote">
-      Conso indicative (backend simulé, aucun coût réel). Une <strong>violation</strong> = requête <em>bloquée</em> par la protection (injection de prompt, exfiltration) ; les secrets et données personnelles sont <em>caviardés</em> (la requête aboutit, expurgée). Le <strong>type d'incident</strong> reprend la <strong>classification</strong> d'audit la plus grave vue pour l'identité : <span class="itype nc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg> Propre</span> (Nc, aucune action DLP) · <span class="itype c1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg> Caviardé</span> (C1) · <span class="itype c2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Restreint</span> (C2, PII ou exfiltration bloquée) · <span class="itype c3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg> Attaque</span> (C3, injection bloquée). La <strong>classe de donnée captée</strong> et la <strong>preuve signée</strong> sont dérivées du journal d'audit signé. La coupure est appliquée en direct : la clé révoquée est refusée dès la requête suivante (401). « <strong>Logs</strong> » ouvre le tableau de bord d'investigation par agent (Grafana), pré-filtré sur l'identité — chaque incident au niveau requête, avec son type, sa preuve signée, vérifiable.
+      Simulated backend: indicative spend only. <strong>Violations</strong> are blocked injection or exfiltration attempts; secrets and PII are redacted before the request continues. Highest signed audit class per identity:
+      <span class="itype nc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg> Clean</span> NC · <span class="itype c1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg> Redacted</span> C1 · <span class="itype c2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Restricted</span> C2 · <span class="itype c3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></svg> Attack</span> C3. Revoked keys fail on the next request (401). <strong>Logs</strong> opens the pre-filtered Grafana investigation view.
     </p>
   </main>
 
   <script>
-    // Champs de /governance.json (écrit par le watcher) :
+    // Fields from /governance.json (written by the watcher):
     //   { updated, threshold, agents: [ {
     //       tenant, type:"human"|"agent", emoji, label, sub, owner, env,
     //       requests, spend_eur, violations, data_classes:[…],
     //       decision:"bloqué"|"caviardé"|"—", incident_type:"NC"|"C1"|"C2"|"C3",
     //       signed:bool, revoked:bool } ] }
-    // NOTE : `emoji` reste dans le contrat mais n'est plus rendu — l'icône
-    // d'identité (user/bot) est dérivée de `type` et tracée en SVG en ligne.
+    // NOTE: `emoji` remains in the contract but is no longer rendered. The
+    // identity icon (user/bot) is derived from `type` and drawn inline as SVG.
     var THRESHOLD = 8;
-    var prevViol = {};      // mémorise les violations pour animer les incréments
-    var wasRevoked = {};    // mémorise l'état révoqué pour flasher la bascule
+    var prevViol = {};      // remembers violations to animate increments
+    var wasRevoked = {};    // remembers revocation state to flash transitions
 
-    // Grafana est servi par otel-lgtm sur le port 3000 (même hôte que la démo).
+    // Grafana is served by otel-lgtm on port 3000, on the same host as the demo.
     var GRAFANA_BASE = location.protocol + "//" + location.hostname + ":3000";
 
     function violClass(v, revoked) {
@@ -260,28 +260,26 @@
     }
 
     function eur(n) {
-      return Number(n).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+      return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
     }
 
-    // Construit un lien profond vers le tableau de bord d'investigation par agent
-    // (uid stable « grob-audit-agent »), pré-filtré sur l'identité via la variable
-    // de gabarit $tenant. L'auditeur arrive sur la vue dédiée (stats + journal
-    // signé + violations dans le temps), pas sur l'Explore brut de Loki.
+    // Builds a deep link to the per-agent investigation dashboard (stable uid
+    // `grob-audit-agent`), pre-filtered by identity through the $tenant variable.
+    // The auditor lands on the dedicated view, not raw Loki Explore.
     function auditDashboardUrl(tenant) {
-      // uid-only (sans slug) : évite la réécriture d'URL côté client de Grafana
-      // qui peut perdre le var-tenant et te faire atterrir sur le tenant par défaut.
+      // uid-only, no slug: avoids Grafana client-side URL rewriting that can
+      // drop var-tenant and land on the default tenant.
       return GRAFANA_BASE + "/d/grob-audit-agent" +
         "?var-tenant=" + encodeURIComponent(tenant) +
         "&from=now-3h&to=now&theme=dark";
     }
 
-    var CLASS_LABEL = { menace: "Menace", secret: "Secret", financier: "Financier", pii: "PII" };
+    var CLASS_LABEL = { menace: "Threat", secret: "Secret", financier: "Financial", pii: "PII" };
 
     var SVG_NS = "http://www.w3.org/2000/svg";
 
-    // Fabrique une icône SVG en ligne (style Lucide, trait `currentColor`, sans
-    // requête réseau). `paths` : tableau de spécifications d'éléments enfants —
-    // chaque entrée { tag, ...attrs }. La couleur suit le texte du conteneur.
+    // Creates an inline Lucide-style SVG icon with currentColor and no network
+    // request. `paths` contains child element specs: { tag, ...attrs }.
     function svgIcon(paths, stroke) {
       var s = document.createElementNS(SVG_NS, "svg");
       s.setAttribute("viewBox", "0 0 24 24");
@@ -301,8 +299,8 @@
       return s;
     }
 
-    // Avatar d'identité : « user » pour un humain, « bot » pour un agent de
-    // service. Dérivé de `type` (le champ `emoji` n'est plus rendu).
+    // Identity avatar: `user` for humans, `bot` for service agents. Derived from
+    // `type`; the `emoji` field is no longer rendered.
     function identityIcon(isAgent) {
       if (isAgent) {
         // Lucide « bot »
@@ -322,10 +320,10 @@
       ]);
     }
 
-    // Glyphe SVG en tête de badge de type d'incident (remplace l'emoji).
+    // SVG glyph used at the start of the incident-type badge.
     function incidentIcon(key) {
       if (key === "C1") {
-        // Lucide « eye-off » — donnée caviardée / masquée
+        // Lucide eye-off: redacted / masked data.
         return svgIcon([
           { tag: "path", d: "M9.88 9.88a3 3 0 1 0 4.24 4.24" },
           { tag: "path", d: "M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" },
@@ -334,35 +332,33 @@
         ]);
       }
       if (key === "C2") {
-        // Lucide « lock » — donnée restreinte / PII
+        // Lucide lock: restricted data / PII.
         return svgIcon([
           { tag: "rect", width: "18", height: "11", x: "3", y: "11", rx: "2", ry: "2" },
           { tag: "path", d: "M7 11V7a5 5 0 0 1 10 0v4" }
         ]);
       }
       if (key === "C3") {
-        // Lucide « ban » — attaque bloquée
+        // Lucide ban: blocked attack.
         return svgIcon([
           { tag: "circle", cx: "12", cy: "12", r: "10" },
           { tag: "path", d: "m4.9 4.9 14.2 14.2" }
         ]);
       }
-      // NC : Lucide « shield-check » — trafic propre
+      // NC: Lucide shield-check, clean traffic.
       return svgIcon([
         { tag: "path", d: "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" },
         { tag: "path", d: "m9 12 2 2 4-4" }
       ]);
     }
 
-    // Type d'incident dominant, dérivé de la classification d'audit la plus grave
-    // vue pour l'identité (champ `classification`, source de vérité grob). Le JSON
-    // sérialise « NC » en majuscules ; on tolère « Nc » par sécurité. Le glyphe de
-    // tête est rendu en SVG (règle design-system : pas d'emoji-icône).
+    // Dominant incident type, derived from the highest audit classification seen
+    // for the identity. JSON serializes `NC` uppercase; tolerate `Nc` defensively.
     var ITYPE = {
-      NC: { cls: "nc", text: "Propre" },
-      C1: { cls: "c1", text: "Caviardé" },
-      C2: { cls: "c2", text: "Restreint" },
-      C3: { cls: "c3", text: "Attaque" }
+      NC: { cls: "nc", text: "Clean" },
+      C1: { cls: "c1", text: "Redacted" },
+      C2: { cls: "c2", text: "Restricted" },
+      C3: { cls: "c3", text: "Attack" }
     };
 
     function buildIncidentType(it) {
@@ -380,7 +376,7 @@
     function buildChips(classes) {
       var wrap = document.createElement("div"); wrap.className = "chips";
       if (!classes || !classes.length) {
-        var c = document.createElement("span"); c.className = "chip none"; c.textContent = "aucune"; wrap.appendChild(c);
+        var c = document.createElement("span"); c.className = "chip none"; c.textContent = "none"; wrap.appendChild(c);
         return wrap;
       }
       classes.forEach(function (cl) {
@@ -392,8 +388,7 @@
       return wrap;
     }
 
-    // Preuve signée : Lucide « badge-check » (sceau + coche) plutôt qu'une
-    // simple coche, pour mieux signifier l'attestation d'audit signée.
+    // Signed proof: Lucide badge-check (seal + check) instead of a plain check.
     function checkIcon() {
       return svgIcon([
         { tag: "path", d: "M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z" },
@@ -401,7 +396,7 @@
       ], "2.2");
     }
 
-    // Investigation : Lucide « search » (loupe).
+    // Investigation: Lucide search.
     function searchIcon() {
       return svgIcon([
         { tag: "circle", cx: "11", cy: "11", r: "8" },
@@ -409,7 +404,7 @@
       ]);
     }
 
-    // Statut d'identité : « circle-check » (actif) ou « ban » (révoqué).
+    // Identity status: circle-check for active, ban for revoked.
     function statusIcon(revoked) {
       if (revoked) {
         return svgIcon([
@@ -439,7 +434,7 @@
         var justRevoked = a.revoked && !wasRevoked[a.tenant];
         if (justRevoked) tr.classList.add("just-revoked");
 
-        // --- Identité : avatar SVG (user/bot, dérivé de `type`) + nom + sous-titre + badge type ---
+        // --- Identity: SVG avatar derived from `type`, name, subtitle and type badge ---
         var tdAgent = td();
         var wrap = document.createElement("div"); wrap.className = "agent";
         var av = document.createElement("div"); av.className = "avatar " + (isAgent ? "agent" : "human");
@@ -447,7 +442,7 @@
         var meta = document.createElement("div"); meta.className = "meta";
         var nm = document.createElement("div"); nm.className = "name"; nm.textContent = a.label || a.tenant;
         var sub = document.createElement("div"); sub.className = "sub";
-        // Humains → département ; agents → owner + env.
+        // Humans -> department; agents -> owner + env.
         if (isAgent) {
           sub.textContent = "owner : " + (a.owner || "?") + " · env : " + (a.env || "?");
         } else {
@@ -455,22 +450,22 @@
         }
         var kind = document.createElement("span");
         kind.className = "kind " + (isAgent ? "agent" : "human");
-        kind.textContent = isAgent ? "Agent" : "Humain";
+        kind.textContent = isAgent ? "Agent" : "Human";
         meta.appendChild(nm); meta.appendChild(sub); meta.appendChild(kind);
         wrap.appendChild(av); wrap.appendChild(meta); tdAgent.appendChild(wrap);
 
-        // --- Requêtes ---
+        // --- Requests ---
         var tdReq = td("right");
         var nReq = document.createElement("span"); nReq.className = "num";
         nReq.style.fontSize = "24px"; nReq.style.color = "var(--text)";
         nReq.textContent = a.requests; tdReq.appendChild(nReq);
 
-        // --- Conso € ---
+        // --- Spend EUR ---
         var tdEur = td("right");
         var nEur = document.createElement("span"); nEur.className = "spend";
         nEur.textContent = eur(a.spend_eur); tdEur.appendChild(nEur);
 
-        // --- Violations (gros chiffre sémantique) ---
+        // --- Violations ---
         var tdViol = td("right");
         var nViol = document.createElement("span");
         nViol.className = "num " + violClass(a.violations, a.revoked);
@@ -480,42 +475,42 @@
         }
         tdViol.appendChild(nViol);
 
-        // --- Classe de donnée captée ---
+        // --- Data classes ---
         var tdClass = td(); tdClass.appendChild(buildChips(a.data_classes));
 
-        // --- Type d'incident (classification d'audit dominante) ---
+        // --- Incident type (dominant audit classification) ---
         var tdItype = td(); tdItype.appendChild(buildIncidentType(a.incident_type));
 
-        // --- Décision ---
+        // --- Decision ---
         var tdDec = td();
         var dec = document.createElement("span");
-        var dv = a.decision || "—";
+        var dv = a.decision || "-";
         dec.className = "decision " + (dv === "bloqué" ? "bloque" : dv === "caviardé" ? "caviarde" : "none");
-        dec.textContent = dv;
+        dec.textContent = dv === "bloqué" ? "Blocked" : dv === "caviardé" ? "Redacted" : "-";
         tdDec.appendChild(dec);
 
-        // --- Preuve signée ---
+        // --- Signed proof ---
         var tdProof = td("center");
         var proof = document.createElement("span");
         proof.className = "proof" + (a.signed ? "" : " no");
-        if (a.signed) { proof.appendChild(checkIcon()); var t = document.createElement("span"); t.textContent = "Signée"; proof.appendChild(t); }
-        else { var t2 = document.createElement("span"); t2.textContent = "—"; proof.appendChild(t2); }
+        if (a.signed) { proof.appendChild(checkIcon()); var t = document.createElement("span"); t.textContent = "Signed"; proof.appendChild(t); }
+        else { var t2 = document.createElement("span"); t2.textContent = "-"; proof.appendChild(t2); }
         tdProof.appendChild(proof);
 
-        // --- Statut (+ indice de remédiation si révoqué) ---
+        // --- Status (+ remediation hint when revoked) ---
         var tdStat = td("center");
         var pill = document.createElement("span");
         var lbl = document.createElement("span");
-        if (a.revoked) { pill.className = "pill revoque"; lbl.textContent = "RÉVOQUÉ"; }
-        else           { pill.className = "pill actif";   lbl.textContent = "Actif"; }
+        if (a.revoked) { pill.className = "pill revoque"; lbl.textContent = "REVOKED"; }
+        else           { pill.className = "pill actif";   lbl.textContent = "Active"; }
         pill.appendChild(statusIcon(a.revoked)); pill.appendChild(lbl); tdStat.appendChild(pill);
         if (a.revoked) {
           var rem = document.createElement("span"); rem.className = "remediation";
-          rem.textContent = "Clé révoquée — preuve signée exportable.";
+          rem.textContent = "Key revoked; signed proof is exportable.";
           tdStat.appendChild(rem);
         }
 
-        // --- Investigation : drill-down Loki par identité ---
+        // --- Investigation: Loki drill-down by identity ---
         var tdLogs = td("center");
         var link = document.createElement("a");
         link.className = "logs-link";
@@ -543,12 +538,12 @@
         .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
         .then(function (data) {
           dot.classList.add("live");
-          statusText.textContent = "Connecté — surveillance active";
+          statusText.textContent = "Connected - monitoring active";
           render(data);
         })
         .catch(function () {
           dot.classList.remove("live");
-          statusText.textContent = "En attente des données…";
+          statusText.textContent = "Waiting for data...";
         });
     }
     poll();

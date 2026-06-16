@@ -7,8 +7,11 @@
 
 - [ ] **Images récupérées** : `docker compose -f deploy/demo/docker-compose.yml pull`
       (évite un téléchargement de plusieurs centaines de Mo devant le public).
-- [ ] **Doublure enregistrée** : `demo.cast` produit et **rejoué en entier** au
+- [ ] **Doublure enregistrée** : `make -C deploy/demo demo-cast`, puis
+      `asciinema play docs/demos/showcase-rssi/demo.cast` rejoué en entier au
       moins une fois (voir DEMO.md → La doublure).
+- [ ] **GIF visuel optionnel** : `make -C deploy/demo demo-gif` produit
+      `docs/demos/showcase-rssi/demo.gif` si `agg` est installé.
 - [ ] **Captures de secours** du tableau de bord et de la page de blocages
       placées dans ce dossier (mode hors-ligne).
 

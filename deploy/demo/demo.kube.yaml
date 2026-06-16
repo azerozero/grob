@@ -1002,19 +1002,19 @@ kind: ConfigMap
 metadata:
   name: cm-web-gov
 data:
-  governance.html: "<!DOCTYPE html>\n<html lang=\"fr\">\n<head>\n  <meta charset=\"\
+  governance.html: "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"\
     utf-8\" />\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"\
-    \ />\n  <title>Grob \u2014 Console de gouvernance des identit\xE9s IA</title>\n\
-    \  <!-- Design system \xAB Trust & Authority \xBB : Lexend (titres) + Source Sans\
-    \ 3 (corps). -->\n  <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"\
-    \ />\n  <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin\
-    \ />\n  <link href=\"https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap\"\
+    \ />\n  <title>Grob \u2014 AI identity governance console</title>\n  <!-- Trust\
+    \ & Authority design system: Lexend headings + Source Sans 3 body. -->\n  <link\
+    \ rel=\"preconnect\" href=\"https://fonts.googleapis.com\" />\n  <link rel=\"\
+    preconnect\" href=\"https://fonts.gstatic.com\" crossorigin />\n  <link href=\"\
+    https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap\"\
     \ rel=\"stylesheet\" />\n  <style>\n    :root {\n      --bg:        #020617;\n\
     \      --surface:   #0F172A;\n      --surface-2: #1E293B;\n      --line:     \
     \ #334155;\n      --text:      #F8FAFC;\n      --muted:     #94A3B8;\n      --ok:\
-    \        #22C55E;  /* actif / propre */\n      --warn:      #F59E0B;  /* alerte\
-    \ / caviard\xE9 */\n      --block:     #EF4444;  /* r\xE9voqu\xE9 / violations\
-    \ */\n      --info:      #38BDF8;  /* liens / drill-down */\n    }\n    * { box-sizing:\
+    \        #22C55E;  /* active / clean */\n      --warn:      #F59E0B;  /* warning\
+    \ / redacted */\n      --block:     #EF4444;  /* revoked / violations */\n   \
+    \   --info:      #38BDF8;  /* links / drill-down */\n    }\n    * { box-sizing:\
     \ border-box; }\n    html, body { height: 100%; }\n    body {\n      margin: 0;\n\
     \      font-family: \"Source Sans 3\", -apple-system, \"Segoe UI\", Roboto, sans-serif;\n\
     \      background: radial-gradient(1100px 560px at 50% -12%, #0b1b3a 0%, var(--bg)\
@@ -1039,268 +1039,247 @@ data:
     \ none !important; animation: none !important; }\n      td.right .num, td.right\
     \ .num.bump { transition: none !important; transform: none !important; }\n   \
     \ }\n\n    main { padding: 22px 24px 16px; max-width: 1360px; margin: 0 auto;\
-    \ }\n\n    /* ---- Tableau par identit\xE9 ---- */\n    .card {\n      background:\
-    \ linear-gradient(180deg, var(--surface), var(--surface-2));\n      border: 1px\
-    \ solid var(--line); border-radius: 18px; overflow: hidden;\n    }\n    /* overflow-x:\
-    \ filet de s\xE9curit\xE9 sous ~1100px ; au-dessus la table tient\n       sans\
-    \ barre horizontale gr\xE2ce au padding resserr\xE9 et aux en-t\xEAtes courts.\
-    \ */\n    .table-wrap { overflow-x: auto; }\n    table { width: 100%; border-collapse:\
-    \ collapse; min-width: 940px; table-layout: auto; }\n    thead th {\n      text-align:\
-    \ left; font-size: 11.5px; font-weight: 700; letter-spacing: .06em;\n      text-transform:\
-    \ uppercase; color: var(--muted);\n      padding: 12px 8px; border-bottom: 1px\
-    \ solid var(--line); white-space: nowrap;\n    }\n    thead th.right, tbody td.right\
-    \ { text-align: right; }\n    thead th.center, tbody td.center { text-align: center;\
-    \ }\n    tbody td { padding: 11px 8px; border-bottom: 1px solid rgba(51,65,85,.5);\
-    \ vertical-align: middle; }\n    tbody tr:last-child td { border-bottom: none;\
-    \ }\n\n    .agent { display: flex; align-items: center; gap: 12px; }\n    .avatar\
-    \ {\n      width: 40px; height: 40px; border-radius: 11px; flex: none;\n     \
-    \ display: grid; place-items: center;\n      background: rgba(148,163,184,.12);\
-    \ border: 1px solid transparent;\n    }\n    .avatar svg { width: 21px; height:\
-    \ 21px; }\n    .avatar.human { background: rgba(56,189,248,.12); border-color:\
-    \ rgba(56,189,248,.28); color: var(--info); }\n    .avatar.agent { background:\
-    \ rgba(148,163,184,.14); border-color: rgba(148,163,184,.28); color: var(--muted);\
-    \ }\n    .agent .meta .name { font-weight: 700; font-size: 17px; }\n    .agent\
-    \ .meta .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }\n    .kind\
-    \ {\n      display: inline-block; font-size: 11px; font-weight: 700; letter-spacing:\
-    \ .06em;\n      text-transform: uppercase; padding: 2px 8px; border-radius: 6px;\
-    \ margin-top: 4px;\n    }\n    .kind.human { color: var(--info); background: rgba(56,189,248,.12);\
-    \ border: 1px solid rgba(56,189,248,.35); }\n    .kind.agent { color: var(--muted);\
-    \ background: rgba(148,163,184,.10); border: 1px solid rgba(148,163,184,.3); }\n\
-    \n    .num { font-size: clamp(22px, 2.4vw, 30px); font-weight: 800; font-variant-numeric:\
-    \ tabular-nums; letter-spacing: -1px; }\n    td.right .num { display: inline-block;\
-    \ transition: transform .22s cubic-bezier(.2,.8,.2,1); }\n    td.right .num.bump\
-    \ { transform: scale(1.14); }\n    .num.viol-0 { color: var(--ok); }\n    .num.viol-some\
-    \ { color: var(--warn); }\n    .num.viol-hot { color: var(--block); }\n    .spend\
-    \ { font-size: 18px; font-weight: 600; color: var(--muted); font-variant-numeric:\
-    \ tabular-nums; }\n\n    /* ---- Classes de donn\xE9es + chips ---- */\n    /*\
-    \ max-width borne la colonne : les chips se replient (\u22482 par ligne) au lieu\n\
-    \       d'\xE9largir la table et de provoquer un d\xE9filement horizontal. */\n\
-    \    .chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 184px; }\n\
-    \    .chip {\n      font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius:\
-    \ 999px;\n      border: 1px solid transparent; white-space: nowrap;\n    }\n \
-    \   .chip.menace    { color: var(--block); background: rgba(239,68,68,.12);  border-color:\
-    \ rgba(239,68,68,.4); }\n    .chip.secret    { color: var(--warn);  background:\
-    \ rgba(245,158,11,.12); border-color: rgba(245,158,11,.4); }\n    .chip.financier\
-    \ { color: var(--info);  background: rgba(56,189,248,.12); border-color: rgba(56,189,248,.4);\
-    \ }\n    .chip.pii       { color: #C084FC;      background: rgba(192,132,252,.12);\
-    \ border-color: rgba(192,132,252,.4); }\n    .chip.none      { color: var(--muted);\
-    \ background: rgba(148,163,184,.08); border-color: var(--line); }\n\n    .decision\
-    \ { font-weight: 600; font-size: 14px; }\n    .decision.bloque   { color: var(--block);\
-    \ }\n    .decision.caviarde { color: var(--warn); }\n    .decision.none     {\
-    \ color: var(--muted); }\n\n    /* ---- Type d'incident (classification d'audit\
-    \ Nc/C1/C2/C3) ---- */\n    .itype {\n      display: inline-flex; align-items:\
-    \ center; gap: 6px;\n      font-size: 12.5px; font-weight: 700; white-space: nowrap;\n\
-    \      padding: 4px 10px 4px 8px; border-radius: 999px; border: 1px solid transparent;\n\
-    \    }\n    .itype svg { width: 14px; height: 14px; flex: none; }\n    .itype.nc\
-    \ { color: var(--ok);    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4);\
-    \ }\n    .itype.c1 { color: var(--warn);  background: rgba(245,158,11,.12); border-color:\
+    \ }\n\n    /* ---- Identity table ---- */\n    .card {\n      background: linear-gradient(180deg,\
+    \ var(--surface), var(--surface-2));\n      border: 1px solid var(--line); border-radius:\
+    \ 18px; overflow: hidden;\n    }\n    /* overflow-x is the safety net below ~1100px;\
+    \ above that, compact padding\n       and short headers keep the table visible\
+    \ without horizontal scrolling. */\n    .table-wrap { overflow-x: auto; }\n  \
+    \  table { width: 100%; border-collapse: collapse; min-width: 940px; table-layout:\
+    \ auto; }\n    thead th {\n      text-align: left; font-size: 11.5px; font-weight:\
+    \ 700; letter-spacing: .06em;\n      text-transform: uppercase; color: var(--muted);\n\
+    \      padding: 12px 8px; border-bottom: 1px solid var(--line); white-space: nowrap;\n\
+    \    }\n    thead th.right, tbody td.right { text-align: right; }\n    thead th.center,\
+    \ tbody td.center { text-align: center; }\n    tbody td { padding: 11px 8px; border-bottom:\
+    \ 1px solid rgba(51,65,85,.5); vertical-align: middle; }\n    tbody tr:last-child\
+    \ td { border-bottom: none; }\n\n    .agent { display: flex; align-items: center;\
+    \ gap: 12px; }\n    .avatar {\n      width: 40px; height: 40px; border-radius:\
+    \ 11px; flex: none;\n      display: grid; place-items: center;\n      background:\
+    \ rgba(148,163,184,.12); border: 1px solid transparent;\n    }\n    .avatar svg\
+    \ { width: 21px; height: 21px; }\n    .avatar.human { background: rgba(56,189,248,.12);\
+    \ border-color: rgba(56,189,248,.28); color: var(--info); }\n    .avatar.agent\
+    \ { background: rgba(148,163,184,.14); border-color: rgba(148,163,184,.28); color:\
+    \ var(--muted); }\n    .agent .meta .name { font-weight: 700; font-size: 17px;\
+    \ }\n    .agent .meta .sub { color: var(--muted); font-size: 13px; margin-top:\
+    \ 2px; }\n    .kind {\n      display: inline-block; font-size: 11px; font-weight:\
+    \ 700; letter-spacing: .06em;\n      text-transform: uppercase; padding: 2px 8px;\
+    \ border-radius: 6px; margin-top: 4px;\n    }\n    .kind.human { color: var(--info);\
+    \ background: rgba(56,189,248,.12); border: 1px solid rgba(56,189,248,.35); }\n\
+    \    .kind.agent { color: var(--muted); background: rgba(148,163,184,.10); border:\
+    \ 1px solid rgba(148,163,184,.3); }\n\n    .num { font-size: clamp(22px, 2.4vw,\
+    \ 30px); font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing:\
+    \ -1px; }\n    td.right .num { display: inline-block; transition: transform .22s\
+    \ cubic-bezier(.2,.8,.2,1); }\n    td.right .num.bump { transform: scale(1.14);\
+    \ }\n    .num.viol-0 { color: var(--ok); }\n    .num.viol-some { color: var(--warn);\
+    \ }\n    .num.viol-hot { color: var(--block); }\n    .spend { font-size: 18px;\
+    \ font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }\n\
+    \n    /* ---- Data classes + chips ---- */\n    /* max-width bounds the column:\
+    \ chips wrap instead of widening the table. */\n    .chips { display: flex; flex-wrap:\
+    \ wrap; gap: 6px; max-width: 184px; }\n    .chip {\n      font-size: 12px; font-weight:\
+    \ 600; padding: 3px 9px; border-radius: 999px;\n      border: 1px solid transparent;\
+    \ white-space: nowrap;\n    }\n    .chip.menace    { color: var(--block); background:\
+    \ rgba(239,68,68,.12);  border-color: rgba(239,68,68,.4); }\n    .chip.secret\
+    \    { color: var(--warn);  background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.4);\
+    \ }\n    .chip.financier { color: var(--info);  background: rgba(56,189,248,.12);\
+    \ border-color: rgba(56,189,248,.4); }\n    .chip.pii       { color: #C084FC;\
+    \      background: rgba(192,132,252,.12); border-color: rgba(192,132,252,.4);\
+    \ }\n    .chip.none      { color: var(--muted); background: rgba(148,163,184,.08);\
+    \ border-color: var(--line); }\n\n    .decision { font-weight: 600; font-size:\
+    \ 14px; }\n    .decision.bloque   { color: var(--block); }\n    .decision.caviarde\
+    \ { color: var(--warn); }\n    .decision.none     { color: var(--muted); }\n\n\
+    \    /* ---- Incident type (NC/C1/C2/C3 audit classification) ---- */\n    .itype\
+    \ {\n      display: inline-flex; align-items: center; gap: 6px;\n      font-size:\
+    \ 12.5px; font-weight: 700; white-space: nowrap;\n      padding: 4px 10px 4px\
+    \ 8px; border-radius: 999px; border: 1px solid transparent;\n    }\n    .itype\
+    \ svg { width: 14px; height: 14px; flex: none; }\n    .itype.nc { color: var(--ok);\
+    \    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4); }\n \
+    \   .itype.c1 { color: var(--warn);  background: rgba(245,158,11,.12); border-color:\
     \ rgba(245,158,11,.4); }\n    .itype.c2 { color: #FACC15;      background: rgba(250,204,21,.12);\
     \ border-color: rgba(250,204,21,.4); }\n    .itype.c3 { color: var(--block); background:\
     \ rgba(239,68,68,.14);  border-color: rgba(239,68,68,.5); }\n\n    .proof { display:\
     \ inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ok);\
     \ font-weight: 600; }\n    .proof svg { width: 15px; height: 15px; }\n    .proof.no\
-    \ { color: var(--muted); }\n\n    /* ---- Pastille de statut ---- */\n    .pill\
-    \ {\n      display: inline-flex; align-items: center; gap: 7px;\n      font-weight:\
+    \ { color: var(--muted); }\n\n    /* ---- Status pill ---- */\n    .pill {\n \
+    \     display: inline-flex; align-items: center; gap: 7px;\n      font-weight:\
     \ 700; font-size: 14px; padding: 8px 14px 8px 11px; border-radius: 999px;\n  \
     \    border: 1px solid transparent; white-space: nowrap;\n    }\n    .pill svg\
     \ { width: 16px; height: 16px; flex: none; }\n    .pill.actif   { color: var(--ok);\
     \    background: rgba(34,197,94,.12);  border-color: rgba(34,197,94,.4); }\n \
     \   .pill.revoque { color: var(--block); background: rgba(239,68,68,.14);  border-color:\
     \ rgba(239,68,68,.5); }\n    .remediation { display: block; margin-top: 6px; font-size:\
-    \ 11px; color: var(--muted); max-width: 180px; }\n\n    /* ---- Lien drill-down\
-    \ Loki ---- */\n    .logs-link {\n      display: inline-flex; align-items: center;\
+    \ 11px; color: var(--muted); max-width: 180px; }\n\n    /* ---- Loki drill-down\
+    \ link ---- */\n    .logs-link {\n      display: inline-flex; align-items: center;\
     \ gap: 7px; cursor: pointer;\n      font-size: 13px; font-weight: 600; color:\
     \ var(--info); text-decoration: none;\n      padding: 7px 12px; border: 1px solid\
     \ rgba(56,189,248,.35); border-radius: 9px;\n      background: rgba(56,189,248,.08);\
     \ white-space: nowrap;\n      transition: background .2s ease, border-color .2s\
     \ ease, transform .2s ease;\n    }\n    .logs-link:hover { background: rgba(56,189,248,.2);\
     \ border-color: rgba(56,189,248,.55); transform: translateY(-1px); }\n    .logs-link\
-    \ svg { width: 15px; height: 15px; }\n\n    /* ---- Accessibilit\xE9 : anneau\
-    \ de focus visible au clavier ---- */\n    a:focus-visible, .logs-link:focus-visible\
-    \ {\n      outline: 2px solid var(--info); outline-offset: 2px; border-radius:\
-    \ 9px;\n    }\n    @media (prefers-reduced-motion: reduce) {\n      .logs-link,\
-    \ .logs-link:hover { transition: none; transform: none; }\n    }\n\n    tr.flip\
-    \ { transition: background-color .5s ease; }\n    tr.just-revoked { background:\
-    \ rgba(239,68,68,.10); animation: flash 1.2s ease 1; }\n    @keyframes flash {\
-    \ 0%,100% { background: rgba(239,68,68,.10); } 40% { background: rgba(239,68,68,.28);\
-    \ } }\n\n    /* ---- L\xE9gende ---- */\n    .legend { display: flex; flex-wrap:\
-    \ wrap; gap: 10px 16px; justify-content: center; padding: 18px 40px 8px; color:\
-    \ var(--muted); font-size: 13px; }\n    .legend .item { display: inline-flex;\
-    \ align-items: center; gap: 8px; }\n    .legend .sw { width: 12px; height: 12px;\
-    \ border-radius: 3px; }\n    .footnote { text-align: center; color: var(--muted);\
-    \ font-size: 12.5px; padding: 12px 40px 44px; max-width: 1000px; margin: 0 auto;\
-    \ line-height: 1.55; }\n    .footnote a { color: var(--info); }\n\n    /* ----\
-    \ Reflow gracieux sur \xE9crans \xE9troits (375 / 768) ---- */\n    @media (max-width:\
-    \ 768px) {\n      header { padding: 26px 20px 4px; }\n      main { padding: 16px\
-    \ 14px 12px; }\n      .legend { padding: 14px 20px 6px; }\n      .footnote { padding:\
-    \ 12px 20px 40px; }\n      /* La table reste lisible : d\xE9filement horizontal\
-    \ via .table-wrap (overflow-x). */\n    }\n  </style>\n</head>\n<body>\n  <header>\n\
-    \    <div class=\"brand\">\n      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"\
-    currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
-    round\" aria-hidden=\"true\"><path d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5\
-    \ 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51\
-    \ 3.81 17 5 19 5a1 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/></svg>\n      <h1>Une\
-    \ identit\xE9, une cl\xE9, des preuves</h1>\n    </div>\n    <p>Humains et <strong>agents\
-    \ de service</strong> ont chacun <strong>leur cl\xE9</strong>. Conso, incidents\
-    \ et classe de donn\xE9es capt\xE9e sont attribu\xE9s <strong>individuellement</strong>,\
-    \ avec <strong>preuve sign\xE9e</strong>. Un agent qui d\xE9rive voit sa cl\xE9\
-    \ <strong>coup\xE9e automatiquement</strong>.</p>\n    <div class=\"status\"><span\
-    \ id=\"dot\" class=\"dot\"></span><span id=\"statusText\">Connexion\u2026</span></div>\n\
-    \  </header>\n\n  <div class=\"legend\">\n    <span class=\"item\"><span class=\"\
-    sw\" style=\"background:var(--ok)\"></span> Actif / trafic propre</span>\n   \
-    \ <span class=\"item\"><span class=\"sw\" style=\"background:var(--warn)\"></span>\
-    \ Donn\xE9e caviard\xE9e</span>\n    <span class=\"item\"><span class=\"sw\" style=\"\
-    background:var(--block)\"></span> Menace bloqu\xE9e \u2192 seuil \u2192 coupure</span>\n\
-    \    <span class=\"item\">Seuil de coupure : <strong id=\"thr\" style=\"color:var(--text)\"\
-    >\u2014</strong> violations</span>\n  </div>\n\n  <main>\n    <div class=\"card\"\
-    >\n      <div class=\"table-wrap\">\n        <table>\n          <thead>\n    \
-    \        <tr>\n              <th>Identit\xE9</th>\n              <th class=\"\
-    right\">Requ\xEAtes</th>\n              <th class=\"right\">Conso \u20AC</th>\n\
-    \              <th class=\"right\">Violations</th>\n              <th>Donn\xE9\
-    es capt\xE9es</th>\n              <th>Type d'incident</th>\n              <th>D\xE9\
-    cision</th>\n              <th class=\"center\">Preuve</th>\n              <th\
-    \ class=\"center\">Statut</th>\n              <th class=\"center\">Logs</th>\n\
-    \            </tr>\n          </thead>\n          <tbody id=\"rows\">\n      \
-    \      <tr><td colspan=\"10\" style=\"text-align:center;color:var(--muted);padding:40px\"\
-    >En attente des donn\xE9es de gouvernance\u2026</td></tr>\n          </tbody>\n\
-    \        </table>\n      </div>\n    </div>\n    <p class=\"footnote\">\n    \
-    \  Conso indicative (backend simul\xE9, aucun co\xFBt r\xE9el). Une <strong>violation</strong>\
-    \ = requ\xEAte <em>bloqu\xE9e</em> par la protection (injection de prompt, exfiltration)\
-    \ ; les secrets et donn\xE9es personnelles sont <em>caviard\xE9s</em> (la requ\xEA\
-    te aboutit, expurg\xE9e). Le <strong>type d'incident</strong> reprend la <strong>classification</strong>\
-    \ d'audit la plus grave vue pour l'identit\xE9 : <span class=\"itype nc\"><svg\
+    \ svg { width: 15px; height: 15px; }\n\n    /* ---- Accessibility: visible keyboard\
+    \ focus ring ---- */\n    a:focus-visible, .logs-link:focus-visible {\n      outline:\
+    \ 2px solid var(--info); outline-offset: 2px; border-radius: 9px;\n    }\n   \
+    \ @media (prefers-reduced-motion: reduce) {\n      .logs-link, .logs-link:hover\
+    \ { transition: none; transform: none; }\n    }\n\n    tr.flip { transition: background-color\
+    \ .5s ease; }\n    tr.just-revoked { background: rgba(239,68,68,.10); animation:\
+    \ flash 1.2s ease 1; }\n    @keyframes flash { 0%,100% { background: rgba(239,68,68,.10);\
+    \ } 40% { background: rgba(239,68,68,.28); } }\n\n    /* ---- Legend ---- */\n\
+    \    .legend { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content:\
+    \ center; padding: 18px 40px 8px; color: var(--muted); font-size: 13px; }\n  \
+    \  .legend .item { display: inline-flex; align-items: center; gap: 8px; }\n  \
+    \  .legend .sw { width: 12px; height: 12px; border-radius: 3px; }\n    .footnote\
+    \ { text-align: center; color: var(--muted); font-size: 12.5px; padding: 12px\
+    \ 40px 44px; max-width: 1000px; margin: 0 auto; line-height: 1.55; }\n    .footnote\
+    \ a { color: var(--info); }\n\n    /* ---- Graceful reflow on narrow screens (375\
+    \ / 768) ---- */\n    @media (max-width: 768px) {\n      header { padding: 26px\
+    \ 20px 4px; }\n      main { padding: 16px 14px 12px; }\n      .legend { padding:\
+    \ 14px 20px 6px; }\n      .footnote { padding: 12px 20px 40px; }\n      /* The\
+    \ table stays readable: horizontal overflow is contained by .table-wrap. */\n\
+    \    }\n  </style>\n</head>\n<body>\n  <header>\n    <div class=\"brand\">\n \
+    \     <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"\
+    2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path\
+    \ d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1\
+    \ 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1\
+    \ 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/></svg>\n      <h1>One identity, one\
+    \ key, signed proof</h1>\n    </div>\n    <p>Humans and <strong>service agents</strong>\
+    \ each get their own key. Spend, incidents, data classes and signed audit proof\
+    \ stay tied to the exact identity. A drifting agent is <strong>cut off automatically</strong>.</p>\n\
+    \    <div class=\"status\"><span id=\"dot\" class=\"dot\"></span><span id=\"statusText\"\
+    >Connecting...</span></div>\n  </header>\n\n  <div class=\"legend\">\n    <span\
+    \ class=\"item\"><span class=\"sw\" style=\"background:var(--ok)\"></span> Active\
+    \ / clean traffic</span>\n    <span class=\"item\"><span class=\"sw\" style=\"\
+    background:var(--warn)\"></span> Redacted data</span>\n    <span class=\"item\"\
+    ><span class=\"sw\" style=\"background:var(--block)\"></span> Blocked threat ->\
+    \ threshold -> cutoff</span>\n    <span class=\"item\">Cutoff threshold: <strong\
+    \ id=\"thr\" style=\"color:var(--text)\">-</strong> violations</span>\n  </div>\n\
+    \n  <main>\n    <div class=\"card\">\n      <div class=\"table-wrap\">\n     \
+    \   <table>\n          <thead>\n            <tr>\n              <th>Identity</th>\n\
+    \              <th class=\"right\">Requests</th>\n              <th class=\"right\"\
+    >Spend \u20AC</th>\n              <th class=\"right\">Violations</th>\n      \
+    \        <th>Data classes</th>\n              <th>Incident type</th>\n       \
+    \       <th>Decision</th>\n              <th class=\"center\">Proof</th>\n   \
+    \           <th class=\"center\">Status</th>\n              <th class=\"center\"\
+    >Logs</th>\n            </tr>\n          </thead>\n          <tbody id=\"rows\"\
+    >\n            <tr><td colspan=\"10\" style=\"text-align:center;color:var(--muted);padding:40px\"\
+    >Waiting for governance data...</td></tr>\n          </tbody>\n        </table>\n\
+    \      </div>\n    </div>\n    <p class=\"footnote\">\n      Simulated backend:\
+    \ indicative spend only. <strong>Violations</strong> are blocked injection or\
+    \ exfiltration attempts; secrets and PII are redacted before the request continues.\
+    \ Highest signed audit class per identity:\n      <span class=\"itype nc\"><svg\
     \ viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"\
     2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path\
     \ d=\"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1\
     \ 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1\
-    \ 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/></svg> Propre</span> (Nc, aucune\
-    \ action DLP) \xB7 <span class=\"itype c1\"><svg viewBox=\"0 0 24 24\" fill=\"\
-    none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
-    round\" aria-hidden=\"true\"><path d=\"M9.88 9.88a3 3 0 1 0 4.24 4.24\"/><path\
-    \ d=\"M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67\
-    \ 2.68\"/><path d=\"M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0\
-    \ 0 5.39-1.61\"/><line x1=\"2\" x2=\"22\" y1=\"2\" y2=\"22\"/></svg> Caviard\xE9\
-    </span> (C1) \xB7 <span class=\"itype c2\"><svg viewBox=\"0 0 24 24\" fill=\"\
-    none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"\
-    round\" aria-hidden=\"true\"><rect width=\"18\" height=\"11\" x=\"3\" y=\"11\"\
-    \ rx=\"2\" ry=\"2\"/><path d=\"M7 11V7a5 5 0 0 1 10 0v4\"/></svg> Restreint</span>\
-    \ (C2, PII ou exfiltration bloqu\xE9e) \xB7 <span class=\"itype c3\"><svg viewBox=\"\
-    0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"\
-    round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"12\" cy=\"\
-    12\" r=\"10\"/><path d=\"m4.9 4.9 14.2 14.2\"/></svg> Attaque</span> (C3, injection\
-    \ bloqu\xE9e). La <strong>classe de donn\xE9e capt\xE9e</strong> et la <strong>preuve\
-    \ sign\xE9e</strong> sont d\xE9riv\xE9es du journal d'audit sign\xE9. La coupure\
-    \ est appliqu\xE9e en direct : la cl\xE9 r\xE9voqu\xE9e est refus\xE9e d\xE8s\
-    \ la requ\xEAte suivante (401). \xAB <strong>Logs</strong> \xBB ouvre le tableau\
-    \ de bord d'investigation par agent (Grafana), pr\xE9-filtr\xE9 sur l'identit\xE9\
-    \ \u2014 chaque incident au niveau requ\xEAte, avec son type, sa preuve sign\xE9\
-    e, v\xE9rifiable.\n    </p>\n  </main>\n\n  <script>\n    // Champs de /governance.json\
-    \ (\xE9crit par le watcher) :\n    //   { updated, threshold, agents: [ {\n  \
-    \  //       tenant, type:\"human\"|\"agent\", emoji, label, sub, owner, env,\n\
-    \    //       requests, spend_eur, violations, data_classes:[\u2026],\n    //\
-    \       decision:\"bloqu\xE9\"|\"caviard\xE9\"|\"\u2014\", incident_type:\"NC\"\
-    |\"C1\"|\"C2\"|\"C3\",\n    //       signed:bool, revoked:bool } ] }\n    // NOTE\
-    \ : `emoji` reste dans le contrat mais n'est plus rendu \u2014 l'ic\xF4ne\n  \
-    \  // d'identit\xE9 (user/bot) est d\xE9riv\xE9e de `type` et trac\xE9e en SVG\
-    \ en ligne.\n    var THRESHOLD = 8;\n    var prevViol = {};      // m\xE9morise\
-    \ les violations pour animer les incr\xE9ments\n    var wasRevoked = {};    //\
-    \ m\xE9morise l'\xE9tat r\xE9voqu\xE9 pour flasher la bascule\n\n    // Grafana\
-    \ est servi par otel-lgtm sur le port 3000 (m\xEAme h\xF4te que la d\xE9mo).\n\
-    \    var GRAFANA_BASE = location.protocol + \"//\" + location.hostname + \":3000\"\
-    ;\n\n    function violClass(v, revoked) {\n      if (revoked || v >= THRESHOLD)\
-    \ return \"viol-hot\";\n      if (v > 0) return \"viol-some\";\n      return \"\
-    viol-0\";\n    }\n\n    function eur(n) {\n      return Number(n).toLocaleString(\"\
-    fr-FR\", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + \" \u20AC\"\
-    ;\n    }\n\n    // Construit un lien profond vers le tableau de bord d'investigation\
-    \ par agent\n    // (uid stable \xAB grob-audit-agent \xBB), pr\xE9-filtr\xE9\
-    \ sur l'identit\xE9 via la variable\n    // de gabarit $tenant. L'auditeur arrive\
-    \ sur la vue d\xE9di\xE9e (stats + journal\n    // sign\xE9 + violations dans\
-    \ le temps), pas sur l'Explore brut de Loki.\n    function auditDashboardUrl(tenant)\
-    \ {\n      // uid-only (sans slug) : \xE9vite la r\xE9\xE9criture d'URL c\xF4\
-    t\xE9 client de Grafana\n      // qui peut perdre le var-tenant et te faire atterrir\
-    \ sur le tenant par d\xE9faut.\n      return GRAFANA_BASE + \"/d/grob-audit-agent\"\
+    \ 1 0 0 1 1 1z\"/><path d=\"m9 12 2 2 4-4\"/></svg> Clean</span> NC \xB7 <span\
+    \ class=\"itype c1\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\"\
+    \ stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"\
+    true\"><path d=\"M9.88 9.88a3 3 0 1 0 4.24 4.24\"/><path d=\"M10.73 5.08A10.43\
+    \ 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68\"/><path d=\"M6.61\
+    \ 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61\"/><line x1=\"\
+    2\" x2=\"22\" y1=\"2\" y2=\"22\"/></svg> Redacted</span> C1 \xB7 <span class=\"\
+    itype c2\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"\
+    2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><rect\
+    \ width=\"18\" height=\"11\" x=\"3\" y=\"11\" rx=\"2\" ry=\"2\"/><path d=\"M7\
+    \ 11V7a5 5 0 0 1 10 0v4\"/></svg> Restricted</span> C2 \xB7 <span class=\"itype\
+    \ c3\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"\
+    2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle\
+    \ cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m4.9 4.9 14.2 14.2\"/></svg> Attack</span>\
+    \ C3. Revoked keys fail on the next request (401). <strong>Logs</strong> opens\
+    \ the pre-filtered Grafana investigation view.\n    </p>\n  </main>\n\n  <script>\n\
+    \    // Fields from /governance.json (written by the watcher):\n    //   { updated,\
+    \ threshold, agents: [ {\n    //       tenant, type:\"human\"|\"agent\", emoji,\
+    \ label, sub, owner, env,\n    //       requests, spend_eur, violations, data_classes:[\u2026\
+    ],\n    //       decision:\"bloqu\xE9\"|\"caviard\xE9\"|\"\u2014\", incident_type:\"\
+    NC\"|\"C1\"|\"C2\"|\"C3\",\n    //       signed:bool, revoked:bool } ] }\n   \
+    \ // NOTE: `emoji` remains in the contract but is no longer rendered. The\n  \
+    \  // identity icon (user/bot) is derived from `type` and drawn inline as SVG.\n\
+    \    var THRESHOLD = 8;\n    var prevViol = {};      // remembers violations to\
+    \ animate increments\n    var wasRevoked = {};    // remembers revocation state\
+    \ to flash transitions\n\n    // Grafana is served by otel-lgtm on port 3000,\
+    \ on the same host as the demo.\n    var GRAFANA_BASE = location.protocol + \"\
+    //\" + location.hostname + \":3000\";\n\n    function violClass(v, revoked) {\n\
+    \      if (revoked || v >= THRESHOLD) return \"viol-hot\";\n      if (v > 0) return\
+    \ \"viol-some\";\n      return \"viol-0\";\n    }\n\n    function eur(n) {\n \
+    \     return Number(n).toLocaleString(\"en-US\", { minimumFractionDigits: 2, maximumFractionDigits:\
+    \ 2 }) + \" \u20AC\";\n    }\n\n    // Builds a deep link to the per-agent investigation\
+    \ dashboard (stable uid\n    // `grob-audit-agent`), pre-filtered by identity\
+    \ through the $tenant variable.\n    // The auditor lands on the dedicated view,\
+    \ not raw Loki Explore.\n    function auditDashboardUrl(tenant) {\n      // uid-only,\
+    \ no slug: avoids Grafana client-side URL rewriting that can\n      // drop var-tenant\
+    \ and land on the default tenant.\n      return GRAFANA_BASE + \"/d/grob-audit-agent\"\
     \ +\n        \"?var-tenant=\" + encodeURIComponent(tenant) +\n        \"&from=now-3h&to=now&theme=dark\"\
-    ;\n    }\n\n    var CLASS_LABEL = { menace: \"Menace\", secret: \"Secret\", financier:\
-    \ \"Financier\", pii: \"PII\" };\n\n    var SVG_NS = \"http://www.w3.org/2000/svg\"\
-    ;\n\n    // Fabrique une ic\xF4ne SVG en ligne (style Lucide, trait `currentColor`,\
-    \ sans\n    // requ\xEAte r\xE9seau). `paths` : tableau de sp\xE9cifications d'\xE9\
-    l\xE9ments enfants \u2014\n    // chaque entr\xE9e { tag, ...attrs }. La couleur\
-    \ suit le texte du conteneur.\n    function svgIcon(paths, stroke) {\n      var\
-    \ s = document.createElementNS(SVG_NS, \"svg\");\n      s.setAttribute(\"viewBox\"\
-    , \"0 0 24 24\");\n      s.setAttribute(\"fill\", \"none\");\n      s.setAttribute(\"\
-    stroke\", \"currentColor\");\n      s.setAttribute(\"stroke-width\", stroke ||\
-    \ \"2\");\n      s.setAttribute(\"stroke-linecap\", \"round\");\n      s.setAttribute(\"\
-    stroke-linejoin\", \"round\");\n      s.setAttribute(\"aria-hidden\", \"true\"\
-    );\n      paths.forEach(function (spec) {\n        var el = document.createElementNS(SVG_NS,\
-    \ spec.tag);\n        Object.keys(spec).forEach(function (k) {\n          if (k\
-    \ !== \"tag\") el.setAttribute(k, spec[k]);\n        });\n        s.appendChild(el);\n\
-    \      });\n      return s;\n    }\n\n    // Avatar d'identit\xE9 : \xAB user\
-    \ \xBB pour un humain, \xAB bot \xBB pour un agent de\n    // service. D\xE9riv\xE9\
-    \ de `type` (le champ `emoji` n'est plus rendu).\n    function identityIcon(isAgent)\
-    \ {\n      if (isAgent) {\n        // Lucide \xAB bot \xBB\n        return svgIcon([\n\
-    \          { tag: \"path\", d: \"M12 8V4H8\" },\n          { tag: \"rect\", width:\
-    \ \"16\", height: \"12\", x: \"4\", y: \"8\", rx: \"2\" },\n          { tag: \"\
-    path\", d: \"M2 14h2\" },\n          { tag: \"path\", d: \"M20 14h2\" },\n   \
-    \       { tag: \"path\", d: \"M15 13v2\" },\n          { tag: \"path\", d: \"\
-    M9 13v2\" }\n        ]);\n      }\n      // Lucide \xAB user \xBB\n      return\
-    \ svgIcon([\n        { tag: \"path\", d: \"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4\
-    \ 4v2\" },\n        { tag: \"circle\", cx: \"12\", cy: \"7\", r: \"4\" }\n   \
-    \   ]);\n    }\n\n    // Glyphe SVG en t\xEAte de badge de type d'incident (remplace\
-    \ l'emoji).\n    function incidentIcon(key) {\n      if (key === \"C1\") {\n \
-    \       // Lucide \xAB eye-off \xBB \u2014 donn\xE9e caviard\xE9e / masqu\xE9\
-    e\n        return svgIcon([\n          { tag: \"path\", d: \"M9.88 9.88a3 3 0\
-    \ 1 0 4.24 4.24\" },\n          { tag: \"path\", d: \"M10.73 5.08A10.43 10.43\
-    \ 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68\" },\n          { tag:\
-    \ \"path\", d: \"M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0\
-    \ 5.39-1.61\" },\n          { tag: \"line\", x1: \"2\", x2: \"22\", y1: \"2\"\
-    , y2: \"22\" }\n        ]);\n      }\n      if (key === \"C2\") {\n        //\
-    \ Lucide \xAB lock \xBB \u2014 donn\xE9e restreinte / PII\n        return svgIcon([\n\
-    \          { tag: \"rect\", width: \"18\", height: \"11\", x: \"3\", y: \"11\"\
-    , rx: \"2\", ry: \"2\" },\n          { tag: \"path\", d: \"M7 11V7a5 5 0 0 1 10\
-    \ 0v4\" }\n        ]);\n      }\n      if (key === \"C3\") {\n        // Lucide\
-    \ \xAB ban \xBB \u2014 attaque bloqu\xE9e\n        return svgIcon([\n        \
-    \  { tag: \"circle\", cx: \"12\", cy: \"12\", r: \"10\" },\n          { tag: \"\
-    path\", d: \"m4.9 4.9 14.2 14.2\" }\n        ]);\n      }\n      // NC : Lucide\
-    \ \xAB shield-check \xBB \u2014 trafic propre\n      return svgIcon([\n      \
-    \  { tag: \"path\", d: \"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5\
-    \ 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51\
+    ;\n    }\n\n    var CLASS_LABEL = { menace: \"Threat\", secret: \"Secret\", financier:\
+    \ \"Financial\", pii: \"PII\" };\n\n    var SVG_NS = \"http://www.w3.org/2000/svg\"\
+    ;\n\n    // Creates an inline Lucide-style SVG icon with currentColor and no network\n\
+    \    // request. `paths` contains child element specs: { tag, ...attrs }.\n  \
+    \  function svgIcon(paths, stroke) {\n      var s = document.createElementNS(SVG_NS,\
+    \ \"svg\");\n      s.setAttribute(\"viewBox\", \"0 0 24 24\");\n      s.setAttribute(\"\
+    fill\", \"none\");\n      s.setAttribute(\"stroke\", \"currentColor\");\n    \
+    \  s.setAttribute(\"stroke-width\", stroke || \"2\");\n      s.setAttribute(\"\
+    stroke-linecap\", \"round\");\n      s.setAttribute(\"stroke-linejoin\", \"round\"\
+    );\n      s.setAttribute(\"aria-hidden\", \"true\");\n      paths.forEach(function\
+    \ (spec) {\n        var el = document.createElementNS(SVG_NS, spec.tag);\n   \
+    \     Object.keys(spec).forEach(function (k) {\n          if (k !== \"tag\") el.setAttribute(k,\
+    \ spec[k]);\n        });\n        s.appendChild(el);\n      });\n      return\
+    \ s;\n    }\n\n    // Identity avatar: `user` for humans, `bot` for service agents.\
+    \ Derived from\n    // `type`; the `emoji` field is no longer rendered.\n    function\
+    \ identityIcon(isAgent) {\n      if (isAgent) {\n        // Lucide \xAB bot \xBB\
+    \n        return svgIcon([\n          { tag: \"path\", d: \"M12 8V4H8\" },\n \
+    \         { tag: \"rect\", width: \"16\", height: \"12\", x: \"4\", y: \"8\",\
+    \ rx: \"2\" },\n          { tag: \"path\", d: \"M2 14h2\" },\n          { tag:\
+    \ \"path\", d: \"M20 14h2\" },\n          { tag: \"path\", d: \"M15 13v2\" },\n\
+    \          { tag: \"path\", d: \"M9 13v2\" }\n        ]);\n      }\n      // Lucide\
+    \ \xAB user \xBB\n      return svgIcon([\n        { tag: \"path\", d: \"M19 21v-2a4\
+    \ 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2\" },\n        { tag: \"circle\", cx: \"12\", cy:\
+    \ \"7\", r: \"4\" }\n      ]);\n    }\n\n    // SVG glyph used at the start of\
+    \ the incident-type badge.\n    function incidentIcon(key) {\n      if (key ===\
+    \ \"C1\") {\n        // Lucide eye-off: redacted / masked data.\n        return\
+    \ svgIcon([\n          { tag: \"path\", d: \"M9.88 9.88a3 3 0 1 0 4.24 4.24\"\
+    \ },\n          { tag: \"path\", d: \"M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10\
+    \ 7 10 7a13.16 13.16 0 0 1-1.67 2.68\" },\n          { tag: \"path\", d: \"M6.61\
+    \ 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61\" },\n    \
+    \      { tag: \"line\", x1: \"2\", x2: \"22\", y1: \"2\", y2: \"22\" }\n     \
+    \   ]);\n      }\n      if (key === \"C2\") {\n        // Lucide lock: restricted\
+    \ data / PII.\n        return svgIcon([\n          { tag: \"rect\", width: \"\
+    18\", height: \"11\", x: \"3\", y: \"11\", rx: \"2\", ry: \"2\" },\n         \
+    \ { tag: \"path\", d: \"M7 11V7a5 5 0 0 1 10 0v4\" }\n        ]);\n      }\n \
+    \     if (key === \"C3\") {\n        // Lucide ban: blocked attack.\n        return\
+    \ svgIcon([\n          { tag: \"circle\", cx: \"12\", cy: \"12\", r: \"10\" },\n\
+    \          { tag: \"path\", d: \"m4.9 4.9 14.2 14.2\" }\n        ]);\n      }\n\
+    \      // NC: Lucide shield-check, clean traffic.\n      return svgIcon([\n  \
+    \      { tag: \"path\", d: \"M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5\
+    \ 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51\
     \ 3.81 17 5 19 5a1 1 0 0 1 1 1z\" },\n        { tag: \"path\", d: \"m9 12 2 2\
-    \ 4-4\" }\n      ]);\n    }\n\n    // Type d'incident dominant, d\xE9riv\xE9 de\
-    \ la classification d'audit la plus grave\n    // vue pour l'identit\xE9 (champ\
-    \ `classification`, source de v\xE9rit\xE9 grob). Le JSON\n    // s\xE9rialise\
-    \ \xAB NC \xBB en majuscules ; on tol\xE8re \xAB Nc \xBB par s\xE9curit\xE9. Le\
-    \ glyphe de\n    // t\xEAte est rendu en SVG (r\xE8gle design-system : pas d'emoji-ic\xF4\
-    ne).\n    var ITYPE = {\n      NC: { cls: \"nc\", text: \"Propre\" },\n      C1:\
-    \ { cls: \"c1\", text: \"Caviard\xE9\" },\n      C2: { cls: \"c2\", text: \"Restreint\"\
-    \ },\n      C3: { cls: \"c3\", text: \"Attaque\" }\n    };\n\n    function buildIncidentType(it)\
-    \ {\n      var key = String(it || \"NC\").toUpperCase();\n      var def = ITYPE[key]\
-    \ || ITYPE.NC;\n      var span = document.createElement(\"span\");\n      span.className\
-    \ = \"itype \" + def.cls;\n      span.appendChild(incidentIcon(key in ITYPE ?\
-    \ key : \"NC\"));\n      var t = document.createElement(\"span\");\n      t.textContent\
+    \ 4-4\" }\n      ]);\n    }\n\n    // Dominant incident type, derived from the\
+    \ highest audit classification seen\n    // for the identity. JSON serializes\
+    \ `NC` uppercase; tolerate `Nc` defensively.\n    var ITYPE = {\n      NC: { cls:\
+    \ \"nc\", text: \"Clean\" },\n      C1: { cls: \"c1\", text: \"Redacted\" },\n\
+    \      C2: { cls: \"c2\", text: \"Restricted\" },\n      C3: { cls: \"c3\", text:\
+    \ \"Attack\" }\n    };\n\n    function buildIncidentType(it) {\n      var key\
+    \ = String(it || \"NC\").toUpperCase();\n      var def = ITYPE[key] || ITYPE.NC;\n\
+    \      var span = document.createElement(\"span\");\n      span.className = \"\
+    itype \" + def.cls;\n      span.appendChild(incidentIcon(key in ITYPE ? key :\
+    \ \"NC\"));\n      var t = document.createElement(\"span\");\n      t.textContent\
     \ = def.text;\n      span.appendChild(t);\n      return span;\n    }\n\n    function\
     \ buildChips(classes) {\n      var wrap = document.createElement(\"div\"); wrap.className\
     \ = \"chips\";\n      if (!classes || !classes.length) {\n        var c = document.createElement(\"\
-    span\"); c.className = \"chip none\"; c.textContent = \"aucune\"; wrap.appendChild(c);\n\
+    span\"); c.className = \"chip none\"; c.textContent = \"none\"; wrap.appendChild(c);\n\
     \        return wrap;\n      }\n      classes.forEach(function (cl) {\n      \
     \  var c = document.createElement(\"span\");\n        c.className = \"chip \"\
     \ + cl;\n        c.textContent = CLASS_LABEL[cl] || cl;\n        wrap.appendChild(c);\n\
-    \      });\n      return wrap;\n    }\n\n    // Preuve sign\xE9e : Lucide \xAB\
-    \ badge-check \xBB (sceau + coche) plut\xF4t qu'une\n    // simple coche, pour\
-    \ mieux signifier l'attestation d'audit sign\xE9e.\n    function checkIcon() {\n\
-    \      return svgIcon([\n        { tag: \"path\", d: \"M3.85 8.62a4 4 0 0 1 4.78-4.77\
+    \      });\n      return wrap;\n    }\n\n    // Signed proof: Lucide badge-check\
+    \ (seal + check) instead of a plain check.\n    function checkIcon() {\n     \
+    \ return svgIcon([\n        { tag: \"path\", d: \"M3.85 8.62a4 4 0 0 1 4.78-4.77\
     \ 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4\
     \ 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z\" },\n        { tag: \"\
-    path\", d: \"m9 12 2 2 4-4\" }\n      ], \"2.2\");\n    }\n\n    // Investigation\
-    \ : Lucide \xAB search \xBB (loupe).\n    function searchIcon() {\n      return\
-    \ svgIcon([\n        { tag: \"circle\", cx: \"11\", cy: \"11\", r: \"8\" },\n\
-    \        { tag: \"path\", d: \"m21 21-4.3-4.3\" }\n      ]);\n    }\n\n    //\
-    \ Statut d'identit\xE9 : \xAB circle-check \xBB (actif) ou \xAB ban \xBB (r\xE9\
-    voqu\xE9).\n    function statusIcon(revoked) {\n      if (revoked) {\n       \
-    \ return svgIcon([\n          { tag: \"circle\", cx: \"12\", cy: \"12\", r: \"\
-    10\" },\n          { tag: \"path\", d: \"m4.9 4.9 14.2 14.2\" }\n        ], \"\
-    2.2\");\n      }\n      return svgIcon([\n        { tag: \"circle\", cx: \"12\"\
-    , cy: \"12\", r: \"10\" },\n        { tag: \"path\", d: \"m9 12 2 2 4-4\" }\n\
-    \      ], \"2.2\");\n    }\n\n    function td(cls) { var e = document.createElement(\"\
+    path\", d: \"m9 12 2 2 4-4\" }\n      ], \"2.2\");\n    }\n\n    // Investigation:\
+    \ Lucide search.\n    function searchIcon() {\n      return svgIcon([\n      \
+    \  { tag: \"circle\", cx: \"11\", cy: \"11\", r: \"8\" },\n        { tag: \"path\"\
+    , d: \"m21 21-4.3-4.3\" }\n      ]);\n    }\n\n    // Identity status: circle-check\
+    \ for active, ban for revoked.\n    function statusIcon(revoked) {\n      if (revoked)\
+    \ {\n        return svgIcon([\n          { tag: \"circle\", cx: \"12\", cy: \"\
+    12\", r: \"10\" },\n          { tag: \"path\", d: \"m4.9 4.9 14.2 14.2\" }\n \
+    \       ], \"2.2\");\n      }\n      return svgIcon([\n        { tag: \"circle\"\
+    , cx: \"12\", cy: \"12\", r: \"10\" },\n        { tag: \"path\", d: \"m9 12 2\
+    \ 2 4-4\" }\n      ], \"2.2\");\n    }\n\n    function td(cls) { var e = document.createElement(\"\
     td\"); if (cls) e.className = cls; return e; }\n\n    function render(data) {\n\
     \      THRESHOLD = data.threshold || THRESHOLD;\n      document.getElementById(\"\
     thr\").textContent = THRESHOLD;\n\n      var rows = document.getElementById(\"\
@@ -1308,60 +1287,59 @@ data:
     \ (a) {\n        var isAgent = a.type === \"agent\";\n        var tr = document.createElement(\"\
     tr\");\n        tr.className = \"flip\";\n        var justRevoked = a.revoked\
     \ && !wasRevoked[a.tenant];\n        if (justRevoked) tr.classList.add(\"just-revoked\"\
-    );\n\n        // --- Identit\xE9 : avatar SVG (user/bot, d\xE9riv\xE9 de `type`)\
-    \ + nom + sous-titre + badge type ---\n        var tdAgent = td();\n        var\
-    \ wrap = document.createElement(\"div\"); wrap.className = \"agent\";\n      \
-    \  var av = document.createElement(\"div\"); av.className = \"avatar \" + (isAgent\
-    \ ? \"agent\" : \"human\");\n        av.appendChild(identityIcon(isAgent));\n\
-    \        var meta = document.createElement(\"div\"); meta.className = \"meta\"\
-    ;\n        var nm = document.createElement(\"div\"); nm.className = \"name\";\
-    \ nm.textContent = a.label || a.tenant;\n        var sub = document.createElement(\"\
-    div\"); sub.className = \"sub\";\n        // Humains \u2192 d\xE9partement ; agents\
-    \ \u2192 owner + env.\n        if (isAgent) {\n          sub.textContent = \"\
-    owner : \" + (a.owner || \"?\") + \" \xB7 env : \" + (a.env || \"?\");\n     \
-    \   } else {\n          sub.textContent = a.sub || \"\";\n        }\n        var\
-    \ kind = document.createElement(\"span\");\n        kind.className = \"kind \"\
-    \ + (isAgent ? \"agent\" : \"human\");\n        kind.textContent = isAgent ? \"\
-    Agent\" : \"Humain\";\n        meta.appendChild(nm); meta.appendChild(sub); meta.appendChild(kind);\n\
-    \        wrap.appendChild(av); wrap.appendChild(meta); tdAgent.appendChild(wrap);\n\
-    \n        // --- Requ\xEAtes ---\n        var tdReq = td(\"right\");\n       \
-    \ var nReq = document.createElement(\"span\"); nReq.className = \"num\";\n   \
-    \     nReq.style.fontSize = \"24px\"; nReq.style.color = \"var(--text)\";\n  \
-    \      nReq.textContent = a.requests; tdReq.appendChild(nReq);\n\n        // ---\
-    \ Conso \u20AC ---\n        var tdEur = td(\"right\");\n        var nEur = document.createElement(\"\
-    span\"); nEur.className = \"spend\";\n        nEur.textContent = eur(a.spend_eur);\
-    \ tdEur.appendChild(nEur);\n\n        // --- Violations (gros chiffre s\xE9mantique)\
-    \ ---\n        var tdViol = td(\"right\");\n        var nViol = document.createElement(\"\
-    span\");\n        nViol.className = \"num \" + violClass(a.violations, a.revoked);\n\
-    \        nViol.textContent = a.violations;\n        if (prevViol[a.tenant] !==\
-    \ undefined && a.violations > prevViol[a.tenant]) {\n          void nViol.offsetWidth;\
+    );\n\n        // --- Identity: SVG avatar derived from `type`, name, subtitle\
+    \ and type badge ---\n        var tdAgent = td();\n        var wrap = document.createElement(\"\
+    div\"); wrap.className = \"agent\";\n        var av = document.createElement(\"\
+    div\"); av.className = \"avatar \" + (isAgent ? \"agent\" : \"human\");\n    \
+    \    av.appendChild(identityIcon(isAgent));\n        var meta = document.createElement(\"\
+    div\"); meta.className = \"meta\";\n        var nm = document.createElement(\"\
+    div\"); nm.className = \"name\"; nm.textContent = a.label || a.tenant;\n     \
+    \   var sub = document.createElement(\"div\"); sub.className = \"sub\";\n    \
+    \    // Humans -> department; agents -> owner + env.\n        if (isAgent) {\n\
+    \          sub.textContent = \"owner : \" + (a.owner || \"?\") + \" \xB7 env :\
+    \ \" + (a.env || \"?\");\n        } else {\n          sub.textContent = a.sub\
+    \ || \"\";\n        }\n        var kind = document.createElement(\"span\");\n\
+    \        kind.className = \"kind \" + (isAgent ? \"agent\" : \"human\");\n   \
+    \     kind.textContent = isAgent ? \"Agent\" : \"Human\";\n        meta.appendChild(nm);\
+    \ meta.appendChild(sub); meta.appendChild(kind);\n        wrap.appendChild(av);\
+    \ wrap.appendChild(meta); tdAgent.appendChild(wrap);\n\n        // --- Requests\
+    \ ---\n        var tdReq = td(\"right\");\n        var nReq = document.createElement(\"\
+    span\"); nReq.className = \"num\";\n        nReq.style.fontSize = \"24px\"; nReq.style.color\
+    \ = \"var(--text)\";\n        nReq.textContent = a.requests; tdReq.appendChild(nReq);\n\
+    \n        // --- Spend EUR ---\n        var tdEur = td(\"right\");\n        var\
+    \ nEur = document.createElement(\"span\"); nEur.className = \"spend\";\n     \
+    \   nEur.textContent = eur(a.spend_eur); tdEur.appendChild(nEur);\n\n        //\
+    \ --- Violations ---\n        var tdViol = td(\"right\");\n        var nViol =\
+    \ document.createElement(\"span\");\n        nViol.className = \"num \" + violClass(a.violations,\
+    \ a.revoked);\n        nViol.textContent = a.violations;\n        if (prevViol[a.tenant]\
+    \ !== undefined && a.violations > prevViol[a.tenant]) {\n          void nViol.offsetWidth;\
     \ nViol.classList.add(\"bump\");\n        }\n        tdViol.appendChild(nViol);\n\
-    \n        // --- Classe de donn\xE9e capt\xE9e ---\n        var tdClass = td();\
-    \ tdClass.appendChild(buildChips(a.data_classes));\n\n        // --- Type d'incident\
-    \ (classification d'audit dominante) ---\n        var tdItype = td(); tdItype.appendChild(buildIncidentType(a.incident_type));\n\
-    \n        // --- D\xE9cision ---\n        var tdDec = td();\n        var dec =\
-    \ document.createElement(\"span\");\n        var dv = a.decision || \"\u2014\"\
-    ;\n        dec.className = \"decision \" + (dv === \"bloqu\xE9\" ? \"bloque\"\
-    \ : dv === \"caviard\xE9\" ? \"caviarde\" : \"none\");\n        dec.textContent\
-    \ = dv;\n        tdDec.appendChild(dec);\n\n        // --- Preuve sign\xE9e ---\n\
-    \        var tdProof = td(\"center\");\n        var proof = document.createElement(\"\
-    span\");\n        proof.className = \"proof\" + (a.signed ? \"\" : \" no\");\n\
-    \        if (a.signed) { proof.appendChild(checkIcon()); var t = document.createElement(\"\
-    span\"); t.textContent = \"Sign\xE9e\"; proof.appendChild(t); }\n        else\
-    \ { var t2 = document.createElement(\"span\"); t2.textContent = \"\u2014\"; proof.appendChild(t2);\
-    \ }\n        tdProof.appendChild(proof);\n\n        // --- Statut (+ indice de\
-    \ rem\xE9diation si r\xE9voqu\xE9) ---\n        var tdStat = td(\"center\");\n\
-    \        var pill = document.createElement(\"span\");\n        var lbl = document.createElement(\"\
-    span\");\n        if (a.revoked) { pill.className = \"pill revoque\"; lbl.textContent\
-    \ = \"R\xC9VOQU\xC9\"; }\n        else           { pill.className = \"pill actif\"\
-    ;   lbl.textContent = \"Actif\"; }\n        pill.appendChild(statusIcon(a.revoked));\
-    \ pill.appendChild(lbl); tdStat.appendChild(pill);\n        if (a.revoked) {\n\
-    \          var rem = document.createElement(\"span\"); rem.className = \"remediation\"\
-    ;\n          rem.textContent = \"Cl\xE9 r\xE9voqu\xE9e \u2014 preuve sign\xE9\
-    e exportable.\";\n          tdStat.appendChild(rem);\n        }\n\n        //\
-    \ --- Investigation : drill-down Loki par identit\xE9 ---\n        var tdLogs\
-    \ = td(\"center\");\n        var link = document.createElement(\"a\");\n     \
-    \   link.className = \"logs-link\";\n        link.href = auditDashboardUrl(a.tenant);\n\
+    \n        // --- Data classes ---\n        var tdClass = td(); tdClass.appendChild(buildChips(a.data_classes));\n\
+    \n        // --- Incident type (dominant audit classification) ---\n        var\
+    \ tdItype = td(); tdItype.appendChild(buildIncidentType(a.incident_type));\n\n\
+    \        // --- Decision ---\n        var tdDec = td();\n        var dec = document.createElement(\"\
+    span\");\n        var dv = a.decision || \"-\";\n        dec.className = \"decision\
+    \ \" + (dv === \"bloqu\xE9\" ? \"bloque\" : dv === \"caviard\xE9\" ? \"caviarde\"\
+    \ : \"none\");\n        dec.textContent = dv === \"bloqu\xE9\" ? \"Blocked\" :\
+    \ dv === \"caviard\xE9\" ? \"Redacted\" : \"-\";\n        tdDec.appendChild(dec);\n\
+    \n        // --- Signed proof ---\n        var tdProof = td(\"center\");\n   \
+    \     var proof = document.createElement(\"span\");\n        proof.className =\
+    \ \"proof\" + (a.signed ? \"\" : \" no\");\n        if (a.signed) { proof.appendChild(checkIcon());\
+    \ var t = document.createElement(\"span\"); t.textContent = \"Signed\"; proof.appendChild(t);\
+    \ }\n        else { var t2 = document.createElement(\"span\"); t2.textContent\
+    \ = \"-\"; proof.appendChild(t2); }\n        tdProof.appendChild(proof);\n\n \
+    \       // --- Status (+ remediation hint when revoked) ---\n        var tdStat\
+    \ = td(\"center\");\n        var pill = document.createElement(\"span\");\n  \
+    \      var lbl = document.createElement(\"span\");\n        if (a.revoked) { pill.className\
+    \ = \"pill revoque\"; lbl.textContent = \"REVOKED\"; }\n        else         \
+    \  { pill.className = \"pill actif\";   lbl.textContent = \"Active\"; }\n    \
+    \    pill.appendChild(statusIcon(a.revoked)); pill.appendChild(lbl); tdStat.appendChild(pill);\n\
+    \        if (a.revoked) {\n          var rem = document.createElement(\"span\"\
+    ); rem.className = \"remediation\";\n          rem.textContent = \"Key revoked;\
+    \ signed proof is exportable.\";\n          tdStat.appendChild(rem);\n       \
+    \ }\n\n        // --- Investigation: Loki drill-down by identity ---\n       \
+    \ var tdLogs = td(\"center\");\n        var link = document.createElement(\"a\"\
+    );\n        link.className = \"logs-link\";\n        link.href = auditDashboardUrl(a.tenant);\n\
     \        link.target = \"_blank\"; link.rel = \"noopener\";\n        link.appendChild(searchIcon());\n\
     \        var lt = document.createElement(\"span\"); lt.textContent = \"Logs\"\
     ; link.appendChild(lt);\n        tdLogs.appendChild(link);\n\n        tr.appendChild(tdAgent);\
@@ -1374,11 +1352,11 @@ data:
     \ document.getElementById(\"statusText\");\n      fetch(\"/governance.json\",\
     \ { cache: \"no-store\" })\n        .then(function (r) { if (!r.ok) throw new\
     \ Error(r.status); return r.json(); })\n        .then(function (data) {\n    \
-    \      dot.classList.add(\"live\");\n          statusText.textContent = \"Connect\xE9\
-    \ \u2014 surveillance active\";\n          render(data);\n        })\n       \
-    \ .catch(function () {\n          dot.classList.remove(\"live\");\n          statusText.textContent\
-    \ = \"En attente des donn\xE9es\u2026\";\n        });\n    }\n    poll();\n  \
-    \  setInterval(poll, 2000);\n  </script>\n</body>\n</html>\n"
+    \      dot.classList.add(\"live\");\n          statusText.textContent = \"Connected\
+    \ - monitoring active\";\n          render(data);\n        })\n        .catch(function\
+    \ () {\n          dot.classList.remove(\"live\");\n          statusText.textContent\
+    \ = \"Waiting for data...\";\n        });\n    }\n    poll();\n    setInterval(poll,\
+    \ 2000);\n  </script>\n</body>\n</html>\n"
 ---
 apiVersion: v1
 kind: ConfigMap

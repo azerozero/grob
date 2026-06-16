@@ -38,3 +38,8 @@ codeql-db/
 codeql-results.sarif
 docs/reviews/
 grob-codex-proxy.toml
+
+# Generated demo recordings
+docs/demos/showcase-rssi/demo.cast
+docs/demos/showcase-rssi/demo.gif
+docs/demos/showcase-rssi/demo.webm
