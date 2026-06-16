@@ -7,6 +7,8 @@
 #   make demo-logs   Suit les logs du seed (trafic) et du watcher (coupure)
 #   make demo-reset  Remet la démo à l'état s0 (idempotent)
 #   make demo-stop   Arrête le pod sans supprimer les images
+#   make demo-cast   Enregistre la doublure asciinema de la démo
+#   make demo-gif    Convertit la doublure asciinema en GIF partageable
 #   make gen         Régénère demo.kube.yaml depuis les fichiers source
 #   make grob-img    (Re)construit l'image grob patchée (caviardages C1/C2)
 #   make tools       (Re)construit l'image localhost/grob-demo-tools
@@ -25,8 +27,9 @@ POD        := grob-demo
 # Racine du dépôt (contexte de build pour l'image grob : le Containerfile fait
 # COPY . . sur tout l'arbre source). Le Makefile vit dans deploy/demo.
 REPO_ROOT  := $(abspath $(CURDIR)/../..)
+DEMO_DOCS  := $(REPO_ROOT)/docs/demos/showcase-rssi
 
-.PHONY: demo grob-img tools gen demo-logs demo-stop demo-reset urls
+.PHONY: demo grob-img tools gen demo-logs demo-stop demo-reset demo-cast demo-gif urls
 
 # Image grob PATCHÉE, buildée depuis l'arbre source local : elle embarque le
 # correctif feat(audit) qui classe les caviardages en C1/C2 (DLP_WARN), encore
@@ -52,6 +55,15 @@ demo: grob-img tools gen ## Construit, régénère, puis déploie la démo compl
 
 demo-logs: ## Suit le trafic (seed) et la coupure en direct (watcher).
 	$(PODMAN) logs -f $(POD)-seed $(POD)-watcher
+
+demo-cast: ## Enregistre la doublure asciinema (stack déjà lancée).
+	@command -v asciinema >/dev/null 2>&1 || { echo "asciinema est requis. Installez asciinema puis relancez make demo-cast."; exit 1; }
+	cd $(REPO_ROOT) && asciinema rec -y -c "sh docs/demos/showcase-rssi/replay.sh" docs/demos/showcase-rssi/demo.cast
+
+demo-gif: ## Convertit demo.cast en GIF partageable (nécessite agg).
+	@test -f $(DEMO_DOCS)/demo.cast || { echo "demo.cast introuvable. Lancez d'abord : make demo-cast"; exit 1; }
+	@command -v agg >/dev/null 2>&1 || { echo "agg est requis pour générer le GIF. Installez https://github.com/asciinema/agg puis relancez make demo-gif."; exit 1; }
+	agg $(DEMO_DOCS)/demo.cast $(DEMO_DOCS)/demo.gif
 
 demo-stop: ## Arrête le pod (conserve images et manifeste).
 	$(PODMAN) kube down $(KUBE)

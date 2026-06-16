@@ -11,6 +11,21 @@
 
 ---
 
+## Parcours visuel
+
+```mermaid
+flowchart LR
+    seed["Trafic de démo<br/>propre, caviardé, bloqué"] --> api["Grob demo API<br/>:8080"]
+    api --> audit["Journal d'audit<br/>signé"]
+    audit --> watcher["Watcher<br/>état par identité"]
+    watcher --> governance["Console gouvernance<br/>seuil + coupure"]
+    audit --> grafana["Grafana + Loki<br/>drill-down agent"]
+    governance --> logs["Lien Logs<br/>pré-filtré"]
+    logs --> grafana
+```
+
+---
+
 ## ⚡ Ouverture choc (le « waouh » d'abord) — 60 s
 
 > **Avant de parler d'architecture, montrez le résultat.**
@@ -192,7 +207,9 @@ debugger devant le public :
 
   ```sh
   # Enregistrement (une fois, stack lancée) :
-  asciinema rec -c "sh docs/demos/showcase-rssi/replay.sh" docs/demos/showcase-rssi/demo.cast
+  make -C deploy/demo demo-cast
+  # GIF visuel partageable, si agg est installé :
+  make -C deploy/demo demo-gif
   # Rejeu devant le public :
   asciinema play docs/demos/showcase-rssi/demo.cast
   ```

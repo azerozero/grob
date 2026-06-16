@@ -5,8 +5,8 @@
 # Sert à enregistrer l'« understudy » (cast asciinema) ET de repli si le live
 # échoue. La stack doit déjà tourner (`cd deploy/demo && make demo`).
 #
-#   asciinema rec -c "sh docs/demos/showcase-rssi/replay.sh" \
-#                 docs/demos/showcase-rssi/demo.cast
+#   make -C deploy/demo demo-cast
+#   make -C deploy/demo demo-gif   # optionnel, si agg est installé
 # =============================================================================
 
 set -eu
