@@ -200,7 +200,8 @@ pub(super) async fn dispatch_provider_loop(
     // If those mappings are skipped by circuit breaker / endpoint health, direct
     // lookup would bypass `actual_model` and send that alias upstream.
     if should_try_direct_lookup(effective_mappings.len(), &last_error) {
-        if let Some(result) = try_direct_provider_lookup(ctx, request, &decision.model_name).await?
+        if let Some(result) =
+            try_direct_provider_lookup(ctx, request, &decision.model_name, context_guard).await?
         {
             return Ok(result);
         }

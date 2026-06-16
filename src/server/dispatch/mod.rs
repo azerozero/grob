@@ -1404,6 +1404,95 @@ actual_model = "beta"
         );
     }
 
+    #[tokio::test]
+    async fn dispatch_preserves_context_warning_on_direct_provider_lookup() {
+        use crate::models::{Message, MessageContent};
+
+        let toml = r#"
+[server]
+host = "127.0.0.1"
+port = 18098
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+mappings = []
+context_window_tokens = 100
+"#;
+        let config = crate::cli::AppConfig::from_content(toml, "dispatch_direct_lookup_guard_test")
+            .expect("config parses");
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test(
+            "mock",
+            Arc::new(crate::providers::mocks::MockLlmProvider::text(
+                "alpha", "ok",
+            )),
+        );
+        let state = crate::server::test_app_state(config, registry);
+        let inner = state.snapshot();
+        let dlp: Option<Arc<DlpEngine>> = None;
+        let headers = HeaderMap::new();
+        let ctx = DispatchContext {
+            state: &state,
+            inner: &inner,
+            dlp: &dlp,
+            model: "alpha".to_string(),
+            is_streaming: false,
+            tenant_id: None,
+            allowed_models: None,
+            allowed_providers: Vec::new(),
+            peer_ip: "127.0.0.1".to_string(),
+            req_id: "test-req",
+            start_time: std::time::Instant::now(),
+            headers: &headers,
+            trace_id: None,
+            audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(feature = "policies")]
+            resolved_policy: None,
+        };
+
+        let mut request = CanonicalRequest {
+            model: "alpha".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("x".repeat(320)),
+            }],
+            max_tokens: 16,
+            system: None,
+            tools: None,
+            tool_choice: None,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            extensions: Default::default(),
+        };
+
+        let result = dispatch(&ctx, &mut request)
+            .await
+            .expect("dispatch succeeds");
+        let DispatchResult::Complete { context_guard, .. } = result else {
+            panic!("expected non-streaming response");
+        };
+        let info = context_guard.expect("context warning must survive direct lookup");
+        assert_eq!(info.context_window, 100);
+        assert!(info.usage_ratio >= 0.80);
+        assert!(!info.should_compact);
+    }
+
     // ── SLICE 3: policy overrides (matching fix + budget + rate_limit) ──
 
     /// Config declaring one policy with a `route_type` condition plus the given

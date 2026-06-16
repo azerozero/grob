@@ -102,6 +102,7 @@ pub(super) async fn try_direct_provider_lookup(
     ctx: &DispatchContext<'_>,
     request: &crate::models::CanonicalRequest,
     model_name: &str,
+    context_guard: Option<crate::server::ContextGuardInfo>,
 ) -> Result<Option<DispatchResult>, RequestError> {
     let Ok(provider) = ctx.inner.provider_registry.provider_for_model(model_name) else {
         return Ok(None);
@@ -132,6 +133,6 @@ pub(super) async fn try_direct_provider_lookup(
         provider: model_name.to_string(),
         actual_model: model_name.to_string(),
         provider_duration_ms: 0,
-        context_guard: None,
+        context_guard,
     }))
 }
