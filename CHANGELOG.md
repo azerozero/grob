@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.75](https://github.com/azerozero/grob/compare/v0.36.74...v0.36.75) - 2026-06-16
+
+### Fixed
+
+- preserve context warnings on direct lookup
+
+### Other
+
+- sync body limit explanation
+- clarify launch positioning and context errors
+
 ## [0.36.74](https://github.com/azerozero/grob/compare/v0.36.73...v0.36.74) - 2026-06-15
 
 ### Added
