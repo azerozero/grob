@@ -71,6 +71,10 @@ That's it. Grob auto-starts, routes traffic, and stops when your tool exits. To 
 Want to see the full protection story without spending real provider tokens?
 Run the reproducible local demo:
 
+<p align="center">
+  <img src="docs/demos/showcase-rssi/assets/governance-demo.gif" alt="Grob local demo: governance console with signed audit proof and per-identity cutoff" width="960">
+</p>
+
 ```bash
 cd deploy/demo
 make demo
