@@ -66,6 +66,30 @@ grob exec -- claude
 
 That's it. Grob auto-starts, routes traffic, and stops when your tool exits. To check a long-running instance, run `grob status` or `curl http://[::1]:13456/health`.
 
+## Local demo -- DLP, signed audit, and Grafana
+
+Want to see the full protection story without spending real provider tokens?
+Run the reproducible local demo:
+
+```bash
+cd deploy/demo
+make demo
+```
+
+It starts a simulated backend, live DLP traffic, the governance console, Loki,
+Tempo, and Grafana. Open:
+
+- **Governance console**: <http://localhost:8088/governance>
+- **Live DLP feed**: <http://localhost:8088>
+- **Grafana dashboards**: <http://localhost:3000> (`admin` / `admin`)
+
+The demo shows clean traffic, redacted secrets/PII, blocked prompt injection and
+exfiltration attempts, signed audit evidence, and per-identity cutoff for a
+drifting service agent. The walkthrough is in
+[`docs/demos/showcase-rssi/DEMO.md`](docs/demos/showcase-rssi/DEMO.md); the
+pre-flight checklist is in
+[`docs/demos/showcase-rssi/PREFLIGHT.md`](docs/demos/showcase-rssi/PREFLIGHT.md).
+
 ## DLP -- secrets never reach the provider
 
 Every request and response passes through the DLP engine before leaving your machine:
