@@ -11,7 +11,7 @@ flowchart TB
     subgraph server["Axum HTTP Server"]
         direction TB
         mw1["1. Request ID<br/>Reads X-Request-Id or generates UUID v4"]
-        mw2["2. Body Size Limit<br/>Rejects payloads over max_body_size (10 MB)"]
+        mw2["2. Body Size Limit<br/>Optional max_body_size guard (disabled by default)"]
         mw3["3. Security Headers<br/>OWASP headers (X-Content-Type-Options, etc.)"]
         mw4["4. Rate Limiter<br/>Token-bucket per tenant/API-key/IP → 429"]
         mw5["5. Auth<br/>none / api_key / jwt"]

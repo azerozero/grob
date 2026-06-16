@@ -86,7 +86,7 @@ When enabled, Grob applies OWASP-recommended security headers to all responses:
 
 ### Request size limits
 
-Requests exceeding `max_body_size` (default: 10 MB) are rejected before parsing. This prevents memory exhaustion from oversized payloads.
+`max_body_size` defaults to `0`, which disables the body limit so large agent contexts are not rejected before parsing. Set a positive value to reject oversized payloads with HTTP `413` before parsing in multi-tenant or public deployments.
 
 ### Budget enforcement
 
