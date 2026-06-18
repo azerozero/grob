@@ -51,15 +51,16 @@ Contribution shall terminate as of the date such litigation is filed.
 As a condition on the exercise of the rights granted in Sections 1
 and 2, We agree to license Your Contribution:
 
-(a) under the terms of the GNU Affero General Public License
-    version 3.0 (AGPL-3.0) as currently used for the Material; and
+(a) under the terms of the Apache License, Version 2.0
+    (Apache-2.0) as currently used for the Material; and
 
 (b) under any other license, including commercial and proprietary
     licenses, that We may use to distribute the Material.
 
-This means We may distribute Your Contribution under the AGPL-3.0,
-under a commercial license, or under both simultaneously. This is the
-mechanism that enables dual licensing of the Grob project.
+This means We may distribute Your Contribution under Apache-2.0,
+under a commercial or proprietary license, or under both simultaneously.
+This is the mechanism that keeps Grob Core permissive while allowing
+commercial products and managed offerings.
 
 ## 4. Moral Rights
 

@@ -67,4 +67,4 @@ Pull requests run:
 
 ## License
 
-Grob is licensed under AGPL-3.0. By submitting a pull request, you agree to the [CLA](../../CLA.md), which grants A00 SASU the right to distribute your contributions under both AGPL-3.0 and the commercial license.
+Grob Core is licensed under Apache-2.0. By submitting a pull request, you agree to the [CLA](../../CLA.md), which grants A00 SASU the right to distribute your contributions under Apache-2.0 and, when needed, under commercial or proprietary licenses for paid products.

@@ -10,7 +10,7 @@
     <a href="https://github.com/azerozero/grob/actions/workflows/ci.yml"><img src="https://github.com/azerozero/grob/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
     <a href="https://github.com/azerozero/grob/releases"><img src="https://img.shields.io/github/v/release/azerozero/grob" alt="Release"></a>
     <a href="https://github.com/azerozero/grob/releases"><img src="https://img.shields.io/github/downloads/azerozero/grob/total" alt="Downloads"></a>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
   </p>
 </p>
 
@@ -171,7 +171,7 @@ Presets configure everything in one command:
 | **perf** | Pure Anthropic OAuth (Pro/Max) — auto-maps `claude-*` to native | Max subscription |
 | **ultra-cheap** | Stacked free tiers (Groq + Cerebras + Z.ai + OpenRouter `:free`) | ~€0-2/month |
 | **gdpr** | EU-only routing — Mistral, Scaleway, OVH (`region = "eu"`) | Pay-as-you-go |
-| **eu-ai-act** | EU AI Act compliant — EU providers + transparency headers + risk classification | Pay-as-you-go |
+| **eu-ai-act** | EU AI Act controls — EU providers + transparency headers + risk classification | Pay-as-you-go |
 | **eu-eco** | Strict-EU sovereign, budget — Scaleway FR + Nebius `eu-north1` | Pay-as-you-go |
 | **eu-pro** | Strict-EU sovereign, balanced — Hermes-4-405B + Qwen3.5-397B | Pay-as-you-go |
 | **eu-max** | Strict-EU sovereign, premium — preemptive 397B/405B everywhere | Pay-as-you-go |
@@ -228,19 +228,21 @@ strategy = "fan_out"
 mode = "fastest"   # or "best_quality", "weighted"
 ```
 
-## Regulatory compliance
+## Compliance controls
 
-Grob maps its features to specific regulatory articles. Every claim is [verified against the codebase](docs/reference/features.md#implementation-verification-audited-2026-03-18).
+Grob maps technical controls to regulatory evidence needs. It does not certify
+your organization by itself; operators still need legal review, provider due
+diligence, and a hardened configuration. Every implementation claim is [verified against the codebase](docs/reference/features.md#implementation-verification-audited-2026-03-18).
 
 | Regulation | Coverage |
 |------------|----------|
 | **EU AI Act** | Art. 12 (signed audit log with model/tokens), Art. 14 (risk scoring + escalation webhook), Art. 15 (injection detection, 28 languages), Art. 52 (transparency headers) |
 | **GDPR/RGPD** | PII redaction, name pseudonymization, EU-only provider routing (`gdpr = true`), canary tokens for leak detection |
-| **HDS/PCI DSS/SecNumCloud** | Hash-chained audit entries, Merkle batch signing, classification NC/C1/C2/C3, AES-256-GCM credentials at rest |
+| **HDS/PCI-style evidence** | Hash-chained audit entries, Merkle batch signing, classification NC/C1/C2/C3, AES-256-GCM credentials at rest |
 | **NIS2/DORA** | Multi-provider resilience, escalation webhooks, zero-downtime upgrades |
 
 ```bash
-grob preset apply eu-ai-act   # EU AI Act + GDPR in one command
+grob preset apply eu-ai-act   # EU AI Act + GDPR-oriented controls
 grob preset apply gdpr        # EU-only routing + DLP
 ```
 
@@ -429,6 +431,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and PR gu
 
 ## License
 
-[AGPL-3.0](LICENSE) -- Commercial licensing available. See [LICENSING.md](LICENSING.md).
+[Apache-2.0](LICENSE). Commercial Admin, Enterprise, Cloud, and support products
+are described in [LICENSING.md](LICENSING.md).
 
 Built in Rust. Copyright (c) 2025-2026 [A00 SASU](https://github.com/azerozero).

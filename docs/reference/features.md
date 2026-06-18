@@ -130,7 +130,7 @@ Grob maps its features to specific regulatory requirements. The table below show
 | Data classification | Audit entry classification levels: NC, C1, C2, C3 | `src/security/audit_log.rs` |
 | Credentials at rest | AES-256-GCM encryption for all stored secrets | `src/storage/encrypt.rs` |
 | Key management | File-based key with owner-only permissions (cross-platform) | `src/auth/token_store.rs` |
-| Security headers | OWASP-compliant HTTP response headers | `src/security/headers.rs` |
+| Security headers | OWASP-aligned HTTP response headers | `src/security/headers.rs` |
 
 ### SOC 2 / ISO 27001 / HIPAA
 

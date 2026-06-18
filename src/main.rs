@@ -1,6 +1,6 @@
 // Grob - High-performance LLM routing proxy
 // Copyright (c) 2025-2026 A00 SASU
-// License: AGPL-3.0-only
+// License: Apache-2.0
 // See LICENSE for details
 
 #[cfg(feature = "jemalloc")]

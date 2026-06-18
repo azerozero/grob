@@ -126,7 +126,7 @@ flowchart TB
 | `security::audit_log` | `src/security/audit_log.rs` | Signed audit log with ECDSA P-256 |
 | `security::cache` | `src/security/cache.rs` | Response caching (moka) |
 | `security::provider_scorer` | `src/security/provider_scorer.rs` | Adaptive provider scoring (EWMA latency, success rate) |
-| `security::risk` | `src/security/risk.rs` | Risk assessment for EU AI Act compliance |
+| `security::risk` | `src/security/risk.rs` | Risk assessment for EU AI Act controls |
 | `storage` | `src/storage/mod.rs` | Persistent storage layer: atomic files, JSONL journals (GrobStore) |
 | `storage::migrate` | `src/storage/migrate.rs` | Storage migrations |
 | `models` | `src/models/mod.rs` | Anthropic request/response types, route types |

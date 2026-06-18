@@ -36,7 +36,7 @@ FROM scratch
 LABEL org.opencontainers.image.title="grob"
 LABEL org.opencontainers.image.description="LLM Routing Proxy with DLP and compliance"
 LABEL org.opencontainers.image.source="https://github.com/azerozero/grob"
-LABEL org.opencontainers.image.licenses="AGPL-3.0"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 # Copy CA certificates for TLS (from builder)
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/

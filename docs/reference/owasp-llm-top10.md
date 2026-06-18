@@ -170,9 +170,9 @@ monthly_limit_usd = 100.0
 warning_threshold = 0.8  # Warn at 80% spend
 ```
 
-## Audit and EU AI Act compliance
+## Audit and EU AI Act controls
 
-The `[compliance]` section enables features for the EU AI Act and enterprise audit requirements:
+The `[compliance]` section enables technical controls for EU AI Act and enterprise audit evidence needs:
 
 | Feature | EU AI Act article | Config key |
 |---------|------------------|------------|
@@ -181,7 +181,7 @@ The `[compliance]` section enables features for the EU AI Act and enterprise aud
 | Risk classification (Low/Medium/High/Critical) | Article 14 | `risk_classification` |
 | Escalation webhook for high-risk events | Article 14 | `escalation_webhook` |
 
-Audit entries are cryptographically signed (ECDSA P-256 or HMAC-SHA256) and hash-chained. Each entry includes a SHA-256 digest of the previous entry, making log tampering detectable. This supports HDS, PCI DSS, and SecNumCloud compliance frameworks.
+Audit entries are cryptographically signed (ECDSA P-256 or HMAC-SHA256) and hash-chained. Each entry includes a SHA-256 digest of the previous entry, making log tampering detectable. This supports HDS, PCI DSS, and SecNumCloud-style audit evidence.
 
 ## Defense-in-depth diagram
 

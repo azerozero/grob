@@ -1,14 +1,18 @@
 ---
-status: accepted
+status: superseded
 date: 2026-06-14
 deciders: [azerozero]
 consulted: []
 informed: []
 supersedes: []
+superseded_by: [0029-relicense-core-apache]
 related: [0024-preset-as-compliance-template]
 ---
 
 # ADR-0028: Open-Core Boundary — AGPL Core vs Commercial Modules
+
+> Superseded by [ADR-0029](0029-relicense-core-apache.md), which relicenses
+> Grob Core to Apache-2.0 while keeping the open-core product boundary.
 
 ## Context and Problem Statement
 

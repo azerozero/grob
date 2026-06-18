@@ -70,8 +70,8 @@
 
 - [README](README.md): Project overview, install, quick start
 - [Changelog](CHANGELOG.md): Release history
-- [License](LICENSE): AGPL-3.0-only
-- [Licensing](LICENSING.md): Dual-license tiers and commercial options
+- [License](LICENSE): Apache-2.0
+- [Licensing](LICENSING.md): Apache-2.0 core and commercial product options
 - [Contributing](CONTRIBUTING.md): How to contribute (redirect to full guide)
 - [CLA](CLA.md): Contributor License Agreement
 - [AI Agent Context](AGENTS.md): Project context optimized for AI coding agents

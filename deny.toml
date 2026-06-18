@@ -1,4 +1,4 @@
-# cargo-deny configuration for Grob (AGPL-3.0-only)
+# cargo-deny configuration for Grob (Apache-2.0)
 # https://embarkstudios.github.io/cargo-deny/
 
 # ── Advisories ───────────────────────────────────────────────────────────────
@@ -27,8 +27,8 @@ ignore = [
 ]
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
-# Grob is AGPL-3.0-only. We allow permissive licenses (always compatible),
-# copyleft licenses compatible with AGPL-3.0, and a handful of special-purpose
+# Grob is Apache-2.0. We allow permissive licenses, weak-copyleft licenses that
+# are acceptable for this distribution model, and a handful of special-purpose
 # licenses commonly found in the Rust ecosystem.
 [licenses]
 version = 2
@@ -52,13 +52,7 @@ allow = [
     "Unlicense",
     "CC0-1.0",
 
-    # ── Copyleft (compatible with AGPL-3.0) ──
-    "AGPL-3.0-only",
-    "AGPL-3.0-or-later",
-    "GPL-3.0-only",
-    "GPL-3.0-or-later",
-    "LGPL-3.0-only",
-    "LGPL-3.0-or-later",
+    # ── Weak copyleft ──
     "MPL-2.0",
 
     # ── Ecosystem one-offs ──
@@ -66,12 +60,6 @@ allow = [
 ]
 # Minimum confidence for SPDX license detection.
 confidence-threshold = 0.8
-
-# The grob crate itself is AGPL-3.0-only; list it as an explicit exception
-# so cargo-deny never flags the workspace root.
-[[licenses.exceptions]]
-allow = ["AGPL-3.0-only"]
-name = "grob"
 
 # ── Bans ─────────────────────────────────────────────────────────────────────
 [bans]
