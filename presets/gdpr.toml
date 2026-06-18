@@ -1,12 +1,12 @@
 [meta]
-description = "EU-only GDPR compliant — Mistral, Scaleway, OVH (region=eu)"
+description = "EU-only GDPR-oriented routing — Mistral, Scaleway, OVH (region=eu)"
 
-# Preset: gdpr - EU-only GDPR compliant
+# Preset: gdpr - EU-only GDPR-oriented routing
 # Routes only through EU-hosted providers (Mistral, Scaleway, OVH)
 # Requires: MISTRAL_API_KEY (+ optionally SCALEWAY_API_KEY, OVH_API_KEY)
 #
-# All providers in this preset host data exclusively in the EU.
-# No data leaves European jurisdiction.
+# This preset keeps configured provider routing in the EU. Verify provider
+# contracts, subprocessors, and deployment settings for your compliance scope.
 
 [router]
 default = "eu-default"

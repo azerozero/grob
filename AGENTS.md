@@ -14,7 +14,7 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 - **Allocator**: jemalloc on non-MSVC targets
 - **CI**: GitHub Actions (fmt, clippy, nextest, coverage, cargo-audit, cargo-deny, cargo-hack, cargo-machete)
 - **Container**: Multi-stage build, `FROM scratch` (~6 MB image)
-- **License**: AGPL-3.0 with commercial dual-licensing
+- **License**: Apache-2.0 core with commercial Admin/Enterprise products
 
 ## Architecture
 

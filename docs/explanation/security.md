@@ -115,16 +115,16 @@ This feature is opt-in because it changes the provider selection order within a 
 
 When `[cache] enabled = true`, Grob caches responses for deterministic requests (temperature=0). Cache keys are computed from the tenant ID, model, messages, and tools. The cache uses moka (concurrent, TTL-evicting) with configurable capacity and TTL. Cache hits bypass the entire provider pipeline, returning instantly with `x-grob-cache: hit`. Only non-streaming requests are cached.
 
-## EU AI Act compliance
+## EU AI Act controls
 
-The `[compliance]` section enables features required by the EU AI Act:
+The `[compliance]` section enables controls that support EU AI Act evidence needs:
 
 - **Transparency headers**: `X-AI-Provider`, `X-AI-Model`, `X-AI-Generated`, `X-Grob-Audit-Id` on every response (Article 50)
 - **Audit enrichment**: Model name and token counts recorded in audit entries (Article 12)
 - **Risk classification**: Requests scored by DLP trigger count, block status, injection detection, and PII presence (Article 14)
 - **Escalation**: High-risk events dispatched to a configured webhook for human review
 
-The `eu-ai-act` preset enables all compliance features in one command.
+The `eu-ai-act` preset enables the related controls in one command.
 
 ## Network binding
 

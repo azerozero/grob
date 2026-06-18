@@ -1,12 +1,13 @@
 [meta]
-description = "EU AI Act compliant — EU providers + transparency headers + risk classification"
+description = "EU AI Act controls — EU providers + transparency headers + risk classification"
 
-# Preset: eu-ai-act - EU AI Act compliant
-# EU-only providers with full compliance features enabled
+# Preset: eu-ai-act - EU AI Act controls
+# EU-only providers with audit and transparency controls enabled
 # Requires: MISTRAL_API_KEY (+ optionally SCALEWAY_API_KEY)
 #
 # Enables transparency headers, model/token audit logging,
-# risk classification, and DLP for full EU AI Act compliance.
+# risk classification, and DLP. This is technical evidence support,
+# not certification or legal compliance by itself.
 
 [router]
 default = "eu-default"

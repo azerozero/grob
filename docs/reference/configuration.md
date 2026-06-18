@@ -404,7 +404,7 @@ Only deterministic requests (temperature=0) are cached. Cache hits return instan
 
 ```toml
 [compliance]
-enabled = false                    # Enable EU AI Act compliance features
+enabled = false                    # Enable EU AI Act control features
 transparency_headers = false       # Add X-AI-Provider, X-AI-Model, X-AI-Generated headers
 audit_model_name = false           # Record model name in audit entries (Article 12)
 audit_token_counts = false         # Record token counts in audit entries (Article 12)

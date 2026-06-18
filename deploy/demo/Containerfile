@@ -54,7 +54,7 @@ RUN TARGET="$(rustc -vV | sed -n 's/^host: //p')" && \
 FROM scratch
 LABEL org.opencontainers.image.title="grob-demo"
 LABEL org.opencontainers.image.description="Local patched grob for the governance demo"
-LABEL org.opencontainers.image.licenses="AGPL-3.0"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /grob /grob
 COPY --from=builder /runtime/var/lib/grob /var/lib/grob

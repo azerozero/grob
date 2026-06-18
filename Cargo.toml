@@ -2,7 +2,7 @@
 name = "grob"
 version = "0.36.75"
 edition = "2021"
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 description = "High-performance LLM routing proxy — routes to Anthropic, OpenAI, Gemini, DeepSeek, Ollama & more with streaming, tool calling, and multi-provider fallback"
 repository = "https://github.com/azerozero/grob"
 keywords = ["llm", "proxy", "router", "openai", "anthropic"]
@@ -117,7 +117,7 @@ include_dir = "0.7"
 # JWT Auth
 jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
 
-# Security (HDS/PCI/SecNumCloud compliance)
+# Security controls for HDS/PCI/SecNumCloud-style audit evidence
 p256 = { version = "0.13", features = ["ecdsa"] }   # ECDSA P-256 for audit signing
 ecdsa = "0.16"                                       # ECDSA traits
 ed25519-dalek = { version = "2", features = ["rand_core"] }  # Ed25519 for audit signing

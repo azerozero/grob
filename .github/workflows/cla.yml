@@ -171,7 +171,7 @@ jobs:
                 body: [
                   `Thank you for your contribution! Before we can merge this PR, you need to sign our [Contributor License Agreement](${CLA_URL}).`,
                   '',
-                  'The CLA ensures that A00 SASU can distribute your contribution under both the AGPL-3.0 and our commercial license. **You retain full copyright** on your contributions.',
+                  'The CLA ensures that A00 SASU can distribute your contribution under Apache-2.0 and, when needed, under commercial or proprietary licenses. **You retain full copyright** on your contributions.',
                   '',
                   'To sign, please post a comment with exactly the following text:',
                   '',

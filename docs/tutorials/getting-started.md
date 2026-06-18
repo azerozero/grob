@@ -59,7 +59,7 @@ Presets are pre-built configurations that set up providers, models, and routing 
 | `perf` | Pure Anthropic OAuth (Pro/Max), auto-maps `claude-*` to native | Subscription only |
 | `ultra-cheap` | Stacked free tiers (Groq + Cerebras + Z.ai + OpenRouter `:free`) | ~€0-2/month |
 | `gdpr` | EU-only routing (Mistral, Scaleway, OVH) + DLP | Pay-as-you-go |
-| `eu-ai-act` | EU AI Act compliant (EU providers + transparency headers) | Pay-as-you-go |
+| `eu-ai-act` | EU AI Act controls (EU providers + transparency headers) | Pay-as-you-go |
 | `eu-eco` / `eu-pro` / `eu-max` | Strict-EU sovereign tiers (budget / balanced / premium) | Pay-as-you-go |
 
 Apply the `perf` preset (simplest — one Anthropic subscription, no fallbacks):

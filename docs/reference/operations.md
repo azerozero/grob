@@ -11,8 +11,8 @@ Grob ships with 7 built-in presets. Apply with `grob preset apply <name>`.
 | `eu-eco` | Strict-EU sovereign, budget — ~75% SWE-V | Scaleway FR + Nebius eu-north1 |
 | `eu-pro` | Strict-EU sovereign, balanced — ~82% SWE-V | Hermes-4-405B + Qwen3.5-397B |
 | `eu-max` | Strict-EU sovereign, premium — ~85% SWE-V | preemptive 397B/405B everywhere |
-| `gdpr` | EU-only GDPR compliant | Mistral, Scaleway, OVH (region=eu) |
-| `eu-ai-act` | EU AI Act compliant | EU providers + transparency headers + risk classification |
+| `gdpr` | EU-only GDPR-oriented routing | Mistral, Scaleway, OVH (region=eu) |
+| `eu-ai-act` | EU AI Act controls | EU providers + transparency headers + risk classification |
 
 ### Preset management commands
 

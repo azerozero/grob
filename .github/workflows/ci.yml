@@ -812,7 +812,7 @@ jobs:
               --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
               --annotation org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
               --annotation org.opencontainers.image.version="${VERSION#v}" \
-              --annotation org.opencontainers.image.licenses="AGPL-3.0-only"
+              --annotation org.opencontainers.image.licenses="Apache-2.0"
           done
 
           # Create multi-arch manifest list
@@ -886,7 +886,7 @@ jobs:
             desc "High-performance LLM routing proxy with built-in DLP"
             homepage "https://github.com/azerozero/grob"
             version "${V}"
-            license "AGPL-3.0-only"
+            license "Apache-2.0"
 
             on_macos do
               if Hardware::CPU.arm?

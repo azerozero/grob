@@ -17,7 +17,7 @@
 | 7 | Deployment / operations | 3 | N/A | Module-level, not independently deployed |
 | 8 | Contributing guide | 2 | 0.5 | Source file table provided; project-level guide exists |
 | 9 | Changelog | 2 | 0.25 | Part of project-level changelog |
-| 10 | License | 1 | 1.0 | Project-level AGPL-3.0 |
+| 10 | License | 1 | 1.0 | Project-level Apache-2.0 |
 | 11 | CI/CD | 2 | N/A | Covered by project CI |
 | 12 | Security | 3 | 0.5 | DLP applies to all endpoints; no module-specific security doc |
 | 13 | LLM context (AGENTS.md) | 3 | 0.75 | Added to AGENTS.md and CLAUDE.md module table |

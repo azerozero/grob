@@ -1,6 +1,6 @@
 # Security Reference
 
-Complete configuration reference for Grob's security middleware: rate limiting, circuit breakers, OWASP headers, audit logging, adaptive scoring, and EU AI Act compliance.
+Complete configuration reference for Grob's security middleware: rate limiting, circuit breakers, OWASP headers, audit logging, adaptive scoring, and EU AI Act controls.
 
 All settings live under the `[security]` section of `config.toml`.
 
@@ -120,7 +120,7 @@ When set, requests exceeding the limit are rejected with HTTP `413 Payload Too L
 
 ## Audit logging
 
-Signed, hash-chained audit log for compliance (HDS, PCI DSS, SecNumCloud, EU AI Act).
+Signed, hash-chained audit log for HDS, PCI DSS, SecNumCloud, and EU AI Act-style evidence.
 
 ```toml
 [security]

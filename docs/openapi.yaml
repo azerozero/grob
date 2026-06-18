@@ -7,8 +7,8 @@ info:
     format translation, streaming, tool calling, budget enforcement, and DLP.
   version: "0.9.0"
   license:
-    name: AGPL-3.0-only
-    url: https://www.gnu.org/licenses/agpl-3.0.html
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
   contact:
     name: Grob
     url: https://github.com/azerozero/grob
