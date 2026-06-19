@@ -484,14 +484,21 @@ jobs:
           - shard: "5d"
             file: src/server/dispatch/provider_loop.rs
             mutants_shard: ""
-          # Classify engine (T-CI-0e, 2026-04-26): mod.rs (476 LoC) +
-          # classify.rs (512 LoC) split into 2 shards each by file.
+          # Classify engine: classify.rs timed out the 60 min main-push
+          # mutation budget on 2026-06-18, so split it with cargo-mutants'
+          # native shard partitioning instead of raising the job timeout.
           - shard: "6a"
             file: src/routing/classify/mod.rs
             mutants_shard: ""
           - shard: "6b"
             file: src/routing/classify/classify.rs
-            mutants_shard: ""
+            mutants_shard: "0/3"
+          - shard: "6c"
+            file: src/routing/classify/classify.rs
+            mutants_shard: "1/3"
+          - shard: "6d"
+            file: src/routing/classify/classify.rs
+            mutants_shard: "2/3"
     steps:
       - uses: step-security/harden-runner@v2
         with:
