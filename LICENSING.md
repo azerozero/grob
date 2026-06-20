@@ -42,23 +42,14 @@ interfaces belong in the open-source core; turnkey packaged workflows, managed
 operations, advanced UI, and long-term compliance evidence products can be
 commercial.
 
-## Pricing (indicative)
+## Commercial Tiers
 
-| Plan | Use case | Starting price |
-|------|----------|---------------:|
-| **Developer** | Local workstation, evaluation, development | Free |
-| **Community** | Apache-2.0 self-managed use, any size | Free |
-| **Pro** | Small production deployment with support | 5 000 EUR/year |
-| **Business** | Production deployment with support and procurement terms | 12 000 EUR/year |
-| **Enterprise** | Regulated or larger deployments + Enterprise modules | from 25 000 EUR/year |
-| **Regulated / Defense** | Source review under NDA, air-gap, security package | from 40 000 EUR/year |
-| **Integrator** | Deploy Grob for end clients (ESN / MSSP) | from 20 000 EUR/year + per-client terms |
-| **OEM** | Embed Grob with redistribution and support terms | from 50 000 EUR/year |
-| **Grob Cloud** | Dedicated hosted tenant | from 1 000 EUR/month |
+Commercial Pro / Business / Enterprise / Cloud tiers — with support, procurement
+terms, managed operations, and redistribution or OEM rights — are available on
+request. Pricing depends on deployment size, support level, and regulatory
+requirements.
 
-Prices are indicative and may vary with deployment size, support level,
-regulatory requirements, managed operations, and redistribution rights. Quoted
-prices are locked for 12 months from contract signature.
+Contact **licensing@a00.fr** for current tiers and quotes.
 
 ## Compliance Wording
 
@@ -108,10 +99,10 @@ terms, managed deployments, Enterprise modules, or Admin/Cloud products.
 
 No. Apache-2.0 places no company-size or user-count limit on Grob Core.
 
-### We are a defense contractor and need to audit the code.
+### We need to audit the code under NDA or run air-gapped.
 
-The **Regulated / Defense** tier provides source review under NDA, an air-gap
-bundle, and a security package (SBOM / signatures / offline updates). Contact
+Source review under NDA, an air-gap bundle, and a security package
+(SBOM / signatures / offline updates) are available on request. Contact
 licensing@a00.fr.
 
 ## Contact
