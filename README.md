@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">Grob</h1>
   <p align="center">
-    <strong>Your LLM traffic leaks data. Grob stops it.</strong>
+    <strong>Don't give your coding agents a blank check &mdash; on spend or on secrets.</strong>
   </p>
   <p align="center">
     A Rust LLM control plane with inline DLP, routing, budgets, and signed audit logs.
@@ -18,7 +18,7 @@
 
 **Grob** is a high-performance LLM control plane that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, enforces budgets, records signed audit logs, and fits in a 6 MB container with zero dependencies.
 
-> **~90 µs pure overhead** with full DLP + routing + caching + rate limiting -- [40x faster than LiteLLM, every feature measured individually](docs/reference/benchmarks.md).
+> **~90 µs overhead** with DLP, routing, caching, and rate limiting all on the hot path -- sub-millisecond where LiteLLM sits in the milliseconds. Bare proxies post lower numbers by running none of these. [Full methodology and competitor table](docs/reference/benchmarks.md).
 
 ```mermaid
 flowchart LR
@@ -64,7 +64,7 @@ grob setup        # writes ~/.grob/config.toml (override with GROB_CONFIG or --c
 grob exec -- claude
 ```
 
-That's it. Grob auto-starts, routes traffic, and stops when your tool exits. To check a long-running instance, run `grob status` or `curl http://[::1]:13456/health`.
+That's it. Grob auto-starts, routes traffic, and stops when your tool exits. To check a long-running instance, run `grob status` or `curl http://[::1]:13456/health` (use `http://127.0.0.1:13456/health` on IPv4-only setups).
 
 ## Local demo -- DLP, signed audit, and Grafana
 
@@ -94,7 +94,7 @@ drifting service agent. The walkthrough is in
 pre-flight checklist is in
 [`docs/demos/showcase-rssi/PREFLIGHT.md`](docs/demos/showcase-rssi/PREFLIGHT.md).
 
-## DLP -- secrets never reach the provider
+## DLP -- secrets screened before they reach the provider
 
 Every request and response passes through the DLP engine before leaving your machine:
 
@@ -257,6 +257,15 @@ grob preset apply gdpr        # EU-only routing + DLP
 - **MCP tool matrix** -- JSON-RPC server for tool-calling orchestration
 
 See the [full feature matrix](docs/reference/features.md) for rate limiting, JWT/OAuth, log export, zero-downtime upgrades, record & replay, and more.
+
+## Known limitations
+
+Grob is honest about what it is:
+
+- **DLP is a guardrail, not a cryptographic boundary.** It redacts secrets/PII and blocks common prompt-injection and exfiltration patterns before egress. A determined attempt can still get through &mdash; pair it with isolation, code review, and least-privilege secrets handling.
+- **Spend caps are enforced per upstream call, not token-by-token.** A multi-request agent run is stopped before the next call once over budget; a single in-flight streamed response can still overrun its own cost.
+- **Compliance controls are not certification.** Grob maps technical controls to audit-evidence needs; it does not make your organization compliant by itself. Legal review and provider due diligence are still on you.
+- **Young project, small team.** The core is public, Apache-2.0, and actively developed &mdash; but this is early software. Pilot it before betting production on it, and open an issue when something breaks.
 
 ## Configuration
 

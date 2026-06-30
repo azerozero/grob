@@ -1,6 +1,6 @@
 # Benchmarks
 
-> **90 µs overhead** with routing + auth + rate limiting + cache + DLP on 4 vCPU ARM — 40x faster than LiteLLM, with more features than Bifrost.
+> **90 µs overhead** with routing + auth + rate limiting + cache + DLP on 4 vCPU ARM — sub-millisecond with the full stack on the hot path. LiteLLM measures in milliseconds; bare proxies like Bifrost post lower raw numbers only by running none of these features (see the comparison table below, columns marked `—`).
 
 Run with `grob bench --concurrency` (c=vCPU, 5 sec/scenario, mock TCP backend on localhost). The numbers below were captured on the project's CI baseline; see [`Cargo.toml`](../../Cargo.toml) for the version they correspond to. Re-run locally to compare on your hardware.
 
