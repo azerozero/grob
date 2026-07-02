@@ -1,0 +1,91 @@
+# Fireworks GLM-5.2 via OpenAI-compatible Chat Completions.
+#
+# Fireworks API shape:
+#   POST https://api.fireworks.ai/inference/v1/chat/completions
+#   model = "accounts/fireworks/models/glm-5p2"
+#
+# Keep the API key out of docs/config history:
+#   export FIREWORKS_API_KEY=fw_...
+# or use a local encrypted secret and replace api_key with:
+#   api_key = "secret:fireworks"
+
+[server]
+host = "127.0.0.1"
+port = 13456
+log_level = "info"
+
+[server.timeouts]
+api_timeout_ms = 600000
+connect_timeout_ms = 10000
+
+[pricing]
+token_counting = "estimate"
+
+[cache]
+enabled = true
+max_capacity = 2000
+ttl_secs = 3600
+max_entry_bytes = 4194304
+simhash_threshold = 0
+
+[[providers]]
+name = "fireworks"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "$FIREWORKS_API_KEY"
+base_url = "https://api.fireworks.ai/inference/v1"
+enabled = true
+models = ["accounts/fireworks/models/glm-5p2"]
+
+[[models]]
+name = "default-model"
+context_window_tokens = 131072
+
+[[models.mappings]]
+provider = "fireworks"
+actual_model = "accounts/fireworks/models/glm-5p2"
+priority = 1
+
+[[models]]
+name = "think-model"
+context_window_tokens = 131072
+
+[[models.mappings]]
+provider = "fireworks"
+actual_model = "accounts/fireworks/models/glm-5p2"
+priority = 1
+
+[[models]]
+name = "background-model"
+context_window_tokens = 131072
+
+[[models.mappings]]
+provider = "fireworks"
+actual_model = "accounts/fireworks/models/glm-5p2"
+priority = 1
+
+[[models]]
+name = "search-model"
+context_window_tokens = 131072
+
+[[models.mappings]]
+provider = "fireworks"
+actual_model = "accounts/fireworks/models/glm-5p2"
+priority = 1
+
+[[models]]
+name = "glm-5.2"
+context_window_tokens = 131072
+
+[[models.mappings]]
+provider = "fireworks"
+actual_model = "accounts/fireworks/models/glm-5p2"
+priority = 1
+
+[router]
+default = "default-model"
+think = "think-model"
+background = "background-model"
+websearch = "search-model"
+auto_map_regex = "^claude-"
+background_regex = "(?i)claude.*haiku"
