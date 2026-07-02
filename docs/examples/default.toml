@@ -33,21 +33,21 @@ priority = 1
 provider = "kimi-for-coding"
 
 [[providers]]
-api_key = "your-zai-api-key-here"
+api_key = "$ZAI_API_KEY"
 enabled = true
 models = []
 name = "zai coding plan"
 provider_type = "z.ai"
 
 [[providers]]
-api_key = "your-openrouter-api-key-here"
+api_key = "$OPENROUTER_API_KEY"
 enabled = true
 models = []
 name = "openrouter"
 provider_type = "openrouter"
 
 [[providers]]
-api_key = "your-kimi-api-key-here"
+api_key = "$KIMI_API_KEY"
 base_url = "https://api.kimi.com/coding/"
 enabled = true
 models = []

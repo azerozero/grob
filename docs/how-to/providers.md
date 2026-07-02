@@ -126,6 +126,33 @@ api_key = "$OPENAI_API_KEY"
 
 ---
 
+## Fireworks
+
+Fireworks exposes OpenAI-compatible chat completions at `https://api.fireworks.ai/inference/v1`.
+Use the full Fireworks model id in mappings.
+
+```toml
+[[providers]]
+name = "fireworks"
+provider_type = "openai"
+api_key = "$FIREWORKS_API_KEY"
+base_url = "https://api.fireworks.ai/inference/v1"
+models = ["accounts/fireworks/models/glm-5p2"]
+
+[[models]]
+name = "glm-5.2"
+context_window_tokens = 131072
+
+[[models.mappings]]
+provider = "fireworks"
+actual_model = "accounts/fireworks/models/glm-5p2"
+priority = 1
+```
+
+See [fireworks-glm52.toml](../examples/fireworks-glm52.toml) for a complete Grob profile.
+
+---
+
 ## DeepSeek (direct API)
 
 ```toml

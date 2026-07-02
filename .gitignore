@@ -32,12 +32,12 @@ cleancode-plan.md
 # Local personal grob config (committed example lives in docs/examples/)
 grob-openai.toml
 grob-chatgpt.toml
-codeql-db/
-codeql-results.sarif
+grob-gpt55.toml
+grob-codex-proxy.toml
+grob-glm52-fireworks.toml
 codeql-db/
 codeql-results.sarif
 docs/reviews/
-grob-codex-proxy.toml
 
 # Generated demo recordings
 docs/demos/showcase-rssi/demo.cast
