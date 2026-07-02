@@ -493,24 +493,29 @@ fn parse_usage_json(data: &str, pointer: &str, usage: &mut StreamUsage) {
         }
         // message_start carries the authoritative input; message_delta repeats
         // it only when message_start was absent.
-        if input > 0 && (usage.input_tokens == 0 || pointer == "/message/usage") {
-            usage.input_tokens = input;
+        if input > 0 {
+            if usage.input_tokens == 0 || pointer == "/message/usage" {
+                usage.input_tokens = input;
+            }
+            usage.saw_usage = true;
         }
-        usage.saw_usage = true;
     }
     if let Some(output) = u.get("output_tokens").and_then(serde_json::Value::as_u64) {
         // output_tokens is cumulative; take the max so repeated/out-of-order
         // deltas never undercount.
-        usage.output_tokens = usage
-            .output_tokens
-            .max(u32::try_from(output).unwrap_or(u32::MAX));
-        usage.saw_usage = true;
+        let output = u32::try_from(output).unwrap_or(u32::MAX);
+        if output > 0 {
+            usage.output_tokens = usage.output_tokens.max(output);
+            usage.saw_usage = true;
+        }
     }
-    if let Some(cache_creation) = token_u32(u.get("cache_creation_input_tokens")) {
+    if let Some(cache_creation) =
+        token_u32(u.get("cache_creation_input_tokens")).filter(|tokens| *tokens > 0)
+    {
         usage.cache_creation_input_tokens = usage.cache_creation_input_tokens.max(cache_creation);
         usage.saw_usage = true;
     }
-    if let Some(cache_read) = cache_read {
+    if let Some(cache_read) = cache_read.filter(|tokens| *tokens > 0) {
         usage.cache_read_input_tokens = usage.cache_read_input_tokens.max(cache_read);
         usage.saw_usage = true;
     }
@@ -542,11 +547,11 @@ fn billed_input_tokens(usage: &StreamUsage) -> u32 {
 
 /// Resolves the `(input, output)` token counts to bill for a finished stream.
 ///
-/// Provider-reported usage is authoritative. Only when no usage was seen **and**
-/// token counting is in estimate mode does this fall back to the pre-captured
-/// input estimate plus an output estimate from accumulated text. Returns `None`
-/// when nothing should be billed (api mode with no usage), matching the
-/// non-streaming path.
+/// Provider-reported usage is authoritative. Only when no non-zero usage was
+/// seen **and** token counting is in estimate mode does this fall back to the
+/// pre-captured input estimate plus an output estimate from accumulated text.
+/// Returns `None` when nothing should be billed (api mode with no usable
+/// provider counts), matching the non-streaming path.
 fn resolve_billed_tokens(
     usage: &StreamUsage,
     estimate_mode: bool,
@@ -560,7 +565,7 @@ fn resolve_billed_tokens(
         tracing::debug!(
             estimated_input_tokens,
             estimated_output_tokens = output,
-            "streaming provider omitted usage; billing from local token estimate"
+            "streaming provider omitted usable usage; billing from local token estimate"
         );
         return Some((estimated_input_tokens, output));
     }
@@ -823,6 +828,24 @@ mod tests {
         // "hello world" = 11 bytes; no message_* usage seen.
         assert!(!usage.saw_usage);
         assert_eq!(usage.output_bytes, 11);
+    }
+
+    #[test]
+    fn zero_usage_with_text_falls_back_to_estimate() {
+        let sse = concat!(
+            "event: message_start\n",
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello world\"}}\n\n",
+            "event: message_delta\n",
+            "data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}\n\n",
+        );
+        let usage = scan_all(sse);
+
+        assert!(!usage.saw_usage);
+        assert_eq!(usage.output_bytes, 11);
+        assert_eq!(resolve_billed_tokens(&usage, true, 25), Some((25, 3)));
+        assert_eq!(resolve_billed_tokens(&usage, false, 25), None);
     }
 
     #[test]
