@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.76](https://github.com/azerozero/grob/compare/v0.36.75...v0.36.76) - 2026-07-02
+
+### Fixed
+
+- *(deps)* bump anyhow 1.0.103 and quinn-proto 0.11.15 for RUSTSEC advisories
+
+### Other
+
+- *(readme)* soften absolute claims and de-recycle benchmark headline
+- *(licensing)* replace indicative pricing grid with contact
+- split classify mutation shard
+- *(license)* relicense core to Apache-2.0
+- tighten demo gif crop
+- crop readme demo gif
+- add demo gif to readme
+- add local demo to readme
+- polish demo visuals and governance copy
+
 ## [0.36.75](https://github.com/azerozero/grob/compare/v0.36.74...v0.36.75) - 2026-06-16
 
 ### Fixed
