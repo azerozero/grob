@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.79](https://github.com/azerozero/grob/compare/v0.36.78...v0.36.79) - 2026-07-24
+
+### Added
+
+- *(openai)* replay encrypted reasoning across Codex turns
+
+### Other
+
+- repoint two rotted external links
+- untrack the local debug config that reached main in #410
+
 ## [0.36.78](https://github.com/azerozero/grob/compare/v0.36.77...v0.36.78) - 2026-07-24
 
 ### Fixed
