@@ -114,12 +114,26 @@ jobs:
   # =========================================================================
   # Stage 1: Parallel lint / check gate
   # =========================================================================
-  fmt:
-    name: Rustfmt
+  # The local pre-commit/pre-push gate, replayed verbatim in CI.
+  #
+  # `prek.toml` is the single source of truth: this job runs the very hooks a
+  # developer runs, so "passes locally, fails in CI" can no longer be a
+  # version-skew or a config-drift question. It replaces the former Rustfmt,
+  # Security Audit, Cargo Deny, Doc Coverage and Unused Dependencies jobs, whose
+  # commands it now inherits from prek.toml instead of restating them here.
+  #
+  # It also closes a real gap: the six builtin hygiene hooks (trailing
+  # whitespace, end-of-file, TOML/YAML validity, merge-conflict markers, line
+  # endings) previously ran ONLY on machines with prek installed, so a
+  # contributor without the hooks could land any of them.
+  #
+  # Deliberately NOT gated on the `rust` path filter — the hygiene hooks apply
+  # to markdown, YAML and TOML too.
+  prek:
+    name: Quality gate (prek)
     needs: [changes]
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: step-security/harden-runner@v2
         with:
@@ -127,8 +141,41 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
-      - run: cargo fmt --all -- --check
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: prek
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # The hooks are `language = "system"`, so their tools must be on PATH.
+      # install-action serves prebuilt binaries, so this costs seconds.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-machete,cargo-audit
+      - uses: j178/prek-action@v2
+        with:
+          # --stage pre-push selects every hook: the pre-push-only ones plus the
+          # unstaged (all-stage) defaults.
+          #
+          # gitleaks     — the hook scans the *staged* diff, which does not exist
+          #                in CI; the dedicated job below scans the commit range.
+          # cargo-sweep  — prunes a developer's target/ dir; meaningless here.
+          # lychee-offline — the Docs Lint workflow runs the online check, a
+          #                strict superset, and lychee is not in install-action.
+          extra-args: >-
+            --all-files
+            --stage pre-push
+            --skip gitleaks
+            --skip cargo-sweep
+            --skip lychee-offline
+      # `cargo fmt --all --` rewrites files and still exits 0, so a formatting
+      # violation would otherwise pass CI silently. This also catches the
+      # builtin fixers if they ever stop reporting their own edits.
+      - name: Fail if any hook rewrote a file
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::A prek hook modified files. Run 'prek run --all-files' locally and commit the result."
+            exit 1
+          fi
 
   clippy:
     name: Clippy (${{ matrix.os }})
@@ -139,7 +186,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Linux clippy is covered by the prek job above; these two are the
+        # platform-specific coverage prek cannot give from one runner.
+        os: [macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -157,21 +206,6 @@ jobs:
             cargo clippy --all-targets -- -D warnings
           fi
         shell: bash
-
-  audit:
-    name: Security Audit
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@v6
-      - uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
   gitleaks:
     name: Gitleaks
@@ -210,65 +244,6 @@ jobs:
               gitleaks detect --source . --log-opts "${BEFORE}..${{ github.sha }}" --verbose
             fi
           fi
-
-  deny:
-    name: Cargo Deny
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@v6
-      - uses: EmbarkStudios/cargo-deny-action@v2
-
-  docs:
-    name: Doc Coverage
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: docs
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Check missing doc comments
-        env:
-          RUSTDOCFLAGS: "-W missing-docs"
-        run: |
-          WARNINGS=$(cargo doc --no-deps 2>&1 | grep -c "^warning: missing documentation" || true)
-          if [ "$WARNINGS" -gt 0 ]; then
-            echo "::error::Found $WARNINGS undocumented public items"
-            cargo doc --no-deps 2>&1 | grep "^warning: missing documentation" -A2
-            exit 1
-          fi
-          echo "All public items are documented"
-
-  machete:
-    name: Unused Dependencies
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: step-security/harden-runner@v2
-        with:
-          egress-policy: audit
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: machete
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: bnjbvr/cargo-machete@v0.9.1 # pinned — update manually
 
   coverage:
     name: Coverage
@@ -349,9 +324,8 @@ jobs:
     name: Test Ubuntu (shard ${{ matrix.shard }}/4)
     needs:
       - changes
-      - fmt
+      - prek
       - clippy
-      - deny
     if: |
       always() &&
       (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') &&
@@ -401,9 +375,8 @@ jobs:
     name: Test (${{ matrix.os }})
     needs:
       - changes
-      - fmt
+      - prek
       - clippy
-      - deny
     if: |
       always() &&
       (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') &&
@@ -1119,14 +1092,9 @@ jobs:
     if: always()
     needs:
       - changes
-      - fmt
+      - prek
       - clippy
-      - audit
       - gitleaks
-      - deny
-      - docs
-      - machete
-
       - coverage
       - feature-check
       - test-ubuntu
@@ -1147,14 +1115,9 @@ jobs:
           # preemption) are both non-fatal — a benign cancellation must never
           # block a release. A real regression still surfaces as "failure".
           results=( \
-            "${{ needs.fmt.result }}" \
+            "${{ needs.prek.result }}" \
             "${{ needs.clippy.result }}" \
-            "${{ needs.audit.result }}" \
             "${{ needs.gitleaks.result }}" \
-            "${{ needs.deny.result }}" \
-            "${{ needs.docs.result }}" \
-            "${{ needs.machete.result }}" \
-
             "${{ needs.coverage.result }}" \
             "${{ needs.feature-check.result }}" \
             "${{ needs.test-ubuntu.result }}" \
@@ -1179,14 +1142,9 @@ jobs:
       checks: write  # job summary
     needs:
       - changes
-      - fmt
+      - prek
       - clippy
-      - audit
       - gitleaks
-      - deny
-      - docs
-      - machete
-
       - coverage
       - feature-check
       - test-ubuntu
@@ -1215,11 +1173,10 @@ jobs:
         with:
           script: |
             const jobs = [
-              'changes', 'fmt', 'clippy', 'audit', 'gitleaks', 'deny',
-              'docs', 'machete', 'coverage', 'feature-check',
-              'test-ubuntu', 'test-other', 'build', 'container',
-              'e2e', 'load', 'release', 'homebrew', 'homebrew-test',
-              'validate-yaml', 'required'
+              'changes', 'prek', 'clippy', 'gitleaks', 'coverage',
+              'feature-check', 'test-ubuntu', 'test-other', 'build',
+              'container', 'e2e', 'load', 'release', 'homebrew',
+              'homebrew-test', 'validate-yaml', 'required'
             ];
 
             const needs = ${{ toJSON(needs) }};
