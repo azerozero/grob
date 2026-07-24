@@ -29,12 +29,11 @@ LICENSE-IDENTIFICATION.md
 
 # Configuration
 cleancode-plan.md
-# Local personal grob config (committed example lives in docs/examples/)
-grob-openai.toml
-grob-chatgpt.toml
-grob-gpt55.toml
-grob-codex-proxy.toml
-grob-glm52-fireworks.toml
+# Local personal grob configs at the repo root (committed examples live in
+# docs/examples/ and deploy/). Globbed rather than enumerated: the per-file list
+# it replaces had already missed grob-openai-logged.toml, which reached main in
+# #410 carrying one operator's account entitlements as comments.
+/grob-*.toml
 codeql-db/
 codeql-results.sarif
 docs/reviews/
