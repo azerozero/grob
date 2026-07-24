@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.77](https://github.com/azerozero/grob/compare/v0.36.76...v0.36.77) - 2026-07-24
+
+### Fixed
+
+- *(deps)* bump crossbeam-epoch to 0.9.20 for RUSTSEC-2026-0204
+- *(security)* take the audit batch buffer instead of draining it
+
 ## [0.36.76](https://github.com/azerozero/grob/compare/v0.36.75...v0.36.76) - 2026-07-02
 
 ### Fixed
