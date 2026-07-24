@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.78](https://github.com/azerozero/grob/compare/v0.36.77...v0.36.78) - 2026-07-24
+
+### Fixed
+
+- *(deps)* bump age to 0.12 to drop the unmaintained proc-macro-error2
+- *(deps)* bump the OpenTelemetry stack to 0.32 for GHSA-w9wp-h8wv-79jx
+
+### Other
+
+- Merge pull request #460 from azerozero/chore/otel-0-32
+- *(security)* drop advisory ignores no longer matching any crate
+
 ## [0.36.77](https://github.com/azerozero/grob/compare/v0.36.76...v0.36.77) - 2026-07-24
 
 ### Fixed
