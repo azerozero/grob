@@ -47,15 +47,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # OpenTelemetry (optional, for distributed tracing export)
-opentelemetry = { version = "0.28", optional = true }
-opentelemetry_sdk = { version = "0.28", features = ["rt-tokio"], optional = true }
+opentelemetry = { version = "0.32", optional = true }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
 # default-features=false drops the `http-proto` + `reqwest-blocking-client`
 # defaults (which pull opentelemetry-http + reqwest/native-tls/openssl). grob
 # exports over gRPC/tonic only, so it needs just grpc-tonic + trace + metrics.
-opentelemetry-otlp = { version = "0.28", default-features = false, features = ["grpc-tonic", "trace", "metrics"], optional = true }
-tracing-opentelemetry = { version = "0.29", optional = true }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["grpc-tonic", "trace", "metrics"], optional = true }
+tracing-opentelemetry = { version = "0.33", optional = true }
 # Bridges `tracing` events into OTLP logs (the 3rd OTel signal). gRPC/tonic only.
-opentelemetry-appender-tracing = { version = "0.28", optional = true }
+opentelemetry-appender-tracing = { version = "0.32", optional = true }
 
 # Error Handling
 anyhow = "1"
