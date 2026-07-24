@@ -483,7 +483,7 @@ impl AuditLog {
 
     /// Builds the Merkle tree, signs the root, and writes all buffered entries.
     fn flush_batch(&self, state: &mut AuditLogState) -> Result<()> {
-        let batch: Vec<PendingEntry> = state.batch_buffer.drain(..).collect();
+        let batch: Vec<PendingEntry> = std::mem::take(&mut state.batch_buffer);
         state.batch_start = Instant::now();
 
         if batch.is_empty() {
