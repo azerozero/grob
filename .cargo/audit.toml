@@ -9,8 +9,4 @@ ignore = [
     # axum-server 0.8 migrates to rustls-pki-types, but rustls-acme 0.12 pins 0.7.
     # Track: https://github.com/tokio-rs/axum/issues — bump when rustls-acme supports 0.8.
     "RUSTSEC-2025-0134",
-    # proc-macro-error2: unmaintained build-time proc-macro, pulled transitively
-    # via age -> i18n-embed-fl. Compile-time only (not in the runtime binary), no
-    # safe upgrade available. Drop when age/i18n-embed-fl migrate off it.
-    "RUSTSEC-2026-0173",
 ]

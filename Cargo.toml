@@ -106,7 +106,7 @@ dashmap = "6"
 arc-swap = "1"
 
 # Encrypted audit export (envelope encryption, multi-recipient)
-age = { version = "0.11", features = ["armor"] }
+age = { version = "0.12", features = ["armor"] }
 
 # Caching (high-performance concurrent cache with TTL)
 moka = { version = "0.12", features = ["future", "sync"] }
