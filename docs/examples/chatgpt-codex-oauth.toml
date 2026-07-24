@@ -31,10 +31,16 @@ models = []
 service_tier = "priority"        # ~1.5x speed on gpt-5.5/gpt-5.4; ignored elsewhere. Remove for standard.
 
 # Optional Codex tuning (Responses path), defaults shown — omit to use them:
-#   codex = { priority_models = ["gpt-5.5", "gpt-5.4"], reasoning_auto_map = false, reasoning_xhigh_min_budget = 16000 }
+#   codex = { priority_models = ["gpt-5.5", "gpt-5.4"], reasoning_auto_map = false, reasoning_xhigh_min_budget = 16000, reasoning_continuity = false }
 # priority_models get the "priority" tier + `xhigh` effort (prefix-matched, -mini
 # excluded). reasoning_auto_map = true maps the thinking budget → effort (legacy).
 # An explicit `reasoning_effort = "low".."xhigh"` overrides all of this.
+#
+# reasoning_continuity = true keeps the backend's encrypted reasoning between
+# turns and replays it ahead of the tool call that produced it, so the model
+# resumes its own chain of thought through an agent loop instead of restarting
+# it every turn. Costs extra input tokens per turn plus a few KB of memory per
+# tool call (in-memory, 1 hour TTL, lost on restart). Off by default.
 
 # Default dev model: gpt-5.5. Set `default = "codex"` under [router] for the coding model.
 [[models]]
