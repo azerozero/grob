@@ -76,6 +76,20 @@ Converts OpenAI SSE chunks to Anthropic SSE format using stateful `StreamTransfo
 
 **Codex models**: Detected via model name containing "codex". Uses `/v1/responses` endpoint (or `/codex/responses` for OAuth). System prompt injected from `src/providers/openai/codex_instructions.md` (verbatim Codex CLI prompt, embedded via `include_str!`).
 
+**Reasoning continuity** (`src/providers/openai/reasoning_store.rs`, opt-in via `codex.reasoning_continuity`):
+
+The Codex backend runs under `store = false` and returns its reasoning state as opaque `encrypted_content` on `reasoning` output items, retaining nothing server-side. Codex CLI replays those items each turn because it owns the conversation in native Responses format; grob only sees Anthropic-format history, which has no field to carry them.
+
+With `reasoning_continuity = true`, grob keeps its own copy:
+
+| Stage | Behaviour |
+|-------|-----------|
+| Capture | `response.output_item.done` items of type `reasoning` are buffered, then anchored to the `call_id` of the `function_call` that follows them |
+| Store | Written at stream end, keyed `<prompt_cache_key>:<call_id>` — in-memory, 1 hour TTL, 20 000 entries |
+| Replay | Spliced into `input[]` immediately before the matching `function_call`, verbatim |
+
+The `call_id` is the only anchor that survives the round trip (it becomes `tool_use.id` on the Anthropic side). Reasoning without `encrypted_content`, and reasoning that closes a text-only turn, are both dropped — the backend rejects a reasoning item placed anywhere but directly before its own call. Reasoning is lost on restart and never persisted to disk.
+
 **OpenRouter**: Uses `openai` provider type with custom headers (`HTTP-Referer`, `X-Title`).
 
 ### GeminiProvider

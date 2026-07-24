@@ -193,4 +193,5 @@ let response = reqwest::Client::new()
 ## Related
 
 - [OpenCode](https://github.com/sst/opencode) - Inspiration for this implementation
-- [Anthropic OAuth Docs](https://docs.anthropic.com/claude/reference/oauth)
+- [Using Claude Code with a Pro or Max plan](https://support.claude.com/en/articles/11145838-using-claude-code-with-your-pro-or-max-plan) - What a subscription login covers
+- [RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636) - OAuth 2.0 PKCE, the flow implemented here

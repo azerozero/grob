@@ -490,6 +490,43 @@ fn emit_responses_fc_args(
     }
 }
 
+/// Buffers a completed `reasoning` item until a tool call anchors it.
+///
+/// Items without `encrypted_content` are skipped: the plaintext summary is
+/// already relayed as `thinking` deltas, and replaying a reasoning item the
+/// backend cannot decrypt buys nothing.
+fn collect_reasoning_item(state: &mut StreamTransformState, item: &serde_json::Value) {
+    if !state.capture_reasoning {
+        return;
+    }
+    let has_encrypted = item
+        .get("encrypted_content")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty());
+    if has_encrypted {
+        state.pending_reasoning.push(item.clone());
+    }
+}
+
+/// Anchors the buffered reasoning items to the function call they preceded.
+///
+/// The `call_id` is the only identifier that survives the round trip through
+/// Anthropic's format (as `tool_use.id`), so it is what the next turn will use
+/// to find these items again.
+fn anchor_pending_reasoning(state: &mut StreamTransformState, item: &serde_json::Value) {
+    if !state.capture_reasoning || state.pending_reasoning.is_empty() {
+        return;
+    }
+    let Some(call_id) = item.get("call_id").and_then(|v| v.as_str()) else {
+        // No anchor: drop rather than replay these items at a guessed position,
+        // which the backend rejects with a 400.
+        state.pending_reasoning.clear();
+        return;
+    };
+    let items = std::mem::take(&mut state.pending_reasoning);
+    state.captured_reasoning.push((call_id.to_string(), items));
+}
+
 /// Closes a streaming Codex function-call block on `output_item.done`.
 ///
 /// If the `added`/`delta` events were never seen (a fully-buffered call), the
@@ -975,8 +1012,13 @@ pub(crate) fn transform_codex_event_to_anthropic_sse(
         ty if ty.ends_with("function_call_arguments.done") => {}
         "response.output_item.done" => {
             if let Some(item) = json.get("item") {
-                if item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
-                    emit_responses_fc_done(&mut output, state, &json, item);
+                match item.get("type").and_then(|t| t.as_str()) {
+                    Some("function_call") => {
+                        anchor_pending_reasoning(state, item);
+                        emit_responses_fc_done(&mut output, state, &json, item);
+                    }
+                    Some("reasoning") => collect_reasoning_item(state, item),
+                    _ => {}
                 }
             }
         }
@@ -1102,6 +1144,162 @@ mod codex_stream_tests {
             out.push_str(&transform(event, "msg_test", "gpt-5.5", &mut state).unwrap());
         }
         out
+    }
+
+    /// Runs a Responses stream with reasoning capture on, returning the state
+    /// so tests can assert on what was anchored.
+    fn run_capturing(events: &[&str]) -> StreamTransformState {
+        let mut state = StreamTransformState {
+            capture_reasoning: true,
+            ..Default::default()
+        };
+        for event in events {
+            transform(event, "msg_test", "gpt-5.5", &mut state).unwrap();
+        }
+        state
+    }
+
+    /// A reasoning `output_item.done` as the Codex backend emits it.
+    fn reasoning_event(id: &str, encrypted: Option<&str>) -> String {
+        let mut item = serde_json::json!({"type": "reasoning", "id": id});
+        if let Some(enc) = encrypted {
+            item["encrypted_content"] = serde_json::json!(enc);
+        }
+        serde_json::json!({
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": item,
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn reasoning_is_anchored_to_the_call_it_precedes() {
+        let state = run_capturing(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            &reasoning_event("rs_1", Some("blob-1")),
+            r#"{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_abc","name":"Bash","arguments":"{}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        assert_eq!(state.captured_reasoning.len(), 1);
+        let (call_id, items) = &state.captured_reasoning[0];
+        assert_eq!(call_id, "call_abc");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["encrypted_content"], "blob-1");
+        assert!(state.pending_reasoning.is_empty());
+    }
+
+    #[test]
+    fn each_call_gets_only_the_reasoning_that_preceded_it() {
+        let state = run_capturing(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            &reasoning_event("rs_1", Some("blob-1")),
+            r#"{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_one","name":"Bash","arguments":"{}"}}"#,
+            &reasoning_event("rs_2", Some("blob-2")),
+            r#"{"type":"response.output_item.done","output_index":3,"item":{"type":"function_call","call_id":"call_two","name":"Bash","arguments":"{}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        assert_eq!(state.captured_reasoning.len(), 2);
+        assert_eq!(state.captured_reasoning[0].0, "call_one");
+        assert_eq!(
+            state.captured_reasoning[0].1[0]["encrypted_content"],
+            "blob-1"
+        );
+        assert_eq!(state.captured_reasoning[1].0, "call_two");
+        assert_eq!(
+            state.captured_reasoning[1].1[0]["encrypted_content"],
+            "blob-2"
+        );
+    }
+
+    #[test]
+    fn several_reasoning_items_before_one_call_stay_grouped_in_order() {
+        let state = run_capturing(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            &reasoning_event("rs_1", Some("blob-1")),
+            &reasoning_event("rs_2", Some("blob-2")),
+            r#"{"type":"response.output_item.done","output_index":2,"item":{"type":"function_call","call_id":"call_abc","name":"Bash","arguments":"{}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        let (_, items) = &state.captured_reasoning[0];
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["id"], "rs_1");
+        assert_eq!(items[1]["id"], "rs_2");
+    }
+
+    #[test]
+    fn reasoning_without_encrypted_content_is_not_captured() {
+        // The plaintext summary already reaches the client as thinking deltas,
+        // and the backend cannot resume from an item it did not encrypt.
+        let state = run_capturing(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            &reasoning_event("rs_1", None),
+            r#"{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_abc","name":"Bash","arguments":"{}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        assert!(state.captured_reasoning.is_empty());
+    }
+
+    #[test]
+    fn trailing_reasoning_with_no_call_is_dropped() {
+        // Nothing in the Anthropic history can anchor it, and replaying it at a
+        // guessed position is a backend 400.
+        let state = run_capturing(&[
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_text.delta","output_index":0,"delta":"done"}"#,
+            &reasoning_event("rs_1", Some("blob-1")),
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ]);
+
+        assert!(state.captured_reasoning.is_empty());
+    }
+
+    #[test]
+    fn capture_stays_off_unless_reasoning_continuity_is_enabled() {
+        let mut state = StreamTransformState::default();
+        for event in [
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            &reasoning_event("rs_1", Some("blob-1")),
+            r#"{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_abc","name":"Bash","arguments":"{}"}}"#,
+        ] {
+            transform(event, "msg_test", "gpt-5.5", &mut state).unwrap();
+        }
+
+        assert!(state.captured_reasoning.is_empty());
+        assert!(state.pending_reasoning.is_empty());
+    }
+
+    #[test]
+    fn capturing_reasoning_does_not_disturb_the_tool_use_stream() {
+        // Same events as `structured_function_call_streams_as_tool_use`, with a
+        // reasoning item in front: the client-visible output must be unchanged.
+        let events = [
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","call_id":"call_abc","name":"Bash","arguments":""}}"#,
+            r#"{"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\"command\":\"ls\"}"}"#,
+            r#"{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"call_abc","name":"Bash","arguments":"{\"command\":\"ls\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ];
+        let without = run(&events);
+
+        let reasoning = reasoning_event("rs_1", Some("blob-1"));
+        let mut with_events = vec![events[0], reasoning.as_str()];
+        with_events.extend_from_slice(&events[1..]);
+        let mut state = StreamTransformState {
+            capture_reasoning: true,
+            ..Default::default()
+        };
+        let mut with = String::new();
+        for event in &with_events {
+            with.push_str(&transform(event, "msg_test", "gpt-5.5", &mut state).unwrap());
+        }
+
+        assert_eq!(with, without);
+        assert_eq!(state.captured_reasoning.len(), 1);
     }
 
     fn run_openai_chunks(chunks: &[&str]) -> String {

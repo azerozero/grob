@@ -1,5 +1,6 @@
 //! OpenAI provider implementation.
 
+mod reasoning_store;
 mod streaming;
 mod tool_salvage;
 mod transform;
@@ -395,6 +396,9 @@ impl LlmProvider for OpenAIProvider {
         // API, which streams typed events; everything else uses Chat Completions.
         // Mirrors the endpoint choice in the non-streaming `send_message`.
         let use_responses = self.base.is_oauth() || is_codex;
+        // Reasoning replay only exists on the Responses path; the Chat
+        // Completions surface has no encrypted reasoning state to carry.
+        let reasoning_continuity = use_responses && self.base.codex.reasoning_continuity;
 
         let (url, request_body) = if use_responses {
             // OAuth serves the stream under `/codex/responses`; the public API
@@ -427,7 +431,8 @@ impl LlmProvider for OpenAIProvider {
                     &self.base.codex,
                     self.base.reasoning_effort.as_deref(),
                     self.base.service_tier.as_deref(),
-                );
+                )
+                .with_reasoning_store(reasoning_continuity.then(reasoning_store::global));
                 let responses_request = transform::transform_to_responses_request(
                     &request,
                     CODEX_INSTRUCTIONS,
@@ -487,7 +492,21 @@ impl LlmProvider for OpenAIProvider {
         use std::sync::{Arc, Mutex};
 
         let message_id = format!("msg_{}", uuid::Uuid::new_v4());
-        let state = Arc::new(Mutex::new(StreamTransformState::default()));
+        // The key the reasoning captured from this response is filed under. Read
+        // off the outgoing body so the passthrough path (which keeps the native
+        // client's own key) files under the key that actually went on the wire.
+        let reasoning_conversation = reasoning_continuity
+            .then(|| {
+                request_body
+                    .get("prompt_cache_key")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .flatten();
+        let state = Arc::new(Mutex::new(StreamTransformState {
+            capture_reasoning: reasoning_conversation.is_some(),
+            ..Default::default()
+        }));
         let state_for_cleanup = state.clone();
 
         let sse_stream = SseStream::new(response.bytes_stream());
@@ -524,12 +543,27 @@ impl LlmProvider for OpenAIProvider {
         // Stream finalization: ensure proper termination
         let finalized_stream = transformed_stream
             .chain(futures::stream::once(async move {
-                let state = state_for_cleanup.lock().unwrap_or_else(|e| e.into_inner());
+                let mut state = state_for_cleanup.lock().unwrap_or_else(|e| e.into_inner());
                 tracing::debug!(
                     "Stream finalization: message_started={}, stream_ended={}",
                     state.message_started,
                     state.stream_ended
                 );
+
+                // Publish this turn's reasoning so the next one can replay it.
+                // Deferred to here rather than done per-event so a stream that
+                // dies mid-response leaves nothing half-anchored behind.
+                if let Some(conversation) = reasoning_conversation.as_deref() {
+                    let captured = std::mem::take(&mut state.captured_reasoning);
+                    if !captured.is_empty() {
+                        tracing::debug!(
+                            "Storing reasoning for {} tool call(s) on conversation {}",
+                            captured.len(),
+                            conversation
+                        );
+                        reasoning_store::record(reasoning_store::global(), conversation, &captured);
+                    }
+                }
 
                 if state.message_started && !state.stream_ended {
                     tracing::warn!("Stream ended without finish_reason - sending end events");

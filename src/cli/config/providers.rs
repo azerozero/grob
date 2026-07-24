@@ -204,6 +204,21 @@ pub struct CodexOptions {
     /// Defaults to 16000.
     #[serde(default = "default_reasoning_xhigh_min_budget")]
     pub reasoning_xhigh_min_budget: u32,
+
+    /// When `true`, keep the backend's encrypted reasoning state across turns
+    /// and replay it ahead of the tool call that produced it.
+    ///
+    /// Under `store = false` the backend returns its reasoning as opaque
+    /// `encrypted_content` and retains nothing. Codex CLI replays those items
+    /// because it owns the conversation; grob only sees Anthropic-format
+    /// history, so it caches them itself (in memory, 1 hour TTL) and splices
+    /// them back in. Costs a little memory and sends more input tokens per
+    /// turn, in exchange for the model resuming its own chain of thought
+    /// through an agent loop.
+    ///
+    /// Defaults to `false`. Only affects the OpenAI Responses (Codex) path.
+    #[serde(default)]
+    pub reasoning_continuity: bool,
 }
 
 impl Default for CodexOptions {
@@ -212,6 +227,7 @@ impl Default for CodexOptions {
             priority_models: default_priority_models(),
             reasoning_auto_map: false,
             reasoning_xhigh_min_budget: default_reasoning_xhigh_min_budget(),
+            reasoning_continuity: false,
         }
     }
 }

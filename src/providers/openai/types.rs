@@ -123,6 +123,14 @@ pub(crate) enum OpenAIResponsesItem {
     },
     /// The output of a tool call, fed back to the model.
     FunctionCallOutput { call_id: String, output: String },
+    /// A `reasoning` item replayed verbatim from a previous turn.
+    ///
+    /// Carries the backend's opaque `encrypted_content`, so it is forwarded
+    /// exactly as received — re-serializing it field by field would invalidate
+    /// it. The `type` tag already lives inside the stored object, hence
+    /// `#[serde(untagged)]` on this variant alone.
+    #[serde(untagged)]
+    Reasoning(serde_json::Value),
 }
 
 /// Content can be string or array of content parts
@@ -365,4 +373,16 @@ pub(crate) struct StreamTransformState {
     /// Kept so argument deltas can be normalized with tool-specific rules even
     /// when later delta events only carry `output_index` or `item_id`.
     pub responses_fc_names: std::collections::HashMap<u64, String>,
+    /// Reasoning items seen since the last `function_call` closed.
+    ///
+    /// Only populated when reasoning continuity is on. Emptied into
+    /// [`Self::captured_reasoning`] as soon as a function call anchors them.
+    pub pending_reasoning: Vec<serde_json::Value>,
+    /// Reasoning items anchored to the `call_id` they preceded, in wire order.
+    ///
+    /// Drained once the stream ends and written to the cross-turn reasoning
+    /// store. See [`crate::providers::openai::reasoning_store`].
+    pub captured_reasoning: Vec<(String, Vec<serde_json::Value>)>,
+    /// Whether to collect reasoning items at all (`codex.reasoning_continuity`).
+    pub capture_reasoning: bool,
 }

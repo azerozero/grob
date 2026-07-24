@@ -1,3 +1,4 @@
+use super::reasoning_store::{self, ReasoningStore};
 use super::types::*;
 use crate::models::{CanonicalRequest, Message, MessageContent};
 use crate::providers::error::{is_context_window_exceeded_message, ProviderError};
@@ -961,6 +962,10 @@ pub(crate) struct CodexTuning<'a> {
     pub reasoning_auto_map: bool,
     /// Thinking budget at/above which auto-map selects `xhigh` (else `medium`).
     pub reasoning_xhigh_min_budget: u32,
+    /// Store of encrypted reasoning items to splice back into `input`.
+    ///
+    /// `None` when `codex.reasoning_continuity` is off, which is the default.
+    pub reasoning_store: Option<&'a ReasoningStore>,
 }
 
 impl<'a> CodexTuning<'a> {
@@ -976,8 +981,23 @@ impl<'a> CodexTuning<'a> {
             priority_models: &opts.priority_models,
             reasoning_auto_map: opts.reasoning_auto_map,
             reasoning_xhigh_min_budget: opts.reasoning_xhigh_min_budget,
+            reasoning_store: None,
         }
     }
+
+    /// Attaches the reasoning store, enabling cross-turn reasoning replay.
+    pub(crate) fn with_reasoning_store(mut self, store: Option<&'a ReasoningStore>) -> Self {
+        self.reasoning_store = store;
+        self
+    }
+}
+
+/// Where to look up the reasoning items belonging to one conversation.
+struct ReasoningReplay<'a> {
+    store: &'a ReasoningStore,
+    /// The prefix hash that identifies this conversation, shared with
+    /// `prompt_cache_key`.
+    conversation: &'a str,
 }
 
 /// Transform Anthropic request to OpenAI Responses API format.
@@ -1010,6 +1030,15 @@ pub(crate) fn transform_to_responses_request(
         codex_instructions.to_string()
     };
 
+    // Derived before the items are built so it can double as the reasoning
+    // store's conversation key; it only reads the reusable prefix.
+    let prompt_cache_key =
+        derive_prompt_cache_key(&instructions, tools.as_deref(), request.messages.first());
+    let replay = tuning.reasoning_store.map(|store| ReasoningReplay {
+        store,
+        conversation: &prompt_cache_key,
+    });
+
     let mut items = Vec::new();
 
     // Codex has no separate system role; hoist the system prompt to a user item.
@@ -1040,15 +1069,10 @@ pub(crate) fn transform_to_responses_request(
                 content: Some(responses_message_content(role, text.clone())),
             }),
             MessageContent::Blocks(blocks) => {
-                push_blocks_as_items(&mut items, role, blocks)?;
+                push_blocks_as_items(&mut items, role, blocks, replay.as_ref())?;
             }
         }
     }
-
-    // Derive the cache key from the reusable prefix BEFORE `tools` is moved into
-    // the request below.
-    let prompt_cache_key =
-        derive_prompt_cache_key(&instructions, tools.as_deref(), request.messages.first());
 
     let reasoning = resolve_reasoning_effort(request, tuning)
         .map(|effort| serde_json::json!({ "effort": effort }));
@@ -1234,6 +1258,7 @@ fn push_blocks_as_items(
     items: &mut Vec<OpenAIResponsesItem>,
     role: &str,
     blocks: &[ContentBlock],
+    replay: Option<&ReasoningReplay<'_>>,
 ) -> Result<(), ProviderError> {
     let mut text = String::new();
 
@@ -1247,6 +1272,15 @@ fn push_blocks_as_items(
             }
             ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input }) => {
                 flush_text_item(items, role, &mut text);
+                // The backend requires each reasoning item to sit immediately
+                // before the call it produced; anywhere else is a 400.
+                if let Some(replay) = replay {
+                    items.extend(
+                        reasoning_store::replay(replay.store, replay.conversation, id)
+                            .into_iter()
+                            .map(OpenAIResponsesItem::Reasoning),
+                    );
+                }
                 let arguments = serialize_tool_input(input, name)?;
                 items.push(OpenAIResponsesItem::FunctionCall {
                     call_id: id.clone(),
@@ -1827,6 +1861,277 @@ mod tests {
         );
         // Different system instructions also separate the cache namespace.
         assert_ne!(key("INSTR ONE", "same"), key("INSTR TWO", "same"));
+    }
+
+    /// One agent-loop turn: user asks, assistant calls a tool, tool answers.
+    fn agent_loop_request() -> CanonicalRequest {
+        use crate::models::ToolResultContent;
+
+        let mut request = base_request();
+        request.model = "gpt-5.5".to_string();
+        request.messages = vec![
+            Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("list files".to_string()),
+            },
+            Message {
+                role: "assistant".to_string(),
+                content: MessageContent::Blocks(vec![ContentBlock::tool_use(
+                    "toolu_1".to_string(),
+                    "Bash".to_string(),
+                    serde_json::json!({ "command": "ls" }),
+                )]),
+            },
+            Message {
+                role: "user".to_string(),
+                content: MessageContent::Blocks(vec![ContentBlock::Known(
+                    KnownContentBlock::ToolResult {
+                        tool_use_id: "toolu_1".to_string(),
+                        content: ToolResultContent::Text("file1".to_string()),
+                        is_error: false,
+                        cache_control: None,
+                    },
+                )]),
+            },
+        ];
+        request
+    }
+
+    #[test]
+    fn reasoning_continuity_replays_the_item_just_before_its_call() {
+        let request = agent_loop_request();
+        let opts = CodexOptions::default();
+        let store = reasoning_store::reasoning_store();
+
+        // First turn establishes the conversation key the store is filed under.
+        let first = serde_json::to_value(
+            transform_to_responses_request(
+                &request,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let conversation = first["prompt_cache_key"].as_str().unwrap().to_string();
+
+        let item = serde_json::json!({
+            "type": "reasoning",
+            "id": "rs_1",
+            "encrypted_content": "opaque-blob",
+        });
+        reasoning_store::record(
+            &store,
+            &conversation,
+            &[("toolu_1".to_string(), vec![item.clone()])],
+        );
+
+        let json = serde_json::to_value(
+            transform_to_responses_request(
+                &request,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None).with_reasoning_store(Some(&store)),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let input = json["input"].as_array().unwrap();
+        let reasoning_at = input.iter().position(|i| i["type"] == "reasoning").unwrap();
+        let call_at = input
+            .iter()
+            .position(|i| i["type"] == "function_call" && i["call_id"] == "toolu_1")
+            .unwrap();
+
+        // Anywhere other than immediately before its own call is a backend 400.
+        assert_eq!(reasoning_at + 1, call_at);
+        assert_eq!(input[reasoning_at], item);
+    }
+
+    #[test]
+    fn reasoning_continuity_is_off_without_a_store() {
+        let opts = CodexOptions::default();
+        let json = serde_json::to_value(
+            transform_to_responses_request(
+                &agent_loop_request(),
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let input = json["input"].as_array().unwrap();
+        assert!(input.iter().all(|i| i["type"] != "reasoning"));
+    }
+
+    #[test]
+    fn reasoning_from_another_conversation_is_not_replayed() {
+        let request = agent_loop_request();
+        let opts = CodexOptions::default();
+        let store = reasoning_store::reasoning_store();
+
+        // Same call_id, but filed under a conversation this request is not part of.
+        reasoning_store::record(
+            &store,
+            "some-other-conversation",
+            &[(
+                "toolu_1".to_string(),
+                vec![serde_json::json!({"type": "reasoning", "id": "rs_x"})],
+            )],
+        );
+
+        let json = serde_json::to_value(
+            transform_to_responses_request(
+                &request,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None).with_reasoning_store(Some(&store)),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let input = json["input"].as_array().unwrap();
+        assert!(input.iter().all(|i| i["type"] != "reasoning"));
+    }
+
+    #[test]
+    fn reasoning_survives_a_full_capture_then_replay_round_trip() {
+        use crate::models::ToolResultContent;
+
+        let opts = CodexOptions::default();
+        let store = reasoning_store::reasoning_store();
+        let user = |text: &str| Message {
+            role: "user".to_string(),
+            content: MessageContent::Text(text.to_string()),
+        };
+
+        // ── Turn 1: the client's opening request ─────────────────────────
+        let mut turn1 = base_request();
+        turn1.model = "gpt-5.5".to_string();
+        turn1.messages = vec![user("list files")];
+        let sent1 = serde_json::to_value(
+            transform_to_responses_request(
+                &turn1,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None).with_reasoning_store(Some(&store)),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let conversation = sent1["prompt_cache_key"].as_str().unwrap().to_string();
+
+        // ── The backend answers with reasoning, then a tool call ─────────
+        let mut state = StreamTransformState {
+            capture_reasoning: true,
+            ..Default::default()
+        };
+        for event in [
+            r#"{"type":"response.created","response":{"model":"gpt-5.5"}}"#,
+            r#"{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","encrypted_content":"opaque-blob"}}"#,
+            r#"{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","call_id":"toolu_1","name":"Bash","arguments":"{\"command\":\"ls\"}"}}"#,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        ] {
+            super::super::streaming::transform_codex_event_to_anthropic_sse(
+                event, "msg_1", "gpt-5.5", &mut state,
+            )
+            .unwrap();
+        }
+        reasoning_store::record(&store, &conversation, &state.captured_reasoning);
+
+        // ── Turn 2: the client replays the grown history ─────────────────
+        let mut turn2 = turn1.clone();
+        turn2.messages.push(Message {
+            role: "assistant".to_string(),
+            content: MessageContent::Blocks(vec![ContentBlock::tool_use(
+                "toolu_1".to_string(),
+                "Bash".to_string(),
+                serde_json::json!({ "command": "ls" }),
+            )]),
+        });
+        turn2.messages.push(Message {
+            role: "user".to_string(),
+            content: MessageContent::Blocks(vec![ContentBlock::Known(
+                KnownContentBlock::ToolResult {
+                    tool_use_id: "toolu_1".to_string(),
+                    content: ToolResultContent::Text("file1".to_string()),
+                    is_error: false,
+                    cache_control: None,
+                },
+            )]),
+        });
+        let sent2 = serde_json::to_value(
+            transform_to_responses_request(
+                &turn2,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None).with_reasoning_store(Some(&store)),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        // The conversation key is what ties the two turns together; if it drifted
+        // the lookup would silently miss and continuity would be a no-op.
+        assert_eq!(sent2["prompt_cache_key"].as_str().unwrap(), conversation);
+
+        let input = sent2["input"].as_array().unwrap();
+        let reasoning_at = input.iter().position(|i| i["type"] == "reasoning").unwrap();
+        assert_eq!(input[reasoning_at]["encrypted_content"], "opaque-blob");
+        assert_eq!(input[reasoning_at + 1]["type"], "function_call");
+        assert_eq!(input[reasoning_at + 1]["call_id"], "toolu_1");
+    }
+
+    #[test]
+    fn replayed_reasoning_keeps_the_encrypted_payload_byte_for_byte() {
+        // The blob is opaque to grob; re-serializing it field by field would
+        // invalidate it, so the stored value must come back out untouched.
+        let request = agent_loop_request();
+        let opts = CodexOptions::default();
+        let store = reasoning_store::reasoning_store();
+
+        let conversation = serde_json::to_value(
+            transform_to_responses_request(
+                &request,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None),
+            )
+            .unwrap(),
+        )
+        .unwrap()["prompt_cache_key"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let item = serde_json::json!({
+            "type": "reasoning",
+            "id": "rs_1",
+            "summary": [{"type": "summary_text", "text": "thought about it"}],
+            "encrypted_content": "gAAAAABn+/=payload==",
+            "status": "completed",
+        });
+        reasoning_store::record(
+            &store,
+            &conversation,
+            &[("toolu_1".to_string(), vec![item.clone()])],
+        );
+
+        let json = serde_json::to_value(
+            transform_to_responses_request(
+                &request,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None).with_reasoning_store(Some(&store)),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let replayed = json["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["type"] == "reasoning")
+            .unwrap();
+        assert_eq!(replayed, &item);
     }
 
     #[test]
