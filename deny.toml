@@ -12,10 +12,6 @@ version = 2
 # grob only uses RSA for JWT signature verification, not decryption.
 ignore = [
     "RUSTSEC-2023-0071",
-    # proc-macro-error2: unmaintained build-time proc-macro, pulled transitively
-    # via age → i18n-embed-fl. Compile-time only (not in the runtime binary), no
-    # safe upgrade available. Drop when age/i18n-embed-fl migrate off it.
-    "RUSTSEC-2026-0173",
     # rustls-pemfile: unmaintained (PEM parsing folded into rustls-pki-types).
     # Pulled transitively via axum-server and rustls-acme; certificate/key PEM
     # parsing only, no security vulnerability. Surfaces under `--all-features`
