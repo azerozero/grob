@@ -416,7 +416,7 @@ Specifically configurable per deployment:
 
 | Label | Framework | Semantics | Source |
 |---|---|---|---|
-| `fedramp-high` | FedRAMP PMO | Endpoint authorized at FedRAMP High baseline. Three-tier scheme: `fedramp-low`, `fedramp-moderate`, `fedramp-high`. | [fedramp.gov](https://www.fedramp.gov/understanding-baselines-and-impact-levels/) |
+| `fedramp-high` | FedRAMP PMO | Endpoint authorized at FedRAMP High baseline. Three-tier scheme: `fedramp-low`, `fedramp-moderate`, `fedramp-high`. | [fedramp.gov](https://www.fedramp.gov/archive/2017-11-16-understanding-baselines-and-impact-levels/), [FIPS 199](https://csrc.nist.gov/pubs/fips/199/final) |
 | `il5` (also `il2`, `il4`, `il6`) | DoD SRG | Controlled unclassified for national-security systems. Bare numeric tier is the canonical form. | [DoD Cloud Computing SRG v1r4](https://public.cyber.mil/dccs/dccs-documents/) |
 | `secnumcloud-3.2` | ANSSI (France) | ANSSI-qualified at the named SecNumCloud reference version. Issuer + version pattern. | [cyber.gouv.fr](https://cyber.gouv.fr/secnumcloud-pour-les-fournisseurs-de-services-cloud) |
 | `c5:2020` | BSI (Germany) | BSI Cloud Computing Compliance Criteria Catalogue, year-tagged. | [BSI Kriterienkatalog C5](https://www.bsi.bund.de/EN/Themen/Unternehmen-und-Organisationen/Informationen-und-Empfehlungen/Empfehlungen-nach-Angriffszielen/Cloud-Computing/Kriterienkatalog-C5/kriterienkatalog-c5_node.html) |
