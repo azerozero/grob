@@ -1,8 +1,6 @@
 //! Server lifecycle: bind, serve, drain, and OAuth callback spawning.
 //!
-//! TLS uses axum-server with rustls. The `rustls-pemfile` transitive dep
-//! is tracked under RUSTSEC-2025-0134 until axum-server migrates to
-//! `rustls-pki-types`.
+//! TLS uses axum-server with rustls.
 
 use super::{oauth_handlers, AppState};
 use crate::config::AppConfig;
@@ -80,7 +78,7 @@ pub(super) async fn bind_and_serve(
             let acceptor = crate::shared::acme::build_acme_acceptor(&config.server.tls.acme)?;
             info!("Server listening on {} (ACME TLS, {})", addr, REUSE_LABEL);
             let std_listener = crate::shared::net::bind_reuseport_std(&addr)?;
-            axum_server::Server::from_tcp(std_listener)
+            axum_server::from_tcp(std_listener)?
                 .acceptor(acceptor)
                 .handle(handle)
                 .serve(app.into_make_service())
@@ -99,7 +97,7 @@ pub(super) async fn bind_and_serve(
             .await?;
             info!("Server listening on {} (TLS, {})", addr, REUSE_LABEL);
             let std_listener = crate::shared::net::bind_reuseport_std(&addr)?;
-            axum_server::from_tcp_rustls(std_listener, rustls_config)
+            axum_server::from_tcp_rustls(std_listener, rustls_config)?
                 .handle(handle)
                 .serve(app.into_make_service())
                 .await?;
@@ -112,7 +110,7 @@ pub(super) async fn bind_and_serve(
 #[cfg(any(feature = "tls", feature = "acme"))]
 fn spawn_axum_server_shutdown(
     shutdown_signal: impl Future<Output = ()> + Send + 'static,
-    handle: axum_server::Handle,
+    handle: axum_server::Handle<std::net::SocketAddr>,
 ) {
     tokio::spawn(async move {
         shutdown_signal.await;
