@@ -102,11 +102,36 @@ feature/* ──► main ──► release-plz PR ──► tag v* ──► rel
 
 | Stage | Trigger | Jobs |
 |-------|---------|------|
-| Quality gates | push to `main` / PR | fmt, clippy, doc, actionlint |
+| Quality gate | push to `main` / PR | `prek run --all-files` — the same hooks as local (see below), plus clippy on macOS/Windows, gitleaks, actionlint |
 | Tests | push to `main` / PR | unit tests (Ubuntu + macOS + Windows), integration tests |
 | Mutation testing | push to `main` only | cargo-mutants on critical paths (router, DLP) |
 | Cross-build | push to `main` + tag push | Multi-target binaries (Linux amd64/arm64/musl, macOS, Windows) |
 | Release | tag `v*` push | GitHub Release, container image, Homebrew formula |
+
+#### One gate, two places
+
+`prek.toml` is the single source of truth for the quality gate. The CI `prek` job
+runs the identical hooks via [`j178/prek-action`](https://github.com/j178/prek-action),
+so a check cannot drift between a developer's machine and the pipeline — adding a
+hook to `prek.toml` adds it to CI, with no workflow edit.
+
+Reproduce the CI gate exactly:
+
+```bash
+prek run --all-files --stage pre-push --skip gitleaks --skip cargo-sweep --skip lychee-offline
+```
+
+Three hooks are skipped in CI, each for a reason that does not weaken the gate:
+
+| Hook | Why skipped | What covers it in CI |
+|------|-------------|----------------------|
+| `gitleaks` | The hook scans the *staged* diff, which does not exist on a runner | The `gitleaks` job scans the PR's commit range (wider) |
+| `cargo-sweep` | Prunes a developer's `target/` directory | Nothing to cover — irrelevant on ephemeral runners |
+| `lychee-offline` | Deliberately offline to stay fast locally | The `docs-lint` workflow runs the online check, a strict superset |
+
+CI additionally fails if any hook *rewrote* a file: `cargo fmt --all --` fixes
+formatting and still exits 0, so `git diff --exit-code` is what actually enforces
+formatting in the pipeline.
 
 ### Release Flow (`.github/workflows/release-plz.yml`)
 
