@@ -484,4 +484,88 @@ mod tests {
         let token_bad = make_token(&claims_bad, "test-secret-256-bits-minimum!!");
         assert!(validator.validate(&token_bad).is_err());
     }
+
+    fn claims_for(sub: &str) -> GrobClaims {
+        GrobClaims {
+            sub: sub.to_string(),
+            tenant: None,
+            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
+            iss: None,
+            aud: None,
+        }
+    }
+
+    /// Signs `claims` with a fresh RSA-2048 key, returning the RS256 token plus
+    /// the base64url `(n, e)` a JWKS endpoint would publish for it.
+    fn make_rs256_token(claims: &GrobClaims) -> (String, String, String) {
+        use aws_lc_rs::encoding::AsDer;
+        use aws_lc_rs::rsa::{KeyPair, KeySize, PublicKeyComponents};
+        use aws_lc_rs::signature::KeyPair as _;
+        use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+        use base64::Engine as _;
+        use jsonwebtoken::{encode, EncodingKey, Header};
+
+        let key_pair = KeyPair::generate(KeySize::Rsa2048).unwrap();
+
+        // `EncodingKey::from_rsa_der` expects PKCS#1, but aws-lc-rs serialises
+        // PKCS#8. Going through PEM lets jsonwebtoken unwrap it.
+        let pem = format!(
+            "-----BEGIN PRIVATE KEY-----\n{}\n-----END PRIVATE KEY-----\n",
+            STANDARD.encode(key_pair.as_der().unwrap().as_ref())
+        );
+        let token = encode(
+            &Header::new(Algorithm::RS256),
+            claims,
+            &EncodingKey::from_rsa_pem(pem.as_bytes()).unwrap(),
+        )
+        .unwrap();
+
+        let components: PublicKeyComponents<Vec<u8>> = key_pair.public_key().into();
+        (
+            token,
+            URL_SAFE_NO_PAD.encode(&components.n),
+            URL_SAFE_NO_PAD.encode(&components.e),
+        )
+    }
+
+    /// Guards the JWKS path against a silent break when the jsonwebtoken crypto
+    /// backend changes: `refresh_jwks` swallows `from_rsa_components` errors, so
+    /// a backend that rejected `(n, e)` keys would look like "no valid key found"
+    /// rather than a startup failure.
+    #[test]
+    fn jwks_rsa_components_validate_rs256_token() {
+        let validator = JwtValidator::from_config(&JwtConfig::default()).unwrap();
+        let claims = claims_for("svc-rsa");
+        let (token, n, e) = make_rs256_token(&claims);
+
+        let key = DecodingKey::from_rsa_components(&n, &e).unwrap();
+        validator
+            .jwks_rsa_keys
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(key);
+
+        let result = validator.validate(&token).unwrap();
+        assert_eq!(result.sub, "svc-rsa");
+    }
+
+    #[test]
+    fn jwks_rsa_components_reject_token_from_another_key() {
+        let validator = JwtValidator::from_config(&JwtConfig::default()).unwrap();
+        let (token, _, _) = make_rs256_token(&claims_for("svc-rsa"));
+        // Components of a different key pair than the one that signed the token.
+        let (_, n, e) = make_rs256_token(&claims_for("svc-rsa"));
+
+        let key = DecodingKey::from_rsa_components(&n, &e).unwrap();
+        validator
+            .jwks_rsa_keys
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(key);
+
+        assert!(matches!(
+            validator.validate(&token),
+            Err(AuthError::InvalidToken(_))
+        ));
+    }
 }

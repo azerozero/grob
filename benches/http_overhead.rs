@@ -141,14 +141,15 @@ fn get_server() -> &'static ServerState {
 
             let tls_app = Router::new().route("/health", get(health));
 
+            // axum-server 0.8 made `bind_rustls` generic over the address family
+            // (IP vs Unix), so the target type has to be spelled out.
+            let tls_addr: std::net::SocketAddr = format!("127.0.0.1:{}", tls_port).parse().unwrap();
+
             tokio::spawn(async move {
-                axum_server::bind_rustls(
-                    format!("127.0.0.1:{}", tls_port).parse().unwrap(),
-                    rustls_config,
-                )
-                .serve(tls_app.into_make_service())
-                .await
-                .unwrap();
+                axum_server::bind_rustls(tls_addr, rustls_config)
+                    .serve(tls_app.into_make_service())
+                    .await
+                    .unwrap();
             });
 
             // Wait for both servers

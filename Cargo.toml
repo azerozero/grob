@@ -115,7 +115,7 @@ moka = { version = "0.12", features = ["future", "sync"] }
 include_dir = "0.7"
 
 # JWT Auth
-jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "rust_crypto"] }
+jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 
 # Security controls for HDS/PCI/SecNumCloud-style audit evidence
 p256 = { version = "0.13", features = ["ecdsa"] }   # ECDSA P-256 for audit signing
@@ -142,12 +142,11 @@ crossterm = { version = "0.29", optional = true }
 socket2 = { version = "0.5", features = ["all"], optional = true }
 
 # TLS (optional, for native HTTPS without reverse proxy)
-axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
+axum-server = { version = "0.8", features = ["tls-rustls"], optional = true }
 rustls = { version = "0.23", optional = true }
-rustls-pemfile = { version = "2", optional = true }
 
 # ACME / Let's Encrypt auto-certificates (optional, requires tls feature)
-rustls-acme = { version = "0.12", features = ["axum"], optional = true }
+rustls-acme = { version = "0.15", features = ["axum"], optional = true }
 regex-syntax = "0.8.10"
 
 # Trace log compression (zstd for rotated trace files)
@@ -178,6 +177,10 @@ tracing-test = "0.2"       # Capture tracing logs in tests
 # Property Testing
 proptest = "1"
 rcgen = "0.13"             # Self-signed certs for TLS benchmarks
+# RSA keygen for the JWKS validation tests. Already in the tree via
+# jsonwebtoken's aws_lc_rs backend; `ring-io` exposes the (n, e) accessors the
+# JWKS path needs. Dev-only, so the release binary is unaffected.
+aws-lc-rs = { version = "1", features = ["ring-io"] }
 
 # Cucumber BDD (E2E)
 cucumber = "0.21"
@@ -238,7 +241,7 @@ otel = [
     "opentelemetry-appender-tracing",
     "metrics-util",
 ]
-tls = ["axum-server", "rustls", "rustls-pemfile"]
+tls = ["axum-server", "rustls"]
 acme = ["tls", "rustls-acme"]
 dlp = []
 oauth = []
@@ -252,10 +255,11 @@ test-util = []
 [package.metadata.cargo-machete]
 # ecdsa: trait crate required for p256::ecdsa::signature::Signer bounds
 # tower: required by tower-http for Service/Layer trait impls
-# rustls/rustls-pemfile: behind optional "tls" feature flag
+# rustls: behind optional "tls" feature flag
 # insta: snapshot testing — used incrementally as tests are converted
 # tracing-test: used via #[traced_test] attribute on individual tests
-ignored = ["ecdsa", "tower", "rustls", "rustls-pemfile", "rustls-acme", "insta", "tracing-test", "socket2", "tikv-jemallocator", "nix", "jsonrpsee"]
+# aws-lc-rs: dev-only, RSA keygen for the JWKS validation tests
+ignored = ["ecdsa", "tower", "rustls", "rustls-acme", "insta", "tracing-test", "socket2", "tikv-jemallocator", "nix", "jsonrpsee", "aws-lc-rs"]
 
 [profile.release]
 opt-level = 3
