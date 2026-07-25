@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.80](https://github.com/azerozero/grob/compare/v0.36.79...v0.36.80) - 2026-07-25
+
+### Fixed
+
+- *(validate)* read OAuth tokens from the encrypted store, not legacy JSON
+
+### Other
+
+- *(routing)* kill 16 surviving mutants in the complexity classifier
+- run the local prek gate in CI instead of restating it
+
 ## [0.36.79](https://github.com/azerozero/grob/compare/v0.36.78...v0.36.79) - 2026-07-24
 
 ### Added
