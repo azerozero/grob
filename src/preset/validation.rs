@@ -63,13 +63,19 @@ impl ModelValidation {
 /// Returns an error if the token store, encrypted store, or provider
 /// registry cannot be built from the config.
 pub fn build_registry(config: &AppConfig) -> Result<(Arc<ProviderRegistry>, TokenStore)> {
-    let token_store = TokenStore::at_default_path()
-        .map_err(|e| anyhow::anyhow!("Failed to init token store: {}", e))?;
-
     let grob_store = Arc::new(
         GrobStore::open(&GrobStore::default_path())
             .map_err(|e| anyhow::anyhow!("Failed to open encrypted store: {}", e))?,
     );
+
+    // Read OAuth tokens from the encrypted GrobStore — the same backend the
+    // server, `grob doctor` and `grob connect` all use. The legacy
+    // `at_default_path()` reads a plaintext `~/.grob/oauth_tokens.json` that
+    // modern installs never write, so `grob validate` reported "no token found"
+    // for tokens `grob doctor` on the very same store reports as usable.
+    let token_store = TokenStore::with_store(grob_store.clone())
+        .map_err(|e| anyhow::anyhow!("Failed to init token store: {}", e))?;
+
     let secret_backend =
         crate::storage::secrets::build_backend(&config.secrets, grob_store.clone());
 
@@ -421,6 +427,84 @@ fn log_broken_mapping(m: &MappingResult) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Serializes the `GROB_HOME`-mutating tests below so they cannot clobber
+    // each other's environment when the suite runs in parallel.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Regression guard for the `grob validate` false negative: it built its
+    /// token store with the legacy `at_default_path()` (a plaintext
+    /// `oauth_tokens.json` modern installs never write), so it reported "no
+    /// token found" for OAuth tokens the encrypted store — and `grob doctor` —
+    /// saw as usable. `build_registry` must read the same GrobStore-backed
+    /// store as the server.
+    #[test]
+    fn build_registry_reads_oauth_tokens_from_the_encrypted_store() {
+        use crate::auth::token_store::OAuthToken;
+        use secrecy::SecretString;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let home =
+            std::env::temp_dir().join(format!("grob-validate-token-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("GROB_HOME", &home);
+        }
+
+        // Persist an OAuth token through the same encrypted store the server uses.
+        let store = Arc::new(
+            crate::storage::GrobStore::open(&crate::storage::GrobStore::default_path()).unwrap(),
+        );
+        store
+            .save_oauth_token(&OAuthToken {
+                provider_id: "test-oauth-provider".to_string(),
+                access_token: SecretString::new("access".to_string()),
+                refresh_token: SecretString::new("refresh".to_string()),
+                expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                enterprise_url: None,
+                project_id: None,
+                needs_reauth: None,
+            })
+            .unwrap();
+
+        let config: AppConfig = toml::from_str(
+            r#"
+                [router]
+                default = "m"
+
+                [[providers]]
+                name = "p"
+                provider_type = "openai"
+                auth_type = "oauth"
+                oauth_provider = "test-oauth-provider"
+                models = []
+
+                [[models]]
+                name = "m"
+                [[models.mappings]]
+                provider = "p"
+                actual_model = "gpt-5.5"
+                priority = 1
+            "#,
+        )
+        .unwrap();
+
+        let (_registry, token_store) = build_registry(&config).unwrap();
+
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("GROB_HOME");
+        }
+        let _ = std::fs::remove_dir_all(&home);
+
+        assert!(
+            token_store.get("test-oauth-provider").is_some(),
+            "build_registry must read tokens from the encrypted GrobStore, not the legacy JSON file"
+        );
+    }
 
     // ── extract_http_code ──────────────────────────────────────────────────────
 
