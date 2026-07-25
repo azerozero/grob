@@ -428,9 +428,9 @@ fn is_successful_test_command(command: &str, content: &str) -> bool {
     is_test_command
         && content.len() <= TEST_OUTPUT_MAX_BYTES
         && !has_nonzero_exit_code(content)
-        && (content.contains("test result: ok")
-            || content.contains(" 0 failed")
-            || content.contains(", 0 failed"))
+        // `", 0 failed"` is intentionally absent: it is a substring of
+        // `" 0 failed"`, so the shorter marker already matches it.
+        && (content.contains("test result: ok") || content.contains(" 0 failed"))
 }
 
 fn has_nonzero_exit_code(content: &str) -> bool {
@@ -1086,6 +1086,130 @@ mod tests {
             classify_complexity(&req, &default_config()),
             ComplexityTier::Complex
         );
+    }
+
+    // ── predicate unit tests ──
+    //
+    // The classification-level tests above exercise these helpers only through
+    // their happy path, which lets a flipped `&&`/`||`/`==` inside a predicate
+    // survive (a mutation-testing gap on `classify.rs`). These tests pin each
+    // boolean operand independently: every case holds all but one condition
+    // true, so flipping any single operator changes the result.
+
+    #[test]
+    fn is_task_create_success_requires_every_condition() {
+        let input = serde_json::Value::Null;
+        let r = |name| ToolUseRef {
+            name,
+            input: &input,
+        };
+
+        assert!(is_task_create_success(
+            r("TaskCreate"),
+            "Task #3 created successfully"
+        ));
+        // Wrong tool name — else identical.
+        assert!(!is_task_create_success(
+            r("TaskUpdate"),
+            "Task #3 created successfully"
+        ));
+        // Missing the "Task #" prefix — else identical.
+        assert!(!is_task_create_success(
+            r("TaskCreate"),
+            "Item created successfully"
+        ));
+        // Missing the " created successfully" phrase — else identical.
+        assert!(!is_task_create_success(r("TaskCreate"), "Task #3 deleted"));
+    }
+
+    #[test]
+    fn is_git_status_command_matches_only_git_status_and_diff_check() {
+        assert!(is_git_status_command("git status --short"));
+        assert!(is_git_status_command("git -C /r status --short -uno"));
+        assert!(is_git_status_command("git diff --check"));
+        assert!(is_git_status_command("git diff --check -- src"));
+        // Right suffix, wrong program — the leading "git " guard must hold.
+        assert!(!is_git_status_command("hg status --short"));
+        // "git " program, but neither status --short nor diff --check.
+        assert!(!is_git_status_command("git log --oneline"));
+    }
+
+    #[test]
+    fn is_git_metadata_command_matches_only_branch_and_toplevel() {
+        assert!(is_git_metadata_command("git branch --show-current"));
+        assert!(is_git_metadata_command("git -C /r branch --show-current"));
+        assert!(is_git_metadata_command("git rev-parse --show-toplevel"));
+        assert!(is_git_metadata_command(
+            "git -C /r rev-parse --show-toplevel"
+        ));
+        // Right suffix, wrong program.
+        assert!(!is_git_metadata_command("jj branch --show-current"));
+        // "git " program, unrelated subcommand.
+        assert!(!is_git_metadata_command("git remote -v"));
+    }
+
+    #[test]
+    fn is_short_success_needs_both_short_and_zero_exit() {
+        assert!(is_short_success("Process exited with code 0"));
+        // Short but non-zero exit — the exit-code guard must hold.
+        assert!(!is_short_success("Process exited with code 1"));
+        // Zero exit but over the byte cap — the length guard must hold.
+        let long = "x".repeat(SHORT_SUCCESS_MAX_BYTES + 1);
+        assert!(!is_short_success(&long));
+        assert!(is_short_success(&"x".repeat(SHORT_SUCCESS_MAX_BYTES)));
+    }
+
+    #[test]
+    fn is_successful_test_command_needs_test_cmd_short_zero_and_ok_marker() {
+        let ok = "test result: ok\nProcess exited with code 0";
+        assert!(is_successful_test_command("cargo test", ok));
+        assert!(is_successful_test_command(
+            "cargo nextest run -p grob",
+            "120 passed, 0 failed\nProcess exited with code 0"
+        ));
+        // Not a test command — else identical.
+        assert!(!is_successful_test_command("cargo build", ok));
+        // Over the byte cap — else identical.
+        let long = format!("test result: ok\n{}", "x".repeat(TEST_OUTPUT_MAX_BYTES));
+        assert!(!is_successful_test_command("cargo test", &long));
+        // Non-zero exit — else identical.
+        assert!(!is_successful_test_command(
+            "cargo test",
+            "test result: ok\nProcess exited with code 101"
+        ));
+        // No success marker at all — else identical.
+        assert!(!is_successful_test_command(
+            "cargo test",
+            "running 5 tests\nProcess exited with code 0"
+        ));
+    }
+
+    #[test]
+    fn exit_code_after_parses_signed_integers() {
+        // Zero and positive.
+        assert_eq!(exit_code_after("Exit code: 0", "Exit code: "), Some(0));
+        assert_eq!(exit_code_after("Exit code: 12", "Exit code: "), Some(12));
+        // Negative — the `idx == 0 && ch == '-'` sign branch must accept it.
+        assert_eq!(exit_code_after("Exit code: -5", "Exit code: "), Some(-5));
+        // A leading non-digit, non-'-' character yields nothing — this pins the
+        // sign condition to `== 0 && == '-'` rather than any looser form.
+        assert_eq!(exit_code_after("Exit code: +5", "Exit code: "), None);
+        assert_eq!(exit_code_after("Exit code: x5", "Exit code: "), None);
+        // Marker absent.
+        assert_eq!(exit_code_after("all good", "Exit code: "), None);
+        // A '-' anywhere but the first position is not a sign.
+        assert_eq!(exit_code_after("Exit code: 1-2", "Exit code: "), Some(1));
+    }
+
+    #[test]
+    fn has_nonzero_exit_code_reads_both_markers() {
+        assert!(has_nonzero_exit_code("Process exited with code 1"));
+        assert!(has_nonzero_exit_code("Exit code: 137"));
+        assert!(has_nonzero_exit_code("Exit code: -1"));
+        // Exit 0 is not a failure.
+        assert!(!has_nonzero_exit_code("Process exited with code 0"));
+        // No exit-code marker present at all.
+        assert!(!has_nonzero_exit_code("still running"));
     }
 
     // ── helpers ──
