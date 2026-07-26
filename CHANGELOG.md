@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.81](https://github.com/azerozero/grob/compare/v0.36.80...v0.36.81) - 2026-07-26
+
+### Fixed
+
+- *(status)* read OAuth tokens from the encrypted store in status + setup
+
 ## [0.36.80](https://github.com/azerozero/grob/compare/v0.36.79...v0.36.80) - 2026-07-25
 
 ### Fixed
