@@ -1260,7 +1260,10 @@ fn push_blocks_as_items(
     blocks: &[ContentBlock],
     replay: Option<&ReasoningReplay<'_>>,
 ) -> Result<(), ProviderError> {
+    // Buffered text is coalesced into one part; images interleave as their own
+    // parts, so a "describe this" text + image turn stays a single message.
     let mut text = String::new();
+    let mut parts: Vec<serde_json::Value> = Vec::new();
 
     for block in blocks {
         match block {
@@ -1270,8 +1273,14 @@ fn push_blocks_as_items(
                 }
                 text.push_str(t);
             }
+            ContentBlock::Known(KnownContentBlock::Image { source }) => {
+                flush_text_part(role, &mut text, &mut parts);
+                if let Some(part) = responses_image_part(source) {
+                    parts.push(part);
+                }
+            }
             ContentBlock::Known(KnownContentBlock::ToolUse { id, name, input }) => {
-                flush_text_item(items, role, &mut text);
+                flush_message_parts(items, role, &mut text, &mut parts);
                 // The backend requires each reasoning item to sit immediately
                 // before the call it produced; anywhere else is a 400.
                 if let Some(replay) = replay {
@@ -1293,7 +1302,7 @@ fn push_blocks_as_items(
                 content,
                 ..
             }) => {
-                flush_text_item(items, role, &mut text);
+                flush_message_parts(items, role, &mut text, &mut parts);
                 items.push(OpenAIResponsesItem::FunctionCallOutput {
                     call_id: tool_use_id.clone(),
                     output: content.to_string(),
@@ -1303,33 +1312,68 @@ fn push_blocks_as_items(
         }
     }
 
-    flush_text_item(items, role, &mut text);
+    flush_message_parts(items, role, &mut text, &mut parts);
     Ok(())
 }
 
-/// Pushes accumulated text as a `message` item and clears the buffer.
-fn flush_text_item(items: &mut Vec<OpenAIResponsesItem>, role: &str, text: &mut String) {
+/// Appends the buffered text (if any) to `parts` as one typed text part.
+fn flush_text_part(role: &str, text: &mut String, parts: &mut Vec<serde_json::Value>) {
     if !text.is_empty() {
+        parts.push(responses_text_part(role, std::mem::take(text)));
+    }
+}
+
+/// Flushes buffered text and image parts into a single `message` item.
+fn flush_message_parts(
+    items: &mut Vec<OpenAIResponsesItem>,
+    role: &str,
+    text: &mut String,
+    parts: &mut Vec<serde_json::Value>,
+) {
+    flush_text_part(role, text, parts);
+    if !parts.is_empty() {
         items.push(OpenAIResponsesItem::Message {
             role: role.to_string(),
-            content: Some(responses_message_content(role, std::mem::take(text))),
+            content: Some(serde_json::Value::Array(std::mem::take(parts))),
         });
     }
 }
 
-/// Builds Responses-API typed message content (`[{"type":…,"text":…}]`).
+/// Builds one Responses-API typed text part.
 ///
 /// The backend's prompt cache only matches when message content uses the
 /// structured parts; a flat string defeats caching for reasoning models like
 /// gpt-5.5. Assistant turns use `output_text`; every other role uses
 /// `input_text`.
-fn responses_message_content(role: &str, text: String) -> serde_json::Value {
+fn responses_text_part(role: &str, text: String) -> serde_json::Value {
     let part_type = if role == "assistant" {
         "output_text"
     } else {
         "input_text"
     };
-    serde_json::json!([{ "type": part_type, "text": text }])
+    serde_json::json!({ "type": part_type, "text": text })
+}
+
+/// Wraps a text string as Responses-API message content (`[{"type":…,"text":…}]`).
+fn responses_message_content(role: &str, text: String) -> serde_json::Value {
+    serde_json::Value::Array(vec![responses_text_part(role, text)])
+}
+
+/// Builds a Responses-API `input_image` part from an Anthropic image block.
+///
+/// Base64 sources become a `data:` URI; URL sources pass through. Returns `None`
+/// when neither the inline data nor a URL is present (nothing to send).
+fn responses_image_part(source: &crate::models::ImageSource) -> Option<serde_json::Value> {
+    let image_url = if let Some(url) = source.url.as_ref().filter(|u| !u.is_empty()) {
+        url.clone()
+    } else {
+        let data = source.data.as_ref().filter(|d| !d.is_empty())?;
+        let media_type = source.media_type.as_deref().unwrap_or("image/png");
+        format!("data:{media_type};base64,{data}")
+    };
+    // The Responses API takes `image_url` as a bare string, unlike Chat
+    // Completions where it is an object.
+    Some(serde_json::json!({ "type": "input_image", "image_url": image_url }))
 }
 
 /// Transforms Anthropic tool definitions into Responses-API (flattened) tools.
@@ -1775,6 +1819,81 @@ mod tests {
         // A model dropped from the list loses priority (silent no-op).
         let flagship = resolve("gpt-5.5");
         assert_eq!(flagship["service_tier"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn responses_request_forwards_image_blocks_as_input_image() {
+        use crate::models::ImageSource;
+
+        let mut request = base_request();
+        request.model = "gpt-5.5".to_string();
+        request.system = None;
+        request.messages = vec![Message {
+            role: "user".to_string(),
+            content: MessageContent::Blocks(vec![
+                ContentBlock::text("What is in this image?".to_string(), None),
+                ContentBlock::Known(KnownContentBlock::Image {
+                    source: ImageSource {
+                        r#type: "base64".to_string(),
+                        media_type: Some("image/png".to_string()),
+                        data: Some("aGVsbG8=".to_string()),
+                        url: None,
+                    },
+                }),
+            ]),
+        }];
+
+        let opts = CodexOptions::default();
+        let json = serde_json::to_value(
+            transform_to_responses_request(
+                &request,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        // The text and the image share one message item, in order.
+        let content = &json["input"][0]["content"];
+        assert_eq!(content[0]["type"], "input_text");
+        assert_eq!(content[0]["text"], "What is in this image?");
+        assert_eq!(content[1]["type"], "input_image");
+        assert_eq!(content[1]["image_url"], "data:image/png;base64,aGVsbG8=");
+    }
+
+    #[test]
+    fn responses_request_passes_image_url_through() {
+        use crate::models::ImageSource;
+
+        let mut request = base_request();
+        request.system = None;
+        request.messages = vec![Message {
+            role: "user".to_string(),
+            content: MessageContent::Blocks(vec![ContentBlock::Known(KnownContentBlock::Image {
+                source: ImageSource {
+                    r#type: "url".to_string(),
+                    media_type: None,
+                    data: None,
+                    url: Some("https://example.com/cat.png".to_string()),
+                },
+            })]),
+        }];
+
+        let opts = CodexOptions::default();
+        let json = serde_json::to_value(
+            transform_to_responses_request(
+                &request,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let part = &json["input"][0]["content"][0];
+        assert_eq!(part["type"], "input_image");
+        assert_eq!(part["image_url"], "https://example.com/cat.png");
     }
 
     #[test]
