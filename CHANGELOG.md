@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.83](https://github.com/azerozero/grob/compare/v0.36.82...v0.36.83) - 2026-07-26
+
+### Added
+
+- *(openai)* forward image blocks on the Responses (Codex) path
+
 ## [0.36.82](https://github.com/azerozero/grob/compare/v0.36.81...v0.36.82) - 2026-07-26
 
 ### Other
