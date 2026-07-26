@@ -648,6 +648,9 @@ mod tests {
 
     #[test]
     fn test_list_presets_contains_builtins() {
+        let _guard = crate::GROB_HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join("grob-test-presets");
         #[allow(unsafe_code)]
         unsafe {

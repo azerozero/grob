@@ -5,6 +5,14 @@
 
 use std::path::PathBuf;
 
+/// Process-global lock serializing tests that mutate the `GROB_HOME` env var.
+///
+/// `GROB_HOME` is process-wide, so two tests setting it concurrently clobber
+/// each other. Every test that does `set_var("GROB_HOME", …)` must hold this
+/// for its duration; per-module locks do not exclude across modules.
+#[cfg(test)]
+pub(crate) static GROB_HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Returns the Grob home directory (`~/.grob`).
 ///
 /// When the `dirs` feature is disabled, falls back to reading `GROB_HOME`

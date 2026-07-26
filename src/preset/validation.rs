@@ -69,10 +69,10 @@ pub fn build_registry(config: &AppConfig) -> Result<(Arc<ProviderRegistry>, Toke
     );
 
     // Read OAuth tokens from the encrypted GrobStore — the same backend the
-    // server, `grob doctor` and `grob connect` all use. The legacy
-    // `at_default_path()` reads a plaintext `~/.grob/oauth_tokens.json` that
-    // modern installs never write, so `grob validate` reported "no token found"
-    // for tokens `grob doctor` on the very same store reports as usable.
+    // server, `grob doctor` and `grob connect` all use. This once read a
+    // plaintext `~/.grob/oauth_tokens.json` that modern installs never write, so
+    // `grob validate` reported "no token found" for tokens `grob doctor` on the
+    // very same store reported as usable.
     let token_store = TokenStore::with_store(grob_store.clone())
         .map_err(|e| anyhow::anyhow!("Failed to init token store: {}", e))?;
 
@@ -428,22 +428,20 @@ fn log_broken_mapping(m: &MappingResult) {
 mod tests {
     use super::*;
 
-    // Serializes the `GROB_HOME`-mutating tests below so they cannot clobber
-    // each other's environment when the suite runs in parallel.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     /// Regression guard for the `grob validate` false negative: it built its
-    /// token store with the legacy `at_default_path()` (a plaintext
-    /// `oauth_tokens.json` modern installs never write), so it reported "no
-    /// token found" for OAuth tokens the encrypted store — and `grob doctor` —
-    /// saw as usable. `build_registry` must read the same GrobStore-backed
+    /// token store from a legacy plaintext `oauth_tokens.json` that modern
+    /// installs never write, so it reported "no token found" for OAuth tokens
+    /// the encrypted store — and `grob doctor` — saw as usable. `build_registry`
+    /// must read the same GrobStore-backed
     /// store as the server.
     #[test]
     fn build_registry_reads_oauth_tokens_from_the_encrypted_store() {
         use crate::auth::token_store::OAuthToken;
         use secrecy::SecretString;
 
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::GROB_HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
         let home =
             std::env::temp_dir().join(format!("grob-validate-token-test-{}", std::process::id()));
