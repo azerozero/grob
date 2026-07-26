@@ -93,10 +93,12 @@ feature/* ──► main ──► release-plz PR ──► tag v* ──► rel
 
 - **Never commit or push directly to `main`**. All changes go through feature branches + PRs.
 - **`main` is protected** by a GitHub ruleset (no deletion, no force push, PR required).
-- **Always enable auto-merge** after creating a PR: `gh pr merge <num> --auto --merge`. Do not wait for CI to merge manually.
+- **Always enable auto-merge** after creating a PR: `gh pr merge <num> --auto --squash`. Do not wait for CI to merge manually.
+- **Squash-merge only** (merge commits are disabled on the repo). Every PR lands as ONE commit on `main`'s linear history, with the **PR title** as its message — so the PR title MUST be a conventional commit (`feat(scope): …`). This is not cosmetic: release-plz computes the next version by walking `main`, and a merge-commit puts the feature commit on a second parent where a release cut between two merges can hide it from the version calc (this stranded #478's `feat(routing)` — it never produced a release). A linear history removes that failure mode entirely.
 - **Check file overlap before parallel PRs**: if two PRs modify the same files, base the second on the first branch (`git checkout -b feat/B feat/A`), not on `main`. This prevents merge conflicts when the first PR lands.
-- **Conventional commits required**: `feat:`, `fix:`, `refactor:`, `perf:` with scopes trigger release-plz version bumps. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes.
+- **Conventional commits required** (in the PR title, since that becomes the squash commit): `feat:`, `fix:`, `refactor:`, `perf:` with scopes trigger release-plz version bumps. Use `chore:`, `docs:`, `test:`, `style:`, `ci:` for non-release changes.
 - **release-plz `release_commits` filter**: only `feat|fix|refactor|perf` commits (any scope or no scope) trigger a version bump. The prefix is the gate, not the scope.
+- **release-plz can be run manually**: `gh workflow run release-plz.yml --ref main` (added `workflow_dispatch` in #479) opens the release PR on demand when a push-triggered run was missed.
 
 ### CI Pipeline Stages (`.github/workflows/ci.yml`)
 
