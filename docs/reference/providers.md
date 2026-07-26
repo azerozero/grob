@@ -76,6 +76,8 @@ Converts OpenAI SSE chunks to Anthropic SSE format using stateful `StreamTransfo
 
 **Codex models**: Detected via model name containing "codex". Uses `/v1/responses` endpoint (or `/codex/responses` for OAuth). System prompt injected from `src/providers/openai/codex_instructions.md` (verbatim Codex CLI prompt, embedded via `include_str!`).
 
+**Vision on the Responses path**: `image` blocks map to `input_image` content parts (base64 → `data:` URI, or URL pass-through), interleaved with `input_text` in the same message item — the multimodal counterpart of the `image_url` mapping on the Chat Completions path.
+
 **Reasoning continuity** (`src/providers/openai/reasoning_store.rs`, opt-in via `codex.reasoning_continuity`):
 
 The Codex backend runs under `store = false` and returns its reasoning state as opaque `encrypted_content` on `reasoning` output items, retaining nothing server-side. Codex CLI replays those items each turn because it owns the conversation in native Responses format; grob only sees Anthropic-format history, which has no field to carry them.
