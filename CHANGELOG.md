@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.82](https://github.com/azerozero/grob/compare/v0.36.81...v0.36.82) - 2026-07-26
+
+### Other
+
+- *(auth)* remove the at_default_path token-store footgun
+
 ## [0.36.81](https://github.com/azerozero/grob/compare/v0.36.80...v0.36.81) - 2026-07-26
 
 ### Fixed
