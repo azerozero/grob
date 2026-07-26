@@ -179,27 +179,15 @@ pub fn load_oauth_provider_list_pub() -> Vec<String> {
 }
 
 /// Load the list of OAuth provider IDs that have tokens stored.
+///
+/// Reads the encrypted GrobStore — the same backend the server, `grob doctor`
+/// and `grob connect` use. This once read a plaintext `~/.grob/oauth_tokens.json`
+/// that modern installs never write, so `grob status` and the `setup` wizard
+/// reported every OAuth provider as unauthenticated even with a valid token in
+/// the store.
 fn load_oauth_provider_list() -> Vec<String> {
-    let grob_dir = match crate::grob_home() {
-        Some(d) => d,
-        None => return vec![],
-    };
-    let tokens_path = grob_dir.join("oauth_tokens.json");
-    if !tokens_path.exists() {
-        return vec![];
-    }
-    let content = match std::fs::read_to_string(&tokens_path) {
-        Ok(c) => c,
-        Err(_) => return vec![],
-    };
-    // oauth_tokens.json is { "provider-id": { ... }, ... }
-    let parsed: serde_json::Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return vec![],
-    };
-    parsed
-        .as_object()
-        .map(|obj| obj.keys().cloned().collect())
+    crate::storage::GrobStore::open(&crate::storage::GrobStore::default_path())
+        .map(|store| store.all_oauth_tokens().into_keys().collect())
         .unwrap_or_default()
 }
 
@@ -370,4 +358,62 @@ pub fn setup_credentials_interactive_filtered(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Serializes the GROB_HOME-mutating test so it cannot clobber another
+    // test's environment when the suite runs in parallel.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Regression guard: `load_oauth_provider_list` once read a plaintext
+    /// `~/.grob/oauth_tokens.json` that modern installs never write, so
+    /// `grob status` and the `setup` wizard reported OAuth providers as
+    /// unauthenticated even with a valid token in the encrypted store. It must
+    /// read the same GrobStore the server and `grob doctor` use.
+    #[test]
+    fn load_oauth_provider_list_reads_the_encrypted_store() {
+        use crate::auth::token_store::OAuthToken;
+        use secrecy::SecretString;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        let home =
+            std::env::temp_dir().join(format!("grob-oauth-list-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::set_var("GROB_HOME", &home);
+        }
+
+        let store =
+            crate::storage::GrobStore::open(&crate::storage::GrobStore::default_path()).unwrap();
+        store
+            .save_oauth_token(&OAuthToken {
+                provider_id: "openai-codex".to_string(),
+                access_token: SecretString::new("a".to_string()),
+                refresh_token: SecretString::new("r".to_string()),
+                expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                enterprise_url: None,
+                project_id: None,
+                needs_reauth: None,
+            })
+            .unwrap();
+
+        let list = load_oauth_provider_list();
+
+        #[allow(unsafe_code)]
+        unsafe {
+            std::env::remove_var("GROB_HOME");
+        }
+        let _ = std::fs::remove_dir_all(&home);
+
+        assert!(
+            list.contains(&"openai-codex".to_string()),
+            "must list OAuth providers from the encrypted GrobStore, not legacy JSON"
+        );
+    }
 }
