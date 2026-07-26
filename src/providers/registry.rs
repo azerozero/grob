@@ -419,9 +419,13 @@ impl ProviderRegistry {
 
         for model in models {
             if let Some(first_mapping) = model.mappings.first() {
-                registry
-                    .model_to_provider
-                    .insert(model.name.clone(), first_mapping.provider.clone());
+                // Canonical key so `provider_for_model` matches spelling-agnostically
+                // (`gpt-5.5` config vs a `gpt-5-5` query), mirroring `find_model`.
+                registry.model_to_provider.insert(
+                    crate::routing::classify::model_name::canonicalize_model_name(&model.name)
+                        .into_owned(),
+                    first_mapping.provider.clone(),
+                );
             }
         }
 
@@ -440,8 +444,10 @@ impl ProviderRegistry {
     /// Returns [`ProviderError::ModelNotSupported`] if no registered
     /// provider handles the given model name.
     pub fn provider_for_model(&self, model: &str) -> Result<Arc<dyn LlmProvider>, ProviderError> {
-        // First, check if we have a direct model → provider mapping
-        if let Some(provider_name) = self.model_to_provider.get(model) {
+        // First, check if we have a direct model → provider mapping. The index is
+        // keyed by canonical name, so canonicalize the query to match it.
+        let canonical = crate::routing::classify::model_name::canonicalize_model_name(model);
+        if let Some(provider_name) = self.model_to_provider.get(canonical.as_ref()) {
             if let Some(provider) = self.providers.get(provider_name) {
                 return Ok(provider.clone());
             }
@@ -605,6 +611,67 @@ mod tests {
         let registry = ProviderRegistry::new();
         let result = registry.provider_for_model("gpt-4");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn provider_for_model_is_spelling_agnostic() {
+        use crate::providers::{AuthType, ProviderConfig};
+
+        // A `[[models]]` entry spelled with a dot, as an operator would write it.
+        let providers = vec![ProviderConfig {
+            name: "openai".to_string(),
+            provider_type: "openai".to_string(),
+            auth_type: AuthType::ApiKey,
+            api_key: Some(SecretString::new("test-key".to_string())),
+            base_url: None,
+            models: vec![],
+            enabled: Some(true),
+            oauth_provider: None,
+            project_id: None,
+            location: None,
+            headers: None,
+            budget_usd: None,
+            region: None,
+            pass_through: None,
+            tls_cert: None,
+            tls_key: None,
+            tls_ca: None,
+            pool: None,
+            reasoning_effort: None,
+            service_tier: None,
+            codex: Default::default(),
+            circuit_breaker: None,
+            health_check: None,
+            max_retries: None,
+        }];
+        let models = vec![crate::cli::ModelConfig {
+            name: "gpt-5.5".to_string(),
+            mappings: vec![crate::cli::ModelMapping {
+                priority: 1,
+                provider: "openai".to_string(),
+                actual_model: "gpt-5.5".to_string(),
+                inject_continuation_prompt: false,
+            }],
+            budget_usd: None,
+            context_window_tokens: None,
+            strategy: Default::default(),
+            fan_out: None,
+            deprecated: None,
+        }];
+
+        let registry = ProviderRegistry::from_configs_with_models(
+            &providers,
+            &crate::storage::secrets::EnvBackend,
+            None,
+            &models,
+            &TimeoutConfig::default(),
+        )
+        .unwrap();
+
+        // The dashed form the router canonicalizes to must resolve to the same
+        // provider as the dotted config name.
+        assert!(registry.provider_for_model("gpt-5-5").is_ok());
+        assert!(registry.provider_for_model("gpt-5.5").is_ok());
     }
 
     #[test]

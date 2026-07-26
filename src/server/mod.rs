@@ -102,11 +102,17 @@ impl ReloadableState {
         router: Router,
         provider_registry: Arc<ProviderRegistry>,
     ) -> Self {
+        // Key by the canonical model name so a dotted config entry (`gpt-5.5`)
+        // matches a request whose name the router already canonicalized to the
+        // dashed form (`gpt-5-5`) — routing stays agnostic to the spelling, the
+        // same way it is for text. Canonicalization borrows unchanged for names
+        // outside a known family, so existing configs are untouched.
+        use crate::routing::classify::model_name::canonicalize_model_name;
         let model_index = config
             .models
             .iter()
             .enumerate()
-            .map(|(i, m)| (m.name.to_lowercase(), i))
+            .map(|(i, m)| (canonicalize_model_name(&m.name).to_lowercase(), i))
             .collect();
         #[cfg(feature = "policies")]
         let policy_matcher = init::init_policies(&config);
@@ -120,10 +126,15 @@ impl ReloadableState {
         }
     }
 
-    /// O(1) model config lookup by name (case-insensitive)
+    /// O(1) model config lookup by name (case-insensitive, spelling-agnostic).
+    ///
+    /// The query is canonicalized to match the index keys, so `gpt-5.5` and
+    /// `gpt-5-5` resolve to the same `[[models]]` entry.
     pub fn find_model(&self, name: &str) -> Option<&crate::cli::ModelConfig> {
+        let key =
+            crate::routing::classify::model_name::canonicalize_model_name(name).to_lowercase();
         self.model_index
-            .get(&name.to_lowercase())
+            .get(&key)
             .map(|&idx| &self.config.models[idx])
     }
 }

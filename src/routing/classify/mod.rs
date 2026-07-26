@@ -346,8 +346,14 @@ impl Router {
         // name "default-model" to the upstream provider.
         if let Some(ref mapper) = self.auto_mapper {
             if mapper.is_match(&request.model) {
-                let has_explicit_virtual =
-                    self.config.models.iter().any(|m| m.name == request.model);
+                // `request.model` was canonicalized above; compare the config
+                // names in canonical form too, so a dotted `[[models]]` entry
+                // still counts as an explicit match and is not auto-mapped away.
+                let has_explicit_virtual = self
+                    .config
+                    .models
+                    .iter()
+                    .any(|m| model_name::canonicalize_model_name(&m.name) == request.model);
                 if has_explicit_virtual {
                     info!(
                         "Auto-map skipped for '{}' — explicit [[models]] entry takes precedence",
