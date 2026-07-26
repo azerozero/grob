@@ -154,30 +154,6 @@ impl TokenStore {
         })
     }
 
-    /// Gets the default token store path.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the home directory cannot be determined
-    /// or the config directory cannot be created.
-    pub fn default_path() -> Result<PathBuf> {
-        let home = crate::home_dir().context("Failed to get home directory (set GROB_HOME)")?;
-        let config_dir = home.join(".grob");
-        fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
-        Ok(config_dir.join("oauth_tokens.json"))
-    }
-
-    /// Creates a token store at the default location (legacy mode).
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the default path cannot be resolved or
-    /// the token file cannot be read.
-    pub fn at_default_path() -> Result<Self> {
-        let path = Self::default_path()?;
-        Self::new(path)
-    }
-
     /// Saves a token for a provider.
     ///
     /// # Errors

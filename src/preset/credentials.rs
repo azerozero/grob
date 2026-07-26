@@ -364,10 +364,6 @@ pub fn setup_credentials_interactive_filtered(
 mod tests {
     use super::*;
 
-    // Serializes the GROB_HOME-mutating test so it cannot clobber another
-    // test's environment when the suite runs in parallel.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
     /// Regression guard: `load_oauth_provider_list` once read a plaintext
     /// `~/.grob/oauth_tokens.json` that modern installs never write, so
     /// `grob status` and the `setup` wizard reported OAuth providers as
@@ -378,7 +374,9 @@ mod tests {
         use crate::auth::token_store::OAuthToken;
         use secrecy::SecretString;
 
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = crate::GROB_HOME_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
 
         let home =
             std::env::temp_dir().join(format!("grob-oauth-list-test-{}", std::process::id()));
