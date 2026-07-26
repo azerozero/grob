@@ -16,11 +16,16 @@ on:
     types: [closed]
     branches:
       - main
+  # Manual trigger: the push filter above only fires on `src/**`/`Cargo.*`
+  # changes, and a release PR that merges while a prior release is still cutting
+  # its tag can leave a releasable commit stranded with no way to re-run. This
+  # lets an operator open the release PR on demand without pushing to `main`.
+  workflow_dispatch:
 
 jobs:
   release-pr:
     name: Create Release PR
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
