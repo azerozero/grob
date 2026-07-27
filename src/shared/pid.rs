@@ -135,12 +135,19 @@ pub fn is_process_running(pid: u32) -> bool {
 
 #[cfg(feature = "unix-signals")]
 fn command_invokes_grob(command: &str) -> bool {
-    let first_arg = command
-        .split('\0')
-        .find(|part| !part.trim().is_empty())
-        .or_else(|| command.split_whitespace().next())
-        .unwrap_or_default()
-        .trim();
+    // The command string arrives in two shapes: Linux `/proc/<pid>/cmdline` is
+    // NUL-separated (`grob\0start\0`), while macOS `ps -o command=` is
+    // space-separated (`/opt/homebrew/bin/grob start`). Splitting only on `\0`
+    // left the macOS form intact, so `Path::file_name` on
+    // `"…/grob start"` returned `"grob start"` (≠ `"grob"`) and `grob stop`
+    // refused to stop its own daemon. Pick the separator by which one is present.
+    let first_arg = if command.contains('\0') {
+        command.split('\0').next()
+    } else {
+        command.split_whitespace().next()
+    }
+    .unwrap_or_default()
+    .trim();
     let executable = std::path::Path::new(first_arg)
         .file_name()
         .and_then(|name| name.to_str())
@@ -190,5 +197,18 @@ mod tests {
         assert!(!command_invokes_grob("/tmp/grob-upgrade --config x"));
         assert!(!command_invokes_grob("/usr/bin/python /tmp/grob.py"));
         assert!(!command_invokes_grob("/usr/bin/agrob-helper"));
+    }
+
+    /// macOS `ps -o command=` is space-separated; the executable and its args
+    /// must not be read as one path component. This is the exact string that
+    /// made `grob stop` refuse to stop a live daemon.
+    #[cfg(feature = "unix-signals")]
+    #[test]
+    fn command_identity_accepts_space_separated_macos_form() {
+        assert!(command_invokes_grob("/opt/homebrew/bin/grob start"));
+        assert!(command_invokes_grob("/opt/homebrew/bin/grob start\n"));
+        assert!(command_invokes_grob("grob start -d"));
+        // A non-grob program with a grob-ish argument still must not match.
+        assert!(!command_invokes_grob("/usr/bin/python grob start"));
     }
 }
