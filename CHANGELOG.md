@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.84](https://github.com/azerozero/grob/compare/v0.36.83...v0.36.84) - 2026-07-27
+
+### Fixed
+
+- *(cli)* make grob stop recognise its daemon on macOS ([#481](https://github.com/azerozero/grob/pull/481))
+
+### Other
+
+- switch merge policy to squash-only for reliable release-plz ([#480](https://github.com/azerozero/grob/pull/480))
+- *(release-plz)* allow manual workflow_dispatch
+
 ## [0.36.83](https://github.com/azerozero/grob/compare/v0.36.82...v0.36.83) - 2026-07-26
 
 ### Added
