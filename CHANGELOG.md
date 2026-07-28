@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.85](https://github.com/azerozero/grob/compare/v0.36.84...v0.36.85) - 2026-07-28
+
+### Fixed
+
+- *(openai)* preserve tool-result images on the Responses (Codex) path ([#488](https://github.com/azerozero/grob/pull/488))
+
+### Other
+
+- *(docs)* exclude flaky istio.io from lychee link check ([#483](https://github.com/azerozero/grob/pull/483))
+
 ## [0.36.84](https://github.com/azerozero/grob/compare/v0.36.83...v0.36.84) - 2026-07-27
 
 ### Fixed
