@@ -122,7 +122,15 @@ pub(crate) enum OpenAIResponsesItem {
         arguments: String,
     },
     /// The output of a tool call, fed back to the model.
-    FunctionCallOutput { call_id: String, output: String },
+    ///
+    /// `output` is a bare string for text results (cache-friendly) or an array
+    /// of `input_text`/`input_image` parts when the tool returned an image, so a
+    /// screenshot/vision tool's output reaches the model as pixels, not the
+    /// literal text `"[Image]"`.
+    FunctionCallOutput {
+        call_id: String,
+        output: serde_json::Value,
+    },
     /// A `reasoning` item replayed verbatim from a previous turn.
     ///
     /// Carries the backend's opaque `encrypted_content`, so it is forwarded
