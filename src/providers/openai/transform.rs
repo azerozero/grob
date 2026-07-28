@@ -1305,7 +1305,7 @@ fn push_blocks_as_items(
                 flush_message_parts(items, role, &mut text, &mut parts);
                 items.push(OpenAIResponsesItem::FunctionCallOutput {
                     call_id: tool_use_id.clone(),
-                    output: content.to_string(),
+                    output: responses_tool_output(content),
                 });
             }
             _ => {}
@@ -1357,6 +1357,63 @@ fn responses_text_part(role: &str, text: String) -> serde_json::Value {
 /// Wraps a text string as Responses-API message content (`[{"type":…,"text":…}]`).
 fn responses_message_content(role: &str, text: String) -> serde_json::Value {
     serde_json::Value::Array(vec![responses_text_part(role, text)])
+}
+
+/// Serializes a tool result as a Responses `function_call_output.output`.
+///
+/// Text-only results stay a bare JSON string (unchanged wire shape, so the
+/// prompt cache is undisturbed). When the tool returned an image, the output
+/// becomes an array of `input_text`/`input_image` parts in original order — the
+/// Codex backend accepts this and the model sees the actual pixels, instead of
+/// the `[Image]` placeholder `Display` produced, which made it hallucinate.
+fn responses_tool_output(content: &crate::models::ToolResultContent) -> serde_json::Value {
+    use crate::models::{KnownToolResultBlock, ToolResultBlock, ToolResultContent};
+
+    let ToolResultContent::Blocks(blocks) = content else {
+        return serde_json::Value::String(content.to_string());
+    };
+    let has_image = blocks.iter().any(|b| {
+        matches!(
+            b,
+            ToolResultBlock::Known(KnownToolResultBlock::Image { .. })
+        )
+    });
+    if !has_image {
+        return serde_json::Value::String(content.to_string());
+    }
+
+    let mut parts: Vec<serde_json::Value> = Vec::new();
+    let mut text = String::new();
+    let flush_text = |text: &mut String, parts: &mut Vec<serde_json::Value>| {
+        if !text.is_empty() {
+            parts.push(serde_json::json!({ "type": "input_text", "text": std::mem::take(text) }));
+        }
+    };
+    for block in blocks {
+        match block {
+            ToolResultBlock::Known(KnownToolResultBlock::Text { text: t }) => {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(t);
+            }
+            ToolResultBlock::Known(KnownToolResultBlock::Image { source }) => {
+                flush_text(&mut text, &mut parts);
+                if let Some(part) = responses_image_part(source) {
+                    parts.push(part);
+                }
+            }
+            // Preserve unknown blocks as text rather than dropping them silently.
+            ToolResultBlock::Unknown(v) => {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str(&v.to_string());
+            }
+        }
+    }
+    flush_text(&mut text, &mut parts);
+    serde_json::Value::Array(parts)
 }
 
 /// Builds a Responses-API `input_image` part from an Anthropic image block.
@@ -1894,6 +1951,47 @@ mod tests {
         let part = &json["input"][0]["content"][0];
         assert_eq!(part["type"], "input_image");
         assert_eq!(part["image_url"], "https://example.com/cat.png");
+    }
+
+    #[test]
+    fn tool_result_text_stays_a_bare_string() {
+        use crate::models::ToolResultContent;
+        // Text-only results must keep the plain-string wire shape (cache-friendly).
+        let out = responses_tool_output(&ToolResultContent::Text("file1\nfile2".to_string()));
+        assert_eq!(out, serde_json::json!("file1\nfile2"));
+    }
+
+    #[test]
+    fn tool_result_image_survives_as_input_image() {
+        use crate::models::{
+            ImageSource, KnownToolResultBlock, ToolResultBlock, ToolResultContent,
+        };
+        // A tool that returns an image: the image must reach the model as pixels,
+        // not the literal "[Image]" text `Display` produced.
+        let content = ToolResultContent::Blocks(vec![
+            ToolResultBlock::Known(KnownToolResultBlock::Text {
+                text: "screenshot:".to_string(),
+            }),
+            ToolResultBlock::Known(KnownToolResultBlock::Image {
+                source: ImageSource {
+                    r#type: "base64".to_string(),
+                    media_type: Some("image/png".to_string()),
+                    data: Some("aGVsbG8=".to_string()),
+                    url: None,
+                },
+            }),
+        ]);
+
+        let out = responses_tool_output(&content);
+        let parts = out
+            .as_array()
+            .expect("image output must be an array of parts");
+        assert_eq!(parts[0]["type"], "input_text");
+        assert_eq!(parts[0]["text"], "screenshot:");
+        assert_eq!(parts[1]["type"], "input_image");
+        assert_eq!(parts[1]["image_url"], "data:image/png;base64,aGVsbG8=");
+        // No "[Image]" placeholder anywhere.
+        assert!(!out.to_string().contains("[Image]"));
     }
 
     #[test]
