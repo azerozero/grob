@@ -4,3 +4,6 @@
 ^https?://.*\.internal(/.*)?$
 # public.cyber.mil rate-limits/times out from GitHub runners (flaky, not broken).
 ^https?://(public\.)?cyber\.mil(/.*)?$
+# istio.io refuses connections from GitHub runners intermittently (flaky, not
+# broken — returns 200 from a normal client). Cited in ADR-0022.
+^https?://(www\.)?istio\.io(/.*)?$
