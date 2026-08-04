@@ -130,7 +130,6 @@ pour ceux qui veulent un binaire unique sans orchestration.
 Détail d'API relevé en testant : `c2pa::Reader::from_file` exige la feature `file_io`,
 absente des defaults. À savoir avant de perdre du temps dessus.
 
-
 TrustMark (Adobe/Univ. Surrey, ICCV 2025, `arXiv:2311.18297`) est l'état de l'art ouvert :
 résolution arbitraire, qualité > 43 dB, implémentations Python/Rust/JS via ONNX.
 SynthID-Image (DeepMind, `arXiv:2510.09263`) est le pendant fermé, déployé à l'échelle
@@ -299,9 +298,9 @@ Chaque slice = une ADR courte + un `README.md` de module, conforme au flow du re
 
 ---
 
-# Partie 2 — Control plane d'agents
+## Partie 2 — Control plane d'agents
 
-## État actuel
+### État actuel
 
 Grob a déjà l'ossature d'un control plane, mais **orienté proxy**, pas **orienté agent** :
 
@@ -319,7 +318,7 @@ Grob a déjà l'ossature d'un control plane, mais **orienté proxy**, pas **orie
 Autrement dit : les *primitives* (identité, capacités, budget, audit, HIT, isolation
 réseau) existent déjà. Ce qui manque est la **notion d'agent comme entité de première classe**.
 
-## Le gap
+### Le gap
 
 Aujourd'hui une requête a un tenant, une policy, un budget. Elle n'a pas d'**agent
 identifié et durable**. Conséquences :
@@ -332,7 +331,7 @@ identifié et durable**. Conséquences :
 - Aucune boucle de rappel : rien ne relie « cette image a fuité » à « quel agent l'a produite ».
   C'est précisément le `trace_id` de la partie 1 qui referme cette boucle.
 
-## Ce que dit le marché (recherche, 2026-08)
+### Ce que dit le marché (recherche, 2026-08)
 
 Le terme « agent control plane » s'est stabilisé en 2025-2026 et converge, chez tous les
 acteurs (Microsoft Agent 365 / Entra Agent ID, Okta, Guild, Nagarro, Lyzr), sur la même
@@ -368,7 +367,7 @@ doit **jamais** recevoir le token de son parent. Il reçoit un token dérivé, d
 restreinte. Ça rejoint exactement la contrainte « les capacités décroissent
 monotonement » déjà posée, mais avec un mécanisme normé pour l'appliquer.
 
-## Direction proposée
+### Direction proposée
 
 **Un namespace `agent` + une identité qui traverse tout le pipeline.**
 
@@ -405,7 +404,7 @@ Points de conception qui comptent :
 - **HIT branché sur l'agent.** `policies/hit` existe déjà ; le point d'attache naturel
   est l'agent, pas la requête isolée.
 
-## Ce que ça débloque
+### Ce que ça débloque
 
 - Kill switch réel : un agent qui déraille est coupé, descendance comprise.
 - Attribution du coût par agent, pas par clé API.
@@ -413,7 +412,7 @@ Points de conception qui comptent :
 - Sandbox alignée : `orca.yaml` isole déjà au niveau réseau ; `AgentId` donne le pendant
   logique côté proxy.
 
-## Risques
+### Risques
 
 - **Scope creep vers l'orchestrateur.** Grob doit rester un *control plane*, pas un
   runtime d'agents. Il n'exécute pas, il autorise, borne, observe et coupe.
@@ -423,7 +422,7 @@ Points de conception qui comptent :
 - **État persistant.** Le control plane actuel est stateless ; les agents introduisent
   du cycle de vie. À contenir dans `GrobStore`, sans base de données.
 
-## Open Questions
+### Open Questions
 
 **Tranchées par la recherche et la mesure :**
 
