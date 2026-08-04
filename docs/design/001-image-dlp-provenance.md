@@ -60,6 +60,14 @@ Ce qui cloche avec « je colle un QR dans le coin » :
   qui pointe vers un registre, pas la donnée elle-même (mettre le tenant en clair dans
   l'image, c'est créer une nouvelle fuite).
 
+Bonne nouvelle : ce découpage à couches est exactement ce que l'industrie a standardisé
+sous le nom **Durable Content Credentials** (Adobe / CAI). La spec C2PA 2.1 appelle
+watermark et fingerprint des **soft bindings**, et impose qu'ils soient produits par un
+algorithme de la [C2PA Soft Binding Algorithm List](https://github.com/c2pa-org/softbinding-algorithm-list).
+Le principe officiel est littéralement le nôtre : si une plateforme strippe le manifeste
+C2PA, on retrouve la provenance dans une base en ligne via le watermark ou l'empreinte.
+Donc on n'invente rien, on implémente un standard, ce qui règle aussi l'interop.
+
 Le bon découpage est en trois couches indépendantes qui dégradent gracieusement :
 
 | Couche | Support | Survit à | Casse sur | Rôle |
@@ -80,6 +88,46 @@ et ça évite de transformer le watermark en canal d'exfiltration.
 Une lib JS de lecture reste souhaitable : elle lit L1 (parse C2PA/XMP, pur JS), calcule L3
 (pHash en WASM ou Canvas) et appelle Grob pour résoudre le `trace_id`. La détection L2
 robuste est du traitement du signal → WASM, ou déportée sur l'endpoint serveur.
+
+## État de l'art (recherche, 2026-08)
+
+### Ce qui existe déjà en Rust, vérifié sur crates.io
+
+| Besoin | Crate | Verdict |
+|---|---|---|
+| L1 C2PA | `c2pa` 0.90.4, MIT/Apache-2.0, `rust_native_crypto` dispo (évite OpenSSL) | **À utiliser.** C'est l'implémentation de référence CAI. Features à trier finement : couper `default_http` (4 clients HTTP !), `openssl`, `fetch_remote_manifests` (SSRF), garder `rust_native_crypto`. |
+| L2 watermark | `trustmark` 0.2.2 (Adobe, MIT) | **Attention.** Tire `ort` (ONNX Runtime) + `ndarray` + `image` + modèles ONNX externes. Incompatible avec le binaire `FROM scratch` de 6 MB. → **sidecar**, pas dépendance directe. |
+| L3 fingerprint | `img_hash` 3.2.0 (pHash/dHash) | **À utiliser**, léger, pur Rust. |
+
+TrustMark (Adobe/Univ. Surrey, ICCV 2025, `arXiv:2311.18297`) est l'état de l'art ouvert :
+résolution arbitraire, qualité > 43 dB, implémentations Python/Rust/JS via ONNX.
+SynthID-Image (DeepMind, `arXiv:2510.09263`) est le pendant fermé, déployé à l'échelle
+d'internet, non utilisable ici.
+
+**Conséquence sur le design** : écrire notre propre DWT-DCT était une mauvaise idée.
+On garde une implémentation triviale en fallback pur-Rust si vraiment nécessaire, mais
+le chemin principal est TrustMark en sidecar via l'ABI `MediaMarker`. Le trait était donc
+la bonne abstraction : il absorbe le changement sans toucher au pipeline.
+
+À noter aussi `invisimark` (DWT-DCT-SIFT, QR invisible, testé survivant aux pipelines
+Instagram/Facebook) : c'est exactement la variante « QR mais invisible », qui confirme
+que le QR a du sens **encodé dans le domaine fréquentiel**, pas peint dans le coin.
+
+### Sur la prompt injection multimodale
+
+OWASP LLM01:2025 la liste explicitement (« Scenario #7: Multimodal Injection ») et écrit
+noir sur blanc que *les injections n'ont pas besoin d'être lisibles par un humain, du
+moment que le modèle les parse*. Le document conclut que les défenses multimodales
+spécifiques sont un domaine de recherche ouvert. Deux mitigations OWASP s'appliquent
+directement à notre design et sont déjà des primitives Grob :
+
+- « Segregate and identify external content » → marquer les images entrantes comme non
+  fiables, ce que `tool_layer` peut faire.
+- « Require human approval for high-risk actions » → `policies/hit` existe déjà.
+
+Autrement dit : on ne prétend pas détecter toutes les injections image. On fait de
+l'OCR→DLP (bon marché, attrape le cas naïf), on **marque la provenance** et on branche
+le HIT. C'est la posture honnête.
 
 ## Proposed Design
 
@@ -116,7 +164,8 @@ Sous-modules :
     peut brancher Vision ; sinon sidecar HTTP, jamais linké en dur dans le binaire scratch.
   - `phash.rs` — empreinte perceptuelle (L3), et matching contre une deny-list
     d'images connues (documents internes, slides confidentielles).
-- `mark/` — `c2pa.rs` (L1), `invisible.rs` (L2, DWT-DCT), `qr.rs` (L3-visible, opt-in).
+- `mark/` — `c2pa.rs` (L1, crate `c2pa`), `soft_binding.rs` (L2, client sidecar TrustMark
+  conforme à la C2PA Soft Binding Algorithm List), `qr.rs` (L3-visible, opt-in).
 - `registry.rs` — journal `~/.grob/media/YYYY-MM.jsonl` : `trace_id`, phash, verdict,
   tenant, model, ts. Même pattern que `spend/`.
 
@@ -247,6 +296,42 @@ identifié et durable**. Conséquences :
 - Aucune boucle de rappel : rien ne relie « cette image a fuité » à « quel agent l'a produite ».
   C'est précisément le `trace_id` de la partie 1 qui referme cette boucle.
 
+## Ce que dit le marché (recherche, 2026-08)
+
+Le terme « agent control plane » s'est stabilisé en 2025-2026 et converge, chez tous les
+acteurs (Microsoft Agent 365 / Entra Agent ID, Okta, Guild, Nagarro, Lyzr), sur la même
+thèse : **la gouvernance d'agents est un problème de plan d'identité, pas d'admin d'accès.**
+Les briques citées systématiquement :
+
+1. **Une identité dédiée par agent**, pas une clé API partagée ni l'identité de l'humain.
+2. **Credentials scopés** et éphémères.
+3. **Registre** d'agents, avec propriétaire et cycle de vie déclaré.
+4. **Piste d'audit attribuable** par action.
+5. **Révocation / décommissionnement** automatique quand l'agent échoue son évaluation.
+6. Alignement NIST AI RMF / EU AI Act.
+
+Deux points intéressants pour Grob :
+
+- Le problème n°1 identifié est l'**agent sprawl** : personne ne sait combien d'agents
+  tournent ni ce qu'ils touchent. Grob voit déjà *tout le trafic modèle*. Il est
+  structurellement le mieux placé pour tenir le registre, sans instrumenter les agents.
+- Les offres du marché sont des plans de contrôle *SaaS d'entreprise* (Entra, Okta).
+  Grob occupe un créneau différent : un plan de contrôle **local, self-hosted, 6 MB**,
+  qui donne 80 % du résultat sans annuaire d'entreprise. C'est un vrai différenciateur.
+
+Côté standard, MCP 2025-06-18 (`basic/authorization`) donne des fondations réutilisables
+telles quelles, et évite d'inventer un schéma maison :
+
+- OAuth 2.1 + PKCE obligatoire, Dynamic Client Registration (RFC 7591).
+- **Resource Indicators (RFC 8707)** : le token est lié à sa ressource cible.
+- **Protected Resource Metadata (RFC 9728)** + `WWW-Authenticate` sur 401.
+- **Interdiction du token passthrough**, explicitement pour éviter le *confused deputy*.
+
+Ce dernier point est directement une règle de conception pour Grob : un agent enfant ne
+doit **jamais** recevoir le token de son parent. Il reçoit un token dérivé, d'audience
+restreinte. Ça rejoint exactement la contrainte « les capacités décroissent
+monotonement » déjà posée, mais avec un mécanisme normé pour l'appliquer.
+
 ## Direction proposée
 
 **Un namespace `agent` + une identité qui traverse tout le pipeline.**
@@ -304,12 +389,25 @@ Points de conception qui comptent :
 
 ## Open Questions
 
-- L'OCR : sidecar local, ou API vision du provider déjà configuré (attention, on
-  enverrait alors l'image suspecte au provider, ce qui contredit l'objectif) ?
-- C2PA en Rust : implémentation externe acceptable au regard du budget binaire et de
-  `cargo-deny` ?
-- Le watermark L2 : implémentation maison (DWT-DCT ~300 lignes, contrôlée mais à valider
-  empiriquement) ou dépendance ?
-- Les agents deviennent-ils un produit Admin/Enterprise (cf. ADR-0028 open-core boundary)
-  ou restent-ils dans le cœur Apache ?
-- Faut-il un `agent_id` obligatoire à terme, avec un agent implicite par défaut ?
+**Tranchées par la recherche :**
+
+- ~~C2PA en Rust, acceptable ?~~ Oui : `c2pa` 0.90.4, MIT/Apache-2.0, avec
+  `rust_native_crypto` et sans les 4 clients HTTP par défaut. À valider sur `cargo-deny`
+  et sur le poids réel du binaire.
+- ~~Watermark maison ou dépendance ?~~ Ni l'un ni l'autre en direct : TrustMark en
+  **sidecar** (ONNX incompatible avec `FROM scratch`), derrière le trait `MediaMarker`.
+- ~~Faut-il inventer un schéma d'identité d'agent ?~~ Non : OAuth 2.1 + RFC 8707
+  (resource indicators) + RFC 9728, comme MCP 2025-06-18. Et interdiction stricte du
+  token passthrough parent → enfant.
+
+**Encore ouvertes :**
+
+- L'OCR : sidecar local, ou API vision du provider déjà configuré ? (Attention : envoyer
+  l'image suspecte au provider contredit l'objectif.)
+- Le sidecar devient-il un pattern assumé de Grob (media, OCR, ffmpeg) avec un protocole
+  unique, ou trois intégrations ad hoc ? Trancher tôt, ça structure tout le reste.
+- Les agents : produit Admin/Enterprise (cf. ADR-0028 open-core boundary) ou cœur Apache ?
+  Le marché monétise exactement cette couche, donc la question est commerciale.
+- `agent_id` obligatoire à terme, avec un agent implicite par défaut ?
+- Faut-il viser une conformité déclarée NIST AI RMF / EU AI Act, ou juste fournir les
+  primitives et laisser l'utilisateur mapper ?
