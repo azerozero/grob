@@ -273,8 +273,8 @@ pub trait ProviderAvailability: Send + Sync {
     /// Returns true if the provider is available for requests.
     async fn can_execute(&self, provider: &str) -> bool;
 
-    /// Records a successful request to the provider.
-    async fn record_success(&self, provider: &str);
+    /// Records a successful request to the provider, including observed latency.
+    async fn record_success(&self, provider: &str, latency_ms: u64);
 
     /// Records a failed request to the provider.
     async fn record_failure(&self, provider: &str);
@@ -337,7 +337,7 @@ pub mod mocks {
             true
         }
 
-        async fn record_success(&self, _provider: &str) {}
+        async fn record_success(&self, _provider: &str, _latency_ms: u64) {}
 
         async fn record_failure(&self, _provider: &str) {}
 

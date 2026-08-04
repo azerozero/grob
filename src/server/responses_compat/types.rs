@@ -36,8 +36,8 @@ pub struct ResponsesRequest {
     #[serde(default)]
     pub metadata: Option<HashMap<String, Value>>,
 
-    // ── Ignored gracefully (accepted but not processed) ──
-    /// Reference to a previous response for multi-turn (ignored by grob).
+    // ── Compatibility fields ──
+    /// Reference to a previous response for server-side multi-turn history.
     #[serde(default)]
     pub previous_response_id: Option<String>,
     /// Whether to persist the response server-side (ignored by grob).
@@ -137,8 +137,13 @@ pub enum InputContentPart {
         /// The previously generated assistant text.
         text: String,
     },
-    /// Any other content part type (e.g. `input_image`) not modelled here.
-    /// Tolerated and skipped so multi-turn Codex payloads do not 422.
+    /// Image input, represented by either a URL or a base64 data URI.
+    #[serde(rename = "input_image")]
+    InputImage {
+        /// Image URL or data URI.
+        image_url: String,
+    },
+    /// Any other content part type not modelled here.
     #[serde(other)]
     Other,
 }
