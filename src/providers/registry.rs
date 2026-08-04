@@ -16,6 +16,22 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Why a configured mapping cannot be dispatched right now.
+///
+/// [`ProviderRegistry::provider_for_dispatch`] is the sole composition point for
+/// provider-level availability and endpoint-level health. The underlying state
+/// remains owned by the supplied [`crate::traits::ProviderAvailability`] and by
+/// this registry's endpoint health components respectively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DispatchRejection {
+    /// The mapping references a provider absent from the registry.
+    ProviderNotRegistered,
+    /// The provider-level availability authority rejected the dispatch.
+    ProviderUnavailable,
+    /// Active or passive endpoint health rejected the provider/model pair.
+    EndpointUnavailable,
+}
+
 /// Default base URL for OpenAI-compatible API
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 
@@ -437,6 +453,34 @@ impl ProviderRegistry {
         self.providers.get(name).cloned()
     }
 
+    /// Resolves a provider for dispatch through the single availability gate.
+    ///
+    /// Provider-level health is evaluated first because its state machine may
+    /// consume a half-open permit. Endpoint health is then evaluated for the
+    /// concrete `(provider, model)` mapping. Both must allow the request.
+    pub(crate) async fn provider_for_dispatch(
+        &self,
+        provider: &str,
+        model: &str,
+        provider_availability: Option<&dyn crate::traits::ProviderAvailability>,
+    ) -> Result<Arc<dyn LlmProvider>, DispatchRejection> {
+        let provider_impl = self
+            .provider(provider)
+            .ok_or(DispatchRejection::ProviderNotRegistered)?;
+
+        if let Some(availability) = provider_availability {
+            if !availability.can_execute(provider).await {
+                return Err(DispatchRejection::ProviderUnavailable);
+            }
+        }
+
+        if !self.is_endpoint_healthy(provider, model) {
+            return Err(DispatchRejection::EndpointUnavailable);
+        }
+
+        Ok(provider_impl)
+    }
+
     /// Gets a provider for a specific model.
     ///
     /// # Errors
@@ -444,20 +488,32 @@ impl ProviderRegistry {
     /// Returns [`ProviderError::ModelNotSupported`] if no registered
     /// provider handles the given model name.
     pub fn provider_for_model(&self, model: &str) -> Result<Arc<dyn LlmProvider>, ProviderError> {
+        self.provider_and_name_for_model(model)
+            .map(|(_, provider)| provider)
+    }
+
+    /// Gets the configured provider name and implementation for a model.
+    ///
+    /// Dispatch uses the name to apply the same provider and endpoint health
+    /// decision to backward-compatible direct model lookups as mapped lookups.
+    pub(crate) fn provider_and_name_for_model(
+        &self,
+        model: &str,
+    ) -> Result<(String, Arc<dyn LlmProvider>), ProviderError> {
         // First, check if we have a direct model → provider mapping. The index is
         // keyed by canonical name, so canonicalize the query to match it.
         let canonical = crate::routing::classify::model_name::canonicalize_model_name(model);
         if let Some(provider_name) = self.model_to_provider.get(canonical.as_ref()) {
             if let Some(provider) = self.providers.get(provider_name) {
-                return Ok(provider.clone());
+                return Ok((provider_name.clone(), provider.clone()));
             }
         }
 
         // If no direct mapping, search through all providers
         self.providers
-            .values()
-            .find(|p| p.supports_model(model))
-            .cloned()
+            .iter()
+            .find(|(_, provider)| provider.supports_model(model))
+            .map(|(name, provider)| (name.clone(), provider.clone()))
             .ok_or_else(|| ProviderError::ModelNotSupported(model.to_string()))
     }
 
@@ -598,6 +654,38 @@ impl Default for ProviderRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::mocks::MockLlmProvider;
+    use crate::security::CircuitState;
+    use crate::traits::ProviderAvailability;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct FixedAvailability {
+        allowed: bool,
+        checks: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl ProviderAvailability for FixedAvailability {
+        async fn can_execute(&self, _provider: &str) -> bool {
+            self.checks.fetch_add(1, Ordering::Relaxed);
+            self.allowed
+        }
+
+        async fn record_success(&self, _provider: &str, _latency_ms: u64) {}
+
+        async fn record_failure(&self, _provider: &str) {}
+
+        async fn all_states(&self) -> HashMap<String, CircuitState> {
+            HashMap::new()
+        }
+    }
+
+    fn registry_with_mock_provider() -> ProviderRegistry {
+        let mut registry = ProviderRegistry::new();
+        registry
+            .insert_provider_for_test("primary", Arc::new(MockLlmProvider::text("model-a", "ok")));
+        registry
+    }
 
     #[test]
     fn test_empty_registry() {
@@ -611,6 +699,97 @@ mod tests {
         let registry = ProviderRegistry::new();
         let result = registry.provider_for_model("gpt-4");
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn dispatch_gate_does_not_consume_availability_for_missing_provider() {
+        let registry = ProviderRegistry::new();
+        let availability = FixedAvailability {
+            allowed: true,
+            checks: AtomicUsize::new(0),
+        };
+
+        let result = registry
+            .provider_for_dispatch("missing", "model-a", Some(&availability))
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(DispatchRejection::ProviderNotRegistered)
+        ));
+        assert_eq!(availability.checks.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn dispatch_gate_rejects_provider_before_endpoint_health() {
+        let mut registry = registry_with_mock_provider();
+        registry.cb_templates.insert(
+            "primary".to_string(),
+            CircuitBreakerConfig {
+                max_fails: 1,
+                fail_duration: Duration::from_secs(60),
+                cooldown: Some(Duration::from_secs(60)),
+            },
+        );
+        let availability = FixedAvailability {
+            allowed: false,
+            checks: AtomicUsize::new(0),
+        };
+
+        let result = registry
+            .provider_for_dispatch("primary", "model-a", Some(&availability))
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(DispatchRejection::ProviderUnavailable)
+        ));
+        assert_eq!(availability.checks.load(Ordering::Relaxed), 1);
+        assert!(registry.endpoint_breakers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn dispatch_gate_requires_provider_and_endpoint_health() {
+        let mut registry = registry_with_mock_provider();
+        registry.cb_templates.insert(
+            "primary".to_string(),
+            CircuitBreakerConfig {
+                max_fails: 1,
+                fail_duration: Duration::from_secs(60),
+                cooldown: Some(Duration::from_secs(60)),
+            },
+        );
+        registry.record_endpoint_failure("primary", "model-a");
+        let availability = FixedAvailability {
+            allowed: true,
+            checks: AtomicUsize::new(0),
+        };
+
+        let result = registry
+            .provider_for_dispatch("primary", "model-a", Some(&availability))
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(DispatchRejection::EndpointUnavailable)
+        ));
+        assert_eq!(availability.checks.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn dispatch_gate_returns_provider_when_all_signals_allow() {
+        let registry = registry_with_mock_provider();
+        let availability = FixedAvailability {
+            allowed: true,
+            checks: AtomicUsize::new(0),
+        };
+
+        let result = registry
+            .provider_for_dispatch("primary", "model-a", Some(&availability))
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(availability.checks.load(Ordering::Relaxed), 1);
     }
 
     #[test]

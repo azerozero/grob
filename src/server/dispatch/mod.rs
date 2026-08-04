@@ -117,27 +117,17 @@ impl DispatchContext<'_> {
         }
     }
 
-    /// Records a provider success in the scorer or circuit breaker.
-    ///
-    /// Prefers the adaptive scorer (which wraps the circuit breaker);
-    /// falls back to the bare circuit breaker when no scorer is configured.
+    /// Records a provider success through the configured availability authority.
     pub(crate) async fn record_provider_success(&self, provider: &str, latency_ms: u64) {
-        if let Some(ref scorer) = self.state.security.provider_scorer {
-            scorer.record_success(provider, latency_ms).await;
-        } else if let Some(ref cb) = self.state.security.circuit_breakers {
-            cb.record_success(provider).await;
+        if let Some(ref availability) = self.state.security.provider_availability {
+            availability.record_success(provider, latency_ms).await;
         }
     }
 
-    /// Records a provider failure in the scorer or circuit breaker.
-    ///
-    /// Prefers the adaptive scorer (which wraps the circuit breaker);
-    /// falls back to the bare circuit breaker when no scorer is configured.
+    /// Records a provider failure through the configured availability authority.
     pub(crate) async fn record_provider_failure(&self, provider: &str) {
-        if let Some(ref scorer) = self.state.security.provider_scorer {
-            scorer.record_failure(provider).await;
-        } else if let Some(ref cb) = self.state.security.circuit_breakers {
-            cb.record_failure(provider).await;
+        if let Some(ref availability) = self.state.security.provider_availability {
+            availability.record_failure(provider).await;
         }
     }
 

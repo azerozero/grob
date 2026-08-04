@@ -254,7 +254,7 @@ impl crate::traits::ProviderAvailability for CircuitBreakerRegistry {
         self.can_execute(provider).await
     }
 
-    async fn record_success(&self, provider: &str) {
+    async fn record_success(&self, provider: &str, _latency_ms: u64) {
         self.record_success(provider).await;
     }
 
