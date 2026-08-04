@@ -74,7 +74,12 @@ Le bon découpage est en trois couches indépendantes qui dégradent gracieuseme
 |---|---|---|---|---|
 | **L1 — Métadonnées signées** (C2PA / manifeste dans XMP/EXIF) | conteneur du fichier | copie, transfert, upload | screenshot, strip metadata, ré-encodage | provenance riche et vérifiable, cas nominal |
 | **L2 — Watermark invisible robuste** (spectre étalé / DCT-DWT, style Trustmark/SynthID) | pixels | recompression, resize, crop partiel, screenshot | crop massif, régénération, forte dégradation | identifiant opaque 64–128 bits, cas hostile |
-| **L3 — Empreinte perceptuelle** (pHash / dHash indexé côté serveur) | aucune modif de l'image | tout, y compris strip complet | transformation sémantique lourde | rattrapage « d'où vient cette image ? » sans rien avoir écrit dedans |
+| **L3 — Empreinte perceptuelle** (pHash / dHash indexé côté serveur) | aucune modif de l'image | recompression, resize, crop ≤ 25 %, screenshot, niveaux de gris, et leur cumul (mesuré) | **miroir, rotation**, transformation sémantique lourde | rattrapage « d'où vient cette image ? » sans rien avoir écrit dedans |
+
+> Les colonnes de L3 sont **mesurées**, pas estimées (voir « Robustesse de L3 mesurée »
+> plus bas). Celles de L1 et L2 restent des attentes issues de la littérature : L1 est
+> évidente (métadonnées présentes ou absentes), L2 devra être mesurée de la même façon
+> avant d'être promise à quiconque.
 
 Le QR devient une variante *L2-visible* : utile seulement quand on **veut** que ce soit
 visible (asset publié, marquage légal, démo), jamais comme mécanisme principal.
@@ -104,31 +109,76 @@ robuste est du traitement du signal → WASM, ou déportée sur l'endpoint serve
 Crate jetable, profil release identique à celui de Grob (`lto = true`,
 `codegen-units = 1`, `strip = true`, `opt-level = 3`), macOS aarch64 :
 
-| Binaire | Taille |
-|---|---|
-| hello world | 296 KB |
-| + `c2pa` (no-default-features, `rust_native_crypto`, `file_io`) | **7,33 MB** |
+| Binaire | Taille | Delta |
+|---|---|---|
+| hello world | 296 KB | référence |
+| + `c2pa` (no-default-features, `rust_native_crypto`, `file_io`) | **7,33 MB** | +7,0 MB |
+| + `trustmark` 0.2.2 | **12,24 MB** | **+11,9 MB** |
 
-Soit **+7,0 MB nets**, pour une image de conteneur Grob qui pèse ~6 MB aujourd'hui.
-Vérifications faites au passage : `cargo tree` ne contient **aucun** `reqwest`, `openssl`,
-`ureq`, `wasi` ni `wstd` avec ces features, mais l'arbre monte quand même à **240 crates
-uniques** (CBOR, COSE, X.509, `rasn-cms`, `iref`…). La compilation prend 26 s en debug.
+Soit +7,0 MB pour C2PA et +11,9 MB pour TrustMark, sur une image de conteneur Grob qui
+pèse ~6 MB aujourd'hui. **TrustMark seul multiplie la taille par plus de trois**, et
+l'arbre (162 crates) contient `ort`/`ort-sys` (ONNX Runtime), `ndarray`, `image` et
+`fast_image_resize`, sans compter les modèles ONNX qui se téléchargent séparément.
 
-**Conclusion qui change le plan** : C2PA ne peut pas être une feature qu'on active
-tranquillement. Activer L1 **plus que double** la taille du binaire. Deux options, à
-trancher dans l'ADR :
+Côté C2PA, `cargo tree` ne contient **aucun** `reqwest`, `openssl`, `ureq`, `wasi` ni
+`wstd` avec ces features, mais l'arbre monte quand même à **240 crates uniques**
+(CBOR, COSE, X.509, `rasn-cms`, `iref`…).
 
-1. **Feature opt-in assumée** (`media-c2pa`), en documentant noir sur blanc « +7 MB », avec
+**Conclusion qui change le plan** : ni C2PA ni TrustMark ne peuvent être des features
+qu'on active tranquillement. Les activer toutes les deux ferait passer le binaire de
+6 MB à ~25 MB. Deux options, à trancher dans l'ADR :
+
+1. **Feature opt-in assumée** (`media-c2pa`), en documentant noir sur blanc le coût, avec
    une image de conteneur séparée `grob:media`. Le binaire par défaut reste à 6 MB.
-2. **Sidecar de provenance**, comme TrustMark, qui signe et vérifie hors du processus.
-   Le cœur ne connaît que `trace_id` et pHash, tous deux légers.
+2. **Sidecar**, pour C2PA comme pour TrustMark, qui signent et vérifient hors du
+   processus. Le cœur ne connaît que `trace_id` et pHash, tous deux légers.
 
-L'option 2 est plus cohérente : elle rend le noyau indifférent au format de provenance,
-et elle mutualise le protocole sidecar avec l'OCR et TrustMark. L'option 1 reste utile
-pour ceux qui veulent un binaire unique sans orchestration.
+L'option 2 est la seule tenable pour TrustMark, et cohérente pour C2PA : elle rend le
+noyau indifférent au format de provenance et mutualise le protocole sidecar avec l'OCR.
+L'option 1 reste utile pour C2PA seul, si quelqu'un veut un binaire unique sans
+orchestration.
 
 Détail d'API relevé en testant : `c2pa::Reader::from_file` exige la feature `file_io`,
 absente des defaults. À savoir avant de perdre du temps dessus.
+
+### Robustesse de L3 mesurée (le contrat, pas une promesse)
+
+`img_hash` 3.2.0, `HashAlg::Gradient`, hash 64 bits, image synthétique 800×600 de type
+capture d'écran. Distance de Hamming entre l'original et sa version transformée :
+
+| Transformation | Distance /64 |
+|---|---|
+| JPEG q=90 / 70 / 50 | 1 / 1 / 1 |
+| JPEG q=30 | 3 |
+| Resize 75 % / 50 % / 25 % | 1 / 1 / 1 |
+| Crop 5 % / 10 % / 25 % | 1 / 3 / 5 |
+| « Screenshot » (resize + luminosité + JPEG 80) | 1 |
+| Niveaux de gris | 0 |
+| Resize 50 % + luminosité + JPEG 60 (cumulé) | 0 |
+| Crop 20 % + JPEG 60 (cumulé) | 3 |
+| **Miroir horizontal** | **21** |
+| **Rotation 90°** | **52** |
+
+- Pire cas sur les transformations supportées : **5**.
+- Image la plus proche parmi 10 images réellement différentes : **18**.
+- **Marge de séparation : 13.** Un seuil à 10 sépare proprement, avec de la marge des
+  deux côtés. C'est ce seuil qui doit être codé en dur et testé, pas deviné.
+
+Deux enseignements qui vont dans le README du module :
+
+1. L3 est **remarquablement robuste** au cas nominal, y compris aux transformations
+   cumulées, qui sont le cas réel. C'est la couche la moins chère et elle porte
+   beaucoup plus que je ne le supposais.
+2. L3 **ne résiste ni au miroir ni à la rotation** (21 et 52, au-delà du seuil). C'est
+   une limite structurelle du hash par gradient, pas un réglage. Si quelqu'un retourne
+   l'image, seuls L1 et L2 répondent. À écrire dans la doc, sinon on promet une
+   traçabilité qu'on n'a pas.
+
+Méthode : le premier corpus de test que j'avais écrit donnait une séparation nulle, non
+pas à cause de pHash mais parce que mes images « différentes » se ressemblaient toutes
+(distance 1). Un corpus non discriminant produit une conclusion fausse. Le test définitif
+vérifie donc explicitement la séparation avant de conclure quoi que ce soit sur la
+robustesse.
 
 TrustMark (Adobe/Univ. Surrey, ICCV 2025, `arXiv:2311.18297`) est l'état de l'art ouvert :
 résolution arbitraire, qualité > 43 dB, implémentations Python/Rust/JS via ONNX.
