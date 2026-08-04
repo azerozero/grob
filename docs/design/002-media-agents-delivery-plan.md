@@ -25,7 +25,8 @@
 |---|---|---|---|---|
 | 1 | Squelette `media` : décodage borné + pHash + journal | `media` | non | ✅ **livré** (#501) |
 | 2 | **Protocole sidecar** (fondation partagée) | `media` | non | à faire |
-| 3 | Détecteurs bon marché (heuristiques, stégano) + wiring async | `media` | non | à faire |
+| 3 | Détecteurs bon marché (heuristiques, stégano) | `media` | non | ✅ **livré** (#504, #505) |
+| 3b | Wiring async dans dispatch + events watch/tap | `media` | non | à faire |
 | 4 | OCR → DLP via sidecar | `media` | non | à faire |
 | 5 | Mode `blocking` + intégration policies | `media` | oui | à faire |
 | 6 | Provenance L1 (C2PA) + registre `trace_id` | sidecar, ou `media-c2pa` | non | à faire |
@@ -164,6 +165,17 @@ et son absence ne change rien au comportement du proxy.
 ---
 
 ### PR 3 — Détecteurs bon marché + branchement asynchrone
+
+> **✅ Détecteurs livrés (#504), durcis (#505).** Le wiring dispatch/watch est sorti de
+> cette PR (devenu 3b) : il dépend d'un plumbing de config qui n'existe pas encore, et
+> le mélanger à la couche de détection aurait fait une PR non testable isolément.
+>
+> Leçon de #505, qui vaut au-delà de ce slice : le job de mutation testing de la CI est
+> passé au vert sur #504, mais un `cargo-mutants` local sur `scan/` a trouvé **20 mutants
+> survivants**. Les tests vérifiaient que les findings se déclenchaient, jamais que
+> l'arithmétique d'offsets qui les produit était juste. Corrigé à **0 survivant**. À
+> retenir pour les PRs suivantes : sur du parsing d'offsets, tester le résultat ne teste
+> rien ; il faut épingler l'arithmétique.
 
 **Fichiers**
 
