@@ -2,7 +2,13 @@
 
 use super::constants::MIN_ANTHROPIC_SIGNATURE_LENGTH;
 use crate::models::{CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent};
+use bytes::Bytes;
+use futures::Stream;
+use pin_project::pin_project;
 use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 /// Bidirectional map between sanitized (canonical) tool IDs and the originals
 /// supplied by the client.
@@ -267,6 +273,114 @@ pub(super) fn restore_original_tool_ids(
     }
 }
 
+/// Restores sanitized tool IDs in streamed Anthropic `content_block_start` events.
+#[pin_project]
+pub(super) struct RestoreToolIdStream<S> {
+    #[pin]
+    inner: S,
+    id_map: OriginalToolIdMap,
+    buffer: Vec<u8>,
+    queue: VecDeque<Bytes>,
+}
+
+impl<S> RestoreToolIdStream<S> {
+    pub(super) fn new(inner: S, id_map: OriginalToolIdMap) -> Self {
+        Self {
+            inner,
+            id_map,
+            buffer: Vec::new(),
+            queue: VecDeque::new(),
+        }
+    }
+}
+
+impl<S, E> Stream for RestoreToolIdStream<S>
+where
+    S: Stream<Item = Result<Bytes, E>>,
+{
+    type Item = Result<Bytes, E>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+
+        if this.id_map.is_empty() {
+            return this.inner.poll_next(cx);
+        }
+        if let Some(bytes) = this.queue.pop_front() {
+            return Poll::Ready(Some(Ok(bytes)));
+        }
+
+        match this.inner.as_mut().poll_next(cx) {
+            Poll::Ready(Some(Ok(bytes))) => {
+                this.buffer.extend_from_slice(&bytes);
+                while let Some(end) = this.buffer.windows(2).position(|window| window == b"\n\n") {
+                    let event = this.buffer.drain(..end + 2).collect::<Vec<_>>();
+                    this.queue
+                        .push_back(restore_tool_id_in_sse_event(&event, this.id_map));
+                }
+
+                if let Some(bytes) = this.queue.pop_front() {
+                    Poll::Ready(Some(Ok(bytes)))
+                } else {
+                    cx.waker().wake_by_ref();
+                    Poll::Pending
+                }
+            }
+            Poll::Ready(Some(Err(error))) => Poll::Ready(Some(Err(error))),
+            Poll::Ready(None) if !this.buffer.is_empty() => {
+                let tail = std::mem::take(this.buffer);
+                Poll::Ready(Some(Ok(restore_tool_id_in_sse_event(&tail, this.id_map))))
+            }
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+fn restore_tool_id_in_sse_event(event: &[u8], id_map: &OriginalToolIdMap) -> Bytes {
+    let Ok(text) = std::str::from_utf8(event) else {
+        return Bytes::copy_from_slice(event);
+    };
+    let Some(data_start) = text.find("data: ").map(|index| index + "data: ".len()) else {
+        return Bytes::copy_from_slice(event);
+    };
+    let data_end = text[data_start..]
+        .find('\n')
+        .map_or(text.len(), |index| data_start + index);
+    let Ok(mut data) = serde_json::from_str::<serde_json::Value>(&text[data_start..data_end])
+    else {
+        return Bytes::copy_from_slice(event);
+    };
+    if data.get("type").and_then(|value| value.as_str()) != Some("content_block_start")
+        || data
+            .pointer("/content_block/type")
+            .and_then(|value| value.as_str())
+            != Some("tool_use")
+    {
+        return Bytes::copy_from_slice(event);
+    }
+
+    let Some(id) = data
+        .pointer("/content_block/id")
+        .and_then(|value| value.as_str())
+    else {
+        return Bytes::copy_from_slice(event);
+    };
+    let Some(original) = id_map.original_for(id) else {
+        return Bytes::copy_from_slice(event);
+    };
+    data["content_block"]["id"] = serde_json::Value::String(original.to_string());
+
+    let Ok(restored_data) = serde_json::to_vec(&data) else {
+        return Bytes::copy_from_slice(event);
+    };
+    let mut restored = Vec::with_capacity(event.len() + original.len());
+    restored.extend_from_slice(&event[..data_start]);
+    restored.extend_from_slice(&restored_data);
+    restored.extend_from_slice(&event[data_end..]);
+    Bytes::from(restored)
+}
+
 /// Sanitize a tool ID to match pattern ^[a-zA-Z0-9_-]+
 fn sanitize_tool_id(id: &str) -> String {
     id.chars()
@@ -285,6 +399,7 @@ mod tests {
     use super::*;
     use crate::models::{Message, ToolResultContent};
     use crate::providers::{ProviderResponse, Usage};
+    use futures::TryStreamExt;
 
     fn user_message_with_blocks(blocks: Vec<ContentBlock>) -> Message {
         Message {
@@ -476,5 +591,59 @@ mod tests {
             }
             other => panic!("expected ToolUse, got {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn streamed_tool_use_id_restores_original_across_chunks() {
+        let original_id = "functions.Bash:0";
+        let mut request = empty_request();
+        request.messages = vec![assistant_message_with_blocks(vec![ContentBlock::tool_use(
+            original_id.to_string(),
+            "Bash".to_string(),
+            serde_json::json!({}),
+        )])];
+        let mut id_map = OriginalToolIdMap::new();
+        sanitize_tool_use_ids(&mut request, &mut id_map);
+
+        let event = concat!(
+            "event: content_block_start\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,",
+            "\"content_block\":{\"type\":\"tool_use\",",
+            "\"id\":\"functions_Bash_0\",\"name\":\"Bash\",\"input\":{}}}\n\n"
+        );
+        let inner = futures::stream::iter(vec![
+            Ok::<_, ()>(Bytes::copy_from_slice(&event.as_bytes()[..37])),
+            Ok(Bytes::copy_from_slice(&event.as_bytes()[37..])),
+        ]);
+
+        let chunks: Vec<Bytes> = RestoreToolIdStream::new(inner, id_map)
+            .try_collect()
+            .await
+            .unwrap();
+        let output = String::from_utf8(chunks.concat()).unwrap();
+        let parsed = crate::providers::streaming::parse_sse_events(&output);
+        let data: serde_json::Value = serde_json::from_str(&parsed[0].data).unwrap();
+
+        assert_eq!(
+            data.pointer("/content_block/id").and_then(|id| id.as_str()),
+            Some(original_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn streamed_non_start_event_is_unchanged() {
+        let mut id_map = OriginalToolIdMap::new();
+        id_map.record("functions_Bash_0", "functions.Bash:0");
+        let event = Bytes::from_static(
+            b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{}\"}}\n\n",
+        );
+        let inner = futures::stream::iter(vec![Ok::<_, ()>(event.clone())]);
+
+        let chunks: Vec<Bytes> = RestoreToolIdStream::new(inner, id_map)
+            .try_collect()
+            .await
+            .unwrap();
+
+        assert_eq!(chunks.concat(), event.as_ref());
     }
 }
