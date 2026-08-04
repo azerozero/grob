@@ -11,85 +11,60 @@ use std::sync::Arc;
 use super::super::{is_auth_revoked_error, RequestError};
 use super::retry::{capture_upstream_error, is_upstream_rate_limit};
 use super::{DispatchContext, DispatchResult};
+use crate::providers::registry::DispatchRejection;
 use tracing::info;
 
 /// Returns the provider for a mapping, or `None` if it must be skipped.
 ///
-/// Checks, in order:
-///
-/// 1. Provider exists in the registry.
-/// 2. `SecurityConfig::provider_scorer` (wraps `CircuitBreakerRegistry`) —
-///    if a scorer is enabled, it owns availability decisions.
-/// 3. Bare `CircuitBreakerRegistry` — used when no scorer is configured.
-/// 4. Routing-layer passive CB (RE-1a, ADR-0018) — per-endpoint, orthogonal
-///    to the global per-provider CB above.
-///
-/// Each rejection path emits a `grob_circuit_breaker_rejected_total` (or
-/// `grob_routing_endpoint_cb_rejected_total`) counter for observability.
+/// The registry owns composition of provider-level availability and
+/// endpoint-level health. This resolver only translates the decision into
+/// dispatch logs and rejection metrics.
 pub(super) async fn resolve_provider(
     ctx: &DispatchContext<'_>,
     mapping: &crate::cli::ModelMapping,
 ) -> Option<Arc<dyn crate::providers::LlmProvider>> {
-    let provider = ctx
+    let result = ctx
         .inner
         .provider_registry
-        .provider(&mapping.provider)
-        .or_else(|| {
+        .provider_for_dispatch(
+            &mapping.provider,
+            &mapping.actual_model,
+            ctx.state.security.provider_availability.as_deref(),
+        )
+        .await;
+
+    match result {
+        Ok(provider) => Some(provider),
+        Err(DispatchRejection::ProviderNotRegistered) => {
             info!(
                 "Provider {} not found in registry, trying next fallback",
                 mapping.provider
             );
             None
-        })?;
-
-    // Check availability: scorer (which wraps CB) takes priority over bare CB
-    if let Some(ref scorer) = ctx.state.security.provider_scorer {
-        if !scorer.can_execute(&mapping.provider).await {
+        }
+        Err(DispatchRejection::ProviderUnavailable) => {
+            info!("Provider {} unavailable, skipping", mapping.provider);
+            metrics::counter!(
+                "grob_circuit_breaker_rejected_total",
+                "provider" => mapping.provider.clone()
+            )
+            .increment(1);
+            None
+        }
+        Err(DispatchRejection::EndpointUnavailable) => {
             info!(
-                "Provider {} unavailable (scorer/CB), skipping",
-                mapping.provider
+                "Endpoint {}/{} unavailable, skipping",
+                mapping.provider, mapping.actual_model
             );
             metrics::counter!(
-                "grob_circuit_breaker_rejected_total",
-                "provider" => mapping.provider.clone()
+                "grob_routing_endpoint_cb_rejected_total",
+                "provider" => mapping.provider.clone(),
+                "model" => mapping.actual_model.clone(),
             )
             .increment(1);
-            return None;
-        }
-    } else if let Some(ref cb) = ctx.state.security.circuit_breakers {
-        if !cb.can_execute(&mapping.provider).await {
-            info!("Circuit breaker open for {}, skipping", mapping.provider);
-            metrics::counter!(
-                "grob_circuit_breaker_rejected_total",
-                "provider" => mapping.provider.clone()
-            )
-            .increment(1);
-            return None;
+            None
         }
     }
-
-    // Routing-layer passive CB (RE-1a, ADR-0018). Per-endpoint, orthogonal
-    // to the global per-provider security CB above — an endpoint can be
-    // down while the provider still has other endpoints up.
-    if !ctx
-        .inner
-        .provider_registry
-        .is_endpoint_healthy(&mapping.provider, &mapping.actual_model)
-    {
-        info!(
-            "Endpoint {}/{} tripped by passive CB, skipping",
-            mapping.provider, mapping.actual_model
-        );
-        metrics::counter!(
-            "grob_routing_endpoint_cb_rejected_total",
-            "provider" => mapping.provider.clone(),
-            "model" => mapping.actual_model.clone(),
-        )
-        .increment(1);
-        return None;
-    }
-
-    Some(provider)
 }
 
 /// Backward-compat fallback: try direct model -> provider lookup from the registry.
@@ -104,7 +79,14 @@ pub(super) async fn try_direct_provider_lookup(
     model_name: &str,
     context_guard: Option<crate::server::ContextGuardInfo>,
 ) -> Result<Option<DispatchResult>, RequestError> {
-    let Ok(provider) = ctx.inner.provider_registry.provider_for_model(model_name) else {
+    let Ok((provider_name, _)) = ctx
+        .inner
+        .provider_registry
+        .provider_and_name_for_model(model_name)
+    else {
+        return Ok(None);
+    };
+    let Some(provider) = resolve_provider_name(ctx, &provider_name, model_name).await else {
         return Ok(None);
     };
     info!(
@@ -135,4 +117,18 @@ pub(super) async fn try_direct_provider_lookup(
         provider_duration_ms: 0,
         context_guard,
     }))
+}
+
+async fn resolve_provider_name(
+    ctx: &DispatchContext<'_>,
+    provider: &str,
+    model: &str,
+) -> Option<Arc<dyn crate::providers::LlmProvider>> {
+    let mapping = crate::cli::ModelMapping {
+        provider: provider.to_string(),
+        actual_model: model.to_string(),
+        priority: 0,
+        inject_continuation_prompt: false,
+    };
+    resolve_provider(ctx, &mapping).await
 }

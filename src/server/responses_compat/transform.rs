@@ -17,19 +17,61 @@ fn internal_metadata(
     })
 }
 
-/// Extracts text from [`InputContent`].
-fn extract_input_text(content: &InputContent) -> String {
+/// Converts Responses message content without discarding non-text parts.
+fn convert_input_content(content: &InputContent) -> Result<MessageContent, String> {
     match content {
-        InputContent::Text(s) => s.clone(),
-        InputContent::Parts(parts) => parts
-            .iter()
-            .map(|p| match p {
-                InputContentPart::InputText { text } => text.as_str(),
-                InputContentPart::OutputText { text } => text.as_str(),
-                InputContentPart::Other => "",
+        InputContent::Text(s) => Ok(MessageContent::Text(s.clone())),
+        InputContent::Parts(parts) => {
+            let mut blocks = Vec::with_capacity(parts.len());
+            for part in parts {
+                blocks.push(match part {
+                    InputContentPart::InputText { text }
+                    | InputContentPart::OutputText { text } => {
+                        ContentBlock::text(text.clone(), None)
+                    }
+                    InputContentPart::InputImage { image_url } => {
+                        let source = match image_url.split_once(',') {
+                            Some((header, data)) if header.starts_with("data:") => {
+                                crate::models::ImageSource {
+                                    r#type: "base64".to_string(),
+                                    media_type: header
+                                        .strip_prefix("data:")
+                                        .and_then(|value| value.split(';').next())
+                                        .map(str::to_string),
+                                    data: Some(data.to_string()),
+                                    url: None,
+                                }
+                            }
+                            _ => crate::models::ImageSource {
+                                r#type: "url".to_string(),
+                                media_type: None,
+                                data: None,
+                                url: Some(image_url.clone()),
+                            },
+                        };
+                        ContentBlock::image(source)
+                    }
+                    InputContentPart::Other => {
+                        return Err("unsupported Responses message content part".to_string());
+                    }
+                });
+            }
+            Ok(MessageContent::Blocks(blocks))
+        }
+    }
+}
+
+fn extract_system_text(content: &InputContent) -> Result<String, String> {
+    match convert_input_content(content)? {
+        MessageContent::Text(text) => Ok(text),
+        MessageContent::Blocks(blocks) => blocks
+            .into_iter()
+            .map(|block| match block {
+                ContentBlock::Known(KnownContentBlock::Text { text, .. }) => Ok(text),
+                _ => Err("Responses system messages cannot contain images".to_string()),
             })
-            .collect::<Vec<_>>()
-            .join("\n"),
+            .collect::<Result<Vec<_>, _>>()
+            .map(|parts| parts.join("\n")),
     }
 }
 
@@ -130,6 +172,13 @@ fn merge_tool_result_into_user(
 /// Returns a `String` description if the input items contain
 /// an unrecognised variant that cannot be mapped to the canonical format.
 pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<CanonicalRequest, String> {
+    if req.previous_response_id.is_some() {
+        return Err(
+            "previous_response_id cannot be converted to canonical history; send full input history"
+                .to_string(),
+        );
+    }
+
     let mut messages: Vec<Message> = Vec::new();
     let mut system_prompt: Option<SystemPrompt> = None;
 
@@ -151,7 +200,7 @@ pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<Canonic
                     InputItem::Message { role, content } => {
                         if role == "system" {
                             // Merge into system prompt
-                            let text = extract_input_text(content);
+                            let text = extract_system_text(content)?;
                             system_prompt = Some(match system_prompt.take() {
                                 Some(SystemPrompt::Text(existing)) => {
                                     SystemPrompt::Text(format!("{}\n{}", existing, text))
@@ -161,7 +210,7 @@ pub fn transform_responses_to_canonical(req: ResponsesRequest) -> Result<Canonic
                         } else {
                             messages.push(Message {
                                 role: role.clone(),
-                                content: MessageContent::Text(extract_input_text(content)),
+                                content: convert_input_content(content)?,
                             });
                         }
                     }
@@ -466,6 +515,42 @@ mod tests {
         assert_eq!(converted[0].name.as_deref(), Some("get_weather"));
         assert_eq!(converted[0].description.as_deref(), Some("Gets weather"));
         assert!(converted[0].input_schema.is_some());
+    }
+
+    #[test]
+    fn previous_response_id_is_rejected_instead_of_losing_history() {
+        let req: ResponsesRequest = serde_json::from_value(serde_json::json!({
+            "model": "gpt-5.3-codex",
+            "input": "continue",
+            "previous_response_id": "resp_previous"
+        }))
+        .unwrap();
+
+        let error = transform_responses_to_canonical(req).unwrap_err();
+        assert!(error.contains("cannot be converted to canonical history"));
+    }
+
+    #[test]
+    fn input_image_becomes_a_canonical_image_block() {
+        let req: ResponsesRequest = serde_json::from_value(serde_json::json!({
+            "model": "gpt-5.3-codex",
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_image", "image_url": "https://example.com/a.png"}]
+            }]
+        }))
+        .unwrap();
+
+        let canonical = transform_responses_to_canonical(req).unwrap();
+        let MessageContent::Blocks(blocks) = &canonical.messages[0].content else {
+            panic!("image content was flattened to text");
+        };
+        assert!(matches!(
+            &blocks[0],
+            ContentBlock::Known(KnownContentBlock::Image { source })
+                if source.url.as_deref() == Some("https://example.com/a.png")
+        ));
     }
 
     #[test]

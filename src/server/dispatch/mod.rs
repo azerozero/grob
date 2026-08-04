@@ -4,6 +4,7 @@
 //! delegate to the single `dispatch()` function, which orchestrates the full pipeline:
 //! DLP scanning → cache lookup → routing → provider loop with fallback → audit → response.
 
+mod preflight;
 mod provider_loop;
 mod resolver;
 mod retry;
@@ -117,27 +118,17 @@ impl DispatchContext<'_> {
         }
     }
 
-    /// Records a provider success in the scorer or circuit breaker.
-    ///
-    /// Prefers the adaptive scorer (which wraps the circuit breaker);
-    /// falls back to the bare circuit breaker when no scorer is configured.
+    /// Records a provider success through the configured availability authority.
     pub(crate) async fn record_provider_success(&self, provider: &str, latency_ms: u64) {
-        if let Some(ref scorer) = self.state.security.provider_scorer {
-            scorer.record_success(provider, latency_ms).await;
-        } else if let Some(ref cb) = self.state.security.circuit_breakers {
-            cb.record_success(provider).await;
+        if let Some(ref availability) = self.state.security.provider_availability {
+            availability.record_success(provider, latency_ms).await;
         }
     }
 
-    /// Records a provider failure in the scorer or circuit breaker.
-    ///
-    /// Prefers the adaptive scorer (which wraps the circuit breaker);
-    /// falls back to the bare circuit breaker when no scorer is configured.
+    /// Records a provider failure through the configured availability authority.
     pub(crate) async fn record_provider_failure(&self, provider: &str) {
-        if let Some(ref scorer) = self.state.security.provider_scorer {
-            scorer.record_failure(provider).await;
-        } else if let Some(ref cb) = self.state.security.circuit_breakers {
-            cb.record_failure(provider).await;
+        if let Some(ref availability) = self.state.security.provider_availability {
+            availability.record_failure(provider).await;
         }
     }
 
@@ -325,57 +316,10 @@ pub(crate) async fn dispatch(
     #[cfg(feature = "mcp")]
     let grob_hint = resolve_grob_hint(ctx, request)?;
 
-    // ── Step 1: DLP input scanning ──
+    // ── Step 1: Security and tool preflight ──
     // `dlp_triggered` feeds the post-route policy context (Step 5.4).
     #[cfg_attr(not(feature = "policies"), allow(unused_variables))]
-    let dlp_triggered = scan_dlp_input(ctx, request)?;
-
-    // Security: DLP sanitizes the canonical request in place. Drop any verbatim
-    // Responses passthrough body so the OpenAI provider rebuilds from the
-    // sanitized request — otherwise the original, un-redacted bytes would be
-    // forwarded upstream, bypassing DLP. The rebuild path stays cache-friendly
-    // (typed content + prompt_cache_key), so the only cost is a one-request cache
-    // miss when DLP actually fires.
-    if dlp_triggered {
-        request.extensions.responses_passthrough_body = None;
-    }
-
-    // ── Step 1.4: Tool-call spike anomaly detection (T-AD1) ──
-    // Runs after DLP so scoped DLP blocks take precedence, and before
-    // routing so a runaway client cannot exhaust provider quotas before
-    // the spike is observed.
-    check_tool_spike(ctx, request)?;
-
-    // ── Step 1.5: MCP tool calibration ──
-    #[cfg(feature = "mcp")]
-    if let Some(ref mcp) = ctx.state.security.mcp {
-        crate::features::mcp::calibration::calibrate_tools(mcp, request);
-    }
-
-    // ── Step 1.55: Inbound tool well-formedness validation ──
-    // Strips (or, in reject mode, 400s on) tools with a missing name or a
-    // malformed `input_schema`. Well-formedness only — client tools are
-    // arbitrary and are NOT checked against grob's internal catalogue. Runs
-    // before pledge so malformed tools never reach the allowlist check.
-    match crate::features::tool_validation::validate_inbound_tools(
-        request,
-        &ctx.inner.config.tool_validation,
-    ) {
-        Ok(stripped) => warn_stripped_tools(&stripped),
-        Err(reason) => return Err(RequestError::BadRequest(reason)),
-    }
-
-    // ── Step 1.6: Pledge tool filtering ──
-    if ctx.inner.config.pledge.enabled {
-        let filter = crate::features::pledge::PledgeFilter::new(&ctx.inner.config.pledge);
-        let token = ctx
-            .headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "))
-            .or_else(|| ctx.headers.get("x-api-key").and_then(|v| v.to_str().ok()));
-        filter.apply(request, ctx.tenant_id.as_deref(), token);
-    }
+    let dlp_triggered = preflight::run(ctx, request)?;
 
     // ── Step 2: Cache key ──
     let cache_key = ctx
@@ -719,270 +663,6 @@ async fn check_cache(
     })
 }
 
-/// Returns `true` when DLP input scanning is disabled for this request.
-///
-/// Extracted so the early-return guard in [`scan_dlp_input`] is unit-testable
-/// without constructing a full [`DispatchContext`].
-#[inline]
-fn dlp_input_scan_disabled(scan_input: bool) -> bool {
-    !scan_input
-}
-
-/// Returns `true` when a DLP block should escalate via the compliance webhook.
-///
-/// Extracted so the compliance-escalation guard in [`scan_dlp_input`] is
-/// unit-testable without constructing a full [`DispatchContext`].
-#[inline]
-fn should_escalate_compliance(enabled: bool, risk_classification: bool) -> bool {
-    enabled && risk_classification
-}
-
-/// Returns `true` when DLP produced at least one redact/warn report.
-///
-/// Extracted so the trigger flag in [`scan_dlp_input`] is unit-testable
-/// without constructing a full [`DispatchContext`].
-#[inline]
-fn dlp_reports_triggered<T>(reports: &[T]) -> bool {
-    !reports.is_empty()
-}
-
-/// Builds the audit `dlp_rules_triggered` entries for a set of redact/warn reports.
-///
-/// Each entry is `"<rule_type>: <detail>"` (e.g. `"secret: AWS access key"`),
-/// mirroring the format the block path uses so a caviardage is named in the
-/// per-tenant audit log exactly like a block is.
-///
-/// Extracted so the formatting is unit-testable without a full pipeline.
-#[inline]
-fn redaction_audit_rules(reports: &[crate::features::dlp::DlpActionReport]) -> Vec<String> {
-    reports
-        .iter()
-        .map(|r| format!("{}: {}", r.rule_type, r.detail))
-        .collect()
-}
-
-/// Returns `true` when any DLP report concerns personally identifiable information.
-///
-/// Drives the C2 (Restricted) vs C1 (Internal) split for a caviardage: a
-/// redacted PII field is Restricted, a redacted secret is Internal.
-///
-/// Extracted so the PII guard is unit-testable without a full pipeline.
-#[inline]
-fn reports_have_pii(reports: &[crate::features::dlp::DlpActionReport]) -> bool {
-    reports
-        .iter()
-        .any(|r| matches!(r.rule_type, crate::features::dlp::DlpRuleType::Pii))
-}
-
-/// Logs a warning when tool validation stripped malformed inbound tools.
-///
-/// Extracted so the non-empty guard is unit-testable; the inline `if` was
-/// otherwise only reachable through the full `dispatch` pipeline.
-#[inline]
-fn warn_stripped_tools(stripped: &[String]) {
-    if !stripped.is_empty() {
-        tracing::warn!(
-            tools = ?stripped,
-            "tool validation: stripped malformed inbound tools"
-        );
-    }
-}
-
-/// DLP input scanning with risk assessment and audit logging.
-///
-/// Returns `Ok(true)` when DLP acted on the request (one or more redact/warn
-/// reports), `Ok(false)` when scanning is off or nothing matched. That flag
-/// feeds the post-route policy context so `dlp_triggered`-keyed policies match.
-fn scan_dlp_input(
-    ctx: &DispatchContext<'_>,
-    request: &mut CanonicalRequest,
-) -> Result<bool, RequestError> {
-    let Some(ref dlp_engine) = ctx.dlp else {
-        return Ok(false);
-    };
-    if dlp_input_scan_disabled(dlp_engine.config.scan_input) {
-        return Ok(false);
-    }
-
-    match dlp_engine.sanitize_request_checked(request) {
-        Ok(reports) => {
-            let triggered = dlp_reports_triggered(&reports);
-            ctx.emit_dlp_events(&reports, DlpDirection::Request);
-            if triggered {
-                // A caviardage (redact/warn) is a security-relevant event in
-                // its own right, just like a block. Emit a classified audit
-                // entry here so the per-tenant audit log — and the Loki
-                // dashboards built on it — record the redaction as C1 (secret,
-                // Internal) or C2 (PII, Restricted), instead of leaving the
-                // request indistinguishable from clean (Nc) traffic on the
-                // later Response entry. Blocks already do this in the Err arm.
-                ctx.log_audit_if_enabled(AuditEntry {
-                    action: crate::security::audit_log::AuditEvent::DlpWarn,
-                    backend: "REDACTED",
-                    dlp_rules: redaction_audit_rules(&reports),
-                    duration_ms: ctx.start_time.elapsed().as_millis() as u64,
-                    model_name: Some(&ctx.model),
-                    token_counts: None,
-                    risk_level: Some(crate::security::audit_log::RiskLevel::Medium),
-                    dlp_blocked: false,
-                    dlp_had_injection: false,
-                    dlp_had_pii: reports_have_pii(&reports),
-                    dlp_had_redact_or_warn: true,
-                });
-            }
-            Ok(triggered)
-        }
-        Err(block_err) => {
-            // Emit DLP block event for `grob watch`.
-            let (block_rule_type, block_detail) = match &block_err {
-                crate::features::dlp::DlpBlockError::InjectionBlocked(dets) => {
-                    ("injection", format!("{} injection(s) detected", dets.len()))
-                }
-                crate::features::dlp::DlpBlockError::UrlExfilBlocked(dets) => (
-                    "url_exfil",
-                    format!("{} exfiltration URL(s) detected", dets.len()),
-                ),
-                crate::features::dlp::DlpBlockError::IndirectInjectionBlocked(dets) => (
-                    "indirect_injection",
-                    format!("{} indirect injection(s) detected", dets.len()),
-                ),
-            };
-            ctx.state.event_bus.emit(WatchEvent::DlpAction {
-                request_id: ctx.req_id.to_string(),
-                direction: DlpDirection::Request,
-                action: "block".into(),
-                rule_type: block_rule_type.into(),
-                detail: block_detail,
-                timestamp: chrono::Utc::now(),
-            });
-
-            let had_injection = matches!(
-                &block_err,
-                crate::features::dlp::DlpBlockError::InjectionBlocked(_)
-                    | crate::features::dlp::DlpBlockError::IndirectInjectionBlocked(_)
-            );
-            let risk =
-                crate::security::risk::assess_risk(&crate::security::risk::SecurityOutcome {
-                    dlp_rules_triggered: 1,
-                    was_blocked: true,
-                    had_injection,
-                    had_pii: false,
-                });
-
-            let compliance = &ctx.inner.config.compliance;
-            if should_escalate_compliance(compliance.enabled, compliance.risk_classification) {
-                let threshold = crate::security::audit_log::RiskLevel::from_str_threshold(
-                    &compliance.escalation_threshold,
-                );
-                crate::security::risk::maybe_escalate(&crate::security::risk::EscalationEvent {
-                    risk,
-                    threshold,
-                    webhook_url: &compliance.escalation_webhook,
-                    event_id: ctx.req_id,
-                    tenant_id: ctx.tenant_id.as_deref().unwrap_or("anon"),
-                    model: &ctx.model,
-                });
-            }
-
-            ctx.log_audit_if_enabled(AuditEntry {
-                action: crate::security::audit_log::AuditEvent::DlpBlock,
-                backend: "BLOCKED",
-                dlp_rules: vec![block_err.to_string()],
-                duration_ms: ctx.start_time.elapsed().as_millis() as u64,
-                model_name: Some(&ctx.model),
-                token_counts: None,
-                risk_level: Some(risk),
-                dlp_blocked: true,
-                dlp_had_injection: had_injection,
-                dlp_had_pii: false,
-                dlp_had_redact_or_warn: false,
-            });
-            Err(RequestError::DlpBlocked(format!("{}", block_err)))
-        }
-    }
-}
-
-/// Runs the per-session tool-call spike anomaly detector (T-AD1).
-///
-/// Counts the `tool_use` and `tool_result` content blocks in the
-/// incoming request and feeds them into a 60-second rolling window
-/// keyed by session id (falling back to user id, then tenant id).
-/// Crossing the warn threshold logs and emits a metric; crossing the
-/// block threshold writes an audit entry and returns
-/// [`RequestError::ToolSpikeBlocked`] (HTTP 429).
-///
-/// Returns `Ok(())` when the detector is disabled or the request is
-/// below all thresholds.
-///
-/// # Errors
-///
-/// Returns [`RequestError::ToolSpikeBlocked`] when the rolling-window
-/// tool-call total for the resolved session key reaches the configured
-/// block threshold.
-fn check_tool_spike(
-    ctx: &DispatchContext<'_>,
-    request: &CanonicalRequest,
-) -> Result<(), RequestError> {
-    use crate::security::tool_spike::{count_tool_blocks, resolve_key};
-    use crate::security::SpikeAction;
-
-    let Some(detector) = ctx.state.security.tool_spike_detector.as_ref() else {
-        return Ok(());
-    };
-
-    let count = count_tool_blocks(request);
-    let key = resolve_key(request, ctx.tenant_id.as_deref());
-
-    match detector.observe(&key, count) {
-        SpikeAction::Allow => Ok(()),
-        SpikeAction::Warn => {
-            // NOTE: session keys are unbounded, so they stay in the
-            // structured log (high cardinality) rather than a metric label.
-            metrics::counter!("grob_tool_spike_warn_total").increment(1);
-            tracing::warn!(
-                session = %key,
-                rolling_total = detector.current_total(&key),
-                threshold = detector.config().warn_per_min,
-                "tool_spike: warn threshold crossed"
-            );
-            Ok(())
-        }
-        SpikeAction::Block => {
-            metrics::counter!("grob_tool_spike_blocked_total").increment(1);
-            let total = detector.current_total(&key);
-            let block_threshold = detector.config().block_per_min;
-            tracing::warn!(
-                session = %key,
-                rolling_total = total,
-                threshold = block_threshold,
-                "tool_spike: block threshold crossed, returning 429"
-            );
-
-            ctx.log_audit_if_enabled(AuditEntry {
-                action: crate::security::audit_log::AuditEvent::ToolSpikeBlocked,
-                backend: "BLOCKED",
-                dlp_rules: vec![format!(
-                    "tool_spike: {} tool calls in 60s window (threshold {})",
-                    total, block_threshold
-                )],
-                duration_ms: ctx.start_time.elapsed().as_millis() as u64,
-                model_name: Some(&ctx.model),
-                token_counts: None,
-                risk_level: Some(crate::security::audit_log::RiskLevel::High),
-                dlp_blocked: true,
-                dlp_had_injection: false,
-                dlp_had_pii: false,
-                dlp_had_redact_or_warn: false,
-            });
-
-            Err(RequestError::ToolSpikeBlocked(format!(
-                "tool-call spike anomaly: {} tool calls observed in 60s window for session {} (block threshold {})",
-                total, key, block_threshold
-            )))
-        }
-    }
-}
-
 /// Handle fan-out strategy (dispatch to multiple providers in parallel).
 async fn dispatch_fan_out(
     ctx: &DispatchContext<'_>,
@@ -1135,6 +815,10 @@ async fn record_fan_out_costs(
 
 #[cfg(test)]
 mod tests {
+    use super::preflight::{
+        dlp_input_scan_disabled, dlp_reports_triggered, redaction_audit_rules, reports_have_pii,
+        should_escalate_compliance, warn_stripped_tools,
+    };
     use super::*;
     use tracing_test::traced_test;
 

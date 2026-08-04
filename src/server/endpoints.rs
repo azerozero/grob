@@ -72,8 +72,8 @@ pub(super) async fn readiness_check(State(state): State<Arc<AppState>>) -> Respo
     }
 
     // Check if all circuit breakers are open (all providers degraded)
-    if let Some(ref cb) = state.security.circuit_breakers {
-        let states = cb.all_states().await;
+    if let Some(ref availability) = state.security.provider_availability {
+        let states = availability.all_states().await;
         if !states.is_empty() {
             let all_open = states
                 .values()
