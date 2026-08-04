@@ -44,7 +44,7 @@ les infos stockées dedans, c'est une bonne idée ? »
 - Transcoder/ré-encoder de la vidéo dans le proxy. Grob n'est pas un pipeline média.
 - Prétendre à un DRM inviolable. Un watermark robuste est **dissuasif et traçant**,
   pas cryptographiquement inarrachable.
-- Embarquer un moteur OCR lourd (Tesseract, ONNX) dans le binaire 6 MB par défaut.
+- Embarquer un moteur OCR lourd (Tesseract, ONNX) dans le binaire par défaut.
 
 ## Réponse directe : le QR code dans l'image, bonne idée ?
 
@@ -73,22 +73,24 @@ Le bon découpage est en trois couches indépendantes qui dégradent gracieuseme
 | Couche | Support | Survit à | Casse sur | Rôle |
 |---|---|---|---|---|
 | **L1 — Métadonnées signées** (C2PA / manifeste dans XMP/EXIF) | conteneur du fichier | copie, transfert, upload | screenshot, strip metadata, ré-encodage | provenance riche et vérifiable, cas nominal |
-| **L2 — Watermark invisible robuste** (spectre étalé / DCT-DWT, style Trustmark/SynthID) | pixels | recompression, resize, crop partiel, screenshot | crop massif, régénération, forte dégradation | identifiant opaque 64–128 bits, cas hostile |
+| **L2 — Watermark invisible robuste** (spectre étalé / DCT-DWT, style Trustmark/SynthID) | pixels | recompression (jusqu'à JPEG q=30), resize, crop ≤ 20 %, niveaux de gris, miroir horizontal (mesuré) | **décalage de luminosité, même +2/255**, miroir vertical, rotation, crop ≥ 25 % | identifiant opaque **61 bits**, cas hostile |
 | **L3 — Empreinte perceptuelle** (pHash / dHash indexé côté serveur) | aucune modif de l'image | recompression, resize, crop ≤ 25 %, screenshot, niveaux de gris, et leur cumul (mesuré) | **miroir, rotation**, transformation sémantique lourde | rattrapage « d'où vient cette image ? » sans rien avoir écrit dedans |
 
-> Les colonnes de L3 sont **mesurées**, pas estimées (voir « Robustesse de L3 mesurée »
-> plus bas). Celles de L1 et L2 restent des attentes issues de la littérature : L1 est
-> évidente (métadonnées présentes ou absentes), L2 devra être mesurée de la même façon
-> avant d'être promise à quiconque.
+> Les colonnes de L2 et L3 sont **mesurées**, pas estimées (voir les deux sections
+> « Robustesse … mesurée » plus bas). Celles de L1 restent évidentes par construction
+> (les métadonnées sont présentes ou absentes). Fait notable : L2 et L3 tombent sur des
+> transformations **disjointes**, ce qui valide empiriquement le modèle en couches.
 
 Le QR devient une variante *L2-visible* : utile seulement quand on **veut** que ce soit
 visible (asset publié, marquage légal, démo), jamais comme mécanisme principal.
 
 Ce qui est écrit dans L1/L2 : **jamais** de données métier. Uniquement
-`trace_id` (128 bits aléatoires) + version de schéma. Le mapping
-`trace_id → {tenant, session, model, policy, timestamp}` vit dans le `GrobStore`
-(journal JSONL append-only, comme le spend). Cohérent avec le modèle de données existant
-et ça évite de transformer le watermark en canal d'exfiltration.
+`trace_id` + version de schéma. Contrainte mesurée : la capacité utile de TrustMark Bch5
+est de **61 bits**, donc le `trace_id` fait 61 bits, pas 128. C'est amplement suffisant
+(2⁶¹ ≈ 2,3 × 10¹⁸ valeurs) et c'est une contrainte du type, pas un détail d'encodage.
+Le mapping `trace_id → {tenant, session, model, policy, timestamp}` vit dans le
+`GrobStore` (journal JSONL append-only, comme le spend). Cohérent avec le modèle de
+données existant et ça évite de transformer le watermark en canal d'exfiltration.
 
 Une lib JS de lecture reste souhaitable : elle lit L1 (parse C2PA/XMP, pur JS), calcule L3
 (pHash en WASM ou Canvas) et appelle Grob pour résoudre le `trace_id`. La détection L2
@@ -115,21 +117,35 @@ Crate jetable, profil release identique à celui de Grob (`lto = true`,
 | + `c2pa` (no-default-features, `rust_native_crypto`, `file_io`) | **7,33 MB** | +7,0 MB |
 | + `trustmark` 0.2.2 | **12,24 MB** | **+11,9 MB** |
 
-Soit +7,0 MB pour C2PA et +11,9 MB pour TrustMark, sur une image de conteneur Grob qui
-pèse ~6 MB aujourd'hui. **TrustMark seul multiplie la taille par plus de trois**, et
-l'arbre (162 crates) contient `ort`/`ort-sys` (ONNX Runtime), `ndarray`, `image` et
-`fast_image_resize`, sans compter les modèles ONNX qui se téléchargent séparément.
+Soit +7,0 MB pour C2PA et +11,9 MB pour TrustMark.
+
+**Mise en perspective, en restant honnête sur les bases de comparaison.** Le « 6 MB » que
+le README annonce est l'**image conteneur** (`FROM scratch`, cible
+`x86_64-unknown-linux-musl`, strippée). Le binaire `grob` construit ici, en release sur
+macOS aarch64, pèse **17,3 MB** (mesuré) : ce sont deux chiffres différents et les
+mélanger serait malhonnête. Ce qui est directement comparable, ce sont les **deltas**,
+obtenus avec le même profil et la même plateforme :
+
+- +7,0 MB pour C2PA, soit environ **+40 %** du binaire actuel.
+- +11,9 MB pour TrustMark, soit environ **+69 %**.
+- Les deux ensemble : **+19 MB, plus du double**.
+
+Sur l'image conteneur musl, les valeurs absolues différeront, mais l'ordre de grandeur
+relatif ne s'inversera pas : ONNX Runtime et la pile COSE/X.509 ne deviennent pas
+gratuits en changeant de cible.
 
 Côté C2PA, `cargo tree` ne contient **aucun** `reqwest`, `openssl`, `ureq`, `wasi` ni
 `wstd` avec ces features, mais l'arbre monte quand même à **240 crates uniques**
-(CBOR, COSE, X.509, `rasn-cms`, `iref`…).
+(CBOR, COSE, X.509, `rasn-cms`, `iref`…). TrustMark en apporte 162, dont `ort`/`ort-sys`
+(ONNX Runtime), `ndarray`, `image` et `fast_image_resize`, **plus 65 MB de modèles ONNX**
+téléchargés séparément, qu'aucune mesure de binaire ne capture.
 
 **Conclusion qui change le plan** : ni C2PA ni TrustMark ne peuvent être des features
-qu'on active tranquillement. Les activer toutes les deux ferait passer le binaire de
-6 MB à ~25 MB. Deux options, à trancher dans l'ADR :
+qu'on active tranquillement. Deux options, à trancher dans l'ADR :
 
 1. **Feature opt-in assumée** (`media-c2pa`), en documentant noir sur blanc le coût, avec
-   une image de conteneur séparée `grob:media`. Le binaire par défaut reste à 6 MB.
+   une image de conteneur séparée `grob:media`. Le binaire et l'image par défaut sont
+   inchangés.
 2. **Sidecar**, pour C2PA comme pour TrustMark, qui signent et vérifient hors du
    processus. Le cœur ne connaît que `trace_id` et pHash, tous deux légers.
 
@@ -179,6 +195,55 @@ pas à cause de pHash mais parce que mes images « différentes » se ressemblai
 (distance 1). Un corpus non discriminant produit une conclusion fausse. Le test définitif
 vérifie donc explicitement la séparation avant de conclure quoi que ce soit sur la
 robustesse.
+
+### Robustesse de L2 mesurée (TrustMark, modèles ONNX réels)
+
+Même exigence pour L2 : j'avais écrit que sa mesure attendrait la PR 8. C'était faux, les
+modèles sont publics et le test tient en une heure. Sonde reproductible :
+[`assets/l2_watermark_robustness_probe.rs`](assets/l2_watermark_robustness_probe.rs).
+
+TrustMark `Variant::Q` / `Version::Bch5`, modèles ONNX officiels (~65 MB), porteuse
+`ghost.png` du dépôt amont, payload de 61 bits (capacité imposée, voir plus bas) :
+
+| Transformation | L2 extrait ? | Rappel L3 |
+|---|---|---|
+| Aucune (clean) | ✅ | ✅ |
+| JPEG q=90 / 70 / 60 / 50 / 30 | ✅ | ✅ |
+| Resize 75 % / 50 % / 25 % | ✅ | ✅ |
+| Resize 50 % + JPEG 60 | ✅ | ✅ |
+| Crop 10 % / 15 % / 20 % | ✅ | ✅ |
+| **Crop 25 %** | ❌ | ✅ (distance 5) |
+| Niveaux de gris | ✅ | ✅ |
+| Contraste +10 | ✅ | — |
+| **Miroir horizontal** | ✅ | ❌ (21) |
+| **Miroir vertical** | ❌ | — |
+| **Rotation 90°** | ❌ | ❌ (52) |
+| **Luminosité +2** (quasi invisible) | ❌ | ✅ |
+| Luminosité +5 / +8 / +12, −5 | ❌ | ✅ |
+
+Trois résultats qui comptent, et qu'aucune lecture d'article n'aurait donnés :
+
+1. **L2 casse sur un décalage de luminosité de +2/255**, invisible à l'œil, alors qu'il
+   encaisse JPEG q=30. C'est contre-intuitif et c'est une **fragilité opérationnelle
+   majeure** : n'importe quel outil de capture avec auto-exposition, n'importe quel thème
+   clair/sombre, n'importe quelle normalisation d'image détruit le watermark. Pour des
+   screenshots d'agents, ce cas est loin d'être théorique.
+2. **L2 et L3 échouent sur des transformations disjointes.** L2 survit au miroir
+   horizontal où L3 meurt ; L3 survit à la luminosité et au crop 25 % où L2 meurt. C'est
+   la meilleure justification possible du modèle en couches, et elle est maintenant
+   mesurée au lieu d'être postulée. **Aucune des deux couches ne rend l'autre superflue.**
+3. **La capacité est de 61 bits**, pas 64 ni 128. `Version::Bch5.data_bits()` vaut 61 et
+   toute autre longueur est rejetée (`InvalidDataLength`). Le `trace_id` doit donc tenir
+   dans **61 bits**, ce qui reste largement suffisant (2⁶¹ ≈ 2,3 × 10¹⁸) mais doit être
+   fixé dans le type dès le premier jour, pas découvert en PR 8.
+
+Détail de mise en œuvre relevé au passage : la porteuse compte. Mon image synthétique
+512×512 échoue au round-trip propre là où la même en 256×256 et `ghost.png` réussissent.
+Le watermark n'est donc **pas garanti sur toute image** ; le code devra vérifier
+l'extraction juste après l'écriture et journaliser un échec plutôt que de supposer.
+
+Coûts mesurés : encodage ~50 ms, décodage ~30 ms par image sur un M-series, hors
+chargement des modèles. Compatible avec un sidecar, rédhibitoire sur le chemin bloquant.
 
 TrustMark (Adobe/Univ. Surrey, ICCV 2025, `arXiv:2311.18297`) est l'état de l'art ouvert :
 résolution arbitraire, qualité > 43 dB, implémentations Python/Rust/JS via ONNX.
@@ -325,7 +390,7 @@ pas par fichier, sinon un simple découpage efface la provenance.
 | SSRF via `ImageSource::Url` | pas de fetch distant par défaut, allow-list si activé |
 | Faux positifs OCR→DLP bloquants | mode `async` par défaut, `blocking` explicite et opt-in |
 | Le watermark devient un canal d'exfil | seul un `trace_id` opaque est embarqué, jamais de donnée métier |
-| Poids binaire (6 MB, `FROM scratch`) | feature `media` off par défaut, OCR en sidecar, jamais linké |
+| Poids binaire (image 6 MB `FROM scratch`, binaire 17,3 MB) | feature `media` off par défaut, OCR en sidecar, jamais linké |
 | Fausse confiance en la provenance | la réponse dit toujours *quelle couche* a matché et si elle est signée |
 
 ## Plan de livraison

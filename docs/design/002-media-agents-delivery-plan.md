@@ -105,9 +105,14 @@ docs/decisions/0030-media-pipeline.md
 chiffres, pour qu'une mise à jour d'`img_hash` ou un changement d'algorithme se voie
 immédiatement au lieu de dériver en silence.
 
-**Acceptation** : `cargo build` sans `--features media` produit un binaire d'octets
-identiques à `main`. Avec la feature, on peut empreinter une image et la retrouver dans
-le journal.
+**Acceptation** : sans `--features media`, `cargo tree` ne contient aucune des nouvelles
+dépendances et la taille du binaire release ne bouge pas de plus de 1 % par rapport à
+`main` (référence mesurée aujourd'hui : **17,3 MB** en release macOS aarch64 ; l'image
+conteneur musl `FROM scratch` reste sur sa propre référence de ~6 MB). Un critère
+« binaire identique à l'octet près » serait ininspectable en pratique, à cause des
+identifiants de build et des chemins ; la garde utile est l'absence de dépendance et la
+stabilité de la taille. Avec la feature, on peut empreinter une image et la retrouver
+dans le journal.
 
 ---
 
@@ -236,7 +241,7 @@ respecte `on_timeout` dans les deux sens.
 ```
 src/features/media/mark/mod.rs       MediaMarker
 src/features/media/mark/c2pa.rs      client sidecar de provenance (défaut)
-src/features/media/trace.rs          TraceId (128 bits CSPRNG)
+src/features/media/trace.rs          TraceId (61 bits CSPRNG, capacité TrustMark Bch5)
 src/features/media/registry.rs       trace_id → contexte
 Cargo.toml                           feature media-c2pa (in-process, opt-in, +7 MB)
 docs/decisions/0032-content-provenance.md
@@ -297,16 +302,30 @@ au binaire (296 KB → 12,24 MB), soit plus de trois fois la taille de l'image G
 actuelle, sans compter les modèles ONNX téléchargés séparément. `ort`/`ort-sys`,
 `ndarray` et `fast_image_resize` n'ont rien à faire dans un binaire `FROM scratch`.
 
-**Tests de robustesse** (ce sont eux le livrable réel, pas le code) : même protocole que
-celui déjà appliqué à pHash, dont les résultats sont dans le design doc. Matrice
-recompression JPEG q ∈ {90, 70, 50, 30}, resize ∈ {75 %, 50 %, 25 %}, crop
-∈ {5 %, 10 %, 25 %}, cumuls, capture d'écran. Chaque cellule donne un taux d'extraction
-mesuré, publié dans le README du module, **et comparé à L3** : si L2 ne fait pas mieux
-que pHash sur une ligne, cette ligne ne justifie pas son coût opérationnel.
+**Tests de robustesse** : **déjà mesurés**, contrairement à ce que ce plan disait
+initialement. Les modèles ONNX sont publics et la matrice complète est dans le design
+doc, avec la sonde reproductible
+[`assets/l2_watermark_robustness_probe.rs`](assets/l2_watermark_robustness_probe.rs).
+Cette PR se contente donc de **transposer la matrice en tests** et de vérifier qu'elle
+ne régresse pas avec la version des modèles.
 
-Rappel de la mesure L3, qui place la barre : pHash encaisse déjà le cumul
-resize 50 % + luminosité + JPEG 60 à distance 0. L2 doit apporter ce que L3 ne sait pas
-faire (miroir, rotation, crop massif), sinon il n'apporte rien.
+Ce que la mesure impose au code de cette PR :
+
+- **Vérifier l'extraction juste après l'écriture.** Le marquage n'est pas garanti sur
+  toute porteuse : une image synthétique 512×512 échoue au round-trip propre là où la
+  même en 256×256 réussit. Écrire sans relire, c'est promettre une traçabilité absente.
+- **Journaliser l'échec de marquage** comme un événement de premier ordre, pas comme une
+  erreur silencieuse.
+- **Ne pas promettre L2 sur les captures d'écran retouchées** : un décalage de luminosité
+  de +2/255, invisible, suffit à détruire le watermark. La doc utilisateur doit le dire.
+- Budget mesuré : ~50 ms d'encodage, ~30 ms de décodage par image. Confirme le sidecar et
+  exclut le chemin bloquant.
+
+**Ce que L2 apporte réellement par rapport à L3**, mesuré : le miroir horizontal, et
+rien d'autre dans la matrice testée. En sens inverse L3 couvre la luminosité et le crop
+25 % où L2 échoue. Les deux couches sont donc complémentaires mais **L2 est le moins
+rentable des deux** rapporté à son coût (+11,9 MB, sidecar, modèles de 65 MB). Cette PR
+est légitimement la dernière de la piste média.
 
 ---
 
