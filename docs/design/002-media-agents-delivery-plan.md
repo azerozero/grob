@@ -85,9 +85,25 @@ docs/decisions/0030-media-pipeline.md
 
 - Une decompression bomb (petit fichier, dimensions énormes) est rejetée sans allocation.
 - Chaque format non listé est refusé, y compris avec une extension mensongère.
-- pHash stable sous ré-encodage JPEG q=70 et resize 50 %, distinct entre deux images
-  différentes. Ces seuils sont le contrat de L3, donc ils sont testés, pas supposés.
+- **pHash : la matrice de robustesse est déjà mesurée** (voir le design doc). Elle se
+  transpose directement en test, avec les valeurs constatées comme bornes :
+
+  | Cas | Distance mesurée | Assertion |
+  |---|---|---|
+  | JPEG q ≥ 30 | ≤ 3 | `dist <= 5` |
+  | Resize 25–75 % | 1 | `dist <= 5` |
+  | Crop ≤ 25 % | ≤ 5 | `dist <= 5` |
+  | Cumul resize + luminosité + JPEG 60 | 0 | `dist <= 5` |
+  | Images différentes (10 échantillons) | ≥ 18 | `dist > 10` |
+  | Miroir / rotation | 21 / 52 | **non supporté**, test qui documente la limite |
+
+  Le seuil de correspondance est **10**, choisi au milieu de la marge mesurée (5 → 18).
+  Il est codé en constante nommée, pas dispersé en littéral.
 - Le journal est append-only et relisible après troncature partielle (crash simulé).
+
+**Banc d'essai** : [`assets/phash_robustness_probe.rs`](assets/phash_robustness_probe.rs) (versionné dans le repo) est le programme exact qui a produit ces
+chiffres, pour qu'une mise à jour d'`img_hash` ou un changement d'algorithme se voie
+immédiatement au lieu de dériver en silence.
 
 **Acceptation** : `cargo build` sans `--features media` produit un binaire d'octets
 identiques à `main`. Avec la feature, on peut empreinter une image et la retrouver dans
@@ -274,13 +290,23 @@ src/commands/media.rs               grob media verify|trace
 
 ### PR 8 — Watermark L2 (sidecar TrustMark)
 
-**Fichiers** : `src/features/media/mark/soft_binding.rs`, plus le sidecar de la PR 4.
+**Fichiers** : `src/features/media/mark/soft_binding.rs`, plus le sidecar de la PR 2.
 
-**Tests de robustesse** (ce sont eux le livrable réel, pas le code) :
-matrice recompression JPEG q ∈ {90, 70, 50}, resize ∈ {75 %, 50 %, 25 %}, crop
-∈ {10 %, 25 %}, capture d'écran. Chaque cellule donne un taux d'extraction mesuré,
-publié dans le README du module. Sans ces chiffres, la couche L2 est une promesse
-invérifiable.
+**Le sidecar n'est pas discutable ici** : mesuré, `trustmark` 0.2.2 ajoute **+11,9 MB**
+au binaire (296 KB → 12,24 MB), soit plus de trois fois la taille de l'image Grob
+actuelle, sans compter les modèles ONNX téléchargés séparément. `ort`/`ort-sys`,
+`ndarray` et `fast_image_resize` n'ont rien à faire dans un binaire `FROM scratch`.
+
+**Tests de robustesse** (ce sont eux le livrable réel, pas le code) : même protocole que
+celui déjà appliqué à pHash, dont les résultats sont dans le design doc. Matrice
+recompression JPEG q ∈ {90, 70, 50, 30}, resize ∈ {75 %, 50 %, 25 %}, crop
+∈ {5 %, 10 %, 25 %}, cumuls, capture d'écran. Chaque cellule donne un taux d'extraction
+mesuré, publié dans le README du module, **et comparé à L3** : si L2 ne fait pas mieux
+que pHash sur une ligne, cette ligne ne justifie pas son coût opérationnel.
+
+Rappel de la mesure L3, qui place la barre : pHash encaisse déjà le cumul
+resize 50 % + luminosité + JPEG 60 à distance 0. L2 doit apporter ce que L3 ne sait pas
+faire (miroir, rotation, crop massif), sinon il n'apporte rien.
 
 ---
 
