@@ -11,6 +11,7 @@ pub mod config;
 pub mod decode;
 pub mod phash;
 pub mod registry;
+pub mod scan;
 #[cfg(test)]
 mod tests;
 

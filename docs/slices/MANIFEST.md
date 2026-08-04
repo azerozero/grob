@@ -31,7 +31,7 @@
 | [`harness`](../../src/features/harness/README.md) | 999 | 5 | ✓ | Record & replay sandwich testing (feature `harness`) |
 | [`log_export`](../../src/features/log_export/README.md) | 651 | 3 | ✓ | Structured log export with age-encrypted content envelopes |
 | [`mcp`](../../src/features/mcp/README.md) | 2.6k | 11 | ✓ | MCP tool matrix and JSON-RPC server |
-| [`media`](../../src/features/media/README.md) | 1.2k | 6 | ✓ | Bounded media decode, perceptual hash, observation journal (feature `media`) |
+| [`media`](../../src/features/media/README.md) | 1.8k | 10 | ✓ | Bounded media decode, perceptual hash, cheap detectors, observation journal (feature `media`) |
 | [`pledge`](../../src/features/pledge/README.md) | 509 | 4 | ✓ | Structural tool stripping per session profile |
 | [`policies`](../../src/features/policies/README.md) | 3.8k | 15 | ✓ | Unified policy engine, HIT gateway, per-action authorization |
 | [`tap`](../../src/features/tap/README.md) | 369 | 2 | ✓ | Webhook tap (request/response event emission) |

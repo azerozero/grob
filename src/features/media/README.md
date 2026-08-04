@@ -19,6 +19,7 @@ The slice is compiled out unless `--features media` is passed, and inert unless 
 | `MediaFormat`, `MediaProbe` | `decode.rs` | ingestion, journal |
 | `GrayImage`, `PerceptualHash`, `gradient_hash`, `MATCH_THRESHOLD` | `phash.rs` | fingerprinting, lookup |
 | `MediaEvent`, `MediaJournal`, `current_month` | `registry.rs` | observation journal |
+| `scan`, `ScanReport`, `Finding`, `Severity` | `scan/` | cheap detectors |
 
 ## Owns
 
@@ -26,6 +27,7 @@ The slice is compiled out unless `--features media` is passed, and inert unless 
 - Header-only dimension parsing for PNG, JPEG, GIF and WebP.
 - The 64-bit gradient perceptual hash and its measured match threshold.
 - The `~/.grob/media/YYYY-MM.jsonl` observation journal.
+- Cheap detectors: shape heuristics, EXIF/GPS presence, appended payloads.
 
 ## Depends on
 
@@ -63,16 +65,34 @@ Worst same-image distance is 7 and the closest different image is 16, so `MATCH_
 
 **Known limitation:** mirroring and rotation defeat this layer, structurally rather than as a tuning problem, because the hash reads left-to-right. Recovering provenance from a flipped image needs the manifest or watermark layers. There is a test that documents this rather than a comment that hopes for it.
 
+## Detectors
+
+`scan()` runs every cheap detector over an already-probed payload and returns findings, never decisions. Nothing decodes pixels.
+
+| Rule | Severity | Signal |
+|---|---|---|
+| `exif_gps` | Suspicious | Image carries GPS tags; location leaves with the image |
+| `appended_payload` | Suspicious | Data follows the container's end marker |
+| `appended_text` | Suspicious | That appended data contains a long printable run |
+| `extreme_aspect_ratio` | Notice | Ratio beyond 20:1 |
+| `tiny_image` | Notice | 64 pixels or fewer, typically a tracking pixel |
+| `exif_present` | Info | EXIF block present without GPS |
+
+Two properties are enforced by tests rather than convention. Findings **never quote the payload they found**, because a finding that echoed a secret would copy the leak into every log line recording it. And detection is **total**: every prefix of a malformed input yields findings or nothing, never a panic.
+
+**Known limitation:** this catches carelessness, not craft. LSB steganography from a competent tool is statistically indistinguishable without a decoder and a model. Claiming to detect it would be worse than not looking, because it would manufacture confidence.
+
 ## Non-goals
 
-- Verdicts, redaction or blocking.
+- Verdicts, redaction or blocking (detectors report; policy decides, later).
+- Real steganalysis.
 - Watermarking, C2PA manifests, OCR.
 - Object or face recognition.
 - Video.
 
 ## Tests
 
-`tests.rs` covers the decompression-bomb refusal, budget boundaries, lying MIME types, truncated-header totality across all four formats, SSRF refusal, the full perceptual-hash matrix above, the separation gap, and journal append/replay including a torn tail.
+`scan/tests.rs` covers each detector, the no-payload-in-findings property, totality over truncated inputs, and an ignored cross-check against real system JPEGs (`--ignored`). `tests.rs` covers the decompression-bomb refusal, budget boundaries, lying MIME types, truncated-header totality across all four formats, SSRF refusal, the full perceptual-hash matrix above, the separation gap, and journal append/replay including a torn tail.
 
 ## Related design docs
 
