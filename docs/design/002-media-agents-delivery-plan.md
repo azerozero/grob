@@ -394,6 +394,9 @@ utile, avant même toute notion de contrôle.
 
 **Points de conception**
 
+- **Réutiliser `expires_at` des decision tokens**, qui existe déjà et est désormais
+  réellement vérifié (voir A3). Un second système de TTL parallèle serait une divergence
+  garantie.
 - **Le lease, pas le kill.** Un agent tient un bail à TTL qu'il renouvelle. S'il ne
   renouvelle pas, il expire. C'est le seul modèle qui survit au crash du superviseur :
   un agent orphelin ne peut pas brûler du budget indéfiniment parce que personne n'est
@@ -409,19 +412,43 @@ un parent qui expire fait expirer sa descendance.
 
 ### PR A3 — Budget et capacités hiérarchiques
 
-**Points de conception**
+**Ce qui existe déjà, vérifié dans le code** : `policies/decision_token` implémente
+littéralement un modèle boss/worker avec `issuer`, `audience` (glob), `expires_at`,
+HMAC-SHA256 sur les claims, et une séparation `DecisionToken` / `AgentVisibleToken` qui
+est exactement l'anti-passthrough recherché. Le socle est donc plus avancé que ce plan
+ne le supposait : A3 branche l'existant au lieu de l'inventer.
+
+**Deux failles trouvées et corrigées en amont de cette PR** (elles auraient rendu le
+modèle de sécurité décoratif) :
+
+1. **`expires_at` n'était jamais vérifié.** Un token expiré depuis 2020 routait vers
+   `BackendTarget::Real`, c'est-à-dire le backend *live*. La variante d'erreur `Expired`
+   existait mais n'était construite nulle part. Corrigé : `is_expired()` /
+   `check_not_expired()`, appelés depuis `resolve_backend()`, avec **fail-closed sur une
+   date malformée** (une expiration illisible ne doit pas valoir validité illimitée).
+2. **`audience` n'était vérifiable nulle part.** `route_by_decision_token()` ne reçoit
+   aucune identité d'agent, donc la claim ne pouvait structurellement pas être appliquée.
+   Ajout de `resolve_backend_for(agent_id)` et `route_by_decision_token_for()`, qui
+   valident intégrité + expiration + audience ensemble. Au passage, `worker-*` ne
+   matche plus le préfixe nu `worker-`, et une audience réduite à `*` ne matche plus
+   rien, puisqu'une audience qui matche tout équivaut à pas d'audience.
+
+**Points de conception restants**
 
 - Le budget d'un enfant est **prélevé sur celui du parent**, jamais additionnel. Sinon
   un agent qui se réplique contourne trivialement toute limite.
 - Les capacités (profil pledge) ne peuvent que se restreindre en descendant. Même
   propriété monotone que `Role::has_at_least`, à tester explicitement.
 - **Pas de token passthrough** parent → enfant, conformément à MCP 2025-06-18 et au
-  problème du *confused deputy*. L'enfant reçoit un jeton dérivé d'audience restreinte
-  via `policies/decision_token` qui existe déjà.
+  problème du *confused deputy*. L'enfant reçoit un jeton dérivé d'audience restreinte,
+  et c'est désormais réellement applicable puisque l'audience est enfin vérifiée.
+- Corollaire de la faille n° 1 : l'expiration des decision tokens est le **mécanisme de
+  lease de la PR A2**, déjà présent dans le format. A2 n'a pas à inventer un second
+  système de TTL, elle doit réutiliser celui-là.
 
 **Tests** : un enfant ne peut pas dépasser le budget de son parent, ni élargir ses
 capacités, ni réutiliser le jeton du parent. Ces trois tests sont le cœur du modèle de
-sécurité.
+sécurité. Les huit tests d'expiration et d'audience sont déjà écrits et passent.
 
 ---
 
