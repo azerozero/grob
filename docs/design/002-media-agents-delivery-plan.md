@@ -24,19 +24,27 @@
 | # | PR | Feature flag | Bloque le trafic ? | ADR |
 |---|---|---|---|---|
 | 1 | Squelette `media` : décodage borné + pHash + journal | `media` | non | ADR-0030 |
-| 2 | Détecteurs bon marché (heuristiques, stégano) + wiring async | `media` | non | — |
-| 3 | Mode `blocking` + intégration policies | `media` | oui | — |
-| 4 | OCR → DLP via sidecar | `media-ocr` | via #3 | ADR-0031 (sidecar) |
-| 5 | Provenance L1 (C2PA) + registre `trace_id` | `media-c2pa` | non | ADR-0032 |
-| 6 | Surfaces : RPC `media/*`, HTTP verify, CLI | `media` | non | — |
-| 7 | Watermark L2 via sidecar TrustMark | `media` | non | — |
-| 8 | Lib JS `grob-media-verify` | — | non | — |
-| 9 | Vidéo : L1 conteneur + keyframes L3 | `media-video` | non | — |
+| 2 | **Protocole sidecar** (fondation partagée) | `media` | non | ADR-0031 |
+| 3 | Détecteurs bon marché (heuristiques, stégano) + wiring async | `media` | non | — |
+| 4 | OCR → DLP via sidecar | `media` | non | — |
+| 5 | Mode `blocking` + intégration policies | `media` | oui | — |
+| 6 | Provenance L1 (C2PA) + registre `trace_id` | sidecar, ou `media-c2pa` | non | ADR-0032 |
+| 7 | Surfaces : RPC `media/*`, HTTP verify, CLI | `media` | non | — |
+| 8 | Watermark L2 via sidecar TrustMark | `media` | non | — |
+| 9 | Lib JS `grob-media-verify` | — | non | — |
+| 10 | Vidéo : L1 conteneur + keyframes L3 | `media` | non | — |
 | A1 | `AgentId` + contexte propagé + attribution du spend | `agents` | non | ADR-0033 |
 | A2 | Registre d'agents + leases | `agents` | oui (expiration) | — |
 | A3 | Budget et capacités hiérarchiques | `agents` | oui | — |
 | A4 | Surfaces `agent/*` + trajectoire auditée | `agents` | non | — |
 | A5 | Jonction media ↔ agent (`trace_id` → agent) | les deux | non | — |
+
+> **Révision après mesure.** Le sidecar est passé de la PR 4 à la PR 2, et C2PA de la
+> PR 5 à la PR 6, derrière le sidecar. Raison : `c2pa` compilé en dur coûte **+7,0 MB**
+> sur un binaire qui en fait 6 (mesure dans le design doc). Trois des couches lourdes
+> (OCR, C2PA, TrustMark) sont donc hors processus, ce qui fait du protocole sidecar la
+> fondation et non un détail d'implémentation. Le noyau ne manipule que `trace_id` et
+> pHash, tous deux légers.
 
 Les deux pistes sont indépendantes jusqu'à A5. Elles peuvent avancer en parallèle.
 
@@ -87,7 +95,45 @@ le journal.
 
 ---
 
-### PR 2 — Détecteurs bon marché + branchement asynchrone
+### PR 2 — Protocole sidecar (la fondation)
+
+**Pourquoi si tôt** : la mesure de taille de binaire (+7 MB pour C2PA seul) rend le
+hors-processus obligatoire pour trois couches sur quatre. Ce n'est donc plus un détail
+d'intégration mais l'ossature de toute la piste média. Le poser une fois, proprement,
+évite trois intégrations divergentes.
+
+**Fichiers**
+
+```
+src/features/media/sidecar/mod.rs      trait MediaSidecar, découverte, santé
+src/features/media/sidecar/proto.rs    contrat requête/réponse versionné
+src/features/media/sidecar/client.rs   HTTP sur unix socket, timeouts, circuit breaker
+docs/decisions/0031-media-sidecar.md
+```
+
+**Points de conception**
+
+- **Un seul protocole** pour OCR, C2PA et TrustMark. C'était une question ouverte du
+  design doc ; elle est tranchée ici.
+- Unix socket par défaut, jamais de port TCP exposé : le sidecar reçoit des images
+  potentiellement sensibles, il ne doit pas être joignable depuis le réseau.
+- **Absence de sidecar = capacité désactivée proprement**, jamais une erreur de
+  démarrage. Grob doit démarrer et servir même si tout l'appareillage média est absent.
+- Réutiliser le circuit breaker existant (`src/routing/`) plutôt que d'en écrire un
+  deuxième : un sidecar en vrac se comporte exactement comme un provider en vrac.
+- Le protocole est versionné dès le premier jour, sinon on ne pourra jamais le faire
+  évoluer sans casser les déploiements.
+
+**Tests** : sidecar absent → dégradation silencieuse et démarrage normal ; sidecar lent
+→ timeout respecté ; sidecar qui plante en boucle → circuit ouvert, plus d'appels ;
+version de protocole incompatible → refus explicite et lisible.
+
+**Acceptation** : un sidecar factice qui renvoie une réponse fixe est appelé par Grob,
+et son absence ne change rien au comportement du proxy.
+
+---
+
+### PR 3 — Détecteurs bon marché + branchement asynchrone
 
 **Fichiers**
 
@@ -118,7 +164,32 @@ agent envoie des screenshots, sans une milliseconde de latence ajoutée.
 
 ---
 
-### PR 3 — Mode bloquant + policies
+### PR 4 — OCR → DLP (via le sidecar de la PR 2)
+
+**Pourquoi c'est la PR la plus rentable** : elle transforme l'image en texte et rend
+*toutes* les règles DLP existantes applicables. Zéro duplication de règles.
+
+**Fichiers**
+
+```
+src/features/media/scan/text.rs      appel sidecar OCR + réinjection DlpEngine
+```
+
+**Points de conception**
+
+- Le texte OCR passe par le `DlpEngine` **existant**, sans nouvelle règle. Si le DLP
+  détecte une clé AWS dans un screenshot, c'est le même code que pour le texte.
+- Le résultat OCR n'est **jamais** journalisé en clair : seuls les identifiants de règles
+  déclenchées le sont. Sinon le journal devient lui-même la fuite.
+- Sur macOS, un sidecar s'appuyant sur Vision est trivial à écrire ; ailleurs, n'importe
+  quel moteur respectant le protocole convient. Le cœur s'en moque, c'est l'intérêt.
+
+**Tests** : screenshot contenant une fausse clé AWS → règle DLP déclenchée ; le texte
+OCR n'apparaît nulle part dans le journal.
+
+---
+
+### PR 5 — Mode bloquant + policies
 
 **Fichiers**
 
@@ -142,66 +213,43 @@ respecte `on_timeout` dans les deux sens.
 
 ---
 
-### PR 4 — OCR → DLP (sidecar, feature `media-ocr`)
-
-**Pourquoi c'est la PR la plus rentable** : elle transforme l'image en texte et rend
-*toutes* les règles DLP existantes applicables. Zéro duplication de règles.
+### PR 6 — Provenance L1 (C2PA) + registre
 
 **Fichiers**
 
 ```
-src/features/media/scan/text.rs      client sidecar + réinjection DlpEngine
-src/features/media/sidecar.rs        protocole sidecar générique (aussi utilisé PR 7 et 9)
-docs/decisions/0031-media-sidecar.md
-```
-
-**Points de conception**
-
-- Le sidecar est **un seul protocole** pour OCR, watermark et ffmpeg. C'est la question
-  ouverte du design doc, et la réponse est : un seul, tranché ici, sinon on aura trois
-  intégrations divergentes dans six mois.
-- Contrat : HTTP local, unix socket de préférence, timeout court, absence de sidecar =
-  capacité désactivée proprement (pas une erreur de démarrage).
-- Le texte OCR passe par le `DlpEngine` **existant**, sans nouvelle règle. Si le DLP
-  détecte une clé AWS dans un screenshot, c'est le même code que pour le texte.
-- Le résultat OCR n'est **jamais** journalisé en clair : seuls les identifiants de règles
-  déclenchées le sont. Sinon le journal devient la fuite.
-
-**Tests** : screenshot contenant une fausse clé AWS → règle DLP déclenchée ; sidecar
-absent → dégradation propre ; sidecar lent → timeout respecté.
-
----
-
-### PR 5 — Provenance L1 (C2PA) + registre
-
-**Fichiers**
-
-```
-src/features/media/mark/mod.rs      MediaMarker
-src/features/media/mark/c2pa.rs     crate c2pa
-src/features/media/trace.rs         TraceId (128 bits CSPRNG)
-src/features/media/registry.rs      trace_id → contexte
-Cargo.toml                          feature media-c2pa
+src/features/media/mark/mod.rs       MediaMarker
+src/features/media/mark/c2pa.rs      client sidecar de provenance (défaut)
+src/features/media/trace.rs          TraceId (128 bits CSPRNG)
+src/features/media/registry.rs       trace_id → contexte
+Cargo.toml                           feature media-c2pa (in-process, opt-in, +7 MB)
 docs/decisions/0032-content-provenance.md
 ```
 
 **Points de conception**
 
-- Features du crate `c2pa` : `default-features = false`, `rust_native_crypto`, **sans**
-  `default_http` (il tire quatre clients HTTP), **sans** `fetch_remote_manifests` (SSRF).
-  À vérifier avec `cargo tree` et `cargo-deny` dans la PR même.
-- Le manifeste contient `trace_id` et rien d'autre d'identifiant. Pas de tenant, pas de
-  nom de modèle, pas de session. La tentation sera forte, il faut la refuser : tout ce
+- **Chemin par défaut : sidecar.** Mesure faite : `c2pa` compilé en dur ajoute
+  **+7,0 MB** à un binaire qui en fait 6, même en `--no-default-features` avec
+  `rust_native_crypto` (240 crates transitives : CBOR, COSE, X.509). Doubler la taille
+  de l'image pour signer des métadonnées n'est pas un arbitrage défendable par défaut.
+- La feature `media-c2pa` reste disponible pour un binaire unique sans orchestration,
+  avec le coût **écrit dans la doc**, pas découvert par l'utilisateur.
+- À savoir avant de commencer : `c2pa::Reader::from_file` exige la feature `file_io`,
+  absente des defaults. Les features utiles vérifiées sont
+  `--no-default-features --features rust_native_crypto,file_io` : cet ensemble élimine
+  bien `reqwest`, `openssl`, `ureq`, `wasi` et `wstd` de l'arbre (vérifié à `cargo tree`).
+- Le manifeste contient `trace_id` et **rien d'autre** d'identifiant. Pas de tenant, pas
+  de nom de modèle, pas de session. La tentation sera forte, il faut la refuser : tout ce
   qu'on écrit dans l'image devient public.
-- Impact sur la taille du binaire mesuré et écrit dans la description de la PR.
 
 **Tests** : round-trip signer → lire ; manifeste strippé → `trace_id` toujours résolvable
-via pHash ; aucune donnée métier présente dans le fichier de sortie (test explicite qui
-cherche le nom du tenant dans les octets).
+via pHash ; aucune donnée métier dans le fichier de sortie (test explicite qui cherche le
+nom du tenant dans les octets bruts) ; et un test de garde qui échoue si la taille du
+binaire par défaut dépasse un seuil.
 
 ---
 
-### PR 6 — Surfaces d'exposition
+### PR 7 — Surfaces d'exposition
 
 **Fichiers**
 
@@ -224,7 +272,7 @@ src/commands/media.rs               grob media verify|trace
 
 ---
 
-### PR 7 — Watermark L2 (sidecar TrustMark)
+### PR 8 — Watermark L2 (sidecar TrustMark)
 
 **Fichiers** : `src/features/media/mark/soft_binding.rs`, plus le sidecar de la PR 4.
 
@@ -236,14 +284,14 @@ invérifiable.
 
 ---
 
-### PR 8 — Lib JS `grob-media-verify`
+### PR 9 — Lib JS `grob-media-verify`
 
 Package séparé. Fait localement ce qui est local (parse C2PA, pHash en WASM), délègue L2
 au serveur. Aucun secret côté client. Retourne toujours la couche qui a répondu.
 
 ---
 
-### PR 9 — Vidéo
+### PR 10 — Vidéo
 
 L1 sur le conteneur (boîte `uuid` MP4, tags Matroska), L3 sur keyframes échantillonnées
 via sidecar ffmpeg. **Marquage par segment**, jamais par fichier : un simple découpage
@@ -351,12 +399,12 @@ elle manque :
 
 ## Ordre recommandé
 
-1. **PR 1 → 2 → 4** d'abord. C'est le chemin le plus court vers une valeur réelle :
+1. **PR 1 → 2 → 3 → 4** d'abord. C'est le chemin le plus court vers une valeur réelle :
    les screenshots d'agents sont scannés par les règles DLP existantes.
 2. **A1** en parallèle, indépendante et immédiatement utile (coût par agent).
-3. **PR 5 → 6** ensuite : la provenance devient interrogeable.
+3. **PR 5 → 6 → 7** ensuite : blocage, puis provenance interrogeable.
 4. **A2 → A3** quand le besoin de contrôle se fait sentir, pas avant.
-5. **PR 7 → 8 → 9**, **A4 → A5** en fonction des retours.
+5. **PR 8 → 9 → 10**, **A4 → A5** en fonction des retours.
 
 Le point de décision important est après la PR 4 : si l'OCR→DLP n'attrape rien d'utile
 en conditions réelles, tout le reste de la piste média devient discutable et il vaut

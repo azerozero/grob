@@ -95,9 +95,40 @@ robuste est du traitement du signal → WASM, ou déportée sur l'endpoint serve
 
 | Besoin | Crate | Verdict |
 |---|---|---|
-| L1 C2PA | `c2pa` 0.90.4, MIT/Apache-2.0, `rust_native_crypto` dispo (évite OpenSSL) | **À utiliser.** C'est l'implémentation de référence CAI. Features à trier finement : couper `default_http` (4 clients HTTP !), `openssl`, `fetch_remote_manifests` (SSRF), garder `rust_native_crypto`. |
-| L2 watermark | `trustmark` 0.2.2 (Adobe, MIT) | **Attention.** Tire `ort` (ONNX Runtime) + `ndarray` + `image` + modèles ONNX externes. Incompatible avec le binaire `FROM scratch` de 6 MB. → **sidecar**, pas dépendance directe. |
-| L3 fingerprint | `img_hash` 3.2.0 (pHash/dHash) | **À utiliser**, léger, pur Rust. |
+| L1 C2PA | `c2pa` 0.90.4, MIT/Apache-2.0 | **Mesuré, et c'est un problème** : voir ci-dessous. `--no-default-features --features rust_native_crypto,file_io` élimine bien OpenSSL et les 4 clients HTTP, mais **coûte +7,0 MB** de binaire strippé+LTO. |
+| L2 watermark | `trustmark` 0.2.2 (Adobe, MIT) | **Sidecar.** Tire `ort` (ONNX Runtime) + `ndarray` + `image` + des modèles ONNX téléchargés séparément. Incompatible avec `FROM scratch`. |
+| L3 fingerprint | `img_hash` 3.2.0 (pHash/dHash) | **À utiliser**, 51 deps transitives, pur Rust. |
+
+### Mesures réelles (pas des estimations)
+
+Crate jetable, profil release identique à celui de Grob (`lto = true`,
+`codegen-units = 1`, `strip = true`, `opt-level = 3`), macOS aarch64 :
+
+| Binaire | Taille |
+|---|---|
+| hello world | 296 KB |
+| + `c2pa` (no-default-features, `rust_native_crypto`, `file_io`) | **7,33 MB** |
+
+Soit **+7,0 MB nets**, pour une image de conteneur Grob qui pèse ~6 MB aujourd'hui.
+Vérifications faites au passage : `cargo tree` ne contient **aucun** `reqwest`, `openssl`,
+`ureq`, `wasi` ni `wstd` avec ces features, mais l'arbre monte quand même à **240 crates
+uniques** (CBOR, COSE, X.509, `rasn-cms`, `iref`…). La compilation prend 26 s en debug.
+
+**Conclusion qui change le plan** : C2PA ne peut pas être une feature qu'on active
+tranquillement. Activer L1 **plus que double** la taille du binaire. Deux options, à
+trancher dans l'ADR :
+
+1. **Feature opt-in assumée** (`media-c2pa`), en documentant noir sur blanc « +7 MB », avec
+   une image de conteneur séparée `grob:media`. Le binaire par défaut reste à 6 MB.
+2. **Sidecar de provenance**, comme TrustMark, qui signe et vérifie hors du processus.
+   Le cœur ne connaît que `trace_id` et pHash, tous deux légers.
+
+L'option 2 est plus cohérente : elle rend le noyau indifférent au format de provenance,
+et elle mutualise le protocole sidecar avec l'OCR et TrustMark. L'option 1 reste utile
+pour ceux qui veulent un binaire unique sans orchestration.
+
+Détail d'API relevé en testant : `c2pa::Reader::from_file` exige la feature `file_io`,
+absente des defaults. À savoir avant de perdre du temps dessus.
 
 TrustMark (Adobe/Univ. Surrey, ICCV 2025, `arXiv:2311.18297`) est l'état de l'art ouvert :
 résolution arbitraire, qualité > 43 dB, implémentations Python/Rust/JS via ONNX.
@@ -164,8 +195,9 @@ Sous-modules :
     peut brancher Vision ; sinon sidecar HTTP, jamais linké en dur dans le binaire scratch.
   - `phash.rs` — empreinte perceptuelle (L3), et matching contre une deny-list
     d'images connues (documents internes, slides confidentielles).
-- `mark/` — `c2pa.rs` (L1, crate `c2pa`), `soft_binding.rs` (L2, client sidecar TrustMark
-  conforme à la C2PA Soft Binding Algorithm List), `qr.rs` (L3-visible, opt-in).
+- `mark/` — `c2pa.rs` (L1, client sidecar de provenance par défaut, crate `c2pa` en
+  option `media-c2pa` à +7 MB), `soft_binding.rs` (L2, sidecar TrustMark conforme à la
+  C2PA Soft Binding Algorithm List), `qr.rs` (L3-visible, opt-in).
 - `registry.rs` — journal `~/.grob/media/YYYY-MM.jsonl` : `trace_id`, phash, verdict,
   tenant, model, ts. Même pattern que `spend/`.
 
@@ -248,24 +280,27 @@ pas par fichier, sinon un simple découpage efface la provenance.
 
 ## Plan de livraison
 
-1. **Slice 1 — squelette.** `src/features/media/`, feature flag, `MediaRef` depuis
-   `ImageSource`, decode + bornes, `phash.rs`, registry JSONL, events tap. Aucun blocage,
-   observation seule.
-2. **Slice 2 — verdicts.** heuristics + stego, wiring dispatch en mode `async`,
-   politique par policy (`src/features/policies/`), mode `blocking`.
-3. **Slice 3 — provenance.** C2PA (L1) + registry `trace_id`, RPC `media/*`,
-   endpoint HTTP, CLI.
-4. **Slice 4 — watermark.** L2 invisible + QR opt-in, lib JS, tests de robustesse
+Le découpage détaillé en PRs vit dans [`002-media-agents-delivery-plan.md`](002-media-agents-delivery-plan.md).
+En résumé :
+
+1. **Squelette.** `src/features/media/`, feature flag, `MediaRef` depuis `ImageSource`,
+   decode + bornes, `phash.rs`, registry JSONL, events tap. Observation seule.
+2. **Sidecar.** Protocole unique et versionné, partagé par OCR, C2PA et TrustMark.
+   Remonté tôt car la mesure de taille de binaire rend le hors-processus obligatoire.
+3. **Verdicts.** heuristics + stego + OCR→DLP en mode `async`, puis `blocking` et
+   politique par policy (`src/features/policies/`).
+4. **Provenance.** L1 + registry `trace_id`, RPC `media/*`, endpoint HTTP, CLI.
+5. **Watermark.** L2 + QR opt-in, lib JS, tests de robustesse
    (recompression/resize/crop/screenshot) en harness.
-5. **Slice 5 — vidéo.** L1 conteneur + keyframes L3 via sidecar.
+6. **Vidéo.** L1 conteneur + keyframes L3 via sidecar.
 
 Chaque slice = une ADR courte + un `README.md` de module, conforme au flow du repo.
 
 ---
 
-# Partie 2 — Control plane d'agents
+## Partie 2 — Control plane d'agents
 
-## État actuel
+### État actuel
 
 Grob a déjà l'ossature d'un control plane, mais **orienté proxy**, pas **orienté agent** :
 
@@ -283,7 +318,7 @@ Grob a déjà l'ossature d'un control plane, mais **orienté proxy**, pas **orie
 Autrement dit : les *primitives* (identité, capacités, budget, audit, HIT, isolation
 réseau) existent déjà. Ce qui manque est la **notion d'agent comme entité de première classe**.
 
-## Le gap
+### Le gap
 
 Aujourd'hui une requête a un tenant, une policy, un budget. Elle n'a pas d'**agent
 identifié et durable**. Conséquences :
@@ -296,7 +331,7 @@ identifié et durable**. Conséquences :
 - Aucune boucle de rappel : rien ne relie « cette image a fuité » à « quel agent l'a produite ».
   C'est précisément le `trace_id` de la partie 1 qui referme cette boucle.
 
-## Ce que dit le marché (recherche, 2026-08)
+### Ce que dit le marché (recherche, 2026-08)
 
 Le terme « agent control plane » s'est stabilisé en 2025-2026 et converge, chez tous les
 acteurs (Microsoft Agent 365 / Entra Agent ID, Okta, Guild, Nagarro, Lyzr), sur la même
@@ -332,7 +367,7 @@ doit **jamais** recevoir le token de son parent. Il reçoit un token dérivé, d
 restreinte. Ça rejoint exactement la contrainte « les capacités décroissent
 monotonement » déjà posée, mais avec un mécanisme normé pour l'appliquer.
 
-## Direction proposée
+### Direction proposée
 
 **Un namespace `agent` + une identité qui traverse tout le pipeline.**
 
@@ -369,7 +404,7 @@ Points de conception qui comptent :
 - **HIT branché sur l'agent.** `policies/hit` existe déjà ; le point d'attache naturel
   est l'agent, pas la requête isolée.
 
-## Ce que ça débloque
+### Ce que ça débloque
 
 - Kill switch réel : un agent qui déraille est coupé, descendance comprise.
 - Attribution du coût par agent, pas par clé API.
@@ -377,7 +412,7 @@ Points de conception qui comptent :
 - Sandbox alignée : `orca.yaml` isole déjà au niveau réseau ; `AgentId` donne le pendant
   logique côté proxy.
 
-## Risques
+### Risques
 
 - **Scope creep vers l'orchestrateur.** Grob doit rester un *control plane*, pas un
   runtime d'agents. Il n'exécute pas, il autorise, borne, observe et coupe.
@@ -387,27 +422,31 @@ Points de conception qui comptent :
 - **État persistant.** Le control plane actuel est stateless ; les agents introduisent
   du cycle de vie. À contenir dans `GrobStore`, sans base de données.
 
-## Open Questions
+### Open Questions
 
-**Tranchées par la recherche :**
+**Tranchées par la recherche et la mesure :**
 
-- ~~C2PA en Rust, acceptable ?~~ Oui : `c2pa` 0.90.4, MIT/Apache-2.0, avec
-  `rust_native_crypto` et sans les 4 clients HTTP par défaut. À valider sur `cargo-deny`
-  et sur le poids réel du binaire.
+- ~~C2PA en Rust, acceptable ?~~ Le crate existe et compile sans OpenSSL, mais il coûte
+  **+7,0 MB mesurés** (binaire 296 KB → 7,33 MB, profil release de Grob). Donc : sidecar
+  par défaut, feature in-process `media-c2pa` en option documentée.
 - ~~Watermark maison ou dépendance ?~~ Ni l'un ni l'autre en direct : TrustMark en
   **sidecar** (ONNX incompatible avec `FROM scratch`), derrière le trait `MediaMarker`.
+- ~~Le sidecar : un protocole ou trois intégrations ?~~ **Un seul**, versionné, posé en
+  PR 2. La mesure C2PA a tranché la question : trois couches sur quatre sont hors
+  processus, donc c'est une fondation, pas un détail.
 - ~~Faut-il inventer un schéma d'identité d'agent ?~~ Non : OAuth 2.1 + RFC 8707
   (resource indicators) + RFC 9728, comme MCP 2025-06-18. Et interdiction stricte du
   token passthrough parent → enfant.
 
 **Encore ouvertes :**
 
-- L'OCR : sidecar local, ou API vision du provider déjà configuré ? (Attention : envoyer
-  l'image suspecte au provider contredit l'objectif.)
-- Le sidecar devient-il un pattern assumé de Grob (media, OCR, ffmpeg) avec un protocole
-  unique, ou trois intégrations ad hoc ? Trancher tôt, ça structure tout le reste.
+- L'OCR : moteur du sidecar (Vision sur macOS, autre chose ailleurs) ? Le protocole rend
+  la question locale, mais il faut un défaut recommandé. Ne **pas** utiliser l'API vision
+  du provider : envoyer l'image suspecte au provider contredit l'objectif.
 - Les agents : produit Admin/Enterprise (cf. ADR-0028 open-core boundary) ou cœur Apache ?
   Le marché monétise exactement cette couche, donc la question est commerciale.
 - `agent_id` obligatoire à terme, avec un agent implicite par défaut ?
 - Faut-il viser une conformité déclarée NIST AI RMF / EU AI Act, ou juste fournir les
   primitives et laisser l'utilisateur mapper ?
+- Distribue-t-on des sidecars officiels (images conteneur), ou seulement un protocole
+  et une implémentation de référence ?
