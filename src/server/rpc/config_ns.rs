@@ -5,7 +5,7 @@ use super::types::{rpc_err, Role, StatusResponse, ERR_INTERNAL};
 use crate::config::AppConfig;
 use crate::providers::ProviderRegistry;
 use crate::routing::classify::Router;
-use crate::server::config_guard::is_section_or_key_denied;
+use crate::server::config_guard::{ensure_config_reloadable, is_section_or_key_denied};
 use crate::server::{AppState, ReloadableState};
 use jsonrpsee::types::error::INVALID_PARAMS_CODE;
 use jsonrpsee::types::ErrorObjectOwned;
@@ -58,6 +58,8 @@ pub async fn set(
     // Clone the active config so a validation failure leaves the snapshot intact.
     let mut new_config = state.snapshot().config.clone();
     apply_runtime_update(&mut new_config, key, value)?;
+    ensure_config_reloadable(state, &new_config)
+        .map_err(|message| rpc_err(INVALID_PARAMS_CODE, message))?;
 
     // Rebuild the reloadable state from the mutated config and swap atomically.
     // Mirrors the pattern in `server_ns::reload_config` and
@@ -356,6 +358,25 @@ max_entry_bytes = 8192
         apply_runtime_update(&mut config, "cache.ttl_secs", &serde_json::json!(900))
             .expect("cache.ttl_secs update should succeed");
         assert_eq!(config.cache.ttl_secs, 900);
+    }
+
+    #[tokio::test]
+    async fn set_rejects_startup_only_cache_change() {
+        let state = crate::server::test_app_state(
+            fixture_config(),
+            crate::providers::ProviderRegistry::new(),
+        );
+        let admin = CallerIdentity {
+            role: Role::Admin,
+            ip: "127.0.0.1".into(),
+            tenant_id: String::new(),
+        };
+
+        let err = set(&state, &admin, "cache.ttl_secs", &serde_json::json!(900))
+            .await
+            .expect_err("cache instance is initialized only at startup");
+        assert_eq!(err.code(), INVALID_PARAMS_CODE);
+        assert!(err.message().contains("[cache]"));
     }
 
     #[test]

@@ -209,12 +209,9 @@ pub(crate) async fn update_config_json(
 
 /// Reload configuration without restarting the server.
 ///
-/// Rejects only **structurally** invalid candidates: a parse error, an
-/// `AppConfig::validate()` failure (model mapping references an unknown
-/// provider, missing provider auth, bad router regex), or a provider-registry
-/// build failure surface as a 4xx and leave the live `inner` snapshot
-/// untouched. A structurally-valid candidate is always swapped in — the reload
-/// is **not** gated on live provider health, because a provider being
+/// Rejects invalid candidates and changes to startup-only config-derived
+/// subsystems, leaving the live `inner` snapshot untouched. Accepted reloads
+/// are **not** gated on live provider health, because a provider being
 /// momentarily unreachable must not block a config swap. Health is still
 /// observed: `validate_config`'s live probes run in a detached task that only
 /// logs warnings on unhealthy mappings.
@@ -239,11 +236,10 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
         }
     };
 
-    // 1b. Reject a reload that would change/break the `/metrics` bearer token: it
-    //     is resolved once at startup into non-reloadable state, so applying it
-    //     here is impossible and a silent success would falsely imply /metrics is
-    //     now gated (or opened). Shared guard — every reload path calls it.
-    if let Err(msg) = super::config_guard::ensure_metrics_auth_reloadable(&state, &new_config) {
+    // 1b. Reject changes to config-derived subsystems that are initialized only
+    //     at startup. This guard applies equally to API writes and direct edits of
+    //     the config file followed by this endpoint.
+    if let Err(msg) = super::config_guard::ensure_config_reloadable(&state, &new_config) {
         warn!("config reload rejected: {msg}");
         return (
             StatusCode::BAD_REQUEST,
@@ -359,4 +355,76 @@ pub(crate) fn spawn_health_probe(config: AppConfig, registry: Arc<ProviderRegist
             );
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::extract::State;
+
+    fn config_toml(rate_limit_rps: u32, default_model: &str) -> String {
+        format!(
+            r#"
+[server]
+host = "127.0.0.1"
+port = 18100
+
+[router]
+default = "{default_model}"
+
+[security]
+rate_limit_rps = {rate_limit_rps}
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha", "beta"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "alpha"
+
+[[models]]
+name = "beta"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "beta"
+"#
+        )
+    }
+
+    #[tokio::test]
+    async fn reload_endpoint_rejects_direct_edit_to_startup_only_section() {
+        use crate::cli::{AppConfig, ConfigSource};
+        use crate::providers::ProviderRegistry;
+
+        let live_config = AppConfig::from_content(&config_toml(10, "alpha"), "reload_live")
+            .expect("live config parses");
+        let file = tempfile::NamedTempFile::new().expect("temp config");
+        std::fs::write(file.path(), config_toml(20, "beta")).expect("edit config directly");
+        let state = crate::server::test_app_state_with_source(
+            live_config,
+            ProviderRegistry::new(),
+            ConfigSource::File(file.path().to_path_buf()),
+        );
+
+        let response = reload_config(State(state.clone())).await;
+        assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("response body");
+        assert!(
+            String::from_utf8_lossy(&body).contains("[security]"),
+            "response should identify the startup-only section"
+        );
+        assert_eq!(state.snapshot().config.router.default, "alpha");
+    }
 }

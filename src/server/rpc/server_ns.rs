@@ -39,12 +39,10 @@ pub async fn status(
 
 /// Triggers an atomic configuration reload.
 ///
-/// Rejects only **structurally** invalid candidates (parse error,
-/// `AppConfig::validate()` failure, or provider-registry build failure) as a
-/// JSON-RPC error, leaving the in-flight `inner` snapshot untouched. A
-/// structurally-valid candidate is always swapped in — the reload is **not**
-/// gated on live provider health. The same contract the HTTP
-/// `/api/config/reload` endpoint enforces.
+/// Rejects invalid candidates and changes to startup-only config-derived
+/// subsystems as a JSON-RPC error, leaving the in-flight `inner` snapshot
+/// untouched. Accepted reloads are **not** gated on live provider health. The
+/// same contract the HTTP `/api/config/reload` endpoint enforces.
 pub async fn reload_config(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
@@ -65,10 +63,8 @@ pub async fn reload_config(
         .await
         .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to reload config: {e}")))?;
 
-    // Same shared guard as the HTTP reload path: a `/metrics` bearer-token change
-    // cannot be hot-applied (resolved once at startup), so reject it here too
-    // instead of silently keeping the old posture.
-    crate::server::config_guard::ensure_metrics_auth_reloadable(state, &new_config)
+    // Same shared fail-closed guard as the HTTP reload path.
+    crate::server::config_guard::ensure_config_reloadable(state, &new_config)
         .map_err(|msg| rpc_err(ERR_INTERNAL, msg))?;
 
     let new_router = Router::new(new_config.clone());
