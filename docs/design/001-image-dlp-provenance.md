@@ -245,6 +245,61 @@ l'extraction juste après l'écriture et journaliser un échec plutôt que de su
 Coûts mesurés : encodage ~50 ms, décodage ~30 ms par image sur un M-series, hors
 chargement des modèles. Compatible avec un sidecar, rédhibitoire sur le chemin bloquant.
 
+### OCR → DLP mesuré (l'hypothèse centrale du plan)
+
+La PR 4 est le point de décision de toute la piste média : si l'OCR réinjecté dans le
+`DlpEngine` n'attrape rien d'utile, le reste se discute. Cette hypothèse était non
+testée. Elle l'est maintenant, bout en bout : screenshot de terminal rendu avec de faux
+secrets → OCR macOS Vision → **véritable `DlpEngine`** avec builtins et PII activés.
+Sondes : [`assets/ocr_fixture.py`](assets/ocr_fixture.py) et
+[`assets/ocr_probe.swift`](assets/ocr_probe.swift).
+
+L'OCR se trompe, et exactement là où ça fait mal :
+
+| Rendu | OCR |
+|---|---|
+| `AKIAIOSFODNN7EXAMPLE` | `AKIA**T**OSFODNN7EXAMPLE` |
+| `sk_live_51H8xYz…` | `sk_**L**ive_51H8**×**Yz…` |
+| `$ cat .env` | `$cat ,env` |
+
+Résultat sur le moteur réel :
+
+| Texte | Détections |
+|---|---|
+| Texte propre (référence) | 4 : `aws_access_key`, `github_pat`, `postgres_uri`, `stripe_secret_key` |
+| **Sortie OCR brute** | **3** : `aws_access_key`, `github_pat`, `postgres_uri` |
+
+**Verdict : l'hypothèse tient. 75 % des secrets sont attrapés sur de la sortie OCR
+réelle, sans écrire une seule règle nouvelle.** Le DLP existant fonctionne tel quel sur
+des captures d'écran. La PR 4 est justifiée.
+
+Le mécanisme de l'échec est instructif, et je l'ai isolé plutôt que supposé. En réparant
+les erreurs une par une :
+
+- casse seule réparée (`sk_Live` → `sk_live`) : toujours 3 détections ;
+- `×` seul réparé (U+00D7 → `x`) : toujours 3 ;
+- **les deux réparées : 4.**
+
+Autrement dit **une seule erreur de caractère suffit à faire échouer la règle**. Et la
+raison pour laquelle AWS survit alors qu'il contient aussi une faute est structurelle :
+son motif est `AKIA[0-9A-Z]{16}`, donc l'erreur `I`→`T` tombe dans la classe de
+caractères et passe ; l'erreur Stripe tombe dans le **littéral** `sk_live_`, qui ne
+pardonne rien.
+
+Conséquences directes pour la PR 4, qu'aucun raisonnement a priori n'aurait données :
+
+1. **Le taux de détection dépend de la forme du motif**, pas de la qualité de l'OCR en
+   moyenne. Les règles à long préfixe littéral (`sk_live_`, `ghp_`) sont les plus
+   fragiles à l'OCR ; celles à classe de caractères large sont robustes.
+2. Un **mode de correspondance tolérant à l'OCR** pour le chemin image vaut plus que de
+   meilleurs modèles OCR : préfixes insensibles à la casse, et normalisation des
+   confusions visuelles courantes (`×`→`x`, `0`/`O`, `1`/`l`/`I`, `,`/`.`) avant scan.
+   C'est bon marché et ça couvre précisément le mode d'échec observé.
+3. La normalisation doit s'appliquer **au seul texte OCR**, jamais au texte utilisateur :
+   assouplir les règles du chemin texte créerait des faux positifs pour tout le monde.
+4. **Ne jamais journaliser le texte OCR**, seulement les identifiants de règles. Le
+   corpus ci-dessus montre pourquoi : la sortie OCR contient les secrets en clair.
+
 TrustMark (Adobe/Univ. Surrey, ICCV 2025, `arXiv:2311.18297`) est l'état de l'art ouvert :
 résolution arbitraire, qualité > 43 dB, implémentations Python/Rust/JS via ONNX.
 SynthID-Image (DeepMind, `arXiv:2510.09263`) est le pendant fermé, déployé à l'échelle
@@ -552,12 +607,18 @@ Points de conception qui comptent :
 - ~~Faut-il inventer un schéma d'identité d'agent ?~~ Non : OAuth 2.1 + RFC 8707
   (resource indicators) + RFC 9728, comme MCP 2025-06-18. Et interdiction stricte du
   token passthrough parent → enfant.
+- ~~L'OCR attrape-t-il quelque chose d'utile ?~~ **Oui, mesuré** : 3 secrets sur 4 sur
+  de la sortie OCR brute, avec le `DlpEngine` existant et zéro règle nouvelle.
+  Le 4ᵉ revient avec une normalisation anti-confusion de quelques lignes.
 
 **Encore ouvertes :**
 
-- L'OCR : moteur du sidecar (Vision sur macOS, autre chose ailleurs) ? Le protocole rend
-  la question locale, mais il faut un défaut recommandé. Ne **pas** utiliser l'API vision
-  du provider : envoyer l'image suspecte au provider contredit l'objectif.
+- Le moteur OCR du sidecar : Vision sur macOS (une trentaine de lignes, sonde fournie),
+  quoi ailleurs ? Le protocole rend la question locale, mais il faut un défaut
+  recommandé. Ne **pas** utiliser l'API vision du provider : envoyer l'image suspecte au
+  provider contredit l'objectif.
+- L2 mérite-t-il son coût ? Il n'apporte que le miroir horizontal par rapport à pHash,
+  pour +11,9 MB et 65 MB de modèles. À re-trancher après la PR 7, avec les vrais usages.
 - Les agents : produit Admin/Enterprise (cf. ADR-0028 open-core boundary) ou cœur Apache ?
   Le marché monétise exactement cette couche, donc la question est commerciale.
 - `agent_id` obligatoire à terme, avec un agent implicite par défaut ?
