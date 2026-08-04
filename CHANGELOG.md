@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.86](https://github.com/azerozero/grob/compare/v0.36.85...v0.36.86) - 2026-08-04
+
+### Fixed
+
+- *(policies)* enforce decision token expiry and audience ([#500](https://github.com/azerozero/grob/pull/500))
+- harden critical architecture boundaries ([#493](https://github.com/azerozero/grob/pull/493))
+
+### Other
+
+- *(design)* validate the OCR-to-DLP hypothesis against the real engine ([#499](https://github.com/azerozero/grob/pull/499))
+- *(design)* measure L2 watermark robustness, correct layer table ([#498](https://github.com/azerozero/grob/pull/498))
+- *(design)* measure TrustMark cost and pHash robustness contract ([#497](https://github.com/azerozero/grob/pull/497))
+- *(design)* correct c2pa cost with real measurements, reorder media plan ([#496](https://github.com/azerozero/grob/pull/496))
+- *(design)* image/video DLP, content provenance, and agent control plane ([#495](https://github.com/azerozero/grob/pull/495))
+- *(reference)* add the protocol fidelity matrix ([#490](https://github.com/azerozero/grob/pull/490))
+
 ## [0.36.85](https://github.com/azerozero/grob/compare/v0.36.84...v0.36.85) - 2026-07-28
 
 ### Fixed
