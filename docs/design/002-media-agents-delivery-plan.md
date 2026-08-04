@@ -187,26 +187,40 @@ agent envoie des screenshots, sans une milliseconde de latence ajoutée.
 
 ### PR 4 — OCR → DLP (via le sidecar de la PR 2)
 
-**Pourquoi c'est la PR la plus rentable** : elle transforme l'image en texte et rend
-*toutes* les règles DLP existantes applicables. Zéro duplication de règles.
+**Pourquoi c'est la PR la plus rentable, et c'est maintenant mesuré** : elle transforme
+l'image en texte et rend *toutes* les règles DLP existantes applicables. Zéro duplication
+de règles. Test bout en bout déjà fait (screenshot → OCR Vision → vrai `DlpEngine`) :
+**3 secrets sur 4 détectés sur de la sortie OCR brute, sans une seule règle nouvelle.**
+Détail et sondes dans le design doc.
 
 **Fichiers**
 
 ```
 src/features/media/scan/text.rs      appel sidecar OCR + réinjection DlpEngine
+src/features/media/scan/normalize.rs normalisation anti-confusion OCR (voir ci-dessous)
 ```
 
 **Points de conception**
 
 - Le texte OCR passe par le `DlpEngine` **existant**, sans nouvelle règle. Si le DLP
   détecte une clé AWS dans un screenshot, c'est le même code que pour le texte.
+- **Normalisation avant scan, et seulement sur le chemin image.** La mesure montre qu'une
+  unique erreur de caractère fait échouer une règle, et que les motifs à long préfixe
+  littéral (`sk_live_`, `ghp_`) sont les plus fragiles alors que les classes de
+  caractères larges (`AKIA[0-9A-Z]{16}`) encaissent. D'où : préfixes insensibles à la
+  casse, et repli des confusions visuelles (`×`→`x`, `0`/`O`, `1`/`l`/`I`, `,`/`.`).
+  Bon marché, et ciblé sur le mode d'échec réellement observé.
+- Cette tolérance ne doit **jamais** s'appliquer au chemin texte : elle y créerait des
+  faux positifs pour tout le monde. C'est une propriété du scan d'image, pas du moteur.
 - Le résultat OCR n'est **jamais** journalisé en clair : seuls les identifiants de règles
-  déclenchées le sont. Sinon le journal devient lui-même la fuite.
-- Sur macOS, un sidecar s'appuyant sur Vision est trivial à écrire ; ailleurs, n'importe
-  quel moteur respectant le protocole convient. Le cœur s'en moque, c'est l'intérêt.
+  déclenchées le sont. La sortie OCR contient les secrets, c'est tout l'intérêt.
+- Sur macOS, un sidecar s'appuyant sur Vision est trivial à écrire (voir
+  [`assets/ocr_probe.swift`](assets/ocr_probe.swift), une trentaine de lignes) ; ailleurs,
+  n'importe quel moteur respectant le protocole convient.
 
-**Tests** : screenshot contenant une fausse clé AWS → règle DLP déclenchée ; le texte
-OCR n'apparaît nulle part dans le journal.
+**Tests** : le corpus de la mesure devient un test de non-régression, avec le taux de
+détection comme assertion (≥ 3/4 sur la sortie OCR de référence, 4/4 après
+normalisation). Vérifier aussi que le texte OCR n'apparaît nulle part dans le journal.
 
 ---
 
@@ -451,6 +465,13 @@ elle manque :
 4. **A2 → A3** quand le besoin de contrôle se fait sentir, pas avant.
 5. **PR 8 → 9 → 10**, **A4 → A5** en fonction des retours.
 
-Le point de décision important est après la PR 4 : si l'OCR→DLP n'attrape rien d'utile
-en conditions réelles, tout le reste de la piste média devient discutable et il vaut
-mieux le savoir à ce moment-là.
+Le point de décision qui conditionnait toute la piste média (« l'OCR→DLP attrape-t-il
+quelque chose d'utile ? ») **est déjà tranché, avant d'écrire la moindre ligne de
+production** : 3 secrets sur 4 détectés sur de la sortie OCR réelle par le moteur
+existant, 4 sur 4 avec la normalisation anti-confusion. La piste média est justifiée.
+
+Il reste un vrai point de décision, mais plus loin et de nature différente : **après la
+PR 7**, une fois L1 et L3 en place, se demander si L2 mérite son coût (+11,9 MB, sidecar,
+65 MB de modèles) alors que la mesure montre qu'il n'apporte que le miroir horizontal par
+rapport à pHash. Si la réponse est non, la piste s'arrête à la PR 7 et c'est un très bon
+résultat.
