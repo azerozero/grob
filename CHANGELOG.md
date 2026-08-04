@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.87](https://github.com/azerozero/grob/compare/v0.36.86...v0.36.87) - 2026-08-04
+
+### Added
+
+- *(media)* cheap detectors for metadata leaks and appended payloads ([#504](https://github.com/azerozero/grob/pull/504))
+- *(media)* bounded decode, perceptual hashing, and observation journal ([#501](https://github.com/azerozero/grob/pull/501))
+
+### Other
+
+- *(design)* track delivery status in the media and agents plan ([#502](https://github.com/azerozero/grob/pull/502))
+
 ## [0.36.86](https://github.com/azerozero/grob/compare/v0.36.85...v0.36.86) - 2026-08-04
 
 ### Fixed
