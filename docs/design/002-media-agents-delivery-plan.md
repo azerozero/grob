@@ -21,23 +21,23 @@
 
 ## Vue d'ensemble
 
-| # | PR | Feature flag | Bloque le trafic ? | ADR |
+| # | PR | Feature flag | Bloque le trafic ? | État |
 |---|---|---|---|---|
-| 1 | Squelette `media` : décodage borné + pHash + journal | `media` | non | ADR-0030 |
-| 2 | **Protocole sidecar** (fondation partagée) | `media` | non | ADR-0031 |
-| 3 | Détecteurs bon marché (heuristiques, stégano) + wiring async | `media` | non | — |
-| 4 | OCR → DLP via sidecar | `media` | non | — |
-| 5 | Mode `blocking` + intégration policies | `media` | oui | — |
-| 6 | Provenance L1 (C2PA) + registre `trace_id` | sidecar, ou `media-c2pa` | non | ADR-0032 |
-| 7 | Surfaces : RPC `media/*`, HTTP verify, CLI | `media` | non | — |
-| 8 | Watermark L2 via sidecar TrustMark | `media` | non | — |
-| 9 | Lib JS `grob-media-verify` | — | non | — |
-| 10 | Vidéo : L1 conteneur + keyframes L3 | `media` | non | — |
-| A1 | `AgentId` + contexte propagé + attribution du spend | `agents` | non | ADR-0033 |
-| A2 | Registre d'agents + leases | `agents` | oui (expiration) | — |
-| A3 | Budget et capacités hiérarchiques | `agents` | oui | — |
-| A4 | Surfaces `agent/*` + trajectoire auditée | `agents` | non | — |
-| A5 | Jonction media ↔ agent (`trace_id` → agent) | les deux | non | — |
+| 1 | Squelette `media` : décodage borné + pHash + journal | `media` | non | ✅ **livré** (#501) |
+| 2 | **Protocole sidecar** (fondation partagée) | `media` | non | à faire |
+| 3 | Détecteurs bon marché (heuristiques, stégano) + wiring async | `media` | non | à faire |
+| 4 | OCR → DLP via sidecar | `media` | non | à faire |
+| 5 | Mode `blocking` + intégration policies | `media` | oui | à faire |
+| 6 | Provenance L1 (C2PA) + registre `trace_id` | sidecar, ou `media-c2pa` | non | à faire |
+| 7 | Surfaces : RPC `media/*`, HTTP verify, CLI | `media` | non | à faire |
+| 8 | Watermark L2 via sidecar TrustMark | `media` | non | à faire |
+| 9 | Lib JS `grob-media-verify` | — | non | à faire |
+| 10 | Vidéo : L1 conteneur + keyframes L3 | `media` | non | à faire |
+| A1 | `AgentId` + contexte propagé + attribution du spend | `agents` | non | à faire |
+| A2 | Registre d'agents + leases | `agents` | oui (expiration) | à faire |
+| A3 | Budget et capacités hiérarchiques | `agents` | oui | ⚠️ prérequis livré (#500) |
+| A4 | Surfaces `agent/*` + trajectoire auditée | `agents` | non | à faire |
+| A5 | Jonction media ↔ agent (`trace_id` → agent) | les deux | non | à faire |
 
 > **Révision après mesure.** Le sidecar est passé de la PR 4 à la PR 2, et C2PA de la
 > PR 5 à la PR 6, derrière le sidecar. Raison : `c2pa` compilé en dur coûte **+7,0 MB**
@@ -53,6 +53,15 @@ Les deux pistes sont indépendantes jusqu'à A5. Elles peuvent avancer en parall
 ## Piste média
 
 ### PR 1 — Squelette `media` : décoder sans se faire tuer, empreinter, journaliser
+
+> **✅ Livré (#501).** Charte : [`src/features/media/README.md`](../../src/features/media/README.md).
+> Une correction issue de l'implémentation : le hash est écrit à la main plutôt qu'importé
+> d'`img_hash` (≈50 crates transitives et un `image` 0.23 épinglé pour une soixantaine de
+> lignes d'arithmétique), et sa séparation mesurée est **7 / 16** au lieu des 5 / 18 de la
+> sonde de référence. Le seuil de 10 tient toujours, avec moins de marge : les deux bords
+> du gap sont assertés en test pour que l'érosion échoue en CI. Critères d'acceptation
+> vérifiés : **zéro dépendance ajoutée** (429 crates avec ou sans la feature) et binaire
+> par défaut **inchangé à 17,293 MB**.
 
 **Pourquoi en premier** : le décodage borné est la seule partie où une erreur est fatale
 (DoS). On la pose seule, on la teste à fond, et tout le reste s'appuie dessus.
