@@ -321,6 +321,13 @@ mod tests {
                 "server/budget.rs",
             ),
             (
+                "agent_id",
+                "streamed responses would bill to nobody while \
+                 non-streaming ones stayed attributed, which is worse than \
+                 no attribution because the gap is invisible",
+                "server/dispatch/retry.rs",
+            ),
+            (
                 "record_spend_for_agent",
                 "nothing would reach the journal",
                 "features/token_pricing/spend.rs",

@@ -59,6 +59,25 @@ headers -> AgentContext -> DispatchContext::agent_id()
 
 A generic "no slice is orphaned" check was considered and rejected: every slice already has external references, so such a check passes trivially while a slice is half-wired. Naming the specific connection points is what makes the guard able to fail.
 
+## Verified against a live server
+
+Unit tests prove the pieces and the wiring guard proves the connections, but
+neither can prove a real request produces a real journal line. Run against a
+live `grob` with a mock backend:
+
+| request | journal line |
+|---|---|
+| `x-grob-agent-id: planner-7` | `"agent":"planner-7"` |
+| no header | key absent entirely |
+| `x-grob-agent-id: bad id!!` | HTTP 200, key absent |
+| streaming, `streamer-1` | `"agent":"streamer-1"` |
+
+The streaming case matters most: it bills through `SpendStreamContext`, a
+different code path from the non-streaming one. Attribution that worked only
+for non-streaming responses would be **worse than none**, because the gap
+would be invisible in the journal. `agent_id` in `dispatch/retry.rs` is in the
+wiring guard for exactly that reason.
+
 ## What mutation testing found here
 
 Two survivors, both **defects rather than missing tests**: `Display for AgentId` and `is_identified` had no caller outside the tests asserting on them, and `is_self_parented` detected a cyclic lineage then stored it anyway, leaving every consumer to re-check.
