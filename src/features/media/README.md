@@ -94,6 +94,26 @@ Two properties are enforced by tests rather than convention. Findings **never qu
 
 `scan/tests.rs` covers each detector, the no-payload-in-findings property, totality over truncated inputs, and an ignored cross-check against real system JPEGs (`--ignored`). `tests.rs` covers the decompression-bomb refusal, budget boundaries, lying MIME types, truncated-header totality across all four formats, SSRF refusal, the full perceptual-hash matrix above, the separation gap, and journal append/replay including a torn tail.
 
+## Mutation coverage
+
+Every file in the slice has been checked with `cargo-mutants`, because a passing
+test suite says nothing about whether the tests would notice a bug:
+
+| File | Survivors |
+|---|---|
+| `decode.rs` | 0 |
+| `scan/heuristics.rs`, `scan/stego.rs` | 0 |
+| `phash.rs` | 1, provably equivalent (`\|` and `^` are identical after a left shift) |
+| `registry.rs` | 0 |
+
+Two survivors could not be killed by adding tests, and both indicated a design
+problem rather than a coverage gap: a duplicated bounds check in `decode.rs` made
+the pre-decode guard unobservable, and a shift-then-set in `phash.rs` was
+indistinguishable from its xor equivalent. Both were fixed in the code.
+
+The lesson generalises to the rest of the media work: on byte-level parsing,
+asserting the outcome asserts almost nothing. The arithmetic has to be pinned.
+
 ## Related design docs
 
 - [`001-image-dlp-provenance.md`](../../../docs/design/001-image-dlp-provenance.md) — layered provenance model and the measurements behind it.
