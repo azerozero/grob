@@ -285,12 +285,14 @@ pub trait ProviderAvailability: Send + Sync {
 
 // ── Test Mocks ──
 
+/// Mock trait implementations for tests and downstream integration suites.
 #[cfg(any(test, feature = "test-util"))]
 pub mod mocks {
     use super::*;
 
     /// Mock router that always returns a fixed decision.
     pub struct MockRouter {
+        /// Model name returned by every routing decision.
         pub model_name: String,
     }
 
