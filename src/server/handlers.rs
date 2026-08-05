@@ -674,6 +674,8 @@ pub(crate) async fn handle_openai_chat_completions(
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
+        #[cfg(feature = "agents")]
+        agent: crate::features::agents::AgentContext::from_headers(&headers),
         state: &state,
         inner: &prelude.inner,
         dlp: &prelude.dlp,
@@ -793,6 +795,8 @@ pub(crate) async fn handle_responses(
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
+        #[cfg(feature = "agents")]
+        agent: crate::features::agents::AgentContext::from_headers(&headers),
         state: &state,
         inner: &prelude.inner,
         dlp: &prelude.dlp,
@@ -922,6 +926,8 @@ pub(crate) async fn handle_messages(
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
+        #[cfg(feature = "agents")]
+        agent: crate::features::agents::AgentContext::from_headers(&headers),
         state: &state,
         inner: &prelude.inner,
         dlp: &prelude.dlp,

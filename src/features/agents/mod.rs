@@ -307,6 +307,83 @@ mod tests {
         );
     }
 
+    /// The failure this repository hit three times in the media slice, now
+    /// guarded here before it becomes a fourth: code merged, fully tested,
+    /// and called by nothing.
+    ///
+    /// Unit tests cannot see it, because each piece passes alone. This walks
+    /// the source and fails when a wiring point loses its caller.
+    #[test]
+    fn agent_attribution_stays_wired_into_the_request_path() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+        // (symbol, why it matters, file where a caller must exist).
+        let wirings = [
+            (
+                "AgentContext::from_headers",
+                "no request would ever be attributed",
+                "server/handlers.rs",
+            ),
+            (
+                "ctx.agent_id()",
+                "the parsed agent would never reach the spend record",
+                "server/dispatch/telemetry.rs",
+            ),
+            (
+                "record_attributed",
+                "attribution would stop at the budget layer",
+                "server/budget.rs",
+            ),
+            (
+                "record_spend_for_agent",
+                "nothing would reach the journal",
+                "features/token_pricing/spend.rs",
+            ),
+        ];
+
+        for (symbol, consequence, caller) in wirings {
+            let path = root.join(caller);
+            let contents = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            assert!(
+                contents.contains(symbol),
+                "{caller} no longer references {symbol}: {consequence}. \
+                 Wire it back up or delete the feature."
+            );
+        }
+    }
+
+    /// Proves attribution survives the *whole* production path rather than
+    /// just the storage call: tracker -> store -> journal on disk.
+    #[test]
+    fn the_tracker_carries_attribution_all_the_way_to_the_journal() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = crate::storage::GrobStore::open(&dir.path().join("grob.db")).expect("store");
+        let mut tracker = crate::features::token_pricing::spend::SpendTracker::with_store(
+            std::sync::Arc::new(store),
+        );
+
+        tracker.record_attributed(None, "anthropic", "sonnet", 1.5, Some("planner"));
+        // Same call shape without an agent must behave exactly as before.
+        tracker.record_attributed(None, "anthropic", "sonnet", 2.0, None);
+
+        let month = crate::features::token_pricing::spend::current_month();
+        let raw = std::fs::read_to_string(dir.path().join("spend").join(format!("{month}.jsonl")))
+            .expect("read journal");
+        let agents: Vec<Option<String>> = raw
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                serde_json::from_str::<serde_json::Value>(l)
+                    .expect("parse")
+                    .get("agent")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            })
+            .collect();
+        assert_eq!(agents, vec![Some("planner".to_string()), None]);
+    }
+
     #[test]
     fn an_absent_agent_is_omitted_from_serialisation() {
         // Existing journals and exports must stay byte-compatible for the

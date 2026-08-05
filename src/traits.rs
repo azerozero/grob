@@ -196,6 +196,27 @@ pub trait SpendTracking: Send {
     /// Records a cost entry scoped to a tenant.
     fn record_tenant(&mut self, tenant: &str, provider: &str, model: &str, cost: f64);
 
+    /// Records a cost entry carrying optional agent attribution.
+    ///
+    /// The default implementation **drops the agent** and delegates to
+    /// [`Self::record`] / [`Self::record_tenant`], so every existing
+    /// implementor keeps compiling and behaving identically. Attribution is
+    /// additive metadata: an implementor that cannot store it must still
+    /// record the money, because losing spend is worse than losing a label.
+    fn record_attributed(
+        &mut self,
+        tenant: Option<&str>,
+        provider: &str,
+        model: &str,
+        cost: f64,
+        _agent: Option<&str>,
+    ) {
+        match tenant {
+            Some(tenant) => self.record_tenant(tenant, provider, model, cost),
+            None => self.record(provider, model, cost),
+        }
+    }
+
     /// Checks budget limits and returns an error if exceeded.
     fn check_budget(
         &self,
