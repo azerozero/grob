@@ -11,6 +11,8 @@ pub(crate) mod budget_ns;
 pub(crate) mod config_ns;
 pub(crate) mod hit_ns;
 pub(crate) mod keys_ns;
+#[cfg(feature = "media")]
+pub(crate) mod media_ns;
 pub(crate) mod model_ns;
 pub(crate) mod pledge_ns;
 pub(crate) mod provider_ns;
@@ -66,6 +68,30 @@ async fn dispatch_action(
             let r = server_ns::reload_config(state, caller).await?;
             to_json(r)
         }
+
+        // ── grob/media/* ──
+        #[cfg(feature = "media")]
+        Action::Media(MediaAction::Verify { trace_id }) => {
+            let r = media_ns::verify(state, caller, trace_id).await?;
+            to_json(r)
+        }
+        #[cfg(feature = "media")]
+        Action::Media(MediaAction::Trace { trace_id }) => {
+            let r = media_ns::trace(state, caller, trace_id).await?;
+            to_json(r)
+        }
+        #[cfg(feature = "media")]
+        Action::Media(MediaAction::Fingerprint { phash }) => {
+            let r = media_ns::fingerprint(state, caller, phash).await?;
+            to_json(r)
+        }
+        // Compiled out: the namespace parses but reports the capability as
+        // absent, which is clearer to an operator than an unknown method.
+        #[cfg(not(feature = "media"))]
+        Action::Media(_) => Err(types::rpc_err(
+            types::ERR_INTERNAL,
+            "media support is not compiled into this build".to_string(),
+        )),
 
         // ── grob/model/* ──
         Action::Model(ModelAction::List) => model_ns::list(state, caller).await,

@@ -108,6 +108,22 @@ A `TraceId` is the only thing that will ever be written into an image. Never a t
 
 Handles are issued for every inspected image and recorded in `~/.grob/media/trace/YYYY-MM.jsonl` alongside the perceptual fingerprint. The fingerprint is what allows an image whose handle was stripped to still be traced, since it is computed from pixels rather than read from the file.
 
+## Control surface
+
+Three read-only RPC methods, split across two roles on purpose:
+
+| Method | Role | Answers |
+|---|---|---|
+| `grob/media/verify` | Observer | is this handle known here |
+| `grob/media/trace` | Operator | who produced this image |
+| `grob/media/fingerprint` | Operator | same, when the handle was stripped |
+
+`verify` names nobody, so it is safe to expose widely. `trace` returns the tenant, which is exactly the fact the opaque handle keeps out of the file, so it costs a rung. Putting both at the same level would undo the reason the identifier is opaque in the first place.
+
+`verify` reports **which layer answered** rather than a bare boolean: a handle read from a signed manifest and one recovered from a fingerprint are both useful and not equally strong, and collapsing that into `true` would hide the difference.
+
+Because these go through `ControlEngine`, they reach CLI, JSON-RPC and the MCP bridge at once.
+
 ## Blocking mode
 
 `mode = "blocking"` inspects images before dispatch and can refuse. That raises a question the async path never faces: what happens when the inspection itself fails, through a timeout, an unreachable sidecar, or an open circuit. All three mean the same thing, that the image was never examined.
