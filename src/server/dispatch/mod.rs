@@ -33,6 +33,24 @@ use super::{
 use crate::features::watch::events::{DlpDirection, WatchEvent};
 
 /// All context needed to dispatch a request through the provider pipeline.
+impl DispatchContext<'_> {
+    /// Agent this request's spend is attributed to, if any.
+    ///
+    /// Two bodies rather than a gated call site: every caller stays
+    /// feature-agnostic, and a build without `agents` attributes to nothing
+    /// instead of failing to compile.
+    #[cfg(feature = "agents")]
+    pub(crate) fn agent_id(&self) -> Option<&str> {
+        self.agent.id()
+    }
+
+    /// Agent attribution is unavailable without the `agents` feature.
+    #[cfg(not(feature = "agents"))]
+    pub(crate) fn agent_id(&self) -> Option<&str> {
+        None
+    }
+}
+
 pub(crate) struct DispatchContext<'a> {
     pub state: &'a Arc<AppState>,
     pub inner: &'a Arc<ReloadableState>,
@@ -43,6 +61,12 @@ pub(crate) struct DispatchContext<'a> {
     pub is_streaming: bool,
     /// Tenant identifier from JWT claims (multi-tenant deployments).
     pub tenant_id: Option<String>,
+    /// Calling-agent attribution parsed from request headers.
+    ///
+    /// Carried, never inferred: a wrong attribution is worse than none,
+    /// because it points an investigation at the wrong agent.
+    #[cfg(feature = "agents")]
+    pub agent: crate::features::agents::AgentContext,
     /// Virtual-key model scope. When non-empty, the resolved model must be in
     /// this list; `None`/empty means the key is unscoped. Enforced post-routing.
     pub allowed_models: Option<Vec<String>>,
@@ -876,6 +900,7 @@ async fn record_fan_out_costs(
             actual_model,
             counter.estimated_cost_usd,
             ctx.tenant_id.as_deref(),
+            ctx.agent_id(),
         )
         .await;
     }
@@ -1109,6 +1134,8 @@ actual_model = "beta"
             model: "alpha".to_string(),
             is_streaming: false,
             tenant_id: None,
+            #[cfg(feature = "agents")]
+            agent: crate::features::agents::AgentContext::default(),
             allowed_models: Some(vec!["alpha".to_string()]),
             allowed_providers: Vec::new(),
             peer_ip: "127.0.0.1".to_string(),
@@ -1201,6 +1228,8 @@ context_window_tokens = 100
             model: "alpha".to_string(),
             is_streaming: false,
             tenant_id: None,
+            #[cfg(feature = "agents")]
+            agent: crate::features::agents::AgentContext::default(),
             allowed_models: None,
             allowed_providers: Vec::new(),
             peer_ip: "127.0.0.1".to_string(),
@@ -1354,6 +1383,8 @@ provider = "{provider}"
             model: "alpha".to_string(),
             is_streaming: false,
             tenant_id: tenant.map(|s| s.to_string()),
+            #[cfg(feature = "agents")]
+            agent: crate::features::agents::AgentContext::default(),
             allowed_models: None,
             allowed_providers: Vec::new(),
             peer_ip: "127.0.0.1".to_string(),
@@ -1613,6 +1644,8 @@ actual_model = "alpha"
             model: "alpha".to_string(),
             is_streaming: false,
             tenant_id: None,
+            #[cfg(feature = "agents")]
+            agent: crate::features::agents::AgentContext::default(),
             allowed_models: None,
             allowed_providers: Vec::new(),
             peer_ip: "127.0.0.1".to_string(),
@@ -1750,6 +1783,8 @@ actual_model = "alpha"
             model: "alpha".to_string(),
             is_streaming: false,
             tenant_id: None,
+            #[cfg(feature = "agents")]
+            agent: crate::features::agents::AgentContext::default(),
             allowed_models: None,
             allowed_providers: Vec::new(),
             peer_ip: "127.0.0.1".to_string(),

@@ -161,6 +161,33 @@ impl SpendTracker {
         }
     }
 
+    /// Record spend carrying optional agent attribution.
+    ///
+    /// Falls back to the plain tenant/global paths when no agent is present or
+    /// no store is configured, so attribution never changes *whether* money is
+    /// recorded, only how precisely it is labelled.
+    pub fn record_attributed(
+        &mut self,
+        tenant: Option<&str>,
+        provider: &str,
+        model: &str,
+        cost: f64,
+        agent: Option<&str>,
+    ) {
+        let (Some(agent), Some(store)) = (agent, self.store.as_ref()) else {
+            match tenant {
+                Some(tenant) => self.record_tenant(tenant, provider, model, cost),
+                None => self.record(provider, model, cost),
+            }
+            return;
+        };
+        store.record_spend_for_agent(tenant, cost, provider, model, Some(agent));
+        // Mirror the non-agent paths: refresh the global view so request-count
+        // accessors stay consistent. Tenant-tagged dollars stay out of the
+        // global total, exactly as `record_tenant` documents.
+        self.data = store.load_spend(None);
+    }
+
     /// Get total spend for current month
     pub fn total(&self) -> f64 {
         self.data.total
@@ -409,6 +436,17 @@ impl crate::traits::SpendTracking for SpendTracker {
 
     fn record_tenant(&mut self, tenant: &str, provider: &str, model: &str, cost: f64) {
         self.record_tenant(tenant, provider, model, cost);
+    }
+
+    fn record_attributed(
+        &mut self,
+        tenant: Option<&str>,
+        provider: &str,
+        model: &str,
+        cost: f64,
+        agent: Option<&str>,
+    ) {
+        self.record_attributed(tenant, provider, model, cost, agent);
     }
 
     fn check_budget(
