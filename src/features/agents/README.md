@@ -40,9 +40,30 @@ The field is omitted entirely when absent, so existing journals stay readable an
 - A registry of known agents.
 - Authorisation. The header is metadata, and trusting it for access control would be a confused-deputy hazard.
 
+## The request path
+
+```
+headers -> AgentContext -> DispatchContext::agent_id()
+        -> record_spend -> record_attributed -> journal
+```
+
+`record_attributed` is a trait method whose default body **drops the agent** and delegates to the pre-existing calls, so every implementor keeps compiling and one that cannot store attribution still records the money. Losing spend is worse than losing a label.
+
+`agent_id()` has two bodies rather than a gated call site, so callers stay feature-agnostic and a build without `agents` attributes to nothing instead of failing to compile.
+
 ## Tests
 
-`mod.rs` covers the accepted and refused character sets (including newlines and quotes that would forge a journal line), the length bound, lineage capture, the discarded orphan parent, self-parenting detection, and a spend round-trip asserting both attribution and backward compatibility.
+`mod.rs` covers the accepted and refused character sets (including newlines and quotes that would forge a journal line), the length bound, lineage capture, the discarded orphan parent, the dropped self-parented cycle, and a spend round-trip asserting both attribution and backward compatibility.
+
+`agent_attribution_stays_wired_into_the_request_path` reads the source and fails if any of the four connection points above loses its caller. It exists because A1 shipped this slice with nothing calling it, the **fourth** occurrence of that failure in this repository, and the media slice's guard could not see it.
+
+A generic "no slice is orphaned" check was considered and rejected: every slice already has external references, so such a check passes trivially while a slice is half-wired. Naming the specific connection points is what makes the guard able to fail.
+
+## What mutation testing found here
+
+Two survivors, both **defects rather than missing tests**: `Display for AgentId` and `is_identified` had no caller outside the tests asserting on them, and `is_self_parented` detected a cyclic lineage then stored it anyway, leaving every consumer to re-check.
+
+The first two were deleted, since a test against otherwise-unused API only proves the API exists. The third became enforcement at the boundary: `from_headers` drops the impossible parent, keeping the identity so spend stays attributable. 16 mutants, 16 caught.
 
 ## Related design docs
 
