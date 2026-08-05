@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.88](https://github.com/azerozero/grob/compare/v0.36.87...v0.36.88) - 2026-08-05
+
+### Added
+
+- enforce the 100% doc coverage invariant with a lint ([#510](https://github.com/azerozero/grob/pull/510))
+
+### Other
+
+- *(media)* record mutation coverage in the slice charter ([#509](https://github.com/azerozero/grob/pull/509))
+- *(media)* close the mutation gap on perceptual hashing ([#508](https://github.com/azerozero/grob/pull/508))
+- *(media)* close the mutation gap on the decode safety boundary ([#507](https://github.com/azerozero/grob/pull/507))
+- *(design)* mark PR 3 delivered and record the mutation-testing lesson ([#506](https://github.com/azerozero/grob/pull/506))
+- *(media)* kill 20 surviving mutants in the scan detectors ([#505](https://github.com/azerozero/grob/pull/505))
+
 ## [0.36.87](https://github.com/azerozero/grob/compare/v0.36.86...v0.36.87) - 2026-08-04
 
 ### Added
