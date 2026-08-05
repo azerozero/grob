@@ -21,6 +21,7 @@ The slice is compiled out unless `--features media` is passed, and inert unless 
 | `MediaEvent`, `MediaJournal`, `current_month` | `registry.rs` | observation journal |
 | `scan`, `ScanReport`, `Finding`, `Severity` | `scan/` | cheap detectors |
 | `SidecarClient`, `SidecarConfig`, `Endpoint`, `Capability` | `sidecar/` | out-of-process capabilities |
+| `observe_request`, `collect_inline_media` | `observe.rs` | request-path entry point |
 
 ## Owns
 
@@ -83,6 +84,16 @@ Worst same-image distance is 7 and the closest different image is 16, so `MATCH_
 Two properties are enforced by tests rather than convention. Findings **never quote the payload they found**, because a finding that echoed a secret would copy the leak into every log line recording it. And detection is **total**: every prefix of a malformed input yields findings or nothing, never a panic.
 
 **Known limitation:** this catches carelessness, not craft. LSB steganography from a competent tool is statistically indistinguishable without a decoder and a model. Claiming to detect it would be worse than not looking, because it would manufacture confidence.
+
+## Observing a request
+
+`observe_request` is the entry point from the request path, and it **returns `()`**. That is the guarantee rather than a convention: a caller cannot await a verdict that does not exist, so no later refactor can quietly make inspection blocking. It lifts the inline images out of the request, hands them to a detached task, and returns. A test asserts the call itself completes in under 20 ms while the journal entry appears afterwards.
+
+Remote (URL) blocks are skipped rather than recorded. This slice never fetches them, and journaling an unfetched URL would claim knowledge of bytes nobody has seen.
+
+One image being refused does not stop the others from being inspected, which a test pins with a lying MIME type and a decompression bomb sitting in front of a valid PNG.
+
+Fingerprints are currently recorded as **absent** rather than faked: reaching pixels needs an image decoder, this slice links none on purpose, and that capability arrives over the sidecar protocol alongside OCR. A placeholder fingerprint would collide with every other undecodable image, which is worse than admitting there is none. Shape, format and findings are journaled meanwhile, and they are what an operator asks for first.
 
 ## Sidecars
 
