@@ -26,7 +26,7 @@
 | 1 | Squelette `media` : décodage borné + pHash + journal | `media` | non | ✅ **livré** (#501) |
 | 2 | **Protocole sidecar** (fondation partagée) | `media` | non | ✅ **livré** |
 | 3 | Détecteurs bon marché (heuristiques, stégano) | `media` | non | ✅ **livré** (#504, #505) |
-| 3b | Wiring async dans dispatch + events watch/tap | `media` | non | à faire |
+| 3b | Point d'entrée async depuis le chemin requête | `media` | non | ✅ **livré** (#518) |
 | 4 | OCR → DLP via sidecar | `media` | non | à faire |
 | 5 | Mode `blocking` + intégration policies | `media` | oui | à faire |
 | 6 | Provenance L1 (C2PA) + registre `trace_id` | sidecar, ou `media-c2pa` | non | à faire |
