@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.89](https://github.com/azerozero/grob/compare/v0.36.88...v0.36.89) - 2026-08-05
+
+### Added
+
+- *(media)* stateless sidecar protocol for out-of-process capabilities ([#512](https://github.com/azerozero/grob/pull/512))
+
 ## [0.36.88](https://github.com/azerozero/grob/compare/v0.36.87...v0.36.88) - 2026-08-05
 
 ### Added
