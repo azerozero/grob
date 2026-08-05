@@ -51,6 +51,22 @@ impl GrobStore {
         provider: &str,
         model: &str,
     ) {
+        self.record_spend_for_agent(tenant, amount, provider, model, None);
+    }
+
+    /// Records spend attributed to an agent.
+    ///
+    /// Separate entry point rather than an extra parameter on the existing
+    /// one: every current caller keeps working untouched, and the attribution
+    /// path is visible in a grep rather than hidden behind a `None`.
+    pub(crate) fn record_spend_for_agent(
+        &self,
+        tenant: Option<&str>,
+        amount: f64,
+        provider: &str,
+        model: &str,
+        agent: Option<&str>,
+    ) {
         let ts = chrono::Utc::now().to_rfc3339();
 
         // Update in-memory global cache. Tenant-tagged events historically
@@ -99,6 +115,7 @@ impl GrobStore {
             model: model.to_string(),
             cost_usd: amount,
             tenant: tenant.map(String::from),
+            agent: agent.map(String::from),
         };
         if let Ok(mut j) = self.journal.lock() {
             if let Err(e) = j.append(&event) {
@@ -147,6 +164,7 @@ impl GrobStore {
                     model: model.to_string(),
                     cost_usd: amount,
                     tenant: Some(t.to_string()),
+                    agent: agent.map(String::from),
                 };
                 if let Err(e) = journal_entry.append(&tenant_event) {
                     tracing::warn!("failed to append per-tenant spend event: {e}");

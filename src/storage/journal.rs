@@ -21,6 +21,12 @@ pub(crate) struct SpendEvent {
     pub cost_usd: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
+    /// Agent that incurred the spend, when one identified itself.
+    ///
+    /// Optional and omitted when absent, so existing journals stay readable
+    /// and existing exports keep parsing unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
 }
 
 /// Append-only JSONL spend journal.
@@ -245,6 +251,7 @@ mod tests {
                 model: "claude-opus".to_string(),
                 cost_usd: 0.05,
                 tenant: None,
+                agent: None,
             })
             .unwrap();
 
@@ -256,6 +263,7 @@ mod tests {
                 model: "gpt-4o".to_string(),
                 cost_usd: 0.10,
                 tenant: None,
+                agent: None,
             })
             .unwrap();
 
@@ -281,6 +289,7 @@ mod tests {
                 model: "claude-opus".to_string(),
                 cost_usd: 1.0,
                 tenant: None,
+                agent: None,
             })
             .unwrap();
         journal
@@ -291,6 +300,7 @@ mod tests {
                 model: "claude-opus".to_string(),
                 cost_usd: 2.0,
                 tenant: Some("tenant-a".to_string()),
+                agent: None,
             })
             .unwrap();
         journal.fsync().unwrap();
