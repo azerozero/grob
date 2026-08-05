@@ -5,7 +5,9 @@
 //! where the layer is known *not* to hold (mirror and rotation).
 
 use super::config::MediaConfig;
-use super::decode::{probe, probe_bytes, sniff, MediaFormat};
+use super::decode::{
+    estimated_decoded_len, exceeds_budget_before_decoding, probe, probe_bytes, sniff, MediaFormat,
+};
 use super::phash::{gradient_hash, GrayImage, PerceptualHash, MATCH_THRESHOLD};
 use super::registry::{MediaEvent, MediaJournal};
 use super::{MediaError, MediaRef};
@@ -74,6 +76,164 @@ fn oversized_payload_is_refused_before_decoding_base64() {
     )
     .unwrap_err();
     assert!(matches!(err, MediaError::TooLarge { .. }), "got {err:?}");
+}
+
+#[test]
+fn byte_budget_rejects_everything_above_the_limit_not_just_the_limit() {
+    // A `==` comparison instead of `>` would let every oversized payload
+    // through while still passing a test that only probes one size. Walk a
+    // range so the boundary itself is pinned.
+    let limit = 512;
+    let config = MediaConfig {
+        max_bytes: limit,
+        ..MediaConfig::default()
+    };
+    for len in [limit + 1, limit + 2, limit * 4, limit * 100] {
+        let err = probe_bytes(&vec![0u8; len], &config).unwrap_err();
+        assert!(
+            matches!(err, MediaError::TooLarge { .. }),
+            "{len} bytes should exceed the {limit} byte budget, got {err:?}"
+        );
+    }
+    // Exactly at the budget is allowed; it fails later for being unrecognised,
+    // which proves the size gate let it through.
+    let at_limit = probe_bytes(&vec![0u8; limit], &config).unwrap_err();
+    assert_eq!(at_limit, MediaError::UnsupportedFormat);
+}
+
+#[test]
+fn oversized_payloads_are_refused_before_any_allocation() {
+    // The pre-decode guard is the one that protects memory, and it is
+    // invisible through `probe` alone: the post-decode check returns the same
+    // error, so a broken guard would still look correct while having already
+    // allocated the payload it was meant to refuse.
+    let config = MediaConfig {
+        max_bytes: 1024,
+        ..MediaConfig::default()
+    };
+    let encoded_len = |decoded: usize| b64(&vec![0u8; decoded]).len();
+
+    for decoded in [config.max_bytes + 1, config.max_bytes * 2, 10_000_000] {
+        assert!(
+            exceeds_budget_before_decoding(encoded_len(decoded), &config),
+            "{decoded} decoded bytes must be refused before allocating"
+        );
+    }
+    // Comfortably inside the budget must never be pre-refused. The estimate
+    // rounds up to the base64 group, so a payload within 3 bytes of the limit
+    // may be refused early; that is the conservative direction and it costs
+    // nothing, since it would be refused after decoding anyway.
+    for decoded in [0, 1, 512, config.max_bytes - 4] {
+        assert!(
+            !exceeds_budget_before_decoding(encoded_len(decoded), &config),
+            "{decoded} decoded bytes is inside the budget and must not be pre-refused"
+        );
+    }
+}
+
+#[test]
+fn decoded_length_estimate_matches_real_base64() {
+    // Pins the arithmetic itself. The post-decode check would mask a broken
+    // estimate behind a correct-looking error, so the guard that protects the
+    // allocation has to be verified on its own.
+    for decoded_len in [0usize, 1, 2, 3, 4, 63, 64, 512, 4096, 1_000_000] {
+        let encoded = b64(&vec![0u8; decoded_len]);
+        let estimate = estimated_decoded_len(encoded.len());
+        assert!(
+            estimate >= decoded_len,
+            "estimate {estimate} under-reports {decoded_len} real bytes: \
+             oversized payloads would be allocated before refusal"
+        );
+        assert!(
+            estimate <= decoded_len + 3,
+            "estimate {estimate} over-reports {decoded_len} real bytes by more \
+             than one base64 group: valid images would be rejected"
+        );
+    }
+    // Exact values, so operator swaps (+, *, %) cannot pass unnoticed.
+    assert_eq!(estimated_decoded_len(0), 0);
+    assert_eq!(estimated_decoded_len(4), 3);
+    assert_eq!(estimated_decoded_len(8), 6);
+    assert_eq!(estimated_decoded_len(400), 300);
+}
+
+#[test]
+fn encoded_length_estimate_is_conservative_and_ordered() {
+    // The pre-decode guard estimates decoded size as len/4*3. Swapping the
+    // operators (len*4/3, len%4, len/4+3) would either reject valid payloads
+    // or wave through oversized ones, so check both directions.
+    let config = MediaConfig {
+        max_bytes: 1024,
+        ..MediaConfig::default()
+    };
+
+    // Real base64 of payloads just over and far over the budget. Using
+    // genuinely encoded data matters: the len/4*3 estimate is exact for
+    // well-formed base64, so a broken estimate shows up as an accepted
+    // payload rather than as a decoding error.
+    for decoded_len in [config.max_bytes + 1, config.max_bytes * 4] {
+        let encoded = b64(&vec![0u8; decoded_len]);
+        let err = probe(
+            MediaRef::Inline {
+                data: &encoded,
+                declared_type: None,
+            },
+            &config,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, MediaError::TooLarge { .. }),
+            "{decoded_len} decoded bytes should exceed the {} byte budget, got {err:?}",
+            config.max_bytes
+        );
+    }
+
+    // One byte under the budget must pass the size gate and fail only on
+    // format, proving the estimate does not over-reject.
+    let just_under = b64(&vec![0u8; config.max_bytes - 1]);
+    assert_eq!(
+        probe(
+            MediaRef::Inline {
+                data: &just_under,
+                declared_type: None,
+            },
+            &config,
+        )
+        .unwrap_err(),
+        MediaError::UnsupportedFormat
+    );
+
+    // A small valid PNG must survive the estimate untouched: an over-eager
+    // estimate would reject legitimate images long before their real size.
+    let small = b64(&png_header(8, 8));
+    let (bytes, probed) = probe(
+        MediaRef::Inline {
+            data: &small,
+            declared_type: None,
+        },
+        &config,
+    )
+    .expect("a 29-byte PNG is comfortably inside a 1 KiB budget");
+    assert_eq!(probed.byte_len, bytes.len());
+    assert_eq!((probed.width, probed.height), (8, 8));
+}
+
+#[test]
+fn pixel_budget_rejects_everything_above_the_limit() {
+    // Same `>` versus `==` hazard on the decompression-bomb guard, which is
+    // the one that actually protects memory.
+    let config = MediaConfig {
+        max_pixels: 10_000,
+        ..MediaConfig::default()
+    };
+    for (w, h) in [(101, 100), (200, 100), (1000, 1000), (50_000, 50_000)] {
+        let err = probe_bytes(&png_header(w, h), &config).unwrap_err();
+        assert!(
+            matches!(err, MediaError::TooManyPixels { .. }),
+            "{w}x{h} should exceed the 10000 pixel budget, got {err:?}"
+        );
+    }
+    assert!(probe_bytes(&png_header(100, 100), &config).is_ok());
 }
 
 #[test]

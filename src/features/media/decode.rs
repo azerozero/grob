@@ -61,7 +61,9 @@ impl MediaProbe {
 /// Decodes base64 and probes the payload against `config`'s bounds.
 ///
 /// The size limit is checked on the *encoded* string first, so an oversized
-/// payload is rejected without allocating its decoded form.
+/// payload is rejected without allocating its decoded form. Use
+/// [`exceeds_budget_before_decoding`] to observe that pre-decode decision on
+/// its own.
 ///
 /// # Errors
 ///
@@ -80,12 +82,10 @@ pub fn probe(
         MediaRef::Remote { .. } => return Err(MediaError::RemoteNotFetched),
     };
 
-    // Reject on the encoded length before allocating anything. Base64 inflates
-    // by 4/3, so this is a conservative lower bound on the decoded size.
-    let lower_bound = data.len() / 4 * 3;
-    if lower_bound > config.max_bytes {
+    // Reject on the encoded length before allocating anything.
+    if exceeds_budget_before_decoding(data.len(), config) {
         return Err(MediaError::TooLarge {
-            actual: lower_bound,
+            actual: estimated_decoded_len(data.len()),
             limit: config.max_bytes,
         });
     }
@@ -94,15 +94,36 @@ pub fn probe(
         .decode(data.as_bytes())
         .map_err(|_| MediaError::InvalidBase64)?;
 
-    if bytes.len() > config.max_bytes {
-        return Err(MediaError::TooLarge {
-            actual: bytes.len(),
-            limit: config.max_bytes,
-        });
-    }
-
+    // The exact size check lives in `probe_bytes`; repeating it here would be
+    // a second copy of the same rule that no test can tell apart from the
+    // first, and that quietly drifts when one copy is edited.
     let probe = probe_bytes(&bytes, config)?;
     Ok((bytes, probe))
+}
+
+/// Lower bound on the decoded size of a base64 string of `encoded_len` bytes.
+///
+/// Base64 emits 4 characters per 3 input bytes, so dividing by 4 and
+/// multiplying by 3 recovers the payload size, rounded down. Exposed and
+/// tested on its own because it guards an allocation: if it over-estimates we
+/// reject valid images, and if it under-estimates we allocate for payloads we
+/// had already decided to refuse. The redundant post-decode check would hide
+/// either mistake behind a correct-looking error.
+#[must_use]
+pub const fn estimated_decoded_len(encoded_len: usize) -> usize {
+    encoded_len / 4 * 3
+}
+
+/// Returns whether a base64 payload is refused before it is decoded.
+///
+/// [`probe`] applies this first so an oversized payload never reaches an
+/// allocation. Exposed because that is otherwise invisible from the outside:
+/// the post-decode bounds check in [`probe_bytes`] produces the same error
+/// either way, so only this predicate distinguishes "refused cheaply" from
+/// "refused after allocating the very payload we did not want".
+#[must_use]
+pub fn exceeds_budget_before_decoding(encoded_len: usize, config: &MediaConfig) -> bool {
+    estimated_decoded_len(encoded_len) > config.max_bytes
 }
 
 /// Probes already-decoded bytes against `config`'s bounds.
