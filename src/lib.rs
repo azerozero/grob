@@ -2,6 +2,10 @@
 
 // NOTE: deny (not forbid) so that the few justified unsafe blocks can #[allow].
 #![deny(unsafe_code)]
+// The crate documents every public item. That was a convention enforced by
+// review alone, which is a slow and unreliable way to hold an invariant; the
+// lint makes an undocumented addition fail the build instead.
+#![deny(missing_docs)]
 
 use std::path::PathBuf;
 
