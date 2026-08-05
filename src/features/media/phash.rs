@@ -75,7 +75,12 @@ impl GrayImage {
     }
 
     /// Samples the luma value at `(x, y)`, clamped to the image bounds.
-    fn sample(&self, x: u32, y: u32) -> u8 {
+    ///
+    /// The clamp is defensive: [`downsample`] never asks for a coordinate
+    /// outside the image. It is kept, and tested directly, so that a future
+    /// change to the grid geometry fails a test instead of reading out of
+    /// bounds.
+    pub(crate) fn sample(&self, x: u32, y: u32) -> u8 {
         let x = x.min(self.width - 1) as usize;
         let y = y.min(self.height - 1) as usize;
         self.luma[y * self.width as usize + x]
@@ -127,10 +132,12 @@ pub fn gradient_hash(img: &GrayImage) -> PerceptualHash {
         for col in 0..GRID_W - 1 {
             let left = grid[row * GRID_W + col];
             let right = grid[row * GRID_W + col + 1];
-            bits <<= 1;
-            if left > right {
-                bits |= 1;
-            }
+            // Shift and set in one expression. Note that `|` and `^` are
+            // provably interchangeable here, because the low bit is always
+            // zero immediately after the shift; no test can distinguish them,
+            // so mutation testing reports that as a surviving mutant and it
+            // is a false positive rather than a coverage gap.
+            bits = (bits << 1) | u64::from(left > right);
         }
     }
     PerceptualHash(bits)
@@ -161,4 +168,45 @@ fn downsample(img: &GrayImage) -> [u8; GRID_W * GRID_H] {
         }
     }
     grid
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sample_clamps_to_the_last_valid_pixel() {
+        // Exercised directly because `downsample` never requests an
+        // out-of-range coordinate, so this bound is otherwise unobservable.
+        // An off-by-one here would read past the buffer the moment the grid
+        // geometry changes.
+        let img = GrayImage::new(2, 2, vec![10, 20, 30, 40]).expect("image");
+        assert_eq!(img.sample(0, 0), 10);
+        assert_eq!(img.sample(1, 0), 20);
+        assert_eq!(img.sample(0, 1), 30);
+        assert_eq!(img.sample(1, 1), 40);
+
+        // Past either edge clamps rather than wrapping or panicking.
+        assert_eq!(img.sample(2, 0), 20);
+        assert_eq!(img.sample(99, 0), 20);
+        assert_eq!(img.sample(0, 2), 30);
+        assert_eq!(img.sample(0, 99), 30);
+        assert_eq!(img.sample(99, 99), 40);
+        assert_eq!(img.sample(u32::MAX, u32::MAX), 40);
+    }
+
+    #[test]
+    fn sample_handles_single_pixel_and_single_axis_images() {
+        let one = GrayImage::new(1, 1, vec![7]).expect("image");
+        assert_eq!(one.sample(0, 0), 7);
+        assert_eq!(one.sample(u32::MAX, u32::MAX), 7);
+
+        let row = GrayImage::new(3, 1, vec![1, 2, 3]).expect("image");
+        assert_eq!(row.sample(2, 0), 3);
+        assert_eq!(row.sample(9, 9), 3);
+
+        let column = GrayImage::new(1, 3, vec![1, 2, 3]).expect("image");
+        assert_eq!(column.sample(0, 2), 3);
+        assert_eq!(column.sample(9, 9), 3);
+    }
 }
