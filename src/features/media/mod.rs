@@ -17,6 +17,7 @@ pub mod scan;
 pub mod sidecar;
 #[cfg(test)]
 mod tests;
+pub mod trace;
 
 use crate::models::ImageSource;
 
