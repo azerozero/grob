@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.94](https://github.com/azerozero/grob/compare/v0.36.93...v0.36.94) - 2026-08-05
+
+### Added
+
+- *(agents)* attribute request spend to the calling agent ([#537](https://github.com/azerozero/grob/pull/537))
+- *(agents)* agent identity and spend attribution ([#535](https://github.com/azerozero/grob/pull/535))
+- *(control)* media provenance namespace with a role split ([#533](https://github.com/azerozero/grob/pull/533))
+- *(media)* opaque provenance handles and their registry ([#530](https://github.com/azerozero/grob/pull/530))
+
+### Other
+
+- *(design)* mark PR A1 delivered ([#536](https://github.com/azerozero/grob/pull/536))
+- *(design)* split PR 7 and mark the RPC surface delivered ([#534](https://github.com/azerozero/grob/pull/534))
+- *(design)* split PR 6 and mark the trace registry delivered ([#532](https://github.com/azerozero/grob/pull/532))
+- *(design)* mark PR 5 delivered ([#529](https://github.com/azerozero/grob/pull/529))
+- *(media)* cover the OCR success path in blocking mode ([#528](https://github.com/azerozero/grob/pull/528))
+
 ## [0.36.93](https://github.com/azerozero/grob/compare/v0.36.92...v0.36.93) - 2026-08-05
 
 ### Added
