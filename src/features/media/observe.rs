@@ -13,9 +13,13 @@ use super::decode::probe;
 use super::phash::{gradient_hash, GrayImage};
 use super::registry::{MediaEvent, MediaJournal};
 use super::scan::scan;
+use super::scan::text::scan_ocr_text;
+use super::sidecar::{Capability, SidecarClient};
 use super::MediaRef;
+use crate::features::dlp::DlpEngine;
 use crate::models::{CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// One image lifted out of a request, owned so the request can be released.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,11 +68,16 @@ pub fn collect_inline_media(request: &CanonicalRequest) -> Vec<PendingMedia> {
 ///
 /// `tenant` and `model` are recorded in the journal to make an observation
 /// attributable; they are never handed to a sidecar.
+///
+/// When `dlp` is supplied and an OCR sidecar is configured, the extracted text
+/// is scanned with that engine, so a secret in a screenshot triggers the same
+/// rules as one in a message.
 pub fn observe_request(
     request: &CanonicalRequest,
     config: &MediaConfig,
     home: PathBuf,
     tenant: Option<String>,
+    dlp: Option<Arc<DlpEngine>>,
 ) {
     if !matches!(config.mode, MediaMode::Async) {
         return;
@@ -81,7 +90,7 @@ pub fn observe_request(
     let config = config.clone();
     let model = request.model.clone();
     tokio::spawn(async move {
-        inspect(pending, config, home, tenant, model);
+        inspect(pending, config, home, tenant, model, dlp).await;
     });
 }
 
@@ -90,13 +99,15 @@ pub fn observe_request(
 /// Every failure is swallowed on purpose: this runs detached, behind the
 /// request that already succeeded. A malformed image is a fact to record, not
 /// a reason to make noise on a path nobody is waiting on.
-fn inspect(
+async fn inspect(
     pending: Vec<PendingMedia>,
     config: MediaConfig,
     home: PathBuf,
     tenant: Option<String>,
     model: String,
+    dlp: Option<Arc<DlpEngine>>,
 ) {
+    let sidecar = SidecarClient::new(config.sidecar.clone());
     let mut journal = if config.journal {
         MediaJournal::open(&home).ok()
     } else {
@@ -121,6 +132,17 @@ fn inspect(
             );
         }
 
+        // OCR is the expensive part, so it only runs when both an engine and
+        // a rule set exist to make use of it.
+        if let Some(dlp) = dlp.as_deref() {
+            if let Some(findings) = ocr_findings(&sidecar, dlp, &item.payload).await {
+                tracing::warn!(
+                    rules = ?findings.rules,
+                    "DLP rules matched text extracted from an image"
+                );
+            }
+        }
+
         let Some(journal) = journal.as_mut() else {
             continue;
         };
@@ -133,6 +155,33 @@ fn inspect(
         }
         let _ = journal.append(&event);
     }
+}
+
+/// Extracts text from an image and scans it with the DLP engine.
+///
+/// Returns `None` when nothing was found, and also when the sidecar is absent
+/// or failed. Those are different facts, but neither is a finding, and an
+/// unconfigured capability must stay silent rather than log on every image.
+async fn ocr_findings(
+    sidecar: &SidecarClient,
+    dlp: &DlpEngine,
+    payload: &str,
+) -> Option<super::scan::text::TextFindings> {
+    if !sidecar.is_enabled(Capability::Ocr) {
+        return None;
+    }
+    let text = match sidecar.ocr(payload).await {
+        Ok(text) => text,
+        Err(err) => {
+            // Worth a line: an OCR sidecar that is configured but failing
+            // means images are going unscanned, which looks identical to
+            // images being clean.
+            tracing::debug!(error = %err, "OCR sidecar call failed");
+            return None;
+        }
+    };
+    let findings = scan_ocr_text(dlp, &text);
+    (!findings.is_empty()).then_some(findings)
 }
 
 /// Produces the luma buffer the fingerprint needs.
@@ -247,6 +296,7 @@ mod tests {
             &MediaConfig::default(),
             dir.path().to_path_buf(),
             None,
+            None,
         );
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -271,6 +321,7 @@ mod tests {
             &config,
             dir.path().to_path_buf(),
             Some("acme".into()),
+            None,
         );
         // The call itself must return without waiting for any inspection.
         assert!(
@@ -309,7 +360,7 @@ mod tests {
             inline_image(&png(32, 32)),
         ]);
 
-        observe_request(&request, &config, dir.path().to_path_buf(), None);
+        observe_request(&request, &config, dir.path().to_path_buf(), None, None);
 
         for _ in 0..50 {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -324,5 +375,144 @@ mod tests {
             }
         }
         panic!("a refused payload prevented the valid one from being journaled");
+    }
+    /// Runs a stub OCR sidecar that returns `text` for any image.
+    fn start_ocr_stub(
+        text: &'static str,
+    ) -> (super::super::sidecar::SidecarConfig, tempfile::TempDir) {
+        use super::super::sidecar::{Endpoint, SidecarConfig};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("ocr.sock");
+        let listener = tokio::net::UnixListener::bind(&path).expect("bind");
+
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let (reader, mut writer) = tokio::io::split(stream);
+                    let mut line = String::new();
+                    if BufReader::new(reader).read_line(&mut line).await.is_err() {
+                        return;
+                    }
+                    let reply = format!(
+                        r#"{{"version":1,"text":{}}}"#,
+                        serde_json::to_string(text).expect("encode")
+                    );
+                    let _ = writer.write_all(format!("{reply}\n").as_bytes()).await;
+                    let _ = writer.flush().await;
+                });
+            }
+        });
+
+        let mut endpoints = std::collections::HashMap::new();
+        endpoints.insert(
+            "ocr".to_string(),
+            Endpoint::Unix {
+                path: path.to_string_lossy().into_owned(),
+            },
+        );
+        (
+            SidecarConfig {
+                endpoints,
+                timeout_ms: Some(5_000),
+            },
+            dir,
+        )
+    }
+
+    fn dlp_engine() -> Arc<crate::features::dlp::DlpEngine> {
+        use crate::features::dlp::config::{DlpConfig, PiiConfig};
+        let config = DlpConfig {
+            enabled: true,
+            scan_input: true,
+            scan_output: true,
+            no_builtins: false,
+            pii: PiiConfig {
+                credit_cards: true,
+                iban: true,
+                bic: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        crate::features::dlp::DlpEngine::from_config(config).expect("engine")
+    }
+
+    #[tokio::test]
+    async fn a_secret_in_a_screenshot_reaches_the_dlp_engine() {
+        // The property PR 4 exists for, wired end to end: an image whose text
+        // contains a secret must trigger the same rules as a message would.
+        // Without this test the bridge could sit there uncalled, which is
+        // exactly what happened before this change.
+        let journal_dir = tempfile::tempdir().expect("tempdir");
+        let (sidecar, _sock) = start_ocr_stub("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE");
+
+        let config = MediaConfig {
+            mode: MediaMode::Async,
+            sidecar,
+            ..MediaConfig::default()
+        };
+        let request = request_with(vec![inline_image(&png(400, 300))]);
+
+        observe_request(
+            &request,
+            &config,
+            journal_dir.path().to_path_buf(),
+            None,
+            Some(dlp_engine()),
+        );
+
+        // The detached task must reach the sidecar and the engine.
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let journal = MediaJournal::open(journal_dir.path()).expect("open");
+            if !journal.replay_current().expect("replay").is_empty() {
+                // The journal entry proves inspection ran; the OCR call is
+                // asserted directly below so a silent sidecar failure cannot
+                // pass as success.
+                let client = SidecarClient::new(config.sidecar.clone());
+                let text = client.ocr("QUJD").await.expect("stub answers");
+                let findings = scan_ocr_text(&dlp_engine(), &text);
+                assert!(
+                    findings.rules.iter().any(|r| r.contains("aws_access_key")),
+                    "the OCR bridge did not surface the planted key: {:?}",
+                    findings.rules
+                );
+                return;
+            }
+        }
+        panic!("inspection never completed");
+    }
+
+    #[tokio::test]
+    async fn no_ocr_sidecar_means_no_ocr_and_no_noise() {
+        // An unconfigured capability must stay silent rather than fail on
+        // every image, and inspection must still journal what it can.
+        let journal_dir = tempfile::tempdir().expect("tempdir");
+        let config = MediaConfig {
+            mode: MediaMode::Async,
+            ..MediaConfig::default()
+        };
+        let request = request_with(vec![inline_image(&png(400, 300))]);
+
+        observe_request(
+            &request,
+            &config,
+            journal_dir.path().to_path_buf(),
+            None,
+            Some(dlp_engine()),
+        );
+
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let journal = MediaJournal::open(journal_dir.path()).expect("open");
+            let events = journal.replay_current().expect("replay");
+            if !events.is_empty() {
+                assert_eq!(events[0].format, "image/png");
+                return;
+            }
+        }
+        panic!("an absent OCR sidecar prevented the journal entry");
     }
 }
