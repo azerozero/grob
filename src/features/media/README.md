@@ -21,7 +21,9 @@ The slice is compiled out unless `--features media` is passed, and inert unless 
 | `MediaEvent`, `MediaJournal`, `current_month` | `registry.rs` | observation journal |
 | `scan`, `ScanReport`, `Finding`, `Severity` | `scan/` | cheap detectors |
 | `SidecarClient`, `SidecarConfig`, `Endpoint`, `Capability` | `sidecar/` | out-of-process capabilities |
-| `observe_request`, `collect_inline_media` | `observe.rs` | request-path entry point |
+| `observe_request`, `collect_inline_media` | `observe.rs` | async request-path entry point |
+| `inspect_blocking`, `Verdict`, `DenyReason` | `blocking.rs` | pre-dispatch verdict |
+| `OnFailure` | `config.rs` | fail-closed policy |
 | `scan_ocr_text`, `TextFindings` | `scan/text.rs` | OCR text into the DLP engine |
 | `fold_confusions`, `scan_variants` | `scan/normalize.rs` | OCR error repair |
 
@@ -96,6 +98,18 @@ Remote (URL) blocks are skipped rather than recorded. This slice never fetches t
 One image being refused does not stop the others from being inspected, which a test pins with a lying MIME type and a decompression bomb sitting in front of a valid PNG.
 
 Fingerprints are currently recorded as **absent** rather than faked: reaching pixels needs an image decoder, this slice links none on purpose, and that capability arrives over the sidecar protocol alongside OCR. A placeholder fingerprint would collide with every other undecodable image, which is worse than admitting there is none. Shape, format and findings are journaled meanwhile, and they are what an operator asks for first.
+
+## Blocking mode
+
+`mode = "blocking"` inspects images before dispatch and can refuse. That raises a question the async path never faces: what happens when the inspection itself fails, through a timeout, an unreachable sidecar, or an open circuit. All three mean the same thing, that the image was never examined.
+
+**The default is to refuse** (`on_failure = "deny"`). An operator who turned on blocking asked for images to be examined before they leave; forwarding the ones we failed to examine would answer a different question than the one they asked, and would do it exactly when something is already wrong.
+
+`on_failure = "allow"` is available for deployments where a stalled sidecar must not become an outage. The trade is explicit, which is why it lives in configuration rather than in a default.
+
+Two refusal reasons are reported distinctly, because they send an operator to different places: `Findings` means the request must change, `NotInspected` means the sidecar must be fixed. Refusals name the rules that fired but never quote the matched values, since those are the secrets themselves.
+
+A missing OCR sidecar is **reduced capability, not failure**: the cheap detectors still run, text simply cannot be read, so a deployment that has not installed OCR is not refusing every image.
 
 ## OCR into DLP
 
