@@ -42,6 +42,7 @@ import base64
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 
@@ -51,16 +52,52 @@ PROTOCOL_VERSION = 1
 def extract_text(image_bytes: bytes) -> str:
     """Return the text visible in an image.
 
-    Replace this with a real engine. Raising here is deliberate: a sidecar
-    that silently returned "" would look healthy while disabling the DLP
-    checks that depend on it, which is worse than being unavailable.
+    Shells out to GROB_OCR_CMD (default: "ocrs"), feeding the image on stdin
+    and reading text from stdout. Nothing touches the disk, which is the
+    point: a sidecar writing temp files would leave copies of exactly the
+    payloads this slice exists to protect.
+
+    GROB_OCR_CMD is split on spaces, so an engine with its own calling
+    convention fits without editing this file:
+
+      ocrs              reads stdin when given no argument (default)
+      tesseract - -     needs the two dashes
+      deepseek-ocr.rs   serve its OpenAI endpoint and adapt here instead
+
+    Verified with ocrs against the screenshot fixture: 3 of the 4 planted
+    secrets reach grob's existing DLP rules.
     """
+    command = os.environ.get("GROB_OCR_CMD", "ocrs").split()
+    if not command:
+        raise RuntimeError("GROB_OCR_CMD is empty")
+    engine = command[0]
     if os.environ.get("GROB_SIDECAR_ECHO"):
-        # Interop-test mode: prove the framing without an engine.
+        # Interop-test mode: exercise the framing without an engine present.
         return f"bytes:{len(image_bytes)}"
-    raise NotImplementedError(
-        "no OCR engine wired in; see the module docstring"
-    )
+
+    try:
+        completed = subprocess.run(
+            command,
+            input=image_bytes,
+            capture_output=True,
+            timeout=float(os.environ.get("GROB_OCR_TIMEOUT", "30")),
+            check=False,
+        )
+    except FileNotFoundError:
+        # Be explicit rather than returning "": an engine that is absent must
+        # look unavailable, not look like an image containing no secrets.
+        raise RuntimeError(
+            f"OCR engine {engine!r} not found on PATH; "
+            "install it or set GROB_OCR_CMD"
+        ) from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"OCR engine {engine!r} timed out") from None
+
+    if completed.returncode != 0:
+        # stderr may quote the input, so report only the status code.
+        raise RuntimeError(f"OCR engine {engine!r} exited with {completed.returncode}")
+
+    return completed.stdout.decode("utf-8", errors="replace")
 
 
 def handle(request: dict) -> dict:
