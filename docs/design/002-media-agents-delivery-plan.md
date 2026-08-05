@@ -27,7 +27,7 @@
 | 2 | **Protocole sidecar** (fondation partagée) | `media` | non | ✅ **livré** |
 | 3 | Détecteurs bon marché (heuristiques, stégano) | `media` | non | ✅ **livré** (#504, #505) |
 | 3b | Point d'entrée async depuis le chemin requête | `media` | non | ✅ **livré** (#518) |
-| 4 | OCR → DLP via sidecar | `media` | non | à faire |
+| 4 | OCR → DLP via sidecar | `media` | non | ✅ **livré** (#521) |
 | 5 | Mode `blocking` + intégration policies | `media` | oui | à faire |
 | 6 | Provenance L1 (C2PA) + registre `trace_id` | sidecar, ou `media-c2pa` | non | à faire |
 | 7 | Surfaces : RPC `media/*`, HTTP verify, CLI | `media` | non | à faire |
@@ -230,6 +230,17 @@ agent envoie des screenshots, sans une milliseconde de latence ajoutée.
 ---
 
 ### PR 4 — OCR → DLP (via le sidecar de la PR 2)
+
+> **Livré (#521), et le resultat depasse la mesure initiale.** La normalisation
+> anti-confusion fait passer les DEUX moteurs de 3 secrets sur 4 a **4 sur 4**.
+> Le choix du moteur reste donc une preference de deploiement au lieu de fuir
+> dans les proprietes de securite, ce que le protocole sidecar promettait.
+>
+> Un piege trouve a l'implementation : les reparations doivent **composer**, pas
+> seulement coexister. `ocrs` rend `sk_live_` en `sk Live_`, soit un underscore
+> perdu ET une erreur de casse dans le meme litteral ; reparer l'un sans l'autre
+> laisse la regle muette. Il a fallu un second essai, desormais epingle par un
+> test.
 
 **Pourquoi c'est la PR la plus rentable, et c'est maintenant mesuré** : elle transforme
 l'image en texte et rend *toutes* les règles DLP existantes applicables. Zéro duplication
