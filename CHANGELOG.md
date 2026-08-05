@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.90](https://github.com/azerozero/grob/compare/v0.36.89...v0.36.90) - 2026-08-05
+
+### Added
+
+- *(media)* make the reference sidecar actually perform OCR ([#514](https://github.com/azerozero/grob/pull/514))
+
 ## [0.36.89](https://github.com/azerozero/grob/compare/v0.36.88...v0.36.89) - 2026-08-05
 
 ### Added
