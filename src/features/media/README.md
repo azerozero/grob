@@ -140,6 +140,12 @@ An ignored test drives the Rust client against it end to end, asserting that a p
 
 `scan/tests.rs` covers each detector, the no-payload-in-findings property, totality over truncated inputs, and an ignored cross-check against real system JPEGs (`--ignored`). `tests.rs` covers the decompression-bomb refusal, budget boundaries, lying MIME types, truncated-header totality across all four formats, SSRF refusal, the full perceptual-hash matrix above, the separation gap, and journal append/replay including a torn tail.
 
+## Reachability
+
+Three times in this slice's history, working and fully tested code shipped while nothing called it: the config in #516, the observation entry point in #518, the OCR bridge in #523. Unit tests cannot catch that, because every piece passes in isolation.
+
+`every_entry_point_has_a_caller_outside_its_own_file` reads the source at test time and asserts each entry point still has its caller: `observe_request` in the dispatch path, `scan_ocr_text` in the observation path, `MediaConfig` in the top-level config. Deleting any of those wirings fails the test instead of silently disabling the feature.
+
 ## Mutation coverage
 
 Every file in the slice has been checked with `cargo-mutants`, because a passing
