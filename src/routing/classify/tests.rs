@@ -41,6 +41,8 @@ fn create_test_config() -> AppConfig {
         policies: vec![],
         #[cfg(feature = "mcp")]
         mcp: Default::default(),
+        #[cfg(feature = "media")]
+        media: Default::default(),
         tool_layer: Default::default(),
         tee: Default::default(),
         fips: Default::default(),

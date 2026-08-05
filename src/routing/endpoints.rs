@@ -424,6 +424,8 @@ mod tests {
             harness: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
+            #[cfg(feature = "media")]
+            media: Default::default(),
         }
     }
 

@@ -41,6 +41,8 @@ fn make_router() -> Router {
         tool_layer: Default::default(),
         #[cfg(feature = "mcp")]
         mcp: Default::default(),
+        #[cfg(feature = "media")]
+        media: Default::default(),
         version: None,
         user: Default::default(),
         otel: Default::default(),
