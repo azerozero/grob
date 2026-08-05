@@ -80,8 +80,34 @@ struct AuditEntry<'a> {
 }
 
 impl DispatchContext<'_> {
+    /// Hands the request's inline images to the media slice.
+    ///
+    /// Off unless `[media] mode` says otherwise, and non-blocking when on:
+    /// the call returns before any inspection happens, so the request path
+    /// is unchanged either way.
+    #[cfg(feature = "media")]
+    fn observe_media(&self, request: &CanonicalRequest) {
+        // No home directory means no journal to write to, so there is
+        // nothing useful to observe.
+        let Some(home) = crate::grob_home() else {
+            return;
+        };
+        crate::features::media::observe::observe_request(
+            request,
+            &self.inner.config.media,
+            home,
+            self.tenant_id.clone(),
+            self.dlp.clone(),
+        );
+    }
+
+    /// No-op when the media feature is compiled out.
+    #[cfg(not(feature = "media"))]
+    fn observe_media(&self, _request: &CanonicalRequest) {}
+
     /// Run DLP input sanitization if enabled, emitting watch events for actions taken.
     fn sanitize_input(&self, request: &mut CanonicalRequest) {
+        self.observe_media(request);
         if let Some(ref dlp_engine) = self.dlp {
             if dlp_engine.config.scan_input {
                 let reports = dlp_engine.sanitize_request_reported(request);

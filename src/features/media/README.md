@@ -22,6 +22,8 @@ The slice is compiled out unless `--features media` is passed, and inert unless 
 | `scan`, `ScanReport`, `Finding`, `Severity` | `scan/` | cheap detectors |
 | `SidecarClient`, `SidecarConfig`, `Endpoint`, `Capability` | `sidecar/` | out-of-process capabilities |
 | `observe_request`, `collect_inline_media` | `observe.rs` | request-path entry point |
+| `scan_ocr_text`, `TextFindings` | `scan/text.rs` | OCR text into the DLP engine |
+| `fold_confusions`, `scan_variants` | `scan/normalize.rs` | OCR error repair |
 
 ## Owns
 
@@ -94,6 +96,23 @@ Remote (URL) blocks are skipped rather than recorded. This slice never fetches t
 One image being refused does not stop the others from being inspected, which a test pins with a lying MIME type and a decompression bomb sitting in front of a valid PNG.
 
 Fingerprints are currently recorded as **absent** rather than faked: reaching pixels needs an image decoder, this slice links none on purpose, and that capability arrives over the sidecar protocol alongside OCR. A placeholder fingerprint would collide with every other undecodable image, which is worse than admitting there is none. Shape, format and findings are journaled meanwhile, and they are what an operator asks for first.
+
+## OCR into DLP
+
+The image path adds **no rules**. Extracted text goes through the existing `DlpEngine`, so a screenshot containing an AWS key trips the same rule as a chat message, operators maintain one rule set, and every future DLP improvement reaches images for free.
+
+Normalisation exists because of a measurement, not a hunch. Repairing real OCR errors one at a time showed that a single wrong character defeats a rule, and that survival depends on the *shape* of the pattern: `AKIA[0-9A-Z]{16}` survived `AKIAI` being read as `AKIAT` because the error landed in a character class, while `sk_live_` did not survive `sk_Live_` because a literal prefix forgives nothing. The useful lever is therefore folding the confusions engines actually make, not buying a better engine.
+
+The repairs must **compose**. `ocrs` renders `sk_live_` as `sk Live_`: a dropped underscore *and* a case error in the same literal, where fixing either alone leaves the rule silent.
+
+| Engine | Raw OCR | After normalisation |
+|---|---|---|
+| macOS Vision | 3/4 secrets | **4/4** |
+| ocrs | 3/4 secrets | **4/4** |
+
+Both engines fail differently and normalisation closes both gaps, so the engine choice stays a deployment preference instead of leaking into the security properties.
+
+Normalisation applies to the image path **only**. Loosening the text path would manufacture false positives for every request that never involved an image. Findings carry rule identifiers, never the OCR text, which contains the very secrets that triggered them.
 
 ## Sidecars
 
