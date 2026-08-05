@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.92](https://github.com/azerozero/grob/compare/v0.36.91...v0.36.92) - 2026-08-05
+
+### Added
+
+- *(media)* connect OCR-to-DLP to the actual request path ([#523](https://github.com/azerozero/grob/pull/523))
+- *(media)* reinject OCR text into the existing DLP engine ([#521](https://github.com/azerozero/grob/pull/521))
+- *(media)* request-path entry point for out-of-band inspection ([#518](https://github.com/azerozero/grob/pull/518))
+
+### Other
+
+- *(design)* mark PR 4 delivered ([#522](https://github.com/azerozero/grob/pull/522))
+- *(design)* mark PR 3b delivered ([#520](https://github.com/azerozero/grob/pull/520))
+
 ## [0.36.91](https://github.com/azerozero/grob/compare/v0.36.90...v0.36.91) - 2026-08-05
 
 ### Added
