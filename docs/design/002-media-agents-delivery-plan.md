@@ -24,7 +24,7 @@
 | # | PR | Feature flag | Bloque le trafic ? | État |
 |---|---|---|---|---|
 | 1 | Squelette `media` : décodage borné + pHash + journal | `media` | non | ✅ **livré** (#501) |
-| 2 | **Protocole sidecar** (fondation partagée) | `media` | non | à faire |
+| 2 | **Protocole sidecar** (fondation partagée) | `media` | non | ✅ **livré** |
 | 3 | Détecteurs bon marché (heuristiques, stégano) | `media` | non | ✅ **livré** (#504, #505) |
 | 3b | Wiring async dans dispatch + events watch/tap | `media` | non | à faire |
 | 4 | OCR → DLP via sidecar | `media` | non | à faire |
@@ -127,6 +127,29 @@ dans le journal.
 ---
 
 ### PR 2 — Protocole sidecar (la fondation)
+
+> **Livré.** Deux questions de l'utilisateur ont tranché la conception :
+> *stateless ou pas ?* et *il faut fonctionner hors macOS*.
+>
+> **Stateless, et garanti par le type** : `SidecarRequest` ne porte ni tenant,
+> ni session, ni policy, ni trace_id, et un test verifie que la serialisation
+> n'expose aucun champ de ce genre. Un sidecar ne peut donc pas correler les
+> appels meme s'il le voulait.
+>
+> **Hors macOS, mesure** : `ocrs` (Rust pur, ~12 MB de modeles, CPU, zero
+> dependance systeme) donne le meme score DLP que Vision, 3 secrets sur 4, avec
+> des modes d'echec differents. Vision perd un caractere dans le litteral
+> Stripe, `ocrs` perd les underscores.
+>
+> `deepseek-ocr.rs` (Apache-2.0, serveur compatible OpenAI) a ete evalue :
+> excellent en haute fidelite, mais 4,7 a 9 GB de poids et 9 a 50 GB de RAM,
+> donc troisieme niveau optionnel et non defaut. Son serveur OpenAI se branche
+> derriere ce protocole via un adaptateur HTTP mince, ce qui valide au passage
+> le choix d'avoir pose un protocole plutot que trois integrations.
+>
+> Interop Rust vers Python verifiee contre une implementation de reference de
+> ~120 lignes : un protocole n'existe qu'une fois qu'une seconde implementation
+> independante le parle. Mutation testing : 0 survivant du premier coup.
 
 **Pourquoi si tôt** : la mesure de taille de binaire (+7 MB pour C2PA seul) rend le
 hors-processus obligatoire pour trois couches sur quatre. Ce n'est donc plus un détail

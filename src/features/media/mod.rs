@@ -12,6 +12,7 @@ pub mod decode;
 pub mod phash;
 pub mod registry;
 pub mod scan;
+pub mod sidecar;
 #[cfg(test)]
 mod tests;
 

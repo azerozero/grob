@@ -20,6 +20,7 @@ The slice is compiled out unless `--features media` is passed, and inert unless 
 | `GrayImage`, `PerceptualHash`, `gradient_hash`, `MATCH_THRESHOLD` | `phash.rs` | fingerprinting, lookup |
 | `MediaEvent`, `MediaJournal`, `current_month` | `registry.rs` | observation journal |
 | `scan`, `ScanReport`, `Finding`, `Severity` | `scan/` | cheap detectors |
+| `SidecarClient`, `SidecarConfig`, `Endpoint`, `Capability` | `sidecar/` | out-of-process capabilities |
 
 ## Owns
 
@@ -28,6 +29,7 @@ The slice is compiled out unless `--features media` is passed, and inert unless 
 - The 64-bit gradient perceptual hash and its measured match threshold.
 - The `~/.grob/media/YYYY-MM.jsonl` observation journal.
 - Cheap detectors: shape heuristics, EXIF/GPS presence, appended payloads.
+- The stateless sidecar protocol for OCR, watermarking and provenance signing.
 
 ## Depends on
 
@@ -82,6 +84,18 @@ Two properties are enforced by tests rather than convention. Findings **never qu
 
 **Known limitation:** this catches carelessness, not craft. LSB steganography from a competent tool is statistically indistinguishable without a decoder and a model. Claiming to detect it would be worse than not looking, because it would manufacture confidence.
 
+## Sidecars
+
+Three capabilities need machine-learning runtimes or large cryptographic stacks. Linking them in was measured: `c2pa` adds 7.0 MB and `trustmark` 11.9 MB to a 17.3 MB binary, and a vision-language OCR model wants 9-50 GB of RAM. Out-of-process is therefore the default, and one versioned protocol serves all three so they cannot drift apart.
+
+**Stateless by contract.** A request carries no tenant, session, policy or trace field, so a sidecar cannot correlate calls even if it wanted to; a test asserts the serialised request has no such field. Everything stateful stays here, under `~/.grob/media/`. That keeps sidecars hot-swappable, replicable behind any load balancer, and outside the blast radius: a component retaining payloads would be a second copy of the data this slice exists to protect.
+
+**Absent means off.** An unconfigured capability is disabled, not broken. Grob starts and serves with no sidecar installed, and a failing one trips a breaker instead of being retried forever.
+
+Transport is newline-delimited JSON over a unix socket (loopback TCP where unix sockets are unavailable), one request per connection. Endpoints reachable beyond the host are reported by `externally_reachable()` so an operator is warned rather than silently exposed.
+
+A reference implementation lives at [`ocr_sidecar.py`](../../../docs/design/assets/ocr_sidecar.py), about 120 lines. An ignored test drives the Rust client against it: a protocol is only real once a second, independently written implementation speaks it.
+
 ## Non-goals
 
 - Verdicts, redaction or blocking (detectors report; policy decides, later).
@@ -105,6 +119,7 @@ test suite says nothing about whether the tests would notice a bug:
 | `scan/heuristics.rs`, `scan/stego.rs` | 0 |
 | `phash.rs` | 1, provably equivalent (`\|` and `^` are identical after a left shift) |
 | `registry.rs` | 0 |
+| `sidecar/proto.rs`, `sidecar/config.rs` | 0 |
 
 Two survivors could not be killed by adding tests, and both indicated a design
 problem rather than a coverage gap: a duplicated bounds check in `decode.rs` made
