@@ -531,6 +531,123 @@ fn mirroring_is_a_documented_limitation() {
 }
 
 #[test]
+fn matches_rejects_hashes_beyond_the_threshold() {
+    // Without this, `matches` could return true unconditionally and every
+    // test above would still pass: they only ever assert that similar images
+    // stay close, never that dissimilar ones are refused.
+    let base = PerceptualHash(0);
+    assert!(base.matches(PerceptualHash(0)));
+
+    // Exactly at the threshold matches; one bit further does not.
+    let at = PerceptualHash((1u64 << MATCH_THRESHOLD) - 1);
+    assert_eq!(base.distance(at), MATCH_THRESHOLD);
+    assert!(base.matches(at));
+
+    let over = PerceptualHash((1u64 << (MATCH_THRESHOLD + 1)) - 1);
+    assert_eq!(base.distance(over), MATCH_THRESHOLD + 1);
+    assert!(
+        !base.matches(over),
+        "one bit past the threshold must not match"
+    );
+
+    assert!(!base.matches(PerceptualHash(u64::MAX)));
+}
+
+#[test]
+fn display_and_hex_agree_and_are_not_empty() {
+    // Display is used in journals and diagnostics; an empty or default
+    // rendering would silently erase provenance identifiers.
+    for raw in [0u64, 1, 0xdead_beef, u64::MAX] {
+        let h = PerceptualHash(raw);
+        let shown = h.to_string();
+        assert_eq!(shown, h.to_hex());
+        assert_eq!(shown.len(), 16, "hash must render as 16 hex digits");
+        assert_eq!(u64::from_str_radix(&shown, 16).expect("hex"), raw);
+    }
+}
+
+#[test]
+fn luma_conversion_weights_the_channels_correctly() {
+    // Pins the BT.601 arithmetic and the stride over RGB triples: a wrong
+    // stride reads the wrong channel, and wrong weights flatten the image.
+    let gray = GrayImage::from_rgb(3, 1, &[255, 0, 0, 0, 255, 0, 0, 0, 255]).expect("rgb");
+    // Red 0.299, green 0.587, blue 0.114 of 255.
+    assert_eq!(gray.luma, vec![76, 150, 29]);
+
+    // Neutral colours map to themselves regardless of weighting.
+    let neutral = GrayImage::from_rgb(2, 1, &[0, 0, 0, 255, 255, 255]).expect("rgb");
+    assert_eq!(neutral.luma, vec![0, 255]);
+
+    // Pixel count must follow width * height, not width + height.
+    assert!(GrayImage::from_rgb(3, 2, &[128; 18]).is_some());
+    assert!(GrayImage::from_rgb(3, 2, &[128; 15]).is_none());
+}
+
+#[test]
+fn images_smaller_than_the_grid_are_sampled_without_panicking() {
+    // The 9x8 grid is larger than these images, so every cell samples past
+    // the edge. Clamping must hold: an off-by-one in the bound would index
+    // out of range, and folding the clamp differently would collapse
+    // distinct images onto the same hash.
+    let one = GrayImage::new(1, 1, vec![128]).expect("image");
+    assert_eq!(gradient_hash(&one).0, 0, "a single pixel has no gradient");
+
+    let two_by_one_dark_left = GrayImage::new(2, 1, vec![0, 255]).expect("image");
+    let two_by_one_dark_right = GrayImage::new(2, 1, vec![255, 0]).expect("image");
+    assert_ne!(
+        gradient_hash(&two_by_one_dark_left),
+        gradient_hash(&two_by_one_dark_right),
+        "clamping must not collapse opposite gradients onto one hash"
+    );
+
+    // A range of sub-grid sizes, all of which must complete.
+    for (w, h) in [(1, 1), (1, 8), (8, 1), (2, 3), (5, 5), (9, 8)] {
+        let img = GrayImage::new(w, h, vec![64; (w * h) as usize]).expect("image");
+        assert_eq!(gradient_hash(&img).0, 0);
+    }
+}
+
+#[test]
+fn hash_encodes_horizontal_gradients_not_a_constant() {
+    // A flat image has no left-to-right differences, so every comparison bit
+    // is zero. A gradient must produce a non-zero, direction-dependent hash.
+    let flat = GrayImage::new(16, 16, vec![128; 256]).expect("image");
+    assert_eq!(
+        gradient_hash(&flat).0,
+        0,
+        "flat image must hash to all zeros"
+    );
+
+    let mut ramp = Vec::with_capacity(256);
+    for _ in 0..16 {
+        for x in 0..16u32 {
+            ramp.push((x * 16) as u8);
+        }
+    }
+    // A strictly rising ramp makes every "left brighter than right" test
+    // false, so it also hashes to zero. That is correct, and it is the reason
+    // the direction matters: reversing the ramp must invert every bit.
+    let rising = GrayImage::new(16, 16, ramp.clone()).expect("image");
+    assert_eq!(gradient_hash(&rising).0, 0);
+
+    let falling_luma: Vec<u8> = ramp
+        .chunks_exact(16)
+        .flat_map(|row| row.iter().rev().copied())
+        .collect();
+    let falling = GrayImage::new(16, 16, falling_luma).expect("image");
+    assert_eq!(
+        gradient_hash(&falling).0,
+        u64::MAX,
+        "a strictly falling ramp must set every comparison bit"
+    );
+    assert_ne!(
+        gradient_hash(&rising),
+        gradient_hash(&falling),
+        "opposite gradients must not collide"
+    );
+}
+
+#[test]
 fn hash_renders_as_16_hex_digits() {
     assert_eq!(PerceptualHash(0).to_hex(), "0000000000000000");
     assert_eq!(PerceptualHash(u64::MAX).to_hex(), "ffffffffffffffff");
