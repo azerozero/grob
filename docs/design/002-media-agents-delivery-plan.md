@@ -28,7 +28,7 @@
 | 3 | Détecteurs bon marché (heuristiques, stégano) | `media` | non | ✅ **livré** (#504, #505) |
 | 3b | Point d'entrée async depuis le chemin requête | `media` | non | ✅ **livré** (#518) |
 | 4 | OCR → DLP via sidecar | `media` | non | ✅ **livré** (#521) |
-| 5 | Mode `blocking` + intégration policies | `media` | oui | à faire |
+| 5 | Mode `blocking` (fail-closed par défaut) | `media` | oui | ✅ **livré** (#526, #528) |
 | 6 | Provenance L1 (C2PA) + registre `trace_id` | sidecar, ou `media-c2pa` | non | à faire |
 | 7 | Surfaces : RPC `media/*`, HTTP verify, CLI | `media` | non | à faire |
 | 8 | Watermark L2 via sidecar TrustMark | `media` | non | à faire |
