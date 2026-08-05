@@ -15,6 +15,7 @@ use super::registry::{MediaEvent, MediaJournal};
 use super::scan::scan;
 use super::scan::text::scan_ocr_text;
 use super::sidecar::{Capability, SidecarClient};
+use super::trace::{TraceId, TraceRecord, TraceRegistry};
 use super::MediaRef;
 use crate::features::dlp::DlpEngine;
 use crate::models::{CanonicalRequest, ContentBlock, KnownContentBlock, MessageContent};
@@ -113,6 +114,11 @@ async fn inspect(
     } else {
         None
     };
+    let mut trace_registry = if config.journal {
+        TraceRegistry::open(&home).ok()
+    } else {
+        None
+    };
 
     for item in pending {
         let media = MediaRef::Inline {
@@ -141,6 +147,19 @@ async fn inspect(
                     "DLP rules matched text extracted from an image"
                 );
             }
+        }
+
+        // Issue a provenance handle for every image we managed to inspect,
+        // so a copy found later can be traced back even though nothing was
+        // embedded in the file yet. The registry is the half that makes a
+        // future watermark or manifest meaningful.
+        if let Some(registry) = trace_registry.as_mut() {
+            let trace_id = TraceId::generate();
+            let mut record = TraceRecord::new(trace_id).with_model(model.clone());
+            if let Some(tenant) = tenant.clone() {
+                record = record.with_tenant(tenant);
+            }
+            let _ = registry.record(&record);
         }
 
         let Some(journal) = journal.as_mut() else {
@@ -483,6 +502,48 @@ mod tests {
             }
         }
         panic!("inspection never completed");
+    }
+
+    #[tokio::test]
+    async fn observing_issues_a_traceable_provenance_handle() {
+        // The registry only matters if something fills it. This asserts the
+        // handle is issued and resolves back to the request's context, which
+        // is what makes a later watermark or manifest worth embedding.
+        use super::super::trace::{TraceId, TraceRegistry};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = MediaConfig {
+            mode: MediaMode::Async,
+            ..MediaConfig::default()
+        };
+        let request = request_with(vec![inline_image(&png(640, 480))]);
+
+        observe_request(
+            &request,
+            &config,
+            dir.path().to_path_buf(),
+            Some("acme".into()),
+            None,
+        );
+
+        for _ in 0..50 {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            let registry = TraceRegistry::open(dir.path()).expect("open");
+            let records = registry
+                .replay(&super::super::registry::current_month())
+                .expect("replay");
+            if let Some(record) = records.first() {
+                assert_eq!(record.tenant.as_deref(), Some("acme"));
+                assert_eq!(record.model.as_deref(), Some("test-model"));
+
+                // The handle must be resolvable and fit the watermark payload.
+                let id = TraceId::from_hex(&record.trace_id).expect("valid handle");
+                let resolved = registry.resolve(id).expect("resolve").expect("known");
+                assert_eq!(resolved.trace_id, record.trace_id);
+                return;
+            }
+        }
+        panic!("no provenance handle was issued");
     }
 
     #[tokio::test]

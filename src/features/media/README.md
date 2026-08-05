@@ -23,6 +23,7 @@ The slice is compiled out unless `--features media` is passed, and inert unless 
 | `SidecarClient`, `SidecarConfig`, `Endpoint`, `Capability` | `sidecar/` | out-of-process capabilities |
 | `observe_request`, `collect_inline_media` | `observe.rs` | async request-path entry point |
 | `inspect_blocking`, `Verdict`, `DenyReason` | `blocking.rs` | pre-dispatch verdict |
+| `TraceId`, `TraceRecord`, `TraceRegistry` | `trace.rs` | provenance handles |
 | `OnFailure` | `config.rs` | fail-closed policy |
 | `scan_ocr_text`, `TextFindings` | `scan/text.rs` | OCR text into the DLP engine |
 | `fold_confusions`, `scan_variants` | `scan/normalize.rs` | OCR error repair |
@@ -99,6 +100,14 @@ One image being refused does not stop the others from being inspected, which a t
 
 Fingerprints are currently recorded as **absent** rather than faked: reaching pixels needs an image decoder, this slice links none on purpose, and that capability arrives over the sidecar protocol alongside OCR. A placeholder fingerprint would collide with every other undecodable image, which is worse than admitting there is none. Shape, format and findings are journaled meanwhile, and they are what an operator asks for first.
 
+## Provenance handles
+
+A `TraceId` is the only thing that will ever be written into an image. Never a tenant, a session or a model: whatever is embedded travels with the file forever, so putting business data there would turn the provenance marker into the exfiltration channel it exists to detect. The identifier is a random handle; the mapping from handle to context stays here.
+
+**61 bits, and the number is not arbitrary.** It is the usable payload of the watermark that has to carry it: `TrustMark`'s Bch5 variant reports `data_bits() == 61` and rejects any other length, measured rather than assumed. Choosing 64 or 128 would produce identifiers that fit the manifest layer and silently fail the watermark layer.
+
+Handles are issued for every inspected image and recorded in `~/.grob/media/trace/YYYY-MM.jsonl` alongside the perceptual fingerprint. The fingerprint is what allows an image whose handle was stripped to still be traced, since it is computed from pixels rather than read from the file.
+
 ## Blocking mode
 
 `mode = "blocking"` inspects images before dispatch and can refuse. That raises a question the async path never faces: what happens when the inspection itself fails, through a timeout, an unreachable sidecar, or an open circuit. All three mean the same thing, that the image was never examined.
@@ -173,6 +182,7 @@ test suite says nothing about whether the tests would notice a bug:
 | `registry.rs` | 0 |
 | `sidecar/proto.rs`, `sidecar/config.rs` | 0 |
 | `blocking.rs` | 0 |
+| `trace.rs` | 0 |
 
 Two survivors could not be killed by adding tests, and both indicated a design
 problem rather than a coverage gap: a duplicated bounds check in `decode.rs` made

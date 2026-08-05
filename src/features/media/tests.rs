@@ -822,6 +822,13 @@ fn every_entry_point_has_a_caller_outside_its_own_file() {
             "features/media/blocking.rs",
             "server/dispatch/mod.rs",
         ),
+        // The observation path must issue provenance handles, or the registry
+        // stays empty and nothing can ever be traced.
+        (
+            "TraceRegistry",
+            "features/media/trace.rs",
+            "features/media/observe.rs",
+        ),
     ];
 
     for (symbol, home, expected_caller) in entry_points {
