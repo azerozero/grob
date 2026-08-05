@@ -94,7 +94,9 @@ Three capabilities need machine-learning runtimes or large cryptographic stacks.
 
 Transport is newline-delimited JSON over a unix socket (loopback TCP where unix sockets are unavailable), one request per connection. Endpoints reachable beyond the host are reported by `externally_reachable()` so an operator is warned rather than silently exposed.
 
-A reference implementation lives at [`ocr_sidecar.py`](../../../docs/design/assets/ocr_sidecar.py), about 120 lines. An ignored test drives the Rust client against it: a protocol is only real once a second, independently written implementation speaks it.
+A reference implementation lives at [`ocr_sidecar.py`](../../../docs/design/assets/ocr_sidecar.py), about 130 lines, and it really performs OCR: it pipes the image to `GROB_OCR_CMD` (default `ocrs`) on stdin and reads text from stdout, so nothing touches the disk. Any engine with its own calling convention fits by setting that variable, `deepseek-ocr.rs` included via its OpenAI endpoint.
+
+An ignored test drives the Rust client against it end to end, asserting that a planted AWS key survives the whole chain: client, unix socket, JSON framing, sidecar, engine, and back. A protocol is only real once a second, independently written implementation speaks it, and a reference implementation that cannot do the thing is not a reference.
 
 ## Non-goals
 

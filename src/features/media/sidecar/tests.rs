@@ -365,14 +365,33 @@ fn the_default_timeout_is_generous_enough_for_real_ocr() {
 #[tokio::test]
 #[ignore = "requires the reference python sidecar to be running"]
 async fn interop_with_the_reference_python_sidecar() {
-    let path = "/tmp/grob-interop.sock";
+    let path =
+        std::env::var("GROB_INTEROP_SOCK").unwrap_or_else(|_| "/tmp/grob-interop.sock".into());
+    let path = path.as_str();
     if !std::path::Path::new(path).exists() {
         println!("reference sidecar not running; skipping");
         return;
     }
-    let client = SidecarClient::new(config_for(path, 5_000));
+    let client = SidecarClient::new(config_for(path, 30_000));
+
+    // With a real engine behind the socket, send a real image and require a
+    // planted secret to survive the whole chain: Rust client, unix socket,
+    // JSON framing, python sidecar, OCR engine, and back.
+    let fixture = std::path::Path::new("/tmp/e2e/shot.png");
+    if fixture.exists() {
+        use base64::Engine as _;
+        let bytes = std::fs::read(fixture).expect("read fixture");
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        let text = client.ocr(&encoded).await.expect("interop call");
+        assert!(
+            text.contains("AKIAIOSFODNN7EXAMPLE"),
+            "the planted AWS key did not survive the chain; got: {text}"
+        );
+        return;
+    }
+
+    // Echo mode: no engine present, so only the framing is under test.
     let text = client.ocr("QUJDRA==").await.expect("interop call");
-    // The stub reports the decoded byte count: 4 bytes from "QUJDRA==".
     assert_eq!(
         text, "bytes:4",
         "python sidecar decoded the payload wrongly"
