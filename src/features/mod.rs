@@ -1,5 +1,7 @@
 //! Feature modules: DLP, TAP streaming, token pricing, MCP tool matrix, log export, media, policies, pledge, and live watch.
 
+#[cfg(feature = "agents")]
+pub mod agents;
 pub mod dlp;
 #[cfg(feature = "harness")]
 pub mod harness;

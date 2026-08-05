@@ -27,6 +27,7 @@
 
 | Slice | LOC | Files | Charter | Purpose |
 |-------|-----|-------|---------|---------|
+| [`agents`](../../src/features/agents/README.md) | 0.4k | 2 | ✓ | Agent identity and spend attribution (feature `agents`) |
 | [`dlp`](../../src/features/dlp/README.md) | 10.0k | 20 | ✓ | DLP engine: secret scanning, PII, prompt injection, canaries |
 | [`harness`](../../src/features/harness/README.md) | 999 | 5 | ✓ | Record & replay sandwich testing (feature `harness`) |
 | [`log_export`](../../src/features/log_export/README.md) | 651 | 3 | ✓ | Structured log export with age-encrypted content envelopes |
