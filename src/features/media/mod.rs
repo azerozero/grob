@@ -7,6 +7,7 @@
 //! The design and the measurements behind the thresholds live in
 //! `docs/design/001-image-dlp-provenance.md`.
 
+pub mod blocking;
 pub mod config;
 pub mod decode;
 pub mod observe;

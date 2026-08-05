@@ -105,6 +105,46 @@ impl DispatchContext<'_> {
     #[cfg(not(feature = "media"))]
     fn observe_media(&self, _request: &CanonicalRequest) {}
 
+    /// Inspects images before dispatch when `[media] mode = "blocking"`.
+    ///
+    /// Returns `Forbidden` when the verdict refuses. The two refusal reasons
+    /// are reported distinctly on purpose: findings mean the request must
+    /// change, a failed inspection means the sidecar must be fixed, and an
+    /// operator reading a log line should be able to tell which.
+    #[cfg(feature = "media")]
+    async fn gate_media(&self, request: &CanonicalRequest) -> Result<(), RequestError> {
+        use crate::features::media::blocking::{inspect_blocking, DenyReason, Verdict};
+
+        let config = &self.inner.config.media;
+        if !config.is_blocking() {
+            return Ok(());
+        }
+        match inspect_blocking(request, config, self.dlp.as_deref()).await {
+            Verdict::Allow => Ok(()),
+            Verdict::Deny { rules, reason } => {
+                let message = match reason {
+                    DenyReason::Findings => {
+                        tracing::warn!(?rules, "media inspection refused a request");
+                        "request refused: an attached image matched a data-loss rule"
+                    }
+                    DenyReason::NotInspected => {
+                        tracing::error!(
+                            "media inspection could not complete; refusing per on_failure=deny"
+                        );
+                        "request refused: an attached image could not be inspected"
+                    }
+                };
+                Err(RequestError::Forbidden(message.to_string()))
+            }
+        }
+    }
+
+    /// No-op when the media feature is compiled out.
+    #[cfg(not(feature = "media"))]
+    async fn gate_media(&self, _request: &CanonicalRequest) -> Result<(), RequestError> {
+        Ok(())
+    }
+
     /// Run DLP input sanitization if enabled, emitting watch events for actions taken.
     fn sanitize_input(&self, request: &mut CanonicalRequest) {
         self.observe_media(request);
@@ -570,6 +610,8 @@ async fn enforce_post_route_policy(
     provider: &str,
     dlp_triggered: bool,
 ) -> Result<(), RequestError> {
+    ctx.gate_media(request).await?;
+
     let Some(matcher) = ctx.inner.policy_matcher.as_ref() else {
         return Ok(());
     };
@@ -652,13 +694,13 @@ async fn enforce_post_route_policy(
 /// in the provider loop / fan-out need no `#[cfg]` gating.
 #[cfg(not(feature = "policies"))]
 async fn enforce_post_route_policy(
-    _ctx: &DispatchContext<'_>,
-    _request: &CanonicalRequest,
+    ctx: &DispatchContext<'_>,
+    request: &CanonicalRequest,
     _decision: &crate::models::RouteDecision,
     _provider: &str,
     _dlp_triggered: bool,
 ) -> Result<(), RequestError> {
-    Ok(())
+    ctx.gate_media(request).await
 }
 
 /// Check the response cache for a hit (non-streaming requests only).

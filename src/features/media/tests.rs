@@ -815,6 +815,13 @@ fn every_entry_point_has_a_caller_outside_its_own_file() {
         // The top-level config must expose the section, or no operator can
         // switch any of this on.
         ("MediaConfig", "features/media/config.rs", "config.rs"),
+        // The dispatch path must consult the blocking verdict, or nothing is
+        // ever refused however the operator configured it.
+        (
+            "inspect_blocking",
+            "features/media/blocking.rs",
+            "server/dispatch/mod.rs",
+        ),
     ];
 
     for (symbol, home, expected_caller) in entry_points {
