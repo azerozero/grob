@@ -29,7 +29,8 @@
 | 3b | Point d'entrée async depuis le chemin requête | `media` | non | ✅ **livré** (#518) |
 | 4 | OCR → DLP via sidecar | `media` | non | ✅ **livré** (#521) |
 | 5 | Mode `blocking` (fail-closed par défaut) | `media` | oui | ✅ **livré** (#526, #528) |
-| 6 | Provenance L1 (C2PA) + registre `trace_id` | sidecar, ou `media-c2pa` | non | à faire |
+| 6a | Registre `trace_id` (61 bits, opaque) | `media` | non | ✅ **livré** (#530) |
+| 6b | Provenance L1 (C2PA) via sidecar | sidecar, ou `media-c2pa` | non | à faire |
 | 7 | Surfaces : RPC `media/*`, HTTP verify, CLI | `media` | non | à faire |
 | 8 | Watermark L2 via sidecar TrustMark | `media` | non | à faire |
 | 9 | Lib JS `grob-media-verify` | — | non | à faire |
