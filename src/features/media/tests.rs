@@ -717,6 +717,48 @@ fn replaying_an_absent_month_is_empty_not_an_error() {
 // --- config --------------------------------------------------------------
 
 #[test]
+fn an_operator_can_enable_the_slice_from_toml() {
+    // The point of this test: PRs 1 and 2 shipped these config structs, but
+    // nothing referenced them from the top-level Config, so no TOML file
+    // could reach them. A feature nobody can switch on is not shipped.
+    let toml = r#"
+[router]
+default = "smart"
+
+[media]
+mode = "async"
+max_bytes = 1048576
+max_pixels = 5000000
+fetch_remote = false
+
+[media.sidecar.endpoints.ocr]
+unix = { path = "/tmp/grob-ocr.sock" }
+"#;
+    let config: crate::config::AppConfig = toml::from_str(toml).expect("parse config");
+
+    assert!(config.media.is_enabled());
+    assert_eq!(config.media.max_bytes, 1_048_576);
+    assert_eq!(config.media.max_pixels, 5_000_000);
+    assert!(!config.media.fetch_remote);
+
+    use super::sidecar::Capability;
+    assert!(config.media.sidecar.is_enabled(Capability::Ocr));
+    assert!(!config.media.sidecar.is_enabled(Capability::Watermark));
+}
+
+#[test]
+fn an_absent_media_section_leaves_the_slice_off() {
+    // Every existing deployment has no [media] section, and must keep
+    // behaving exactly as before.
+    let minimal = "[router]\ndefault = \"smart\"\n";
+    let config: crate::config::AppConfig =
+        toml::from_str(minimal).expect("parse config without a media section");
+    assert!(!config.media.is_enabled());
+    assert!(!config.media.fetch_remote);
+    assert!(config.media.sidecar.endpoints.is_empty());
+}
+
+#[test]
 fn slice_is_inert_by_default() {
     let config = MediaConfig::default();
     assert!(!config.is_enabled(), "media must be off unless asked for");

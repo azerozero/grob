@@ -21,6 +21,19 @@ pub enum MediaMode {
 }
 
 /// Media slice configuration.
+///
+/// Reachable from `~/.grob/config.toml` as `[media]`:
+///
+/// ```toml
+/// [media]
+/// mode = "async"          # off (default) | async
+/// max_bytes = 8388608
+/// max_pixels = 40000000
+/// fetch_remote = false    # leave off: fetching client URLs is an SSRF primitive
+///
+/// [media.sidecar.endpoints.ocr]
+/// unix = { path = "/tmp/grob-ocr.sock" }
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MediaConfig {
@@ -37,6 +50,8 @@ pub struct MediaConfig {
     pub fetch_remote: bool,
     /// Whether observations are appended to the media journal.
     pub journal: bool,
+    /// Out-of-process capabilities (OCR, watermarking, provenance).
+    pub sidecar: super::sidecar::SidecarConfig,
 }
 
 impl Default for MediaConfig {
@@ -47,6 +62,7 @@ impl Default for MediaConfig {
             max_pixels: DEFAULT_MAX_PIXELS,
             fetch_remote: false,
             journal: true,
+            sidecar: super::sidecar::SidecarConfig::default(),
         }
     }
 }

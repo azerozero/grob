@@ -169,5 +169,7 @@ pub fn test_app_config() -> grob::cli::AppConfig {
         harness: Default::default(),
         #[cfg(feature = "mcp")]
         mcp: Default::default(),
+        #[cfg(feature = "media")]
+        media: Default::default(),
     }
 }
