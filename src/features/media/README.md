@@ -172,6 +172,7 @@ test suite says nothing about whether the tests would notice a bug:
 | `phash.rs` | 1, provably equivalent (`\|` and `^` are identical after a left shift) |
 | `registry.rs` | 0 |
 | `sidecar/proto.rs`, `sidecar/config.rs` | 0 |
+| `blocking.rs` | 0 |
 
 Two survivors could not be killed by adding tests, and both indicated a design
 problem rather than a coverage gap: a duplicated bounds check in `decode.rs` made
