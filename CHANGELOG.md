@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.93](https://github.com/azerozero/grob/compare/v0.36.92...v0.36.93) - 2026-08-05
+
+### Added
+
+- *(media)* blocking inspection, fail-closed by default ([#526](https://github.com/azerozero/grob/pull/526))
+
+### Other
+
+- *(media)* guard against entry points losing their callers ([#525](https://github.com/azerozero/grob/pull/525))
+
 ## [0.36.92](https://github.com/azerozero/grob/compare/v0.36.91...v0.36.92) - 2026-08-05
 
 ### Added
