@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.95](https://github.com/azerozero/grob/compare/v0.36.94...v0.36.95) - 2026-08-05
+
+### Other
+
+- *(agents)* drop dead API and enforce the lineage invariant ([#538](https://github.com/azerozero/grob/pull/538))
+
 ## [0.36.94](https://github.com/azerozero/grob/compare/v0.36.93...v0.36.94) - 2026-08-05
 
 ### Added
