@@ -36,7 +36,7 @@
 | 8 | Watermark L2 via sidecar TrustMark | `media` | non | à faire |
 | 9 | Lib JS `grob-media-verify` | — | non | à faire |
 | 10 | Vidéo : L1 conteneur + keyframes L3 | `media` | non | à faire |
-| A1 | `AgentId` + contexte propagé + attribution du spend | `agents` | non | à faire |
+| A1 | `AgentId` + attribution du spend (observation) | `agents` | non | ✅ **livré** (#535) |
 | A2 | Registre d'agents + leases | `agents` | oui (expiration) | à faire |
 | A3 | Budget et capacités hiérarchiques | `agents` | oui | ⚠️ prérequis livré (#500) |
 | A4 | Surfaces `agent/*` + trajectoire auditée | `agents` | non | à faire |
