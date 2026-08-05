@@ -677,7 +677,7 @@ fn journal_appends_and_replays() {
 
     let replayed = journal.replay_current().expect("replay");
     assert_eq!(replayed.len(), 1);
-    assert_eq!(replayed[0].phash, "00000000deadbeef");
+    assert_eq!(replayed[0].phash.as_deref(), Some("00000000deadbeef"));
     assert_eq!(replayed[0].format, "image/png");
     assert_eq!(replayed[0].tenant.as_deref(), Some("acme"));
     assert_eq!((replayed[0].width, replayed[0].height), (640, 480));
@@ -704,7 +704,35 @@ fn journal_survives_a_torn_tail() {
     // The intact record is still readable; only the torn one is lost.
     let replayed = journal.replay_current().expect("replay");
     assert_eq!(replayed.len(), 1);
-    assert_eq!(replayed[0].phash, "0000000000000001");
+    assert_eq!(replayed[0].phash.as_deref(), Some("0000000000000001"));
+}
+
+#[test]
+fn an_event_without_a_fingerprint_is_still_journaled() {
+    // An image whose pixels could not be reached is exactly the kind of event
+    // an operator wants afterwards. Recording it with the fingerprint absent
+    // is honest; recording a placeholder would collide with every other
+    // undecodable image.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut journal = MediaJournal::open(dir.path()).expect("open journal");
+    let probe = probe_bytes(&png_header(320, 200), &MediaConfig::default()).unwrap();
+
+    journal
+        .append(&MediaEvent::observed(&probe).with_tenant("acme"))
+        .expect("append");
+
+    let replayed = journal.replay_current().expect("replay");
+    assert_eq!(replayed.len(), 1);
+    assert_eq!(replayed[0].phash, None);
+    assert_eq!(replayed[0].format, "image/png");
+    assert_eq!((replayed[0].width, replayed[0].height), (320, 200));
+
+    // The absent fingerprint must not appear as a null in the journal line.
+    let line = serde_json::to_string(&replayed[0]).expect("serialise");
+    assert!(
+        !line.contains("phash"),
+        "absent phash should be omitted: {line}"
+    );
 }
 
 #[test]

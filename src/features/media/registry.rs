@@ -22,7 +22,13 @@ pub struct MediaEvent {
     /// RFC-3339 observation timestamp.
     pub ts: String,
     /// Perceptual fingerprint, lowercase hex.
-    pub phash: String,
+    ///
+    /// Absent when the pixels could not be reached without an image decoder.
+    /// Recorded as absent rather than as a placeholder: a fingerprint of
+    /// nothing would collide with every other undecodable image, which is
+    /// worse than admitting we do not have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phash: Option<String>,
     /// Sniffed MIME type.
     pub format: String,
     /// Declared width in pixels.
@@ -43,9 +49,19 @@ impl MediaEvent {
     /// Builds an event from a probe and its fingerprint.
     #[must_use]
     pub fn new(probe: &MediaProbe, phash: PerceptualHash) -> Self {
+        Self::observed(probe).with_phash(phash)
+    }
+
+    /// Builds an event for a payload whose pixels were not reached.
+    ///
+    /// Shape and findings are still worth journaling: an image that was
+    /// refused or could not be decoded is exactly the kind of event an
+    /// operator wants to see afterwards.
+    #[must_use]
+    pub fn observed(probe: &MediaProbe) -> Self {
         Self {
             ts: chrono::Utc::now().to_rfc3339(),
-            phash: phash.to_hex(),
+            phash: None,
             format: probe.format.mime().to_string(),
             width: probe.width,
             height: probe.height,
@@ -53,6 +69,13 @@ impl MediaEvent {
             tenant: None,
             model: None,
         }
+    }
+
+    /// Attaches a perceptual fingerprint.
+    #[must_use]
+    pub fn with_phash(mut self, phash: PerceptualHash) -> Self {
+        self.phash = Some(phash.to_hex());
+        self
     }
 
     /// Attaches the owning tenant.
