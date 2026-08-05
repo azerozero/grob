@@ -406,6 +406,83 @@ mod tests {
         );
     }
 
+    /// Runs a stub OCR sidecar returning `text` for any image.
+    fn start_ocr_stub(text: &'static str) -> (SidecarConfig, tempfile::TempDir) {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("ocr.sock");
+        let listener = tokio::net::UnixListener::bind(&path).expect("bind");
+
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let (reader, mut writer) = tokio::io::split(stream);
+                    let mut line = String::new();
+                    if BufReader::new(reader).read_line(&mut line).await.is_err() {
+                        return;
+                    }
+                    let reply = format!(
+                        r#"{{"version":1,"text":{}}}"#,
+                        serde_json::to_string(text).expect("encode")
+                    );
+                    let _ = writer.write_all(format!("{reply}\n").as_bytes()).await;
+                    let _ = writer.flush().await;
+                });
+            }
+        });
+
+        let mut endpoints = HashMap::new();
+        endpoints.insert(
+            "ocr".to_string(),
+            Endpoint::Unix {
+                path: path.to_string_lossy().into_owned(),
+            },
+        );
+        (
+            SidecarConfig {
+                endpoints,
+                timeout_ms: Some(5_000),
+            },
+            dir,
+        )
+    }
+
+    #[tokio::test]
+    async fn a_secret_read_from_an_image_refuses_the_request() {
+        // The path blocking mode exists for: OCR succeeds, the text contains
+        // a secret, and the request is refused before it reaches a provider.
+        let (sidecar, _sock) = start_ocr_stub("AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE");
+        let config = blocking_config(sidecar, OnFailure::Deny);
+
+        let verdict =
+            inspect_blocking(&request_with_image(&png(400, 300)), &config, Some(&dlp())).await;
+
+        match verdict {
+            Verdict::Deny { reason, rules } => {
+                // Findings, not NotInspected: the sidecar worked perfectly.
+                assert_eq!(reason, DenyReason::Findings);
+                assert!(
+                    rules.iter().any(|r| r.contains("aws_access_key")),
+                    "expected the AWS rule: {rules:?}"
+                );
+            }
+            Verdict::Allow => panic!("a secret read from an image must refuse the request"),
+        }
+    }
+
+    #[tokio::test]
+    async fn clean_text_read_from_an_image_allows_the_request() {
+        // The counterpart: OCR succeeds and finds nothing, so the request
+        // proceeds. Without this, refusing everything would look like success.
+        let (sidecar, _sock) = start_ocr_stub("just a screenshot of a cat");
+        let config = blocking_config(sidecar, OnFailure::Deny);
+
+        let verdict =
+            inspect_blocking(&request_with_image(&png(400, 300)), &config, Some(&dlp())).await;
+        assert!(verdict.is_allowed(), "clean OCR text must not refuse");
+    }
+
     #[tokio::test]
     async fn the_deadline_bounds_the_request_and_denies_by_default() {
         // A wedged sidecar must not hold a request open, and the timeout is
