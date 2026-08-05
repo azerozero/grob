@@ -42,3 +42,7 @@ docs/reviews/
 docs/demos/showcase-rssi/demo.cast
 docs/demos/showcase-rssi/demo.gif
 docs/demos/showcase-rssi/demo.webm
+
+# cargo-mutants run artifacts
+mutants.out/
+mutants.out.old/

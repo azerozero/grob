@@ -64,12 +64,6 @@ impl AgentId {
     }
 }
 
-impl std::fmt::Display for AgentId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
 /// The agent behind a request, and its parent when it was spawned by another.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentContext {
@@ -108,16 +102,19 @@ impl AgentContext {
         if agent_id.is_none() {
             return Self::default();
         }
+        // A self-parented agent is a cycle. Dropping the parent here keeps
+        // the identity (spend is still attributable) while refusing lineage
+        // that would make a hierarchy non-terminating. Detecting it and
+        // storing it anyway would only move the problem to every consumer.
+        let parent_id = if parent_id == agent_id {
+            None
+        } else {
+            parent_id
+        };
         Self {
             agent_id,
             parent_id,
         }
-    }
-
-    /// Returns whether any agent identified itself.
-    #[must_use]
-    pub fn is_identified(&self) -> bool {
-        self.agent_id.is_some()
     }
 
     /// Returns the identifier, when present.
@@ -130,19 +127,6 @@ impl AgentContext {
     #[must_use]
     pub fn parent(&self) -> Option<&str> {
         self.parent_id.as_ref().map(AgentId::as_str)
-    }
-
-    /// Returns whether this agent claims to be its own parent.
-    ///
-    /// A self-parented agent is a malformed lineage: it would make a spend
-    /// hierarchy cyclic, so it is worth detecting even while lineage is only
-    /// being recorded.
-    #[must_use]
-    pub fn is_self_parented(&self) -> bool {
-        match (&self.agent_id, &self.parent_id) {
-            (Some(id), Some(parent)) => id == parent,
-            _ => false,
-        }
     }
 }
 
@@ -211,7 +195,7 @@ mod tests {
     #[test]
     fn a_request_without_headers_carries_no_agent() {
         let context = AgentContext::from_headers(&HeaderMap::new());
-        assert!(!context.is_identified());
+        assert!(context.id().is_none());
         assert_eq!(context.id(), None);
         assert_eq!(context.parent(), None);
     }
@@ -231,7 +215,7 @@ mod tests {
         // Keeping it would produce lineage records with no descendant to
         // attach them to.
         let context = AgentContext::from_headers(&headers(&[(PARENT_AGENT_ID_HEADER, "planner")]));
-        assert!(!context.is_identified());
+        assert!(context.id().is_none());
         assert_eq!(context.parent(), None);
     }
 
@@ -241,7 +225,7 @@ mod tests {
         // bad header must not break a request that would otherwise succeed;
         // enforcement belongs later, against a registry.
         let context = AgentContext::from_headers(&headers(&[(AGENT_ID_HEADER, "bad id!")]));
-        assert!(!context.is_identified());
+        assert!(context.id().is_none());
 
         // A valid agent with a malformed parent keeps its own identity.
         let context = AgentContext::from_headers(&headers(&[
@@ -253,20 +237,22 @@ mod tests {
     }
 
     #[test]
-    fn a_self_parented_agent_is_detected() {
-        // Cyclic lineage would make a future spend hierarchy meaningless, so
-        // it is worth spotting while lineage is still only being recorded.
+    fn a_self_parented_agent_loses_its_cyclic_lineage() {
+        // Detecting a cycle and storing it anyway would push the problem onto
+        // every consumer. The identity survives, so spend stays attributable;
+        // only the impossible lineage is dropped.
         let context = AgentContext::from_headers(&headers(&[
             (AGENT_ID_HEADER, "planner"),
             (PARENT_AGENT_ID_HEADER, "planner"),
         ]));
-        assert!(context.is_self_parented());
+        assert_eq!(context.id(), Some("planner"));
+        assert_eq!(context.parent(), None);
 
         let context = AgentContext::from_headers(&headers(&[
             (AGENT_ID_HEADER, "worker-3"),
             (PARENT_AGENT_ID_HEADER, "planner"),
         ]));
-        assert!(!context.is_self_parented());
+        assert_eq!(context.parent(), Some("planner"));
     }
 
     #[test]
