@@ -786,6 +786,50 @@ fn an_absent_media_section_leaves_the_slice_off() {
     assert!(config.media.sidecar.endpoints.is_empty());
 }
 
+/// Guards against the failure this slice hit three times: code that is
+/// written, tested and merged while nothing calls it.
+///
+/// Unit tests cannot catch it, because each piece passes in isolation. This
+/// walks the source instead and fails when an entry point loses every caller
+/// outside the file that defines it.
+#[test]
+fn every_entry_point_has_a_caller_outside_its_own_file() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+
+    // (symbol, file that defines it, where a caller must exist).
+    let entry_points = [
+        // The dispatch path must call into the slice, or no request is ever
+        // inspected.
+        (
+            "observe_request",
+            "features/media/observe.rs",
+            "server/dispatch/mod.rs",
+        ),
+        // The observation path must use the OCR bridge, or extracted text
+        // never reaches the DLP engine.
+        (
+            "scan_ocr_text",
+            "features/media/scan/text.rs",
+            "features/media/observe.rs",
+        ),
+        // The top-level config must expose the section, or no operator can
+        // switch any of this on.
+        ("MediaConfig", "features/media/config.rs", "config.rs"),
+    ];
+
+    for (symbol, home, expected_caller) in entry_points {
+        let caller = root.join(expected_caller);
+        let contents = std::fs::read_to_string(&caller)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", caller.display()));
+        assert!(
+            contents.contains(symbol),
+            "{symbol} is defined in {home} but {expected_caller} does not \
+             reference it: the feature is unreachable in production. Wire it \
+             up or delete it."
+        );
+    }
+}
+
 #[test]
 fn slice_is_inert_by_default() {
     let config = MediaConfig::default();
