@@ -1,8 +1,8 @@
 //! Generic control engine: `(state, action) → result`.
 //!
 //! Pure dispatch layer shared by CLI, MCP, and UI adapters.
-//! Adapters translate transport-specific inputs into [`Action`] variants
-//! and convert [`ControlResponse`] back to their wire format.
+//! Adapters translate transport-specific inputs into [`Action`](enum@crate::control::engine::Action) variants
+//! and convert [`ControlResponse`](struct@crate::control::engine::ControlResponse) back to their wire format.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

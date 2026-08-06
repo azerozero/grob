@@ -9,7 +9,7 @@
 //! named `claude-sonnet-3-5` would not match a request for
 //! `Claude-3-5-Sonnet-20241022`, even though both refer to the same model.
 //!
-//! [`canonicalize_model_name`] applies a deterministic, idempotent set of
+//! [`canonicalize_model_name`](fn@crate::routing::classify::model_name::canonicalize_model_name) applies a deterministic, idempotent set of
 //! rewrites *before* the `[[models]]` lookup so that user-facing variations
 //! collapse into the configured canonical key.
 //!

@@ -794,8 +794,6 @@ fn test_kill_mutant_635_scan_end_of_stream_url_exfil_branch() {
 #[cfg(feature = "dlp")]
 #[test]
 fn test_kill_mutant_765_scan_input_enabled_reflects_config() {
-    use crate::traits::DlpPipeline;
-
     // scan_input = true → returns true, mutant `-> false` killed.
     let config_true = DlpConfig {
         enabled: true,
@@ -804,7 +802,7 @@ fn test_kill_mutant_765_scan_input_enabled_reflects_config() {
         ..Default::default()
     };
     let engine_true = DlpEngine::from_config(config_true).unwrap();
-    assert!(DlpPipeline::scan_input_enabled(&*engine_true));
+    assert!(engine_true.scan_input_enabled());
 
     // scan_input = false → returns false, mutant `-> true` killed.
     let config_false = DlpConfig {
@@ -814,15 +812,13 @@ fn test_kill_mutant_765_scan_input_enabled_reflects_config() {
         ..Default::default()
     };
     let engine_false = DlpEngine::from_config(config_false).unwrap();
-    assert!(!DlpPipeline::scan_input_enabled(&*engine_false));
+    assert!(!engine_false.scan_input_enabled());
 }
 
 /// Kills: L769 `scan_output_enabled -> bool` (true/false stub).
 #[cfg(feature = "dlp")]
 #[test]
 fn test_kill_mutant_769_scan_output_enabled_reflects_config() {
-    use crate::traits::DlpPipeline;
-
     // scan_output = true → returns true.
     let config_true = DlpConfig {
         enabled: true,
@@ -831,7 +827,7 @@ fn test_kill_mutant_769_scan_output_enabled_reflects_config() {
         ..Default::default()
     };
     let engine_true = DlpEngine::from_config(config_true).unwrap();
-    assert!(DlpPipeline::scan_output_enabled(&*engine_true));
+    assert!(engine_true.scan_output_enabled());
 
     // scan_output = false → returns false.
     let config_false = DlpConfig {
@@ -841,7 +837,7 @@ fn test_kill_mutant_769_scan_output_enabled_reflects_config() {
         ..Default::default()
     };
     let engine_false = DlpEngine::from_config(config_false).unwrap();
-    assert!(!DlpPipeline::scan_output_enabled(&*engine_false));
+    assert!(!engine_false.scan_output_enabled());
 }
 
 // ─── Tests indirect injection (T-A6 ADR-0015) ─────────────────────────────

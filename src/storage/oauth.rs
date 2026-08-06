@@ -1,4 +1,4 @@
-//! OAuth-token persistence for [`GrobStore`] (AES-256-GCM at rest).
+//! OAuth-token persistence for [`crate::storage::GrobStore`] (AES-256-GCM at rest).
 
 use std::path::{Path, PathBuf};
 

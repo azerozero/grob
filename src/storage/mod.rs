@@ -9,9 +9,9 @@
 //! └── vkeys/<hash>.json.enc # AES-256-GCM encrypted virtual keys
 //! ```
 //!
-//! [`GrobStore`] owns one struct with four concerns, each split into its own
-//! submodule of cross-file `impl GrobStore` blocks: [`spend`], [`oauth`],
-//! [`secrets_store`], and [`vkeys`]. This module holds the struct, lifecycle
+//! [`GrobStore`](struct@crate::storage::GrobStore) owns one struct with four concerns, each split into its own
+//! submodule of cross-file `impl GrobStore` blocks: `spend`, `oauth`,
+//! `secrets_store`, and `vkeys`. This module holds the struct, lifecycle
 //! (`open`), and shared helpers.
 
 /// Atomic file write (write → fsync → rename).

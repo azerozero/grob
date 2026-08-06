@@ -1,4 +1,4 @@
-//! Virtual-key persistence for [`GrobStore`] (AES-256-GCM at rest).
+//! Virtual-key persistence for [`crate::storage::GrobStore`] (AES-256-GCM at rest).
 //!
 //! Each record is stored twice: keyed by hash for O(1) auth lookup and by
 //! UUID for management operations.

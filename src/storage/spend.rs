@@ -1,4 +1,4 @@
-//! Spend-journal persistence for [`GrobStore`].
+//! Spend-journal persistence for [`crate::storage::GrobStore`].
 //!
 //! Holds the global and per-tenant append-only JSONL spend journals plus the
 //! hot-path in-memory caches. Split out of `storage/mod.rs` so the storage

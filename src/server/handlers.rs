@@ -424,7 +424,7 @@ fn prepare_dispatch(
 /// (backward compatible).
 ///
 /// Matching is **canonical-vs-canonical**: both the requested model and every
-/// allowed entry are normalised via [`canonicalize_model_name`] so dotted/dated
+/// allowed entry are normalised via [`canonicalize_model_name`](crate::routing::classify::model_name::canonicalize_model_name) so dotted/dated
 /// aliases (e.g. `gpt-5.5` ↔ `gpt-5-5`) compare equal and never trip a false
 /// 403. A verbatim match is also accepted as a fast path.
 ///

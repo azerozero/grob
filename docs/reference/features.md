@@ -319,4 +319,4 @@ Every compliance claim was verified against the actual codebase:
 - **Allocator**: jemalloc (non-MSVC) for ~20% throughput improvement
 - **Container**: 6 MB `FROM scratch`, rustls TLS bundled
 - **Codebase**: ~66K lines of Rust, 1193 tests
-- **Traits**: 7 core abstractions (DlpPipeline, RequestRouter, Tracer, SpendTracking, AuditWriter, EventTap, ProviderAvailability)
+- **Traits**: `LlmProvider` for provider backends, plus `Tracer` and `ProviderAvailability` where dispatch is genuinely polymorphic

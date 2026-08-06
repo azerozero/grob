@@ -427,63 +427,12 @@ impl SpendTracker {
     }
 }
 
-// ── Trait implementation ──
+// ── Reporting accessors ──
 
-impl crate::traits::SpendTracking for SpendTracker {
-    fn record(&mut self, provider: &str, model: &str, cost: f64) {
-        self.record(provider, model, cost);
-    }
-
-    fn record_tenant(&mut self, tenant: &str, provider: &str, model: &str, cost: f64) {
-        self.record_tenant(tenant, provider, model, cost);
-    }
-
-    fn record_attributed(
-        &mut self,
-        tenant: Option<&str>,
-        provider: &str,
-        model: &str,
-        cost: f64,
-        agent: Option<&str>,
-    ) {
-        self.record_attributed(tenant, provider, model, cost, agent);
-    }
-
-    fn check_budget(
-        &self,
-        provider: &str,
-        model: &str,
-        global_limit: f64,
-        provider_limit: Option<f64>,
-        model_limit: Option<f64>,
-    ) -> Result<(), BudgetError> {
-        self.check_budget(provider, model, global_limit, provider_limit, model_limit)
-    }
-
-    fn check_tenant_budget(
-        &self,
-        tenant: Option<&str>,
-        provider: &str,
-        model: &str,
-        tenant_limit: f64,
-        provider_limit: Option<f64>,
-        model_limit: Option<f64>,
-    ) -> Result<(), BudgetError> {
-        self.check_tenant_budget(
-            tenant,
-            provider,
-            model,
-            tenant_limit,
-            provider_limit,
-            model_limit,
-        )
-    }
-
-    fn total(&self) -> f64 {
-        self.total()
-    }
-
-    fn provider_breakdown(&self) -> Vec<(String, f64, u64)> {
+impl SpendTracker {
+    /// Returns the per-provider spend breakdown as `(name, spend_usd, request_count)`.
+    #[must_use]
+    pub fn provider_breakdown(&self) -> Vec<(String, f64, u64)> {
         self.data
             .by_provider
             .iter()
@@ -492,14 +441,6 @@ impl crate::traits::SpendTracking for SpendTracker {
                 (k.clone(), *v, count)
             })
             .collect()
-    }
-
-    fn save(&self) {
-        self.save();
-    }
-
-    fn check_warnings(&self, provider: &str, model: &str, limits: &BudgetLimits) -> Option<String> {
-        self.check_warnings(provider, model, limits)
     }
 }
 

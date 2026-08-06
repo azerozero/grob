@@ -1,8 +1,8 @@
 //! Pluggable secret backends for resolving `secret:<name>` placeholders.
 //!
-//! The default backend ([`LocalEncryptedBackend`]) reuses the AES-256-GCM
-//! store managed by [`GrobStore`]. The other two ([`EnvBackend`],
-//! [`FileBackend`]) are useful in deployments where secrets come from
+//! The default backend ([`LocalEncryptedBackend`](struct@crate::storage::secrets::LocalEncryptedBackend)) reuses the AES-256-GCM
+//! store managed by [`crate::storage::GrobStore`]. The other two ([`EnvBackend`](struct@crate::storage::secrets::EnvBackend),
+//! [`FileBackend`](struct@crate::storage::secrets::FileBackend)) are useful in deployments where secrets come from
 //! Vault Agent, Kubernetes Secret mounts, or a 12-factor-style env.
 
 use crate::cli::{SecretsBackend, SecretsConfig};

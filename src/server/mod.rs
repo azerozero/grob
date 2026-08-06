@@ -149,7 +149,7 @@ pub struct ObservabilityState {
     /// (the default). Resolved once at startup from `[metrics]` config.
     pub metrics_bearer_token: Option<secrecy::SecretString>,
     /// Persistent monthly spend tracker with budget enforcement.
-    pub spend_tracker: tokio::sync::Mutex<Box<dyn traits::SpendTracking>>,
+    pub spend_tracker: tokio::sync::Mutex<crate::features::token_pricing::spend::SpendTracker>,
     /// Shared token pricing table for cost calculation.
     pub pricing_table: SharedPricingTable,
 }
@@ -292,9 +292,8 @@ pub(crate) fn test_app_state_with_source(
     let message_tracer: Arc<dyn traits::Tracer> = Arc::new(
         crate::shared::message_tracing::MessageTracer::new(config.server.tracing.clone()),
     );
-    let spend_tracker: Box<dyn traits::SpendTracking> = Box::new(
-        crate::features::token_pricing::spend::SpendTracker::with_store(grob_store.clone()),
-    );
+    let spend_tracker =
+        crate::features::token_pricing::spend::SpendTracker::with_store(grob_store.clone());
     let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
@@ -404,7 +403,7 @@ pub async fn start_server(
 
     // Coerce concrete types to trait objects for testability
     let tracer: Arc<dyn traits::Tracer> = message_tracer;
-    let tracker: Box<dyn traits::SpendTracking> = Box::new(spend_tracker);
+    let tracker = spend_tracker;
     let provider_availability: Option<Arc<dyn traits::ProviderAvailability>> = provider_scorer
         .clone()
         .map(|scorer| scorer as Arc<dyn traits::ProviderAvailability>)

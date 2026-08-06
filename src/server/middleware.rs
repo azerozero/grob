@@ -408,7 +408,7 @@ pub fn capture_audit_input(request: &Request<Body>) -> AuditMiddlewareCapture {
 /// was written, `false` when the response carried [`AuditedAlready`] (in
 /// which case the dispatch pipeline already wrote a richer entry).
 ///
-/// Extracted from [`audit_log_layer`] so it can be unit-tested without
+/// Extracted from the audit-log middleware layer so it can be unit-tested without
 /// constructing a full `AppState`.
 pub fn emit_request_processed(
     audit_log: &crate::security::AuditLog,
