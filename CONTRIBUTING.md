@@ -69,7 +69,7 @@ feat/* or fix/* ──► main ──► release-plz PR ──► tag v* ──�
   first (`git checkout -b feat/B feat/A`) so the second PR does not need
   a merge when the first lands.
 - Enable auto-merge on every PR as soon as CI starts:
-  `gh pr merge <num> --auto --merge`. Do not wait for CI to merge by
+  `gh pr merge <num> --auto --squash`. Do not wait for CI to merge by
   hand.
 - Releases are handled by release-plz. It watches `main`, opens a
   Release PR with a version bump and changelog entries, and creates the
@@ -114,7 +114,7 @@ example `feat(routing):` or `fix(openai-compat):`).
    style (the squash-merge will use this title).
 2. Fill in the PR description. Describe the problem, the chosen
    approach, the blast radius, and any follow-up work.
-3. Enable auto-merge: `gh pr merge <num> --auto --merge`.
+3. Enable auto-merge: `gh pr merge <num> --auto --squash`.
 4. Wait for the required CI checks to pass. Do not force-push after
    review has started unless you need to rebase onto `main`.
 5. Respond to review comments in the PR thread. One approval from a
