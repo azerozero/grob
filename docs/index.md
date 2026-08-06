@@ -77,8 +77,8 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Provider internals | [Provider Reference](reference/providers.md) |
 | API compatibility | [API Compatibility Reference](reference/api-compatibility.md) |
 | API endpoints | [OpenAPI Spec](openapi.yaml) |
-| OpenAI compatibility | [OpenAI Compatibility](reference/openai-compatibility.md) |
-| Responses API | [Responses API Compatibility](reference/responses-api-compatibility.md) |
+| OpenAI compatibility | [API Compatibility](reference/api-compatibility.md) |
+| Responses API | [API Compatibility](reference/api-compatibility.md) |
 | Error codes | [Error Reference](reference/errors.md) |
 
 ### Understanding Grob

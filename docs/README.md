@@ -27,7 +27,7 @@ Start here: **[Documentation Index](index.md)**
 - [Configuration Reference](reference/configuration.md) -- All TOML config options
 - [CLI Reference](reference/cli.md) -- All commands and flags
 - [Error Reference](reference/errors.md) -- HTTP status codes and error types
-- [OpenAI Compatibility](reference/openai-compatibility.md) -- `/v1/chat/completions` endpoint
+- [API Compatibility](reference/api-compatibility.md) -- `/v1/messages`, `/v1/chat/completions`, `/v1/responses`
 - [HIT Risk Scoring](reference/hit-scoring.md) -- Human-in-the-loop risk scoring details
 - [DLP Indirect Injection Detection](reference/dlp-indirect-injection.md) -- Indirect prompt injection coverage
 - [OpenAPI Specification](openapi.yaml) -- Full API in OpenAPI 3.0
@@ -42,7 +42,3 @@ Start here: **[Documentation Index](index.md)**
 ## Monitoring
 
 Grob exposes Prometheus metrics at `/metrics`. A Grafana dashboard is provided in [grafana-dashboard.json](grafana-dashboard.json).
-
-## Documentation Completeness
-
-See the Documentation Completeness Index reports for scores, gaps, and improvement recommendations: [DLP DCI report](reference/dci-report-dlp.md) and [Responses-compat DCI report](reference/dci-report-responses-compat.md).

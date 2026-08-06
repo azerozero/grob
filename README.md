@@ -16,7 +16,7 @@
 
 ---
 
-**Grob** is a high-performance LLM control plane that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, enforces budgets, records signed audit logs, and fits in a 6 MB container with zero dependencies.
+**Grob** is a high-performance LLM control plane that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, enforces budgets, records signed audit logs, and ships as a 6 MB container with zero dependencies.
 
 > **~90 µs overhead** with DLP, routing, caching, and rate limiting all on the hot path -- sub-millisecond where LiteLLM sits in the milliseconds. Bare proxies post lower numbers by running none of these. [Full methodology and competitor table](docs/reference/benchmarks.md).
 
@@ -44,7 +44,7 @@ flowchart LR
 | Bill shock from runaway LLM usage | **Spend tracking** with per-tenant budgets, monthly caps, and alerts at 80% |
 | Agent context grows until providers return opaque 5xx errors | **Context-window guard** estimates input tokens before dispatch, returns `context_length_exceeded`, and tells Codex/Claude to compact |
 | AI agent executes destructive tool calls without review | **HIT Gateway** -- intercepts every `tool_use` block, enforces per-policy approval rules (auto-approve / require human / deny), supports multisig and quorum |
-| Deploying in air-gapped / sovereign environments | **Single binary, 6 MB, zero dependencies** -- no Python, no PostgreSQL, no Redis |
+| Deploying in air-gapped / sovereign environments | **Single static binary, 6 MB container image, zero dependencies** -- no Python, no PostgreSQL, no Redis |
 
 ## 30-second quickstart
 
