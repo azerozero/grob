@@ -41,7 +41,7 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 ## Key Patterns
 
 - **Config is static at runtime**: Loaded once from TOML into `Arc`. `/api/config/reload` swaps config atomically without restart. In-flight requests continue on old snapshot.
-- **Trait-driven dispatch**: 7+ traits in `src/traits.rs` (LlmProvider, RequestRouter, DlpPipeline, SpendTracking, Tracer, AuditWriter, EventTap, ProviderAvailability) enable testing via mock implementations.
+- **Trait-driven dispatch**: `LlmProvider` (`src/providers/mod.rs`) abstracts every backend. `src/traits.rs` keeps only the abstractions with more than one implementation: `Tracer` and `ProviderAvailability`. Single-implementation types are called directly.
 - **Feature flags**: defaults are `dlp`, `oauth`, `tap`, `compliance`, `mcp`, `watch`, `policies`, `socket-opts`, `dirs`, `jemalloc`, `unix-signals` (see `[features].default` in `Cargo.toml`). `harness` is opt-in (compile with `--features harness`). Disable features at compile time for smaller binaries.
 - **Error types**: `ProviderError` (thiserror) for provider failures, `AppError` for HTTP responses, `anyhow` for CLI/startup.
 - **Streaming-first**: SSE streaming is the primary path. DLP scanning is chunk-based, not buffered.
