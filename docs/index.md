@@ -39,7 +39,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Level | Document | Time |
 |-------|----------|------|
 | First contact | [Getting Started](tutorials/getting-started.md) | 10 min |
-| Quick reference | [Quick Start](tutorials/quickstart.md) | 2 min |
+| Quick reference | [Getting Started, "In a hurry"](tutorials/getting-started.md#in-a-hurry) | 2 min |
 
 ### Task-oriented guides
 
@@ -52,6 +52,12 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Deploy in a container | [How to Deploy Grob](how-to/deploy.md) |
 | Call Grob from Python | [Python SDK Examples](examples/sdk-python.md) |
 | Call Grob from Node.js | [Node SDK Examples](examples/sdk-node.md) |
+| Manage upstream secrets | [Manage Secrets](how-to/manage-secrets.md) |
+| Tune routing from traces | [Auto-tune Routing](how-to/auto-tune-routing.md) |
+| Set up the fuzzy response cache | [Configure the SimHash Cache](how-to/configure-simhash-cache.md) |
+| Override complexity per call | [Use grob_hint](how-to/use-grob-hint.md) |
+| Verify and debug OAuth flows | [OAuth Testing](how-to/oauth-testing.md) |
+| Verify hedge cancellation billing (pre-work for ADR-0020) | [Verify Hedge Cancellation Billing](how-to/verify-hedge-cancellation-billing.md) |
 | Fix common problems | [Troubleshooting](how-to/troubleshooting.md) |
 | Contribute | [How to Contribute](how-to/contribute.md) |
 
@@ -75,10 +81,11 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Benchmarks | [Benchmarks](reference/benchmarks.md) |
 | OWASP LLM Top 10 | [OWASP Coverage](reference/owasp-llm-top10.md) |
 | Provider internals | [Provider Reference](reference/providers.md) |
+| Protocol fidelity (what survives translation) | [Protocol Fidelity Matrix](reference/protocol-fidelity.md) |
 | API compatibility | [API Compatibility Reference](reference/api-compatibility.md) |
 | API endpoints | [OpenAPI Spec](openapi.yaml) |
-| OpenAI compatibility | [API Compatibility](reference/api-compatibility.md) |
-| Responses API | [API Compatibility](reference/api-compatibility.md) |
+| HIT risk scoring | [HIT Risk Scoring](reference/hit-scoring.md) |
+| Indirect prompt injection | [DLP Indirect Injection Detection](reference/dlp-indirect-injection.md) |
 | Error codes | [Error Reference](reference/errors.md) |
 
 ### Understanding Grob
@@ -91,37 +98,42 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Policy engine | [Policy Engine](explanation/policies.md) |
 | Design philosophy | [Design Principles](explanation/design-principles.md) |
 | Gemini specifics | [Gemini Integration](how-to/gemini-integration.md) |
+| OTLP exemplars (why not yet) | [OTLP Exemplars](explanation/otlp-exemplars.md) |
 | Design doc template | [Design Doc Template](design/000-template.md) |
+| Design docs in flight | [`design/`](design/) |
 
 ### Architecture decisions (ADRs)
 
 | ADR | Title |
 |-----|-------|
-| [0001](decisions/0001-static-config-no-hot-reload.md) | Static config, no hot reload |
-| [0002](decisions/0002-custom-oauth-no-crate.md) | Custom OAuth, no crate |
-| [0003](decisions/0003-regex-routing-engine.md) | Regex routing engine |
-| [0004](decisions/0004-persistent-spend-tracking.md) | Persistent spend tracking |
-| [0005](decisions/0005-anthropic-native-provider-trait.md) | Anthropic-native provider trait |
-| [0006](decisions/0006-policy-engine-encrypted-audit-hit-gateway.md) | Policy engine, encrypted audit, HIT gateway |
-| [0007](decisions/0007-openai-compat-dual-surface.md) | OpenAI-compat dual surface |
-| [0008](decisions/0008-wizard-lifecycle.md) | Wizard lifecycle |
-| [0009](decisions/0009-pledge-structural-tool-filtering.md) | Pledge structural tool filtering |
-| [0010](decisions/0010-universal-tool-layer.md) | Universal tool layer |
-| [0011](decisions/0011-control-engine-mcp-tools.md) | Control engine + MCP tools |
-| [0012](decisions/0012-no-unikernel.md) | No unikernel (rejected) |
-| [0013](decisions/0013-storage-files-no-redb.md) | Storage: atomic files, no redb |
-| [0014](decisions/0014-mesh-wireguard-kiss.md) | Mesh: WireGuard KISS |
-| [0015](decisions/0015-indirect-prompt-injection-coverage.md) | Indirect prompt injection coverage |
-| [0016](decisions/0016-decision-tokens-transparent-routing.md) | Decision tokens, transparent routing |
-| [0017](decisions/0017-sokolsky-log-backend.md) | Sokolsky log backend |
-| [0018](decisions/0018-nature-inspired-routing.md) | Nature-inspired routing (RE-1a/RE-1b) |
-| [0019](decisions/0019-ema-stigmergy-endpoint-scoring.md) | EMA stigmergy — adaptive endpoint health scoring (proposed) |
-| [0020](decisions/0020-hedged-requests.md) | Hedged requests — tail-latency reduction (proposed) |
-| [0022](decisions/0022-declarative-endpoints-policies-schema.md) | Declarative `[[endpoints]]` and `[[policies]]` routing schema (proposed) |
-| [0023](decisions/0023-preset-naming-and-composition.md) | Preset naming and composition strategy (proposed) |
-| [0024](decisions/0024-preset-as-compliance-template.md) | Preset-as-compliance-template (proposed) |
-| [0025](decisions/0025-rpc-mutation-transactionality.md) | RPC mutation transactionality and in-flight visibility (proposed) |
-| [0026](decisions/0026-model-name-canonicalization-policy.md) | Model name canonicalization policy (proposed) |
+| [0001](decisions/0001-static-config-no-hot-reload.md) | Explicit API reload — no filesystem hot-reload |
+| [0002](decisions/0002-custom-oauth-no-crate.md) | Custom OAuth implementation — no oauth2 crate |
+| [0003](decisions/0003-regex-routing-engine.md) | Regex-based routing engine |
+| [0004](decisions/0004-persistent-spend-tracking.md) | Persistent spend tracking in redb (GrobStore) (superseded) |
+| [0005](decisions/0005-anthropic-native-provider-trait.md) | Anthropic-native provider trait abstraction |
+| [0006](decisions/0006-policy-engine-encrypted-audit-hit-gateway.md) | Unified Policy Engine, Encrypted Audit Export, and HIT Gateway |
+| [0007](decisions/0007-openai-compat-dual-surface.md) | OpenAI Compatibility — Dual Surface (Chat Completions + Responses) |
+| [0008](decisions/0008-wizard-lifecycle.md) | Wizard Lifecycle Architecture |
+| [0009](decisions/0009-pledge-structural-tool-filtering.md) | Pledge — Structural Tool Filtering for LLM Payloads |
+| [0010](decisions/0010-universal-tool-layer.md) | Universal Tool Layer — Injection, Aliasing, Capability Gating |
+| [0011](decisions/0011-control-engine-mcp-tools.md) | ControlEngine Generic + MCP-Tools-First Configuration Surface |
+| [0012](decisions/0012-no-unikernel.md) | No Unikernel — Prefer Secure-by-Design + seccomp + scratch Image |
+| [0013](decisions/0013-storage-files-no-redb.md) | Storage on Atomic Files + Append-Only Journal — No redb |
+| [0014](decisions/0014-mesh-wireguard-kiss.md) | Mesh Networking — WireGuard KISS, With a Second Profile for Scale (proposed) |
+| [0015](decisions/0015-indirect-prompt-injection-coverage.md) | Indirect Prompt Injection Coverage — Scan Responses and `tool_result` Blocks |
+| [0016](decisions/0016-decision-tokens-transparent-routing.md) | Decision Tokens — Transparent Agent Routing |
+| [0017](decisions/0017-sokolsky-log-backend.md) | Sokolsky LogBackend — Cross-Plane Audit with N-of-N Signatures |
+| [0018](decisions/0018-nature-inspired-routing.md) | Nature-Inspired Routing — Topology vs Policy, Caddy-KISS, Biomimetic Primitives |
+| [0019](decisions/0019-ema-stigmergy-endpoint-scoring.md) | Adaptive Provider Scoring v1 — Provider-Level Score Before `[[endpoints]]` |
+| [0020](decisions/0020-hedged-requests.md) | Hedged Requests — Tail-Latency Reduction via Speculative Duplication (proposed) |
+| [0022](decisions/0022-declarative-endpoints-policies-schema.md) | Declarative `[[endpoints]]` and `[[policies]]` — Routing Schema Rebuild (proposed) |
+| [0023](decisions/0023-preset-naming-and-composition.md) | Preset Naming and Composition Strategy (proposed) |
+| [0024](decisions/0024-preset-as-compliance-template.md) | Preset-as-Compliance-Template — Packaged Compliance Decisions (proposed) |
+| [0025](decisions/0025-rpc-mutation-transactionality.md) | RPC Mutation Transactionality and In-Flight Visibility (proposed) |
+| [0026](decisions/0026-model-name-canonicalization-policy.md) | Model Name Canonicalization Policy (proposed) |
+| [0027](decisions/0027-adopt-system-oauth-credentials.md) | Adopt OAuth Credentials from Co-installed CLIs (proposed) |
+| [0028](decisions/0028-open-core-boundary.md) | Open-Core Boundary — AGPL Core vs Commercial Modules (superseded) |
+| [0029](decisions/0029-relicense-core-apache.md) | Relicense Grob Core to Apache-2.0 |
 
 ### Examples
 
@@ -142,6 +154,11 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | CI/CD release flow (PERT) | [`diagrams/ci-cd-pert.md`](diagrams/ci-cd-pert.md) |
 | Request/dispatch architecture | [`explanation/architecture.md`](explanation/architecture.md) |
 | DLP scanning pipeline | [`reference/dlp.md`](reference/dlp.md) |
+
+## Monitoring
+
+Grob exposes Prometheus metrics at `/metrics`. A Grafana dashboard ships in
+[grafana-dashboard.json](grafana-dashboard.json).
 
 ## Version
 
