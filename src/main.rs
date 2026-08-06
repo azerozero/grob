@@ -223,8 +223,10 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
         }
-        Commands::Completions { shell } => commands::completions::cmd_completions::<Cli>(shell),
-        Commands::SetupCompletions => commands::setup_completions::cmd_setup_completions::<Cli>()?,
+        Commands::Completions { shell } => match shell {
+            Some(shell) => commands::completions::cmd_completions::<Cli>(shell),
+            None => commands::setup_completions::cmd_setup_completions::<Cli>()?,
+        },
         Commands::Env => commands::env::cmd_env(&config),
         Commands::Connect {
             provider,

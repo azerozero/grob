@@ -395,20 +395,20 @@ On Windows, a brief interruption occurs (stop-then-start) because SO_REUSEPORT i
 
 ### `grob completions`
 
-Generate shell completions for the specified shell.
+With no argument, detects the current shell (zsh, bash, or fish) and installs
+completions for it:
+
+```bash
+grob completions
+```
+
+Name a shell to write the script to stdout instead, for packaging or a custom
+install path:
 
 ```bash
 grob completions zsh > ~/.zfunc/_grob
 grob completions bash > /etc/bash_completion.d/grob
 grob completions fish > ~/.config/fish/completions/grob.fish
-```
-
-### `grob setup-completions`
-
-Automatically install shell completions for the current shell (detects zsh, bash, or fish).
-
-```bash
-grob setup-completions
 ```
 
 ### `grob harness` (requires `--features harness`)

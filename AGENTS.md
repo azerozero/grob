@@ -93,7 +93,7 @@ cargo run -- connect       # Interactive credential setup
 cargo run -- init          # Create per-project .grob.toml
 cargo run -- config-diff   # Compare config against preset
 cargo run -- env           # Check required env vars
-cargo run -- setup-completions # Install shell completions
+cargo run -- completions   # Install shell completions for the current shell
 
 # Harness (record & replay testing, requires --features harness)
 cargo run --features harness -- harness record -o traffic.tape.jsonl
