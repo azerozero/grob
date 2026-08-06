@@ -15,6 +15,9 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 - **CI**: GitHub Actions (fmt, clippy, nextest, coverage, cargo-audit, cargo-deny, cargo-hack, cargo-machete)
 - **Container**: Multi-stage build, `FROM scratch` (~6 MB image)
 - **License**: Apache-2.0 core with commercial Admin/Enterprise products
+- **Distribution**: standalone binary, **not published on crates.io**. `crates.io/crates/grob`
+  is an unrelated project ("Growable buffer for Windows API") — never link or `cargo add` it.
+  Install via `brew install azerozero/tap/grob`, the install script, or `ghcr.io/azerozero/grob`.
 
 ## Architecture
 
@@ -42,7 +45,7 @@ Grob accepts requests in Anthropic (`/v1/messages`) and OpenAI (`/v1/chat/comple
 
 - **Config is static at runtime**: Loaded once from TOML into `Arc`. `/api/config/reload` swaps config atomically without restart. In-flight requests continue on old snapshot.
 - **Trait-driven dispatch**: `LlmProvider` (`src/providers/mod.rs`) abstracts every backend. `src/traits.rs` keeps only the abstractions with more than one implementation: `Tracer` and `ProviderAvailability`. Single-implementation types are called directly.
-- **Feature flags**: defaults are `dlp`, `oauth`, `tap`, `compliance`, `mcp`, `watch`, `policies`, `socket-opts`, `dirs`, `jemalloc`, `unix-signals` (see `[features].default` in `Cargo.toml`). `harness` is opt-in (compile with `--features harness`). Disable features at compile time for smaller binaries.
+- **Feature flags**: defaults are `dlp`, `oauth`, `tap`, `compliance`, `mcp`, `watch`, `policies`, `socket-opts`, `dirs`, `jemalloc`, `unix-signals` (see `[features].default` in `Cargo.toml`). `harness` is opt-in (compile with `--features harness`). Disabling a feature removes its wiring (no DLP scan, no tap, no audit log), not much binary weight: `--no-default-features --features oauth,tap,compliance,mcp` measured 16.6 MB against 18.1 MB full. Use the flags to turn behaviour off, not to shrink the binary.
 - **Error types**: `ProviderError` (thiserror) for provider failures, `AppError` for HTTP responses, `anyhow` for CLI/startup.
 - **Streaming-first**: SSE streaming is the primary path. DLP scanning is chunk-based, not buffered.
 - **Environment variable expansion**: API keys in TOML support `$ENV_VAR` syntax resolved at startup.
@@ -60,9 +63,16 @@ feature/* or fix/* ──► PR ──► main ──► (release-plz PR) ──
 - `main` is the only long-lived branch (GitHub Flow). release-plz watches `main` and opens a Release PR when releasable commits land.
 - **`main` is protected** (GitHub ruleset: no deletion, no force push, PR required).
 - **Always work on a feature branch** from `main`: `feat/<topic>` or `fix/<topic>`.
-- **Always enable auto-merge** after creating a PR: `gh pr merge <num> --auto --merge`.
-- **Conventional commits**: `feat:`, `fix:`, `refactor:`, `perf:` trigger version bumps via release-plz. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes.
+- **Always enable auto-merge** after creating a PR: `gh pr merge <num> --auto --squash`.
+  Squash only; merge commits are disabled on the repo and `--merge` is rejected.
+- **Conventional commits**: `feat:`, `fix:`, `refactor:`, `perf:` trigger version bumps via release-plz. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes. The PR title becomes the squash commit, so the **title** is what must be conventional.
 - **Pre-commit hooks** via [prek](https://github.com/j178/prek): run `prek install` after cloning. Hooks run `cargo fmt`, `clippy`, `gitleaks` on commit and tests, audit, deny on push.
+- **Overlapping PRs**: if two PRs touch the same files, branch the second off the first, not off `main`.
+
+[CLAUDE.md](CLAUDE.md) holds the full release mechanics and the reasons behind
+these rules (why squash-only, how release-plz computes the next version). This
+file is the map: what exists and where. CLAUDE.md is the manual: how to write
+code and land it here.
 
 ## Commands
 
@@ -123,7 +133,7 @@ cargo bench --bench hotpath
 - The OpenAI compat endpoint (`/v1/chat/completions`) translates to canonical format internally. Extension fields (response_format, reasoning_effort, seed, logprobs, etc.) are captured for lossless roundtrip but may not be enforced by Anthropic backends.
 - The Responses API endpoint (`/v1/responses`) is used by Codex CLI and OpenAI SDK. It uses named SSE events (`event: response.output_text.delta`) for streaming, flat tool format (no nested `function` wrapper), and `instructions` instead of system messages. Translation logic lives in `src/server/responses_compat/`.
 - Presets live in `presets/*.toml` (shipped with the binary) and user presets in `~/.grob/presets/`.
-- Feature flags are all on by default. To build without DLP: `cargo build --no-default-features --features oauth,tap,compliance,mcp`.
+- Feature flags are all on by default. To build without DLP: `cargo build --no-default-features --features oauth,tap,compliance,mcp`. The `dlp`, `tap`, `compliance` and `oauth` flags gate the initialization path (`server/init.rs`), so the modules still compile in; what disappears is the behaviour, not the code.
 - Anthropic beta features (`anthropic-beta` header) include prompt-caching-scope, interleaved-thinking, fine-grained-tool-streaming, and oauth. Client-provided beta features are merged with server defaults (no duplicates).
 - Routing priority (highest to lowest): WebSearch > Background > AutoMap (name transform) > SubagentTag (model override, returns Default) > PromptRules > Think > Default.
 - `grob exec -- <cmd>` is the recommended way to use Grob. It auto-starts, sets env vars, runs your tool, and auto-stops.
