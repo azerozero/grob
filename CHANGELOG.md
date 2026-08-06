@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.96](https://github.com/azerozero/grob/compare/v0.36.95...v0.36.96) - 2026-08-06
+
+### Other
+
+- delete the dead trait mocks and four redundant docs ([#543](https://github.com/azerozero/grob/pull/543))
+- *(compliance)* correct AI Act article numbers and scope NIS2 honestly ([#542](https://github.com/azerozero/grob/pull/542))
+- *(agents)* guard the streaming attribution path ([#541](https://github.com/azerozero/grob/pull/541))
+- *(agents)* record the request path and the mutation findings ([#540](https://github.com/azerozero/grob/pull/540))
+
 ## [0.36.95](https://github.com/azerozero/grob/compare/v0.36.94...v0.36.95) - 2026-08-05
 
 ### Other
