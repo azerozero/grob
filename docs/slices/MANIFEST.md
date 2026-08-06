@@ -9,34 +9,34 @@
 
 | Slice | LOC | Files | Charter | Purpose |
 |-------|-----|-------|---------|---------|
-| [`auth`](../../src/auth/README.md) | 2.9k | 8 | ✓ | OAuth (PKCE), token store, virtual API keys, JWT validation |
+| [`auth`](../../src/auth/README.md) | 3.8k | 9 | ✓ | OAuth (PKCE), token store, virtual API keys, JWT validation |
 | [`cache`](../../src/cache/README.md) | 935 | 3 | ✓ | Response cache: in-memory LRU + on-disk JSONL replay |
-| [`cli`](../../src/cli/README.md) | 2.1k | 15 | ✓ | TOML config structs, clap derive, env var overrides |
-| [`commands`](../../src/commands/README.md) | 7.9k | 48 | ✓ | CLI command implementations (start, stop, exec, doctor, …) |
-| [`control`](../../src/control/README.md) | 684 | 2 | ✓ | Control-plane primitives shared across surfaces |
-| [`models`](../../src/models/README.md) | 1.3k | 4 | ✓ | `CanonicalRequest`, response types, route classification enums |
-| [`preset`](../../src/preset/README.md) | 1.9k | 4 | ✓ | Preset management (named config bundles) |
-| [`providers`](../../src/providers/README.md) | 5.3k | 19 | ✓ | Anthropic, OpenAI, Gemini, DeepSeek, Ollama provider impls |
-| [`routing`](../../src/routing/README.md) | 3.9k | 11 | ✓ | Classification engine, circuit breaker, health checker |
-| [`security`](../../src/security/README.md) | 3.5k | 12 | ✓ | Rate limiting, audit log, headers, scoring |
-| [`server`](../../src/server/README.md) | 12.9k | 48 | ✓ | Axum server, dispatch pipeline, OpenAI/Responses compat |
-| [`shared`](../../src/shared/README.md) | 1.1k | 7 | ✓ | PID, instance probing, net, OTel, ACME, message tracing |
-| [`storage`](../../src/storage/README.md) | 1.5k | 6 | ✓ | Atomic files, JSONL journals, AES-256-GCM (`GrobStore`) |
+| [`cli`](../../src/cli/README.md) | 2.6k | 16 | ✓ | TOML config structs, clap derive, env var overrides |
+| [`commands`](../../src/commands/README.md) | 8.9k | 48 | ✓ | CLI command implementations (start, stop, exec, doctor, …) |
+| [`control`](../../src/control/README.md) | 846 | 2 | ✓ | Control-plane primitives shared across surfaces |
+| [`models`](../../src/models/README.md) | 614 | 3 | ✓ | `CanonicalRequest`, response types, route classification enums |
+| [`preset`](../../src/preset/README.md) | 2.1k | 4 | ✓ | Preset management (named config bundles) |
+| [`providers`](../../src/providers/README.md) | 11.1k | 21 | ✓ | Anthropic, OpenAI, Gemini, DeepSeek, Ollama provider impls |
+| [`routing`](../../src/routing/README.md) | 6.3k | 13 | ✓ | Classification engine, circuit breaker, health checker |
+| [`security`](../../src/security/README.md) | 4.2k | 13 | ✓ | Rate limiting, audit log, headers, scoring |
+| [`server`](../../src/server/README.md) | 22.2k | 52 | ✓ | Axum server, dispatch pipeline, OpenAI/Responses compat |
+| [`shared`](../../src/shared/README.md) | 2.2k | 9 | ✓ | PID, instance probing, net, OTel, ACME, message tracing |
+| [`storage`](../../src/storage/README.md) | 2.2k | 10 | ✓ | Atomic files, JSONL journals, AES-256-GCM (`GrobStore`) |
 
 ## Feature slices (`src/features/*`)
 
 | Slice | LOC | Files | Charter | Purpose |
 |-------|-----|-------|---------|---------|
-| [`agents`](../../src/features/agents/README.md) | 0.4k | 2 | ✓ | Agent identity and spend attribution (feature `agents`) |
+| [`agents`](../../src/features/agents/README.md) | 387 | 1 | ✓ | Agent identity and spend attribution (feature `agents`) |
 | [`dlp`](../../src/features/dlp/README.md) | 10.0k | 20 | ✓ | DLP engine: secret scanning, PII, prompt injection, canaries |
-| [`harness`](../../src/features/harness/README.md) | 999 | 5 | ✓ | Record & replay sandwich testing (feature `harness`) |
+| [`harness`](../../src/features/harness/README.md) | 1.0k | 5 | ✓ | Record & replay sandwich testing (feature `harness`) |
 | [`log_export`](../../src/features/log_export/README.md) | 651 | 3 | ✓ | Structured log export with age-encrypted content envelopes |
 | [`mcp`](../../src/features/mcp/README.md) | 2.6k | 11 | ✓ | MCP tool matrix and JSON-RPC server |
-| [`media`](../../src/features/media/README.md) | 1.8k | 10 | ✓ | Bounded media decode, perceptual hash, cheap detectors, observation journal (feature `media`) |
-| [`pledge`](../../src/features/pledge/README.md) | 509 | 4 | ✓ | Structural tool stripping per session profile |
-| [`policies`](../../src/features/policies/README.md) | 3.8k | 15 | ✓ | Unified policy engine, HIT gateway, per-action authorization |
-| [`tap`](../../src/features/tap/README.md) | 369 | 2 | ✓ | Webhook tap (request/response event emission) |
-| [`token_pricing`](../../src/features/token_pricing/README.md) | 794 | 2 | ✓ | Spend tracking, monthly budgets, cost calculation |
+| [`media`](../../src/features/media/README.md) | 5.6k | 20 | ✓ | Bounded media decode, perceptual hash, cheap detectors, observation journal (feature `media`) |
+| [`pledge`](../../src/features/pledge/README.md) | 790 | 4 | ✓ | Structural tool stripping per session profile |
+| [`policies`](../../src/features/policies/README.md) | 4.3k | 16 | ✓ | Unified policy engine, HIT gateway, per-action authorization |
+| [`tap`](../../src/features/tap/README.md) | 360 | 2 | ✓ | Webhook tap (request/response event emission) |
+| [`token_pricing`](../../src/features/token_pricing/README.md) | 995 | 2 | ✓ | Spend tracking, monthly budgets, cost calculation |
 | [`tool_layer`](../../src/features/tool_layer/README.md) | 685 | 6 | ✓ | Capability gating, tool aliasing, catalog injection |
 | [`watch`](../../src/features/watch/README.md) | 717 | 3 | ✓ | Live event bus + TUI traffic inspector |
 
