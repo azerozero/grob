@@ -96,14 +96,29 @@ Grob maps its features to specific regulatory requirements. The table below show
 
 ### EU AI Act
 
+Regulation (EU) 2024/1689. Grob is a component, not an AI system placed on the
+market: it produces technical evidence for a deployer or provider, it does not
+make anyone compliant. Article numbers below are those of the final regulation.
+
 | Article | Requirement | Grob Feature | Config |
 |---------|-------------|--------------|--------|
 | **Art. 12** | Record-keeping (logging of AI system usage) | Signed audit log with model name, token counts, timestamps, hash chain | `[compliance] audit_model_name = true`, `audit_token_counts = true` |
 | **Art. 14** | Human oversight (risk classification) | Per-request risk scoring with escalation webhook | `[compliance] risk_classification = true`, `escalation_webhook` |
 | **Art. 15** | Accuracy, robustness, cybersecurity | Prompt injection detection, DLP, circuit breakers | `[dlp] injection = "block"` |
-| **Art. 52** | Transparency obligations | `X-AI-Provider`, `X-AI-Model`, `X-AI-Generated` response headers | `[compliance] transparency_headers = true` |
+| **Art. 19** | Log retention (at least 6 months) | The audit log is strictly append-only — `current.jsonl` is never rotated or purged by grob | `[security] audit_dir` on durable, backed-up storage |
+| **Art. 50** | Transparency obligations | `X-AI-Provider`, `X-AI-Model`, `X-AI-Generated` response headers | `[compliance] transparency_headers = true` |
 
 **Preset**: `grob preset apply eu-ai-act` enables everything in one command.
+
+**What grob does not do for the AI Act**
+
+| Duty | Why it stays with you |
+|------|-----------------------|
+| Art. 4 — AI literacy of staff | An organizational and training duty. |
+| Art. 11 / Annex IV — technical documentation | Grob documents itself, not your AI system. |
+| Art. 27 — fundamental rights impact assessment | A legal assessment, not a proxy feature. |
+| Art. 6 / Annex III — risk classification of *your* use case | Grob's `risk_classification` scores individual requests for security risk. It is not the regulation's high-risk categorisation. |
+| Log deletion on schedule | Grob never deletes. If your retention policy caps at N months, purge `audit_dir` yourself; note this also breaks the hash chain from that point. |
 
 ### GDPR / RGPD
 
@@ -146,12 +161,29 @@ Grob maps its features to specific regulatory requirements. The table below show
 
 ### NIS2 / DORA
 
-| Requirement | Grob Feature |
-|-------------|--------------|
-| ICT risk management | Circuit breakers, adaptive provider scoring, spend budgets |
-| Incident reporting | Signed audit log, escalation webhooks, canary tokens |
-| Digital operational resilience | Multi-provider failover, zero-downtime upgrades, connection warmup |
-| Third-party risk | Per-provider spend tracking, rate limiting, model allowlists |
+NIS2 is transposed in France by the 2025 *résilience des infrastructures critiques
+et cybersécurité* law, with ANSSI as the supervisory authority. Grob is a component
+inside your information system, not the regulated entity. It supplies technical
+measures for Art. 21; the reporting duties and governance duties stay with you.
+
+| Art. 21 measure | Grob feature | Coverage |
+|-----------------|--------------|----------|
+| Business continuity, crisis management | Circuit breakers, multi-provider failover, zero-downtime upgrades, connection warmup | Covered |
+| Risk analysis, ICT risk management | Adaptive provider scoring, spend budgets, rate limits | Covered |
+| Cryptography and encryption | AES-256-GCM credentials at rest, TLS to providers, signed audit entries | Covered |
+| Logging and detection | Hash-chained signed audit log, DLP, canary tokens | Covered |
+| Supply-chain security | SPDX SBOM published on every GitHub release, cosign-signed container images, `cargo-audit` + `cargo-deny` in CI | Covered |
+| Access control | Virtual keys, JWT, per-tenant allowlists | Partial — no MFA/SSO; put grob behind an IdP-aware gateway |
+| Incident handling | Escalation webhook on risk classification | Partial — generic JSON payload, no ANSSI report template |
+
+**What grob does not do for NIS2**
+
+| Duty | Why it stays with you |
+|------|-----------------------|
+| ANSSI incident notification (24 h early warning, 72 h notification, 1 month final report) | The escalation webhook is a signal, not a filing. Wire it into your own incident process. |
+| Registration as an essential/important entity | An organizational duty, not a technical one. |
+| Management-body accountability and training | Out of scope for a proxy. |
+| Supplier due diligence on the LLM providers themselves | Grob routes to them; it cannot audit them. |
 
 ### Compliance presets
 
@@ -179,7 +211,7 @@ Every compliance claim was verified against the actual codebase:
 | 2 | EU AI Act Art. 14 — risk scoring | Implemented | `risk.rs:20-30` scoring: injection=critical, blocked+PII=high |
 | 3 | EU AI Act Art. 14 — escalation webhook | Implemented | `risk.rs:49-87` async POST to configured URL |
 | 4 | EU AI Act Art. 15 — injection detection | Implemented | `prompt_injection.rs` 28 languages + anti-obfuscation |
-| 5 | EU AI Act Art. 52 — transparency headers | Implemented | `middleware.rs:36-52` X-AI-Provider/Model/Generated |
+| 5 | EU AI Act Art. 50 — transparency headers | Implemented | `middleware.rs:36-52` X-AI-Provider/Model/Generated |
 | 6 | GDPR — region routing | Implemented | `helpers.rs` filters providers by region when `gdpr=true` |
 | 7 | GDPR — PII redaction | Implemented | `pii.rs` credit cards (Luhn), IBANs (mod97), BICs |
 | 8 | GDPR — name pseudonymization | Implemented | `names.rs` reversible HMAC-SHA256 mapping |
