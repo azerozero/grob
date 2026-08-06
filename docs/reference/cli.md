@@ -402,6 +402,8 @@ completions for it:
 grob completions
 ```
 
+`setup-completions` remains as a hidden alias of this command.
+
 Name a shell to write the script to stdout instead, for packaging or a custom
 install path:
 
