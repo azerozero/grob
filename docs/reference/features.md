@@ -105,7 +105,7 @@ make anyone compliant. Article numbers below are those of the final regulation.
 | **Art. 12** | Record-keeping (logging of AI system usage) | Signed audit log with model name, token counts, timestamps, hash chain | `[compliance] audit_model_name = true`, `audit_token_counts = true` |
 | **Art. 14** | Human oversight (risk classification) | Per-request risk scoring with escalation webhook | `[compliance] risk_classification = true`, `escalation_webhook` |
 | **Art. 15** | Accuracy, robustness, cybersecurity | Prompt injection detection, DLP, circuit breakers | `[dlp] injection = "block"` |
-| **Art. 19** | Log retention (at least 6 months) | The audit log is strictly append-only — `current.jsonl` is never rotated or purged by grob | `[security] audit_dir` on durable, backed-up storage |
+| **Art. 19** | Log retention (at least 6 months) | The audit log is strictly append-only: `current.jsonl` is never rotated or purged by grob | `[security] audit_dir` on durable, backed-up storage |
 | **Art. 50** | Transparency obligations | `X-AI-Provider`, `X-AI-Model`, `X-AI-Generated` response headers | `[compliance] transparency_headers = true` |
 
 **Preset**: `grob preset apply eu-ai-act` enables everything in one command.
@@ -114,11 +114,11 @@ make anyone compliant. Article numbers below are those of the final regulation.
 
 | Duty | Why it stays with you |
 |------|-----------------------|
-| Art. 4 — AI literacy of staff | An organizational and training duty. |
-| Art. 11 / Annex IV — technical documentation | Grob documents itself, not your AI system. |
-| Art. 27 — fundamental rights impact assessment | A legal assessment, not a proxy feature. |
-| Art. 6 / Annex III — risk classification of *your* use case | Grob's `risk_classification` scores individual requests for security risk. It is not the regulation's high-risk categorisation. |
-| Log deletion on schedule | Grob never deletes. If your retention policy caps at N months, purge `audit_dir` yourself; note this also breaks the hash chain from that point. |
+| Art. 4, AI literacy of staff | An organizational and training duty. |
+| Art. 11 and Annex IV, technical documentation | Grob documents itself, not your AI system. |
+| Art. 27, fundamental rights impact assessment | A legal assessment, not a proxy feature. |
+| Art. 6 and Annex III, risk classification of *your* use case | Grob's `risk_classification` scores individual requests for security risk. It is not the regulation's high-risk categorisation. |
+| Log deletion on schedule | Grob never deletes. If your retention policy caps at N months, purge `audit_dir` yourself. Note this also breaks the hash chain from that point. |
 
 ### GDPR / RGPD
 
@@ -173,8 +173,8 @@ measures for Art. 21; the reporting duties and governance duties stay with you.
 | Cryptography and encryption | AES-256-GCM credentials at rest, TLS to providers, signed audit entries | Covered |
 | Logging and detection | Hash-chained signed audit log, DLP, canary tokens | Covered |
 | Supply-chain security | SPDX SBOM published on every GitHub release, cosign-signed container images, `cargo-audit` + `cargo-deny` in CI | Covered |
-| Access control | Virtual keys, JWT, per-tenant allowlists | Partial — no MFA/SSO; put grob behind an IdP-aware gateway |
-| Incident handling | Escalation webhook on risk classification | Partial — generic JSON payload, no ANSSI report template |
+| Access control | Virtual keys, JWT, per-tenant allowlists | Partial: no MFA/SSO, put grob behind an IdP-aware gateway |
+| Incident handling | Escalation webhook on risk classification | Partial: generic JSON payload, no ANSSI report template |
 
 **What grob does not do for NIS2**
 
