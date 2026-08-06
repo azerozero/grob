@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.97](https://github.com/azerozero/grob/compare/v0.36.96...v0.36.97) - 2026-08-06
+
+### Other
+
+- drop single-impl traits, fix all 49 doc-link warnings, dedupe docs ([#544](https://github.com/azerozero/grob/pull/544))
+
 ## [0.36.96](https://github.com/azerozero/grob/compare/v0.36.95...v0.36.96) - 2026-08-06
 
 ### Other
