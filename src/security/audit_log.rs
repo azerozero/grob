@@ -530,15 +530,6 @@ impl AuditLog {
     }
 }
 
-// ── Trait implementation ──
-
-#[cfg(feature = "compliance")]
-impl crate::traits::AuditWriter for AuditLog {
-    fn write(&self, entry: AuditEntry) -> anyhow::Result<()> {
-        self.write(entry)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
