@@ -342,7 +342,7 @@ impl ProviderRegistry {
     /// Load providers from configuration with model mappings.
     ///
     /// Resolves `secret:<name>` and `$ENV_VAR` placeholders in each
-    /// provider's `api_key` through the supplied [`SecretBackend`] before
+    /// provider's `api_key` through the supplied [`crate::storage::secrets::SecretBackend`] before
     /// building the underlying client. This is the single entry point used
     /// by `server::init`, the CLI `validate` command, and every hot-reload
     /// path; making the backend a required parameter prevents the recurring
@@ -350,7 +350,7 @@ impl ProviderRegistry {
     /// literal placeholder ended up as the bearer token (PR #280, PR #284).
     ///
     /// Callers that have no secrets to resolve — typically tests using
-    /// literal keys — can pass [`storage::secrets::EnvBackend`], which is
+    /// literal keys — can pass [`crate::storage::secrets::EnvBackend`], which is
     /// stateless and a no-op for non-`secret:` / non-`$` strings.
     ///
     /// # Errors

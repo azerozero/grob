@@ -133,7 +133,7 @@ pub fn init_subscriber_with_otel(
 ///
 /// Spans flush on drop of the global provider (opentelemetry 0.28+). The OTLP
 /// log batch processor is explicitly flushed via the retained
-/// [`struct@LOGGER_PROVIDER`] so buffered logs are not lost on exit. Gated behind
+/// the process-wide logger provider so buffered logs are not lost on exit. Gated behind
 /// `#[cfg(feature = "otel")]` so it is not compiled into non-otel builds.
 #[cfg(feature = "otel")]
 pub fn shutdown_otel() {

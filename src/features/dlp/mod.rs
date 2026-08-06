@@ -764,7 +764,7 @@ impl DlpEngine {
 
     /// End-of-stream scan that returns a structured report.
     ///
-    /// Testable variant of [`scan_end_of_stream`]: returns an
+    /// Testable variant of [`DlpEngine::scan_end_of_stream`]: returns an
     /// [`EosScanReport`] with the number of findings detected per category,
     /// so that unit tests can observe the `&&`/`!` branches without having to
     /// capture the global metrics.

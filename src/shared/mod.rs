@@ -5,17 +5,6 @@
 //! vertical-slice foundation (audit item #35) so that `src/` root only
 //! contains genuinely top-level concerns (entry point, lib contract, core
 //! traits).
-//!
-//! Contents:
-//!
-//! - [`acme`] — Automatic TLS certificate provisioning via ACME (feature-gated).
-//! - [`instance`] — Multi-instance coordination (PID + port probing).
-//! - [`log_time`] — Consistent UTC timestamps for all tracing subscribers.
-//! - [`message_tracing`] — Request/response trace pipeline (JSONL with rotation).
-//! - [`net`] — Network binding helpers (SO_REUSEPORT for zero-downtime upgrades).
-//! - [`otel`] — OpenTelemetry subscriber bootstrap.
-//! - `otel_metrics` — OpenTelemetry metrics bridge / fan-out recorder (feature-gated).
-//! - [`pid`] — PID file management for daemon mode.
 
 /// Automatic TLS certificate provisioning via ACME.
 #[cfg(feature = "acme")]

@@ -11,7 +11,7 @@
 //!
 //! OpenAI and Anthropic rotate the `refresh_token` on every refresh, so two
 //! independent holders of the same account's token invalidate each other. The
-//! safe rule therefore differs per source (see [`grob_may_refresh`]): grob may
+//! safe rule therefore differs per source (see [`grob_may_refresh`](fn@crate::auth::system_creds::grob_may_refresh)): grob may
 //! refresh an adopted Codex token (it becomes grob-private), but must treat an
 //! adopted Claude token as a read-only mirror, because that keychain item is
 //! shared by every Claude Code session on the host.
@@ -38,7 +38,7 @@ pub enum SystemSource {
 
 /// Returns the system credential source backing `provider_id`, if grob knows one.
 ///
-/// The ids mirror [`crate::auth::refresh_daemon::config_for_provider_id`].
+/// The ids mirror the provider ids accepted by the OAuth refresh daemon.
 pub fn source_for(provider_id: &str) -> Option<SystemSource> {
     match provider_id {
         "openai-codex" => Some(SystemSource::Codex),

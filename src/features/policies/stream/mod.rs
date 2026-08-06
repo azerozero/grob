@@ -75,7 +75,7 @@ enum HitStreamState {
 /// Performance notes:
 /// - SIMD-accelerated [`memchr::memmem`] for fast `content_block_start` detection.
 /// - Zero-copy passthrough for chunks without tool_use events.
-/// - [`BufferingInput`](HitStreamState::BufferingInput) buffers the entire tool
+/// - The buffering state holds the entire tool
 ///   block (typically < 2 KiB) before emitting any chunk, enabling deny-pattern
 ///   matching on tool arguments.
 ///

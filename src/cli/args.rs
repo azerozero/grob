@@ -491,7 +491,7 @@ pub enum PresetAction {
     Push {
         /// Preset name to push
         name: String,
-        /// Target grob instance URL (e.g., https://grob-qa.example.com)
+        /// Target grob instance URL (e.g., `https://grob-qa.example.com`)
         #[arg(long)]
         target: String,
         /// Skip confirmation prompt
@@ -500,7 +500,7 @@ pub enum PresetAction {
     },
     /// Pull config from a remote grob instance and save as a preset
     Pull {
-        /// Source grob instance URL (e.g., https://grob-prod.example.com)
+        /// Source grob instance URL (e.g., `https://grob-prod.example.com`)
         #[arg(long)]
         from: String,
         /// Name to save the pulled config as

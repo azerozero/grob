@@ -3,10 +3,10 @@
 //! Pairs with the `grob_autotune` MCP tool. Two modes:
 //!
 //! - **suggest** — returns the current classifier weights and thresholds as
-//!   [`TuneSuggestion`] entries. The MVP does not yet infer patches from
+//!   [`TuneSuggestion`](struct@crate::routing::classify::autotune::TuneSuggestion) entries. The MVP does not yet infer patches from
 //!   observed traffic, so `proposed == current` and the rationale points
 //!   the operator at the manual tuning guide.
-//! - **apply** — accepts a list of [`AutotunePatch`] entries and applies
+//! - **apply** — accepts a list of [`AutotunePatch`](struct@crate::routing::classify::autotune::AutotunePatch) entries and applies
 //!   them via the existing `grob_configure` pipeline. This is sugar over
 //!   batching multiple `grob_configure update` calls into one MCP round-trip.
 //!
