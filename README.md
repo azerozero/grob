@@ -236,10 +236,10 @@ diligence, and a hardened configuration. Every implementation claim is [verified
 
 | Regulation | Coverage |
 |------------|----------|
-| **EU AI Act** | Art. 12 (signed audit log with model/tokens), Art. 14 (risk scoring + escalation webhook), Art. 15 (injection detection, 28 languages), Art. 52 (transparency headers) |
+| **EU AI Act** | Art. 12 (signed audit log with model/tokens), Art. 14 (risk scoring + escalation webhook), Art. 15 (injection detection, 28 languages), Art. 50 (transparency headers) |
 | **GDPR/RGPD** | PII redaction, name pseudonymization, EU-only provider routing (`gdpr = true`), canary tokens for leak detection |
 | **HDS/PCI-style evidence** | Hash-chained audit entries, Merkle batch signing, classification NC/C1/C2/C3, AES-256-GCM credentials at rest |
-| **NIS2/DORA** | Multi-provider resilience, escalation webhooks, zero-downtime upgrades |
+| **NIS2/DORA** | Multi-provider resilience, escalation webhooks, zero-downtime upgrades, SBOM on every release. [Reporting duties stay with you](docs/reference/features.md#nis2--dora) |
 
 ```bash
 grob preset apply eu-ai-act   # EU AI Act + GDPR-oriented controls

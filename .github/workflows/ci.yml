@@ -1043,7 +1043,7 @@ jobs:
             --generate-notes \
             --notes-file CHECKSUMS.md \
             $PRERELEASE \
-            artifacts/*.tar.gz artifacts/*.sha256
+            artifacts/*.tar.gz artifacts/*.sha256 artifacts/sbom-grob.spdx.json
 
   homebrew-test:
     name: Test Homebrew install

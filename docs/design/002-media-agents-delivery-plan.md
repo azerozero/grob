@@ -44,7 +44,8 @@
 
 > **Révision après mesure.** Le sidecar est passé de la PR 4 à la PR 2, et C2PA de la
 > PR 5 à la PR 6, derrière le sidecar. Raison : `c2pa` compilé en dur coûte **+7,0 MB**
-> sur un binaire qui en fait 6 (mesure dans le design doc). Trois des couches lourdes
+> sur un binaire qui en fait **17,3** (mesure dans le design doc ; les 6 MB annoncés
+> ailleurs sont l'image conteneur musl, pas le binaire). Trois des couches lourdes
 > (OCR, C2PA, TrustMark) sont donc hors processus, ce qui fait du protocole sidecar la
 > fondation et non un détail d'implémentation. Le noyau ne manipule que `trace_id` et
 > pHash, tous deux légers.
@@ -321,9 +322,11 @@ docs/decisions/0032-content-provenance.md
 **Points de conception**
 
 - **Chemin par défaut : sidecar.** Mesure faite : `c2pa` compilé en dur ajoute
-  **+7,0 MB** à un binaire qui en fait 6, même en `--no-default-features` avec
-  `rust_native_crypto` (240 crates transitives : CBOR, COSE, X.509). Doubler la taille
-  de l'image pour signer des métadonnées n'est pas un arbitrage défendable par défaut.
+  **+7,0 MB** à un binaire de **17,3 MB** (soit +40 %), même en `--no-default-features`
+  avec `rust_native_crypto` (240 crates transitives : CBOR, COSE, X.509). Quatre dixièmes
+  de plus pour signer des métadonnées n'est pas un arbitrage défendable **par défaut**,
+  même si c'est moins spectaculaire que le doublement que ce document affirmait avant
+  que le binaire ne soit mesuré.
 - La feature `media-c2pa` reste disponible pour un binaire unique sans orchestration,
   avec le coût **écrit dans la doc**, pas découvert par l'utilisateur.
 - À savoir avant de commencer : `c2pa::Reader::from_file` exige la feature `file_io`,
