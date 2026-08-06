@@ -101,7 +101,7 @@ cargo run --features harness -- harness replay -t traffic.tape.jsonl
 
 # Presets
 cargo run -- preset list
-cargo run -- preset apply medium
+cargo run -- preset apply perf
 
 # Container
 podman build -f Containerfile -t grob .
