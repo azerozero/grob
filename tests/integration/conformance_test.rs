@@ -23,9 +23,11 @@
 //!
 //! ## Why one server for the whole file
 //!
-//! [`grob::server::start_server`] installs a process-global Prometheus recorder,
-//! so a second server in the same test binary cannot boot. The suite spawns one
-//! server with several configured routes and drives them sequentially.
+//! The Prometheus recorder is a process-global one-shot, so only the first
+//! server in a test binary installs it. Startup tolerates that (a metrics
+//! failure must never block serving, per ADR-0030), but a second server would
+//! still be recording into nothing, so the suite spawns one server with several
+//! configured routes and drives them sequentially.
 
 use std::sync::{Arc, Mutex};
 
