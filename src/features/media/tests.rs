@@ -631,7 +631,9 @@ fn hash_encodes_horizontal_gradients_not_a_constant() {
     assert_eq!(gradient_hash(&rising).0, 0);
 
     let falling_luma: Vec<u8> = ramp
-        .chunks_exact(16)
+        .as_chunks::<16>()
+        .0
+        .iter()
         .flat_map(|row| row.iter().rev().copied())
         .collect();
     let falling = GrayImage::new(16, 16, falling_luma).expect("image");
