@@ -51,7 +51,7 @@ the line requires updating this ADR.
 | HIT / tool authorization | **block (deny)** on every non-approval outcome | `src/server/dispatch/retry.rs:794-806`: explicit deny, dropped channel, and timeout all map to `AuthDecision::Deny` |
 | Secret resolution (api_key `secret:`/`$ENV`) | **block** — resolved before the registry is built; unresolved never ships | `ProviderRegistry::from_configs_with_models` (see ADR trail of #280/#284) |
 | Audit log write | **continue + flag** | audit failure is logged, not fatal |
-| Metrics / OpenTelemetry export | **continue** | export is off the decision path |
+| Metrics / OpenTelemetry export | **continue** | `src/server/init.rs`: recorder install failure is logged, not propagated (the global recorder is a process one-shot, so a second server in one process must still boot) |
 | Token estimate / pricing | **continue (degrade)** | estimate falls back locally; never blocks |
 | Startup provider health probe (`validate_on_start`) | **continue** — opt-in, backgrounded | `src/server/init.rs:84`; never blocks the bind (see the zero-network-startup rule) |
 
