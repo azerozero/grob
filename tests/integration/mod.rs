@@ -2,6 +2,7 @@
 mod audit_middleware_test;
 mod cache_test;
 mod compliance_test;
+mod conformance_test;
 mod dlp_test;
 mod e2e_test;
 mod hit_test;
