@@ -59,6 +59,6 @@ for chunk in stream:
 
 ## See also
 
-- [OpenAI Compatibility](../reference/openai-compatibility.md)
+- [API Compatibility](../reference/api-compatibility.md)
 - [API Compatibility Reference](../reference/api-compatibility.md)
 - [Node SDK guide](sdk-node.md)

@@ -1,8 +1,8 @@
 //! Generic control engine: `(state, action) → result`.
 //!
 //! Pure dispatch layer shared by CLI, MCP, and UI adapters.
-//! Adapters translate transport-specific inputs into [`Action`] variants
-//! and convert [`ControlResponse`] back to their wire format.
+//! Adapters translate transport-specific inputs into [`Action`](enum@crate::control::engine::Action) variants
+//! and convert [`ControlResponse`](struct@crate::control::engine::ControlResponse) back to their wire format.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -54,6 +54,37 @@ pub enum Action {
     Hit(HitAction),
     /// Pledge profile management.
     Pledge(PledgeAction),
+    /// Media provenance queries.
+    Media(MediaAction),
+}
+
+/// Media provenance actions.
+///
+/// The split between the two reads is the whole point. `Verify` answers "did
+/// this image come from here", which is safe to expose widely. `Trace`
+/// answers "who produced it", which names a tenant and is exactly the leak
+/// the opaque handle exists to prevent, so it sits a rung higher.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "op")]
+pub enum MediaAction {
+    /// Reports whether a handle is known to this instance.
+    Verify {
+        /// Hex-rendered provenance handle.
+        trace_id: String,
+    },
+    /// Resolves a handle to its full context.
+    Trace {
+        /// Hex-rendered provenance handle.
+        trace_id: String,
+    },
+    /// Finds records sharing a perceptual fingerprint.
+    ///
+    /// The fallback when a handle was stripped from the file. It reveals the
+    /// same context as `Trace`, so it carries the same requirement.
+    Fingerprint {
+        /// Hex-rendered perceptual fingerprint.
+        phash: String,
+    },
 }
 
 /// Server lifecycle actions.
@@ -328,12 +359,19 @@ pub fn required_role(action: &Action) -> Role {
         | Action::Budget(BudgetAction::Current | BudgetAction::Breakdown)
         | Action::Tools(ToolsAction::List | ToolsAction::Catalog)
         | Action::Hit(HitAction::ListPolicies | HitAction::GetPolicy { .. })
-        | Action::Pledge(PledgeAction::Status | PledgeAction::ListProfiles) => Role::Observer,
+        | Action::Pledge(PledgeAction::Status | PledgeAction::ListProfiles)
+        // "Is this ours?" is a yes/no that names nobody.
+        | Action::Media(MediaAction::Verify { .. }) => Role::Observer,
 
         // Operational mutations
         Action::Server(ServerAction::Reload)
         | Action::Config(ConfigAction::Reload | ConfigAction::Diff | ConfigAction::Get { .. })
-        | Action::Hit(HitAction::Resolve { .. }) => Role::Operator,
+        | Action::Hit(HitAction::Resolve { .. })
+        // Resolving a handle names a tenant, which is precisely what the
+        // opaque identifier keeps out of the image.
+        | Action::Media(MediaAction::Trace { .. } | MediaAction::Fingerprint { .. }) => {
+            Role::Operator
+        }
 
         // Administrative mutations
         Action::Keys(_)
@@ -461,6 +499,28 @@ pub fn parse_method(method: &str, params: Option<&serde_json::Value>) -> Option<
         "grob/pledge/clear" => Action::Pledge(PledgeAction::Clear),
         "grob/pledge/status" => Action::Pledge(PledgeAction::Status),
         "grob/pledge/list_profiles" => Action::Pledge(PledgeAction::ListProfiles),
+        // media
+        "grob/media/verify" => Action::Media(MediaAction::Verify {
+            trace_id: p
+                .get("trace_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        }),
+        "grob/media/trace" => Action::Media(MediaAction::Trace {
+            trace_id: p
+                .get("trace_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        }),
+        "grob/media/fingerprint" => Action::Media(MediaAction::Fingerprint {
+            phash: p
+                .get("phash")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+        }),
 
         _ => return None,
     })
@@ -505,6 +565,10 @@ pub const ALL_METHODS: &[&str] = &[
     "grob/pledge/clear",
     "grob/pledge/status",
     "grob/pledge/list_profiles",
+    // media
+    "grob/media/verify",
+    "grob/media/trace",
+    "grob/media/fingerprint",
 ];
 
 #[cfg(test)]
@@ -692,6 +756,79 @@ mod tests {
                 assert_eq!(context["tenant"], "acme");
             }
             _ => panic!("expected Hit::Resolve"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod media_ns_tests {
+    use super::*;
+
+    #[test]
+    fn verify_is_observer_but_trace_is_operator() {
+        // The split that matters. "Is this ours?" names nobody, so it can be
+        // exposed widely. "Who made it?" names a tenant, which is exactly the
+        // fact the opaque handle keeps out of the image, so it costs a rung.
+        assert_eq!(
+            required_role(&Action::Media(MediaAction::Verify {
+                trace_id: "0000000000000001".into()
+            })),
+            Role::Observer
+        );
+        assert_eq!(
+            required_role(&Action::Media(MediaAction::Trace {
+                trace_id: "0000000000000001".into()
+            })),
+            Role::Operator
+        );
+        // Fingerprint reveals the same context as trace, by another route.
+        assert_eq!(
+            required_role(&Action::Media(MediaAction::Fingerprint {
+                phash: "00000000deadbeef".into()
+            })),
+            Role::Operator
+        );
+    }
+
+    #[test]
+    fn an_observer_cannot_reach_the_tenant_naming_reads() {
+        // Stated as a privilege comparison so a future reshuffle of the role
+        // ladder cannot silently open these up.
+        assert!(!Role::Observer.has_at_least(Role::Operator));
+        assert!(Role::Operator.has_at_least(Role::Observer));
+    }
+
+    #[test]
+    fn media_methods_parse_with_their_parameters() {
+        let params = serde_json::json!({ "trace_id": "00000000deadbeef" });
+        let parsed = parse_method("grob/media/verify", Some(&params));
+        let Some(Action::Media(MediaAction::Verify { trace_id })) = parsed else {
+            panic!("grob/media/verify did not parse into a Verify action");
+        };
+        assert_eq!(trace_id, "00000000deadbeef");
+
+        let params = serde_json::json!({ "phash": "cafebabecafebabe" });
+        let parsed = parse_method("grob/media/fingerprint", Some(&params));
+        let Some(Action::Media(MediaAction::Fingerprint { phash })) = parsed else {
+            panic!("grob/media/fingerprint did not parse into a Fingerprint action");
+        };
+        assert_eq!(phash, "cafebabecafebabe");
+    }
+
+    #[test]
+    fn media_methods_are_discoverable() {
+        // ALL_METHODS drives discovery and the MCP bridge; a method missing
+        // from it exists but cannot be found.
+        for method in [
+            "grob/media/verify",
+            "grob/media/trace",
+            "grob/media/fingerprint",
+        ] {
+            assert!(
+                ALL_METHODS.contains(&method),
+                "{method} is not discoverable"
+            );
+            assert!(parse_method(method, None).is_some());
         }
     }
 }

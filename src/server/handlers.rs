@@ -424,7 +424,7 @@ fn prepare_dispatch(
 /// (backward compatible).
 ///
 /// Matching is **canonical-vs-canonical**: both the requested model and every
-/// allowed entry are normalised via [`canonicalize_model_name`] so dotted/dated
+/// allowed entry are normalised via [`canonicalize_model_name`](crate::routing::classify::model_name::canonicalize_model_name) so dotted/dated
 /// aliases (e.g. `gpt-5.5` ↔ `gpt-5-5`) compare equal and never trip a false
 /// 403. A verbatim match is also accepted as a fast path.
 ///
@@ -674,6 +674,8 @@ pub(crate) async fn handle_openai_chat_completions(
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
+        #[cfg(feature = "agents")]
+        agent: crate::features::agents::AgentContext::from_headers(&headers),
         state: &state,
         inner: &prelude.inner,
         dlp: &prelude.dlp,
@@ -793,6 +795,8 @@ pub(crate) async fn handle_responses(
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
+        #[cfg(feature = "agents")]
+        agent: crate::features::agents::AgentContext::from_headers(&headers),
         state: &state,
         inner: &prelude.inner,
         dlp: &prelude.dlp,
@@ -922,6 +926,8 @@ pub(crate) async fn handle_messages(
         evaluate_policy_if_configured(&state, prelude.tenant_id.as_deref(), &model, &headers);
     let audited_flag = prelude.audited.clone();
     let ctx = dispatch::DispatchContext {
+        #[cfg(feature = "agents")]
+        agent: crate::features::agents::AgentContext::from_headers(&headers),
         state: &state,
         inner: &prelude.inner,
         dlp: &prelude.dlp,

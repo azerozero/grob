@@ -1,11 +1,11 @@
 //! Background daemon that proactively refreshes OAuth tokens before they expire.
 //!
-//! Wakes every [`DEFAULT_TICK_INTERVAL`] and, for each token in the
+//! Wakes every [`DEFAULT_TICK_INTERVAL`](crate::auth::refresh_daemon::DEFAULT_TICK_INTERVAL) and, for each token in the
 //! [`TokenStore`], triggers a refresh if the token expires within
-//! [`DEFAULT_REFRESH_WINDOW`]. On refresh failure (e.g. revoked
+//! [`DEFAULT_REFRESH_WINDOW`](crate::auth::refresh_daemon::DEFAULT_REFRESH_WINDOW). On refresh failure (e.g. revoked
 //! `refresh_token`), the token is marked as needing manual re-authentication.
 //!
-//! The daemon listens on a [`CancellationToken`] for graceful shutdown.
+//! The daemon listens on a [`CancellationToken`](tokio_util::sync::CancellationToken) for graceful shutdown.
 
 use std::time::Duration;
 

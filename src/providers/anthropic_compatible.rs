@@ -90,7 +90,7 @@ fn log_rate_limits(headers: &HashMap<String, String>, provider: &str) {
 
 use super::anthropic_sanitize::{
     restore_original_tool_ids, sanitize_tool_use_ids, strip_all_thinking_signatures,
-    strip_non_anthropic_thinking, OriginalToolIdMap,
+    strip_non_anthropic_thinking, OriginalToolIdMap, RestoreToolIdStream,
 };
 
 /// Merges server-default beta features with client-provided ones, deduplicating.
@@ -421,14 +421,6 @@ impl LlmProvider for AnthropicCompatibleProvider {
         let mut request = request;
         let (url, auth_value, is_anthropic, id_map) =
             self.prepare_anthropic_request(&mut request).await?;
-        // NOTE: Streaming responses pass through unchanged; tool ID
-        // restoration on streamed `content_block_start` events would require
-        // SSE event rewriting and is intentionally out of scope for the
-        // initial Bug #2 fix. The non-streaming path covers the common case
-        // (single response per call). Future work: see TODO at restore call
-        // site below.
-        // TODO: implement SSE-time ID rewrite using `id_map` for streaming.
-        let _ = id_map;
 
         // Try request, fallback: strip all signed thinking blocks on signature error
         let response = match self
@@ -459,8 +451,12 @@ impl LlmProvider for AnthropicCompatibleProvider {
         // Wrap stream with logging to capture cache statistics
         use crate::providers::streaming::LoggingSseStream;
         let byte_stream = response.bytes_stream().map_err(ProviderError::HttpError);
-        let logging_stream =
-            LoggingSseStream::new(byte_stream, self.base.name.clone(), request.model.clone());
+        let restored_stream = RestoreToolIdStream::new(byte_stream, id_map);
+        let logging_stream = LoggingSseStream::new(
+            restored_stream,
+            self.base.name.clone(),
+            request.model.clone(),
+        );
 
         // Return stream with headers for forwarding
         Ok(StreamResponse {

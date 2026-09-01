@@ -38,7 +38,7 @@ Implements compliance-driven primitives shared across the dispatch pipeline: per
 - DLP scanning (see `features::dlp`).
 - Policy decisions (see `features::policies`).
 - Spend tracking (see `features::token_pricing`).
-- Routing logic (see `routing/`). The passive circuit breaker in `routing::circuit_breaker` is distinct from this module's active per-endpoint registry.
+- Routing logic (see `routing/`). Two circuit breakers coexist on purpose and at different granularities: this module's `CircuitBreakerRegistry` is **per provider** and backs the `ProviderAvailability` trait (locked `HashMap`, used for failover decisions), while `routing::circuit_breaker` is **per endpoint** (provider + model pair, lock-free atomics on the hot path, Caddy-style passive). Neither subsumes the other.
 
 ## Tests
 - `tests/integration/security_test.rs` exercises rate limiter and headers end-to-end.

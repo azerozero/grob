@@ -62,6 +62,6 @@ for await (const chunk of stream) {
 
 ## See also
 
-- [OpenAI Compatibility](../reference/openai-compatibility.md)
+- [API Compatibility](../reference/api-compatibility.md)
 - [API Compatibility Reference](../reference/api-compatibility.md)
 - [Python SDK guide](sdk-python.md)

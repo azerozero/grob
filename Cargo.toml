@@ -1,6 +1,6 @@
 [package]
 name = "grob"
-version = "0.36.84"
+version = "0.36.97"
 edition = "2021"
 license = "Apache-2.0"
 description = "High-performance LLM routing proxy — routes to Anthropic, OpenAI, Gemini, DeepSeek, Ollama & more with streaming, tool calling, and multi-provider fallback"
@@ -248,6 +248,8 @@ oauth = []
 tap = []
 compliance = []
 mcp = []
+agents = []
+media = []
 harness = []
 policies = []
 test-util = []

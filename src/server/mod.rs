@@ -149,7 +149,7 @@ pub struct ObservabilityState {
     /// (the default). Resolved once at startup from `[metrics]` config.
     pub metrics_bearer_token: Option<secrecy::SecretString>,
     /// Persistent monthly spend tracker with budget enforcement.
-    pub spend_tracker: tokio::sync::Mutex<Box<dyn traits::SpendTracking>>,
+    pub spend_tracker: tokio::sync::Mutex<crate::features::token_pricing::spend::SpendTracker>,
     /// Shared token pricing table for cost calculation.
     pub pricing_table: SharedPricingTable,
 }
@@ -162,8 +162,11 @@ pub struct SecurityState {
     pub rate_limiter: Option<Arc<RateLimiter>>,
     /// DLP session manager for secret scanning and PII redaction.
     pub dlp_sessions: Option<Arc<DlpSessionManager>>,
-    /// Circuit breakers tracking provider availability.
-    pub circuit_breakers: Option<Arc<dyn traits::ProviderAvailability>>,
+    /// Sole provider-level availability authority used by dispatch.
+    ///
+    /// This is the adaptive scorer when enabled (it forwards outcomes to the
+    /// provider circuit breaker), otherwise the bare provider circuit breaker.
+    pub provider_availability: Option<Arc<dyn traits::ProviderAvailability>>,
     /// Append-only audit log for compliance recording.
     pub audit_log: Option<Arc<AuditLog>>,
     /// LRU response cache for deterministic requests.
@@ -289,9 +292,8 @@ pub(crate) fn test_app_state_with_source(
     let message_tracer: Arc<dyn traits::Tracer> = Arc::new(
         crate::shared::message_tracing::MessageTracer::new(config.server.tracing.clone()),
     );
-    let spend_tracker: Box<dyn traits::SpendTracking> = Box::new(
-        crate::features::token_pricing::spend::SpendTracker::with_store(grob_store.clone()),
-    );
+    let spend_tracker =
+        crate::features::token_pricing::spend::SpendTracker::with_store(grob_store.clone());
     let pricing_table = crate::features::token_pricing::init_pricing_table(&config.pricing);
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
@@ -331,7 +333,7 @@ pub(crate) fn test_app_state_with_source(
             jwt_validator: None,
             rate_limiter: None,
             dlp_sessions: None,
-            circuit_breakers: None,
+            provider_availability: None,
             audit_log: None,
             response_cache: None,
             tap_sender: None,
@@ -401,9 +403,11 @@ pub async fn start_server(
 
     // Coerce concrete types to trait objects for testability
     let tracer: Arc<dyn traits::Tracer> = message_tracer;
-    let tracker: Box<dyn traits::SpendTracking> = Box::new(spend_tracker);
-    let availability: Option<Arc<dyn traits::ProviderAvailability>> =
-        circuit_breakers.map(|cb| cb as Arc<dyn traits::ProviderAvailability>);
+    let tracker = spend_tracker;
+    let provider_availability: Option<Arc<dyn traits::ProviderAvailability>> = provider_scorer
+        .clone()
+        .map(|scorer| scorer as Arc<dyn traits::ProviderAvailability>)
+        .or_else(|| circuit_breakers.map(|cb| cb as Arc<dyn traits::ProviderAvailability>));
 
     let log_exporter = crate::features::log_export::init_log_exporter(&config.log_export);
 
@@ -462,7 +466,7 @@ pub async fn start_server(
             jwt_validator,
             rate_limiter,
             dlp_sessions,
-            circuit_breakers: availability,
+            provider_availability,
             audit_log,
             response_cache,
             tap_sender,

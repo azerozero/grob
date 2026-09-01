@@ -11,6 +11,31 @@ use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
+/// Top-level config keys whose consumers are rebuilt or read from the atomic
+/// [`super::ReloadableState`] snapshot.
+///
+/// Everything else fails closed: adding a new config section cannot silently
+/// become "reloadable" while its runtime subsystem still uses startup state.
+const RELOADABLE_SECTIONS: &[&str] = &[
+    "version",
+    "router",
+    "providers",
+    "models",
+    "tiers",
+    "classifier",
+    "budget",
+    "secrets",
+    "compliance",
+    "user",
+    "pledge",
+    "tool_validation",
+    "policies",
+];
+
+/// Message prefix returned when a reload changes startup-only configuration.
+pub const RESTART_REQUIRED_MSG: &str =
+    "configuration change requires a daemon restart; reload was not applied";
+
 /// Top-level TOML sections that are never writable via any config API.
 ///
 /// Each entry is denied because hot-reloading it cannot be done safely
@@ -140,6 +165,50 @@ pub fn ensure_metrics_auth_reloadable(
     Ok(())
 }
 
+/// Rejects candidates that would make the atomic config snapshot disagree with
+/// subsystems initialized only at process startup.
+///
+/// The comparison is fail-closed at the top-level TOML key boundary. Only keys
+/// in [`RELOADABLE_SECTIONS`] may change. The resolved metrics token check is
+/// retained separately so edits to the contents of an unchanged token file are
+/// also detected.
+///
+/// # Errors
+///
+/// Returns a restart-required message naming the first startup-only section
+/// that changed, or a serialization error.
+pub fn ensure_config_reloadable(
+    state: &Arc<super::AppState>,
+    candidate: &crate::config::AppConfig,
+) -> Result<(), String> {
+    ensure_metrics_auth_reloadable(state, candidate)?;
+
+    let live = toml::Value::try_from(&state.snapshot().config)
+        .map_err(|e| format!("failed to compare live configuration: {e}"))?;
+    let candidate = toml::Value::try_from(candidate)
+        .map_err(|e| format!("failed to compare candidate configuration: {e}"))?;
+    let live = live
+        .as_table()
+        .ok_or_else(|| "live configuration did not serialize as a TOML table".to_string())?;
+    let candidate = candidate
+        .as_table()
+        .ok_or_else(|| "candidate configuration did not serialize as a TOML table".to_string())?;
+
+    let changed = live
+        .keys()
+        .chain(candidate.keys())
+        .filter(|key| !RELOADABLE_SECTIONS.contains(&key.as_str()))
+        .find(|key| live.get(*key) != candidate.get(*key));
+
+    if let Some(section) = changed {
+        return Err(format!(
+            "{RESTART_REQUIRED_MSG}: [{section}] is initialized only at startup"
+        ));
+    }
+
+    Ok(())
+}
+
 /// Validates a key update against the deny-list using [`ConfigSection`].
 ///
 /// Delegates to [`is_section_or_key_denied`] after converting the enum to a
@@ -180,10 +249,9 @@ pub async fn persist_and_reload(
         }
     };
 
-    // Reject a `/metrics` token change BEFORE any persistence, so the on-disk
-    // config and the running token never diverge (the token is resolved once at
-    // startup and cannot be hot-applied).
-    ensure_metrics_auth_reloadable(state, config).map_err(super::RequestError::BadRequest)?;
+    // Reject startup-only changes BEFORE persistence, so disk and runtime never
+    // diverge even when a config mutation path misses its field-level deny-list.
+    ensure_config_reloadable(state, config).map_err(super::RequestError::BadRequest)?;
 
     // 1. Backup
     let backup_path = config_path.with_extension("toml.backup");
@@ -408,6 +476,33 @@ actual_model = "alpha"
             err.contains("restart") || err.contains("could not be read"),
             "message must explain the rejection: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn startup_only_section_change_is_rejected() {
+        use crate::providers::ProviderRegistry;
+
+        let config = guard_config("");
+        let live = crate::server::test_app_state(config.clone(), ProviderRegistry::new());
+        let mut candidate = config;
+        candidate.security.rate_limit_rps += 1;
+
+        let err = ensure_config_reloadable(&live, &candidate)
+            .expect_err("startup-only security state must not split from config");
+        assert!(err.contains("[security]"), "unexpected message: {err}");
+    }
+
+    #[tokio::test]
+    async fn reloadable_section_change_is_allowed() {
+        use crate::providers::ProviderRegistry;
+
+        let config = guard_config("");
+        let live = crate::server::test_app_state(config.clone(), ProviderRegistry::new());
+        let mut candidate = config;
+        candidate.router.default = "beta".to_string();
+
+        ensure_config_reloadable(&live, &candidate)
+            .expect("router is rebuilt as part of the atomic reload state");
     }
 
     // #3: persist_and_reload must reject a token change BEFORE persisting. The

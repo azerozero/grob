@@ -139,6 +139,8 @@ api_key = "my-secret-key"
             harness: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
+            #[cfg(feature = "media")]
+            media: Default::default(),
         };
 
         let router = grob::routing::classify::Router::new(config);
@@ -210,6 +212,8 @@ api_key = "my-secret-key"
             harness: Default::default(),
             #[cfg(feature = "mcp")]
             mcp: Default::default(),
+            #[cfg(feature = "media")]
+            media: Default::default(),
         };
 
         let router = grob::routing::classify::Router::new(config);

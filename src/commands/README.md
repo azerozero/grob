@@ -8,7 +8,7 @@ Hosts the imperative entry points dispatched from `main.rs` after clap parses th
 ## Public API
 | Item | Location | Used by |
 |------|----------|---------|
-| `cmd_init`, `cmd_env`, `cmd_completions`, `cmd_setup_completions` | `init.rs`, `env.rs`, `completions.rs`, `setup_completions.rs` | `main.rs` |
+| `cmd_init`, `cmd_env`, `cmd_completions`, `cmd_setup_completions` | `init.rs`, `env.rs`, `completions.rs`, `setup_completions.rs` | `main.rs` (both completion paths dispatch from `grob completions`) |
 | `cmd_secrets_{add,list,show,rm}` | `secrets.rs` | `main.rs` |
 | `cmd_logs_decrypt` | `logs.rs` | `main.rs` |
 | `cmd_preset_info`, `cmd_preset_export` | `preset.rs` | `main.rs` |

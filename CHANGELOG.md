@@ -7,6 +7,136 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.97](https://github.com/azerozero/grob/compare/v0.36.96...v0.36.97) - 2026-08-06
+
+### Other
+
+- drop single-impl traits, fix all 49 doc-link warnings, dedupe docs ([#544](https://github.com/azerozero/grob/pull/544))
+
+## [0.36.96](https://github.com/azerozero/grob/compare/v0.36.95...v0.36.96) - 2026-08-06
+
+### Other
+
+- delete the dead trait mocks and four redundant docs ([#543](https://github.com/azerozero/grob/pull/543))
+- *(compliance)* correct AI Act article numbers and scope NIS2 honestly ([#542](https://github.com/azerozero/grob/pull/542))
+- *(agents)* guard the streaming attribution path ([#541](https://github.com/azerozero/grob/pull/541))
+- *(agents)* record the request path and the mutation findings ([#540](https://github.com/azerozero/grob/pull/540))
+
+## [0.36.95](https://github.com/azerozero/grob/compare/v0.36.94...v0.36.95) - 2026-08-05
+
+### Other
+
+- *(agents)* drop dead API and enforce the lineage invariant ([#538](https://github.com/azerozero/grob/pull/538))
+
+## [0.36.94](https://github.com/azerozero/grob/compare/v0.36.93...v0.36.94) - 2026-08-05
+
+### Added
+
+- *(agents)* attribute request spend to the calling agent ([#537](https://github.com/azerozero/grob/pull/537))
+- *(agents)* agent identity and spend attribution ([#535](https://github.com/azerozero/grob/pull/535))
+- *(control)* media provenance namespace with a role split ([#533](https://github.com/azerozero/grob/pull/533))
+- *(media)* opaque provenance handles and their registry ([#530](https://github.com/azerozero/grob/pull/530))
+
+### Other
+
+- *(design)* mark PR A1 delivered ([#536](https://github.com/azerozero/grob/pull/536))
+- *(design)* split PR 7 and mark the RPC surface delivered ([#534](https://github.com/azerozero/grob/pull/534))
+- *(design)* split PR 6 and mark the trace registry delivered ([#532](https://github.com/azerozero/grob/pull/532))
+- *(design)* mark PR 5 delivered ([#529](https://github.com/azerozero/grob/pull/529))
+- *(media)* cover the OCR success path in blocking mode ([#528](https://github.com/azerozero/grob/pull/528))
+
+## [0.36.93](https://github.com/azerozero/grob/compare/v0.36.92...v0.36.93) - 2026-08-05
+
+### Added
+
+- *(media)* blocking inspection, fail-closed by default ([#526](https://github.com/azerozero/grob/pull/526))
+
+### Other
+
+- *(media)* guard against entry points losing their callers ([#525](https://github.com/azerozero/grob/pull/525))
+
+## [0.36.92](https://github.com/azerozero/grob/compare/v0.36.91...v0.36.92) - 2026-08-05
+
+### Added
+
+- *(media)* connect OCR-to-DLP to the actual request path ([#523](https://github.com/azerozero/grob/pull/523))
+- *(media)* reinject OCR text into the existing DLP engine ([#521](https://github.com/azerozero/grob/pull/521))
+- *(media)* request-path entry point for out-of-band inspection ([#518](https://github.com/azerozero/grob/pull/518))
+
+### Other
+
+- *(design)* mark PR 4 delivered ([#522](https://github.com/azerozero/grob/pull/522))
+- *(design)* mark PR 3b delivered ([#520](https://github.com/azerozero/grob/pull/520))
+
+## [0.36.91](https://github.com/azerozero/grob/compare/v0.36.90...v0.36.91) - 2026-08-05
+
+### Added
+
+- *(media)* make the media configuration reachable from config.toml ([#516](https://github.com/azerozero/grob/pull/516))
+
+## [0.36.90](https://github.com/azerozero/grob/compare/v0.36.89...v0.36.90) - 2026-08-05
+
+### Added
+
+- *(media)* make the reference sidecar actually perform OCR ([#514](https://github.com/azerozero/grob/pull/514))
+
+## [0.36.89](https://github.com/azerozero/grob/compare/v0.36.88...v0.36.89) - 2026-08-05
+
+### Added
+
+- *(media)* stateless sidecar protocol for out-of-process capabilities ([#512](https://github.com/azerozero/grob/pull/512))
+
+## [0.36.88](https://github.com/azerozero/grob/compare/v0.36.87...v0.36.88) - 2026-08-05
+
+### Added
+
+- enforce the 100% doc coverage invariant with a lint ([#510](https://github.com/azerozero/grob/pull/510))
+
+### Other
+
+- *(media)* record mutation coverage in the slice charter ([#509](https://github.com/azerozero/grob/pull/509))
+- *(media)* close the mutation gap on perceptual hashing ([#508](https://github.com/azerozero/grob/pull/508))
+- *(media)* close the mutation gap on the decode safety boundary ([#507](https://github.com/azerozero/grob/pull/507))
+- *(design)* mark PR 3 delivered and record the mutation-testing lesson ([#506](https://github.com/azerozero/grob/pull/506))
+- *(media)* kill 20 surviving mutants in the scan detectors ([#505](https://github.com/azerozero/grob/pull/505))
+
+## [0.36.87](https://github.com/azerozero/grob/compare/v0.36.86...v0.36.87) - 2026-08-04
+
+### Added
+
+- *(media)* cheap detectors for metadata leaks and appended payloads ([#504](https://github.com/azerozero/grob/pull/504))
+- *(media)* bounded decode, perceptual hashing, and observation journal ([#501](https://github.com/azerozero/grob/pull/501))
+
+### Other
+
+- *(design)* track delivery status in the media and agents plan ([#502](https://github.com/azerozero/grob/pull/502))
+
+## [0.36.86](https://github.com/azerozero/grob/compare/v0.36.85...v0.36.86) - 2026-08-04
+
+### Fixed
+
+- *(policies)* enforce decision token expiry and audience ([#500](https://github.com/azerozero/grob/pull/500))
+- harden critical architecture boundaries ([#493](https://github.com/azerozero/grob/pull/493))
+
+### Other
+
+- *(design)* validate the OCR-to-DLP hypothesis against the real engine ([#499](https://github.com/azerozero/grob/pull/499))
+- *(design)* measure L2 watermark robustness, correct layer table ([#498](https://github.com/azerozero/grob/pull/498))
+- *(design)* measure TrustMark cost and pHash robustness contract ([#497](https://github.com/azerozero/grob/pull/497))
+- *(design)* correct c2pa cost with real measurements, reorder media plan ([#496](https://github.com/azerozero/grob/pull/496))
+- *(design)* image/video DLP, content provenance, and agent control plane ([#495](https://github.com/azerozero/grob/pull/495))
+- *(reference)* add the protocol fidelity matrix ([#490](https://github.com/azerozero/grob/pull/490))
+
+## [0.36.85](https://github.com/azerozero/grob/compare/v0.36.84...v0.36.85) - 2026-07-28
+
+### Fixed
+
+- *(openai)* preserve tool-result images on the Responses (Codex) path ([#488](https://github.com/azerozero/grob/pull/488))
+
+### Other
+
+- *(docs)* exclude flaky istio.io from lychee link check ([#483](https://github.com/azerozero/grob/pull/483))
+
 ## [0.36.84](https://github.com/azerozero/grob/compare/v0.36.83...v0.36.84) - 2026-07-27
 
 ### Fixed
