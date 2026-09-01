@@ -49,6 +49,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Configure OAuth | [OAuth Setup](how-to/oauth-setup.md) |
 | Configure DLP | [How to Configure DLP](how-to/dlp.md) |
 | Configure options | [How to Configure Grob](how-to/configure.md) |
+| Keep replicas consistent (HA) | [Multi-Replica Consistency](how-to/multi-replica-consistency.md) |
 | Deploy in a container | [How to Deploy Grob](how-to/deploy.md) |
 | Call Grob from Python | [Python SDK Examples](examples/sdk-python.md) |
 | Call Grob from Node.js | [Node SDK Examples](examples/sdk-node.md) |

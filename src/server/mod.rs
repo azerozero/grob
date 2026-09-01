@@ -27,6 +27,7 @@ mod oauth_handlers;
 pub mod openai_compat;
 /// OpenAI Responses API (`/v1/responses`) compatibility translation layer.
 pub mod responses_compat;
+pub mod revision;
 /// Unified JSON-RPC 2.0 Control Plane.
 pub mod rpc;
 #[cfg(feature = "watch")]
@@ -94,6 +95,19 @@ pub struct ReloadableState {
     /// part of the reloadable config — policy rule updates take effect immediately.
     #[cfg(feature = "policies")]
     pub policy_matcher: Option<Arc<crate::features::policies::matcher::PolicyMatcher>>,
+    /// Content hash of `config`, stamped when this snapshot was built.
+    ///
+    /// Computed once here rather than on demand: every reload path goes through
+    /// [`ReloadableState::new`], so the revision cannot drift from the config it
+    /// describes, and `/health` stays a cheap read.
+    pub config_revision: revision::Revision,
+    /// Content hash of the policy set alone.
+    ///
+    /// Separate from `config_revision` because policies are the part an auditor
+    /// cares about: a provider `base_url` change moves the config revision while
+    /// leaving the enforced policy identical, and conflating the two would make
+    /// "did the policy change?" unanswerable.
+    pub policy_revision: revision::Revision,
 }
 
 impl ReloadableState {
@@ -116,6 +130,14 @@ impl ReloadableState {
             .collect();
         #[cfg(feature = "policies")]
         let policy_matcher = init::init_policies(&config);
+        let config_revision = revision::compute(&config);
+        #[cfg(feature = "policies")]
+        let policy_revision = revision::compute(&config.policies);
+        // Without the feature there is no policy set to hash; an empty slice
+        // gives a stable, honest value rather than reusing the config revision
+        // and implying a policy identity that does not exist.
+        #[cfg(not(feature = "policies"))]
+        let policy_revision = revision::compute::<[(); 0]>(&[]);
         Self {
             config,
             router,
@@ -123,6 +145,8 @@ impl ReloadableState {
             model_index,
             #[cfg(feature = "policies")]
             policy_matcher,
+            config_revision,
+            policy_revision,
         }
     }
 
@@ -854,6 +878,9 @@ async fn handle_rpc(
             &caller.ip,
             0,
         )
+        // The revision *before* the call: this line records the state the
+        // mutation was applied to, so a reload chain can be replayed in order.
+        .policy_revision(state.snapshot().policy_revision.full())
         .build();
         if let Err(e) = audit_log.write(entry) {
             tracing::error!(error = %e, "RPC audit write failed");

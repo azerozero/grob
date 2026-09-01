@@ -97,6 +97,7 @@ fn build_audit_entry(
         batch_index: None,
         merkle_root: None,
         merkle_proof: None,
+        policy_revision: None,
     }
 }
 
