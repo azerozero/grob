@@ -261,10 +261,8 @@ impl crate::traits::ProviderAvailability for ProviderScorer {
         self.can_execute(provider).await
     }
 
-    async fn record_success(&self, provider: &str) {
-        // Record with 0 latency when called through the trait (latency unknown).
-        // The dispatch layer should call record_success(provider, latency_ms) directly.
-        self.record_success(provider, 0).await;
+    async fn record_success(&self, provider: &str, latency_ms: u64) {
+        self.record_success(provider, latency_ms).await;
     }
 
     async fn record_failure(&self, provider: &str) {
@@ -313,6 +311,17 @@ mod tests {
         let scores = scorer.scores.read().await;
         let s = scores.get("p1").unwrap();
         assert!((s.success_rate() - 0.6).abs() < 0.01);
+    }
+
+    #[tokio::test]
+    async fn availability_trait_preserves_success_latency() {
+        let scorer = ProviderScorer::new(test_config(), None);
+
+        crate::traits::ProviderAvailability::record_success(&scorer, "p1", 250).await;
+
+        let details = scorer.all_score_details().await;
+        let (_, latency, _) = details.get("p1").expect("provider score recorded");
+        assert_eq!(*latency, 250.0);
     }
 
     #[tokio::test]

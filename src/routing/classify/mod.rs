@@ -473,13 +473,5 @@ impl Router {
     }
 }
 
-// ── Trait implementation ──
-
-impl crate::traits::RequestRouter for Router {
-    fn route(&self, request: &mut CanonicalRequest) -> Result<RouteDecision> {
-        self.route(request)
-    }
-}
-
 #[cfg(test)]
 mod tests;

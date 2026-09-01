@@ -213,6 +213,7 @@ pub(crate) async fn record_spend(
     model_name: &str,
     cost: f64,
     tenant_id: Option<&str>,
+    agent_id: Option<&str>,
 ) {
     if cost <= 0.0 {
         return;
@@ -223,7 +224,7 @@ pub(crate) async fn record_spend(
 
     match mode {
         crate::cli::TokenCountingMode::Api => {
-            commit_spend(state, provider_name, model_name, cost, tenant_id).await;
+            commit_spend(state, provider_name, model_name, cost, tenant_id, agent_id).await;
         }
         crate::cli::TokenCountingMode::Estimate => {
             // Consolidate the API-reported cost asynchronously so the response
@@ -232,8 +233,17 @@ pub(crate) async fn record_spend(
             let provider = provider_name.to_string();
             let model = model_name.to_string();
             let tenant = tenant_id.map(str::to_string);
+            let agent = agent_id.map(str::to_string);
             tokio::spawn(async move {
-                commit_spend(&state, &provider, &model, cost, tenant.as_deref()).await;
+                commit_spend(
+                    &state,
+                    &provider,
+                    &model,
+                    cost,
+                    tenant.as_deref(),
+                    agent.as_deref(),
+                )
+                .await;
             });
         }
     }
@@ -246,13 +256,10 @@ async fn commit_spend(
     model_name: &str,
     cost: f64,
     tenant_id: Option<&str>,
+    agent_id: Option<&str>,
 ) {
     let mut tracker = state.observability.spend_tracker.lock().await;
-    if let Some(tenant) = tenant_id {
-        tracker.record_tenant(tenant, provider_name, model_name, cost);
-    } else {
-        tracker.record(provider_name, model_name, cost);
-    }
+    tracker.record_attributed(tenant_id, provider_name, model_name, cost, agent_id);
 }
 
 /// Returns `true` when token counting runs in off-hot-path estimate mode.

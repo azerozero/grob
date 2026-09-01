@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Sanitizes outbound LLM requests and inbound responses against secret leaks, PII disclosure, prompt injection, and URL-based exfiltration (anti-EchoLeak). Implements the [`crate::traits::DlpPipeline`] trait so the dispatch layer stays decoupled from detection internals. Detection runs in five stages: name anonymization, DFA secret scan, PII validators (Luhn / mod-97 / ISO 9362), URL exfiltration, prompt injection.
+Sanitizes outbound LLM requests and inbound responses against secret leaks, PII disclosure, prompt injection, and URL-based exfiltration (anti-EchoLeak). Detection runs in five stages: name anonymization, DFA secret scan, PII validators (Luhn / mod-97 / ISO 9362), URL exfiltration, prompt injection.
 
 ## Public API
 
@@ -37,7 +37,6 @@ Sanitizes outbound LLM requests and inbound responses against secret leaks, PII 
 ## Depends on
 
 - `crate::models` — `CanonicalRequest`, `MessageContent`, `ContentBlock`.
-- `crate::traits::DlpPipeline` — trait surface implemented here.
 - `regex`, `aho-corasick`, `ed25519-dalek`, `tokio`, `tracing`, `metrics`.
 
 ## Non-goals

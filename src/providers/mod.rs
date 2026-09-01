@@ -271,6 +271,7 @@ pub use registry::ProviderRegistry;
 
 // ── Test mocks ───────────────────────────────────────────────────────────────
 
+/// Mock provider implementations for tests and downstream integration suites.
 #[cfg(any(test, feature = "test-util"))]
 pub mod mocks {
     use super::*;

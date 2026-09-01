@@ -2,6 +2,20 @@
 
 This tutorial walks you through installing Grob, configuring it with a preset, and using it with Claude Code. By the end, you will have a working LLM routing proxy with automatic provider fallback.
 
+## In a hurry
+
+Three commands, assuming an Anthropic Pro or Max subscription:
+
+```bash
+brew install azerozero/tap/grob   # or: curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
+grob preset apply perf
+grob exec -- claude
+```
+
+A browser opens once for OAuth. After that, `grob status`, `grob spend`, and
+`grob doctor` tell you what is happening. The rest of this page explains each
+step and covers the API-key path.
+
 ## Prerequisites
 
 - A Unix-like system (macOS or Linux) or Windows

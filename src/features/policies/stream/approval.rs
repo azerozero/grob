@@ -35,9 +35,9 @@ pub struct HitQuorumPending {
 /// A pending HIT approval entry stored in the shared map.
 ///
 /// Supports three resolution modes:
-/// - [`Simple`]: first caller to `POST /api/hit/approve` decides.
-/// - [`MultiSig`]: M-of-N distinct signers must approve via `MultiSigCollector`.
-/// - [`Quorum`]: N votes are tallied with a configurable quorum strategy.
+/// - [`HitApprovalEntry::Simple`]: first caller to `POST /api/hit/approve` decides.
+/// - [`HitApprovalEntry::MultiSig`]: M-of-N distinct signers must approve via `MultiSigCollector`.
+/// - [`HitApprovalEntry::Quorum`]: N votes are tallied with a configurable quorum strategy.
 pub enum HitApprovalEntry {
     /// Single approver — first response wins.
     Simple(tokio::sync::oneshot::Sender<bool>),
@@ -49,7 +49,7 @@ pub enum HitApprovalEntry {
 
 /// Shared map of pending approval requests keyed by `"{request_id}:{tool_name}"`.
 ///
-/// Populated by [`HitStream`] when a tool requires approval, consumed by the
+/// Populated by [`super::HitStream`] when a tool requires approval, consumed by the
 /// `POST /api/hit/approve` HTTP handler.
 pub type HitPendingApprovals = Mutex<HashMap<String, HitApprovalEntry>>;
 

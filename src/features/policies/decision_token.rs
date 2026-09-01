@@ -75,6 +75,14 @@ pub enum DecisionTokenError {
     /// Token has expired.
     #[error("decision token has expired")]
     Expired,
+    /// Token was minted for a different agent.
+    #[error("decision token audience '{audience}' does not match agent '{agent_id}'")]
+    AudienceMismatch {
+        /// Audience pattern carried by the token.
+        audience: String,
+        /// Agent identifier that presented the token.
+        agent_id: String,
+    },
 }
 
 /// Claims carried inside a decision token.
@@ -199,9 +207,64 @@ impl DecisionToken {
     /// # Errors
     ///
     /// Returns [`DecisionTokenError::IntegrityFailure`] if authentication
-    /// fails before resolving the backend.
+    /// fails before resolving the backend, or [`DecisionTokenError::Expired`]
+    /// if the `expires_at` claim is in the past.
     pub fn resolve_backend(&self) -> Result<BackendTarget, DecisionTokenError> {
         self.verify_integrity()?;
+        self.check_not_expired()?;
+        Ok(match self.claims.mode {
+            DecisionMode::Training => BackendTarget::Paper,
+            DecisionMode::Live => BackendTarget::Real,
+        })
+    }
+
+    /// Returns whether the `expires_at` claim is in the past.
+    ///
+    /// A token with no `expires_at` never expires. An unparseable timestamp is
+    /// treated as expired: a malformed expiry must not silently grant
+    /// unlimited validity.
+    pub fn is_expired(&self) -> bool {
+        let Some(raw) = self.claims.expires_at.as_deref() else {
+            return false;
+        };
+        match chrono::DateTime::parse_from_rfc3339(raw) {
+            Ok(deadline) => chrono::Utc::now() >= deadline.with_timezone(&chrono::Utc),
+            Err(_) => true,
+        }
+    }
+
+    /// Fails when the token has expired.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecisionTokenError::Expired`] if [`Self::is_expired`] holds.
+    pub fn check_not_expired(&self) -> Result<(), DecisionTokenError> {
+        if self.is_expired() {
+            return Err(DecisionTokenError::Expired);
+        }
+        Ok(())
+    }
+
+    /// Full validation for a request presented by `agent_id`.
+    ///
+    /// Checks integrity, expiry, and audience together, so a caller cannot
+    /// accidentally honour a token that was minted for a different agent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecisionTokenError::IntegrityFailure`] on a bad tag,
+    /// [`DecisionTokenError::Expired`] past `expires_at`, or
+    /// [`DecisionTokenError::AudienceMismatch`] when `agent_id` is outside the
+    /// audience pattern.
+    pub fn resolve_backend_for(&self, agent_id: &str) -> Result<BackendTarget, DecisionTokenError> {
+        self.verify_integrity()?;
+        self.check_not_expired()?;
+        if !self.matches_audience(agent_id) {
+            return Err(DecisionTokenError::AudienceMismatch {
+                audience: self.claims.audience.clone(),
+                agent_id: agent_id.to_string(),
+            });
+        }
         Ok(match self.claims.mode {
             DecisionMode::Training => BackendTarget::Paper,
             DecisionMode::Live => BackendTarget::Real,
@@ -218,13 +281,22 @@ impl DecisionToken {
     }
 
     /// Checks whether the given agent ID matches the audience pattern.
+    ///
+    /// The pattern is a trailing-`*` prefix glob (`trader-agent-*`) or an exact
+    /// match. A bare `*` matches nothing: an audience that matches everything
+    /// is indistinguishable from no audience at all, and silently granting it
+    /// would defeat the purpose of the claim.
     pub fn matches_audience(&self, agent_id: &str) -> bool {
-        // Simple glob: "trader-agent-*" matches "trader-agent-42"
-        if self.claims.audience.ends_with('*') {
-            let prefix = &self.claims.audience[..self.claims.audience.len() - 1];
-            agent_id.starts_with(prefix)
-        } else {
-            self.claims.audience == agent_id
+        if agent_id.is_empty() {
+            return false;
+        }
+        match self.claims.audience.strip_suffix('*') {
+            // A wildcard-only audience is refused rather than treated as "all".
+            Some("") => false,
+            // The prefix must be followed by at least one character, so
+            // "worker-*" does not match the bare prefix "worker-".
+            Some(prefix) => agent_id.len() > prefix.len() && agent_id.starts_with(prefix),
+            None => self.claims.audience == agent_id,
         }
     }
 }
@@ -235,6 +307,19 @@ impl DecisionToken {
 /// fails integrity verification.
 pub fn route_by_decision_token(token: &DecisionToken) -> BackendTarget {
     match token.resolve_backend() {
+        Ok(target) => target,
+        Err(_) => BackendTarget::Deny,
+    }
+}
+
+/// Routes a request based on the token's mode, scoped to the presenting agent.
+///
+/// Prefer this over [`route_by_decision_token`] wherever the agent identity is
+/// known: it is the only variant that can enforce the `audience` claim, and an
+/// audience that is never checked is not a security control.
+/// Returns [`BackendTarget::Deny`] on any validation failure.
+pub fn route_by_decision_token_for(token: &DecisionToken, agent_id: &str) -> BackendTarget {
+    match token.resolve_backend_for(agent_id) {
         Ok(target) => target,
         Err(_) => BackendTarget::Deny,
     }
@@ -417,5 +502,99 @@ mod tests {
         assert_eq!(deserialized.claims.mode, token.claims.mode);
         assert_eq!(deserialized.mac, token.mac);
         assert!(deserialized.verify_integrity().is_ok());
+    }
+}
+
+#[cfg(test)]
+mod expiry_and_audience_tests {
+    use super::*;
+
+    fn claims(audience: &str, expires_at: Option<&str>) -> DecisionClaims {
+        DecisionClaims {
+            mode: DecisionMode::Live,
+            issuer: "boss-agent".to_string(),
+            audience: audience.to_string(),
+            expires_at: expires_at.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn expired_token_is_denied() {
+        let token = DecisionToken::new("t".into(), claims("w-*", Some("2020-01-01T00:00:00Z")));
+        // Integrity still holds: the token is authentic, just no longer valid.
+        assert!(token.verify_integrity().is_ok());
+        assert!(token.is_expired());
+        assert_eq!(token.resolve_backend(), Err(DecisionTokenError::Expired));
+        assert_eq!(route_by_decision_token(&token), BackendTarget::Deny);
+    }
+
+    #[test]
+    fn future_expiry_is_accepted() {
+        let later = (chrono::Utc::now() + chrono::Duration::hours(1)).to_rfc3339();
+        let token = DecisionToken::new("t".into(), claims("w-*", Some(&later)));
+        assert!(!token.is_expired());
+        assert_eq!(route_by_decision_token(&token), BackendTarget::Real);
+    }
+
+    #[test]
+    fn absent_expiry_never_expires() {
+        let token = DecisionToken::new("t".into(), claims("w-*", None));
+        assert!(!token.is_expired());
+    }
+
+    #[test]
+    fn malformed_expiry_is_treated_as_expired() {
+        // Fail closed: a malformed expiry must not grant unlimited validity.
+        let token = DecisionToken::new("t".into(), claims("w-*", Some("not-a-date")));
+        assert!(token.is_expired());
+        assert_eq!(route_by_decision_token(&token), BackendTarget::Deny);
+    }
+
+    #[test]
+    fn audience_prefix_requires_a_suffix() {
+        let token = DecisionToken::new("t".into(), claims("worker-*", None));
+        assert!(token.matches_audience("worker-1"));
+        assert!(token.matches_audience("worker-42"));
+        // The bare prefix is not a member of "worker-*".
+        assert!(!token.matches_audience("worker-"));
+        assert!(!token.matches_audience("workerX"));
+        assert!(!token.matches_audience(""));
+    }
+
+    #[test]
+    fn wildcard_only_audience_matches_nothing() {
+        let token = DecisionToken::new("t".into(), claims("*", None));
+        assert!(!token.matches_audience("anyone"));
+        assert_eq!(
+            route_by_decision_token_for(&token, "anyone"),
+            BackendTarget::Deny
+        );
+    }
+
+    #[test]
+    fn audience_is_enforced_when_routing_for_an_agent() {
+        let token = DecisionToken::new("t".into(), claims("worker-*", None));
+        assert_eq!(
+            route_by_decision_token_for(&token, "worker-7"),
+            BackendTarget::Real
+        );
+        assert_eq!(
+            route_by_decision_token_for(&token, "intruder-7"),
+            BackendTarget::Deny
+        );
+        assert!(matches!(
+            token.resolve_backend_for("intruder-7"),
+            Err(DecisionTokenError::AudienceMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn expiry_is_checked_before_audience_on_the_agent_path() {
+        let token =
+            DecisionToken::new("t".into(), claims("worker-*", Some("2020-01-01T00:00:00Z")));
+        assert_eq!(
+            token.resolve_backend_for("worker-7"),
+            Err(DecisionTokenError::Expired)
+        );
     }
 }

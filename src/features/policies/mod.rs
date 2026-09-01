@@ -1,7 +1,7 @@
 //! Unified policy engine for per-tenant/zone/compliance request evaluation.
 //!
-//! Evaluates [`RequestContext`] against glob-based [`MatchRules`] to produce
-//! a [`ResolvedPolicy`] with overrides for DLP, rate limiting, routing, budget,
+//! Evaluates [`context::RequestContext`] against glob-based [`config::MatchRules`]
+//! to produce a [`resolved::ResolvedPolicy`] with overrides for DLP, rate limiting, routing, budget,
 //! log export, HIT authorization, and decision token routing.
 
 pub mod config;

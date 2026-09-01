@@ -92,6 +92,10 @@ pub struct AppConfig {
     #[cfg(feature = "mcp")]
     #[serde(default)]
     pub mcp: McpConfig,
+    /// Media inspection: bounded decoding, fingerprinting, sidecars.
+    #[cfg(feature = "media")]
+    #[serde(default)]
+    pub media: crate::features::media::config::MediaConfig,
     /// User-defined section preserved across preset applies
     #[serde(default)]
     pub user: UserConfig,

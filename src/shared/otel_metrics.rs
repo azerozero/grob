@@ -1,7 +1,7 @@
 //! OpenTelemetry metrics bridge — fans the existing `metrics` instrumentation
 //! out to an OTLP `MeterProvider` without re-instrumenting any call site.
 //!
-//! Companion to [`super::otel`] (the trace side). Installed only under the
+//! Companion to [`crate::shared::otel`] (the trace side). Installed only under the
 //! `otel` feature AND when `[otel] metrics = true`: the single global `metrics`
 //! recorder is wrapped in a [`metrics_util::layers::Fanout`] of
 //! `[PrometheusRecorder, OtelRecorder]`, so the ~65 `counter!` / `gauge!` /

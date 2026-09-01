@@ -342,6 +342,7 @@ pub(super) async fn dispatch_streaming(
                 actual_model: mapping.actual_model.clone(),
                 route_type: attempt.decision.route_type,
                 tenant_id: ctx.tenant_id.clone(),
+                agent_id: ctx.agent_id().map(str::to_string),
                 is_subscription: attempt.is_subscription,
                 estimated_input_tokens,
                 start_time: ctx.start_time,

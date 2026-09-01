@@ -72,6 +72,8 @@ pub(crate) struct SpendStreamContext {
     pub route_type: RouteType,
     /// Tenant the spend is isolated to (multi-tenant deployments).
     pub tenant_id: Option<String>,
+    /// Calling agent the spend is attributed to, when the client supplied one.
+    pub agent_id: Option<String>,
     /// `true` when the provider is OAuth-backed (subscription = `$0`).
     pub is_subscription: bool,
     /// Local input-token estimate captured before the request was consumed.
@@ -603,6 +605,7 @@ fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
     let actual_model = ctx.actual_model.clone();
     let route_type = ctx.route_type;
     let tenant_id = ctx.tenant_id.clone();
+    let agent_id = ctx.agent_id.clone();
     let is_subscription = ctx.is_subscription;
     // Cache reads are priced separately (a fraction of input), so they are not
     // folded into the billed input count above; pass them through only when the
@@ -641,6 +644,7 @@ fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
             &model_name,
             cost.estimated_cost_usd,
             tenant_id.as_deref(),
+            agent_id.as_deref(),
         )
         .await;
     });

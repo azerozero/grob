@@ -107,6 +107,7 @@ pub(crate) async fn record_success_telemetry(
         &decision.model_name,
         cost_usd,
         ctx.tenant_id.as_deref(),
+        ctx.agent_id(),
     )
     .await;
 

@@ -4,7 +4,7 @@
 
 ## Purpose
 
-Provides a fire-and-forget observability sink: every request and its assembled SSE response are POSTed to a configured webhook for debugging, replay, and downstream analysis. Uses an mpsc channel with `try_send` semantics so the hot path never blocks; events drop silently when the channel is full. Implements [`crate::traits::EventTap`] under the `tap` cargo feature.
+Provides a fire-and-forget observability sink: every request and its assembled SSE response are POSTed to a configured webhook for debugging, replay, and downstream analysis. Uses an mpsc channel with `try_send` semantics so the hot path never blocks; events drop silently when the channel is full. Gated behind the `tap` cargo feature.
 
 ## Public API
 
@@ -25,7 +25,6 @@ Provides a fire-and-forget observability sink: every request and its assembled S
 
 ## Depends on
 
-- `crate::traits::EventTap` — trait surface implemented here (under `feature = "tap"`).
 - `bytes`, `reqwest`, `serde`, `tokio::sync::mpsc`, `tracing`.
 
 ## Non-goals

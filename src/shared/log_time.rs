@@ -1,6 +1,6 @@
 //! Consistent log timestamp formatting.
 //!
-//! All tracing subscribers use [`UtcTimer`] so timestamps are rendered in UTC
+//! All tracing subscribers use [`UtcTimer`](struct@crate::shared::log_time::UtcTimer) so timestamps are rendered in UTC
 //! with an explicit `Z`, regardless of the host timezone or which init path
 //! (plain, JSON, or OpenTelemetry) was taken. This removes the cross-run
 //! inconsistency that arises when some output is local-time and some is UTC,

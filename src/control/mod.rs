@@ -1,8 +1,8 @@
 //! Generic control engine for unified CLI / MCP / UI dispatch.
 //!
-//! Translates [`Action`] variants into state reads or mutation commands.
+//! Translates [`Action`](enum@crate::control::engine::Action) variants into state reads or mutation commands.
 //! Adapters (JSON-RPC, CLI args, MCP tools) convert their wire format
-//! into actions and render [`ControlResponse`] back to the caller.
+//! into actions and render [`ControlResponse`](struct@crate::control::engine::ControlResponse) back to the caller.
 
 pub mod engine;
 

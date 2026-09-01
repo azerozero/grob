@@ -2,6 +2,15 @@
 
 // NOTE: deny (not forbid) so that the few justified unsafe blocks can #[allow].
 #![deny(unsafe_code)]
+// The crate documents every public item. That was a convention enforced by
+// review alone, which is a slow and unreliable way to hold an invariant; the
+// lint makes an undocumented addition fail the build instead.
+#![deny(missing_docs)]
+// Intra-doc links were allowed to rot to 49 broken references before anyone
+// noticed, because a warning nobody reads is not a signal. Denying them makes
+// a dead link fail the build, the same way missing_docs already does.
+#![deny(rustdoc::broken_intra_doc_links)]
+#![deny(rustdoc::private_intra_doc_links)]
 
 use std::path::PathBuf;
 

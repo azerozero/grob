@@ -353,7 +353,8 @@ impl InjectionDetector {
     /// Scans text for indirect injection (responses and tool results).
     ///
     /// Uses `response_action` instead of `action` to determine the outcome.
-    /// Reuses the same pattern matching and normalization pipeline as [`scan`].
+    /// Reuses the same pattern matching and normalization pipeline as
+    /// [`InjectionDetector::scan`].
     pub fn scan_indirect(&self, text: &str) -> IndirectInjectionResult {
         if text.len() < 10 {
             return IndirectInjectionResult::Clean;
