@@ -10,6 +10,10 @@ silent.
 Scope: request-direction content translation. Response-direction streaming
 fidelity (SSE event mapping, tool-call salvage) is covered by the harness tests.
 
+This page describes what each wire format *can* carry.
+[Agent Conformance](conformance.md) is the companion: which of these guarantees
+are actually **asserted by a test** on each route, and which are still untested.
+
 ## Legend
 
 - **native** — passed through unchanged (no translation).
@@ -66,9 +70,12 @@ instead of re-parsing a string. See [`error.rs`](../../src/server/error.rs).
 
 ## Keeping this honest
 
-This matrix is a claim, and claims rot. The per-release agent-conformance suite
-tracked in the fidelity backlog is what should prove each ✅ semantically (not
-just `HTTP 200`) at every tag; until then, treat unverified rows as such.
+This matrix is a claim, and claims rot. The
+[agent-conformance gate](conformance.md) is what proves the claims semantically
+(not just `HTTP 200`): it runs in the default CI suite, so every tag is gated on
+it. Its own matrix is deliberately sparser than this one — it marks only the
+pairs an end-to-end test actually drives, so the difference between the two
+pages *is* the remaining unverified surface.
 
 [#465]: https://github.com/azerozero/grob/pull/465
 [#476]: https://github.com/azerozero/grob/pull/476
