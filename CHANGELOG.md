@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.98](https://github.com/azerozero/grob/compare/v0.36.97...v0.36.98) - 2026-09-01
+
+### Added
+
+- *(errors)* expose upstream provider errors as structured JSON ([#489](https://github.com/azerozero/grob/pull/489))
+
+### Fixed
+
+- *(media)* satisfy the beta clippy chunks_exact_to_as_chunks lint ([#551](https://github.com/azerozero/grob/pull/551))
+
+### Other
+
+- *(adr)* document the fail-closed dependency contract (ADR-0030) ([#487](https://github.com/azerozero/grob/pull/487))
+
 ## [0.36.97](https://github.com/azerozero/grob/compare/v0.36.96...v0.36.97) - 2026-08-06
 
 ### Other
