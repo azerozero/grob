@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.100](https://github.com/azerozero/grob/compare/v0.36.99...v0.36.100) - 2026-09-01
+
+### Added
+
+- *(server)* stamp config and policy revisions for multi-replica consistency ([#555](https://github.com/azerozero/grob/pull/555))
+
 ## [0.36.99](https://github.com/azerozero/grob/compare/v0.36.98...v0.36.99) - 2026-09-01
 
 ### Fixed
