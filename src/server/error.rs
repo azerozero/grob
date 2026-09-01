@@ -241,6 +241,19 @@ impl RequestError {
     }
 }
 
+/// Extracts the first embedded JSON object/array from a string.
+///
+/// Upstream error bodies reach us as `message` strings, sometimes with a human
+/// prefix (`"anthropic API error: {…}"`). This finds the first `{` or `[` and
+/// parses one JSON value from there, ignoring any trailing text, so a provider's
+/// structured error can be re-exposed. Returns `None` when there is no JSON.
+fn extract_leading_json(s: &str) -> Option<serde_json::Value> {
+    let start = s.find(['{', '['])?;
+    let mut stream =
+        serde_json::Deserializer::from_str(&s[start..]).into_iter::<serde_json::Value>();
+    stream.next()?.ok()
+}
+
 impl IntoResponse for RequestError {
     fn into_response(self) -> Response {
         let (status, error_type, message) = self.parts();
@@ -270,7 +283,9 @@ impl IntoResponse for RequestError {
                 }
             }
             RequestError::ProviderUpstream {
-                provider, status, ..
+                provider,
+                status,
+                body,
             } => {
                 if let Some(error) = body_obj.get_mut("error").and_then(|v| v.as_object_mut()) {
                     error.insert(
@@ -281,6 +296,13 @@ impl IntoResponse for RequestError {
                         "upstream_status".to_string(),
                         serde_json::Value::from(*status),
                     );
+                    // The upstream body is carried in `message` as a string (often
+                    // prefixed, e.g. "anthropic API error: {…}"). Surface the
+                    // provider's own JSON error structured as well, so a client can
+                    // read its `type`/`code` instead of re-parsing a string blob.
+                    if let Some(parsed) = body.as_deref().and_then(extract_leading_json) {
+                        error.insert("upstream_error".to_string(), parsed);
+                    }
                 }
             }
             RequestError::ProviderProtocol { provider, .. } => {
@@ -509,6 +531,43 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body_bytes)
             .expect("invariant: RequestError always produces valid JSON");
         (status, json)
+    }
+
+    #[test]
+    fn extract_leading_json_handles_prefix_pure_and_none() {
+        // Prefixed provider body (the common case).
+        let v = extract_leading_json(
+            r#"anthropic API error: {"type":"error","error":{"type":"rate_limit_error"}}"#,
+        )
+        .expect("must parse the embedded object");
+        assert_eq!(v["error"]["type"], "rate_limit_error");
+        // Pure JSON, and trailing junk after the object is ignored.
+        assert_eq!(extract_leading_json(r#"{"a":1} trailing"#).unwrap()["a"], 1);
+        // No JSON at all.
+        assert!(extract_leading_json("connection refused").is_none());
+    }
+
+    #[tokio::test]
+    async fn provider_upstream_forwards_status_and_structured_error() {
+        let err = RequestError::ProviderUpstream {
+            provider: "anthropic".to_string(),
+            status: 429,
+            body: Some(
+                r#"anthropic API error: {"type":"error","error":{"type":"rate_limit_error","message":"slow down"}}"#
+                    .to_string(),
+            ),
+        };
+        let (status, json) = error_response_parts(err).await;
+
+        // Verbatim upstream status, not a flattened 500.
+        assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(json["error"]["upstream_status"], 429);
+        assert_eq!(json["error"]["provider"], "anthropic");
+        // The provider's own error is now parseable, not just a string blob.
+        assert_eq!(
+            json["error"]["upstream_error"]["error"]["type"],
+            "rate_limit_error"
+        );
     }
 
     #[tokio::test]
