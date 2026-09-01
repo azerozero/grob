@@ -63,7 +63,9 @@ impl GrayImage {
             return None;
         }
         let luma = rgb
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .map(|p| {
                 let y = 0.299 * f32::from(p[0]) + 0.587 * f32::from(p[1]) + 0.114 * f32::from(p[2]);
                 // Saturating cast: the coefficients sum to 1, so y stays in range,
@@ -149,7 +151,7 @@ pub fn gradient_hash(img: &GrayImage) -> PerceptualHash {
 /// the hash stable under rescaling and JPEG noise.
 fn downsample(img: &GrayImage) -> [u8; GRID_W * GRID_H] {
     let mut grid = [0u8; GRID_W * GRID_H];
-    for (row, cell_row) in grid.chunks_exact_mut(GRID_W).enumerate() {
+    for (row, cell_row) in grid.as_chunks_mut::<GRID_W>().0.iter_mut().enumerate() {
         let y0 = (row as u64 * img.height as u64 / GRID_H as u64) as u32;
         let y1 = (((row as u64 + 1) * img.height as u64 / GRID_H as u64) as u32).max(y0 + 1);
         for (col, cell) in cell_row.iter_mut().enumerate() {
