@@ -17,6 +17,8 @@ api_key = "my-secret"     # Optional: require Bearer token on incoming requests
 oauth_callback_port = 1455 # Port for the OAuth callback server (default: 1455)
 warmup_connections = false # Pre-warm provider connections at startup (default: false)
 validate_on_start = false  # Probe each router model at startup (default: false)
+# expected_config_revision = "sha256:…"  # Multi-replica only: fail /ready when the
+                                         # active config revision differs (default: unset)
 
 [server.timeouts]
 api_timeout_ms = 600000   # Provider request timeout (default: 10 min)
@@ -35,6 +37,14 @@ By default a fresh `grob start` performs **no outgoing network requests** and th
 - `validate_on_start` — sends a minimal `max_tokens=1` test request to every provider mapping and logs a health summary. This consumes a small amount of provider quota per mapping, so it is off by default.
 
 Both run after the listener is already accepting traffic, so neither can stall the bind.
+
+### Multi-replica revision pinning
+
+`expected_config_revision` makes a replica report itself **not ready** while the
+configuration it is serving differs from the one the deployment intended, so an
+orchestrator drains it instead of letting it enforce a superseded policy. Unset
+by default, which is correct for a single daemon. See
+[Keep Multiple Replicas Consistent](../how-to/multi-replica-consistency.md).
 
 ## Budget
 

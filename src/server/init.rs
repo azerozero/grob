@@ -835,6 +835,8 @@ pub(crate) fn emit_tee_attestation(
         // Startup attestation runs outside any request span → no trace context.
         trace_id: None,
         span_id: None,
+        // Emitted at startup, before any request is evaluated against policy.
+        policy_revision: None,
         batch_id: None,
         batch_index: None,
         merkle_root: None,

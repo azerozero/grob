@@ -414,6 +414,7 @@ pub fn emit_request_processed(
     audit_log: &crate::security::AuditLog,
     capture: &AuditMiddlewareCapture,
     response: &Response,
+    policy_revision: &str,
 ) -> bool {
     if response.extensions().get::<AuditedAlready>().is_some() {
         return false;
@@ -463,6 +464,8 @@ pub fn emit_request_processed(
         &capture.client_ip,
         duration_ms,
     );
+
+    builder = builder.policy_revision(policy_revision);
 
     if !model.is_empty() {
         builder = builder.model(model);
@@ -524,7 +527,14 @@ pub(crate) async fn audit_log_layer(
     let response = next.run(request).await;
 
     if let Some(ref audit_log) = state.security.audit_log {
-        emit_request_processed(audit_log, &capture, &response);
+        // Read the snapshot after the handler so the recorded revision is the
+        // one the request was actually served under.
+        emit_request_processed(
+            audit_log,
+            &capture,
+            &response,
+            state.snapshot().policy_revision.full(),
+        );
     }
 
     response

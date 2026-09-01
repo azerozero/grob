@@ -46,6 +46,14 @@ pub(super) async fn health_check(State(state): State<Arc<AppState>>) -> impl Int
         "spend": {
             "total_usd": spend_total,
             "budget_usd": budget_limit,
+        },
+        // Content hashes of the *active* snapshot on this replica. Two replicas
+        // reporting different revisions are enforcing different policies, which
+        // is otherwise invisible: both answer "ok". See
+        // `docs/how-to/multi-replica-consistency.md`.
+        "revision": {
+            "config": inner.config_revision.full(),
+            "policy": inner.policy_revision.full(),
         }
     }))
 }
@@ -55,10 +63,35 @@ pub(super) async fn liveness_check() -> impl IntoResponse {
     Json(serde_json::json!({"status": "alive"}))
 }
 
-/// Readiness probe: check that providers are configured and circuit breakers aren't all open.
+/// Readiness probe: providers configured, circuit breakers not all open, and
+/// the active config revision matching what the deployment expects.
 pub(super) async fn readiness_check(State(state): State<Arc<AppState>>) -> Response {
     let inner = state.snapshot();
     let provider_count = inner.provider_registry.list_providers().len();
+
+    // Revision pinning (multi-replica). A replica that missed a reload is still
+    // perfectly healthy in every other respect — it answers, it routes, it has
+    // providers — which is exactly why this has to be checked explicitly: the
+    // failure mode is silent enforcement of a superseded policy, not an outage.
+    // Reporting not-ready lets the orchestrator drain it instead.
+    if let Some(ref expected) = inner.config.server.expected_config_revision {
+        let active = inner.config_revision.full();
+        // Accept the short form too: an operator pinning a revision by hand
+        // will copy the 12-char prefix shown in logs.
+        let matches = active == expected || inner.config_revision.short() == expected.as_str();
+        if !matches {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "status": "not_ready",
+                    "reason": "config revision mismatch",
+                    "expected_config_revision": expected,
+                    "active_config_revision": active,
+                })),
+            )
+                .into_response();
+        }
+    }
 
     if provider_count == 0 {
         return (
@@ -93,7 +126,9 @@ pub(super) async fn readiness_check(State(state): State<Arc<AppState>>) -> Respo
 
     Json(serde_json::json!({
         "status": "ready",
-        "providers": provider_count
+        "providers": provider_count,
+        "config_revision": inner.config_revision.full(),
+        "policy_revision": inner.policy_revision.full(),
     }))
     .into_response()
 }
@@ -229,6 +264,169 @@ actual_model = "alpha"
             format!("Bearer {token}").parse().expect("valid header"),
         );
         h
+    }
+
+    /// Builds a config with `expected_config_revision` set inside `[server]`.
+    ///
+    /// The `config()` helper appends its argument at the end of the document,
+    /// which would place a bare key in whatever table happens to be last. This
+    /// one puts it in the table it belongs to.
+    fn config_with_expected_revision(expected: &str) -> crate::cli::AppConfig {
+        let toml = format!(
+            r#"
+[server]
+host = "127.0.0.1"
+port = 18099
+expected_config_revision = "{expected}"
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "alpha"
+"#
+        );
+        crate::cli::AppConfig::from_content(&toml, "revision_test").expect("config parses")
+    }
+
+    /// Registry holding one mock provider.
+    ///
+    /// Readiness short-circuits to 503 on an empty registry, so the revision
+    /// checks below need a provider present to reach the code under test.
+    fn registry_with_provider() -> ProviderRegistry {
+        let mut registry = ProviderRegistry::new();
+        registry.insert_provider_for_test(
+            "mock",
+            std::sync::Arc::new(crate::providers::mocks::MockLlmProvider::text(
+                "alpha", "ok",
+            )),
+        );
+        registry
+    }
+
+    /// Reads a JSON body out of a response for assertion.
+    async fn json_body(resp: Response) -> serde_json::Value {
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .expect("read body");
+        serde_json::from_slice(&bytes).expect("body should be JSON")
+    }
+
+    /// With no expected revision configured, readiness is unchanged.
+    ///
+    /// The single-daemon case must not acquire a new way to be unready.
+    #[tokio::test]
+    async fn readiness_ignores_revision_when_unpinned() {
+        let state = test_app_state(config(""), registry_with_provider());
+        let resp = readiness_check(State(state)).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "an unpinned replica must stay ready"
+        );
+        let body = json_body(resp).await;
+        assert!(
+            body["config_revision"]
+                .as_str()
+                .is_some_and(|r| r.starts_with("sha256:")),
+            "readiness should still report the active revision; body: {body}"
+        );
+    }
+
+    /// A replica pinned to its own revision stays ready.
+    #[tokio::test]
+    async fn readiness_passes_when_revision_matches() {
+        // Compute the revision this config actually has, then pin to it.
+        let probe = test_app_state(config(""), registry_with_provider());
+        let active = probe.snapshot().config_revision.full().to_string();
+
+        let state = test_app_state(
+            config_with_expected_revision(&active),
+            registry_with_provider(),
+        );
+        let resp = readiness_check(State(state)).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "a replica running the expected revision must be ready"
+        );
+    }
+
+    /// A replica serving a superseded config must report itself unready.
+    ///
+    /// This is the whole point: such a replica is healthy by every other
+    /// measure, so without this check it keeps serving a stale policy while the
+    /// load balancer sees nothing wrong.
+    #[tokio::test]
+    async fn readiness_fails_on_revision_mismatch() {
+        let state = test_app_state(
+            config_with_expected_revision(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            registry_with_provider(),
+        );
+        let resp = readiness_check(State(state)).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::SERVICE_UNAVAILABLE,
+            "a stale replica must be pulled from the load balancer, not left serving"
+        );
+        let body = json_body(resp).await;
+        assert_eq!(body["reason"], "config revision mismatch");
+        assert!(
+            body["active_config_revision"] != body["expected_config_revision"],
+            "the failure must show both revisions so the drift is diagnosable; body: {body}"
+        );
+    }
+
+    /// The short form is accepted, because that is what operators copy.
+    #[tokio::test]
+    async fn readiness_accepts_the_short_revision_form() {
+        let probe = test_app_state(config(""), registry_with_provider());
+        let short = probe.snapshot().config_revision.short().to_string();
+
+        let state = test_app_state(
+            config_with_expected_revision(&short),
+            registry_with_provider(),
+        );
+        let resp = readiness_check(State(state)).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "the 12-char form shown in logs must be usable as a pin"
+        );
+    }
+
+    /// Health must expose both revisions so replicas can be compared.
+    #[tokio::test]
+    async fn health_reports_both_revisions() {
+        let state = test_app_state(config(""), ProviderRegistry::new());
+        let resp = health_check(State(state)).await.into_response();
+        let body = json_body(resp).await;
+        assert!(
+            body["revision"]["config"]
+                .as_str()
+                .is_some_and(|r| r.starts_with("sha256:")),
+            "health must carry the config revision; body: {body}"
+        );
+        assert!(
+            body["revision"]["policy"]
+                .as_str()
+                .is_some_and(|r| r.starts_with("sha256:")),
+            "health must carry the policy revision; body: {body}"
+        );
     }
 
     // Default (no [metrics] token): /metrics is public — unchanged behaviour.
