@@ -82,6 +82,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | OWASP LLM Top 10 | [OWASP Coverage](reference/owasp-llm-top10.md) |
 | Provider internals | [Provider Reference](reference/providers.md) |
 | Protocol fidelity (what survives translation) | [Protocol Fidelity Matrix](reference/protocol-fidelity.md) |
+| Agent conformance (what is *tested* to survive) | [Agent Conformance](reference/conformance.md) |
 | API compatibility | [API Compatibility Reference](reference/api-compatibility.md) |
 | API endpoints | [OpenAPI Spec](openapi.yaml) |
 | HIT risk scoring | [HIT Risk Scoring](reference/hit-scoring.md) |
