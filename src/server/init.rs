@@ -148,7 +148,16 @@ pub(crate) async fn init_observability(
     let prometheus_recorder =
         metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
     let metrics_handle = prometheus_recorder.handle();
-    install_metrics_recorder(prometheus_recorder, &config.otel)?;
+    // Metrics are an *observing* dependency (ADR-0030): their failure must
+    // degrade, never block. `set_global_recorder` can only be called once per
+    // process, so propagating this error means the second server in a process
+    // refuses to start — an observability problem taking down the serving path,
+    // which is the contract violation in the other direction. `/metrics` on this
+    // instance renders from `metrics_handle` either way; what is lost is the
+    // recording of new samples, not the ability to serve traffic.
+    if let Err(e) = install_metrics_recorder(prometheus_recorder, &config.otel) {
+        warn!("⚠️  Metrics recorder unavailable, continuing without it: {e}");
+    }
 
     // Register `# HELP` / `# TYPE` metadata for every exported metric family.
     // Must run after the recorder is installed so the descriptions land on it
@@ -978,6 +987,24 @@ mod tests {
             rendered.contains("# TYPE grob_active_requests gauge"),
             "gauges must render as `gauge`"
         );
+
+        // Second install must FAIL, and startup must tolerate that failure.
+        //
+        // `set_global_recorder` is a process-wide one-shot. Propagating its
+        // error made a second server in the same process refuse to boot: an
+        // *observing* dependency taking down the serving path, which ADR-0030
+        // forbids in both directions. The assertion is folded into this test
+        // because it is the one that legitimately owns the global recorder;
+        // a standalone test would race it for the single install slot.
+        let second = metrics_exporter_prometheus::PrometheusBuilder::new().build_recorder();
+        let result = install_metrics_recorder(second, &crate::cli::OtelConfig::default());
+        assert!(
+            result.is_err(),
+            "the global recorder is a one-shot; this test's premise is that a \
+             second install fails"
+        );
+        // `init_observability` logs and continues on this error rather than
+        // using `?`. See the call site.
     }
 
     /// Recursively collects every `.rs` file under `dir`.
