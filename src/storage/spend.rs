@@ -11,22 +11,33 @@ use super::{journal, sanitize_filename, GrobStore, DEFAULT_TENANT};
 use crate::features::token_pricing::spend::SpendData;
 
 impl GrobStore {
-    /// Loads spend data (from cache for global, from per-tenant cache for tenants).
-    pub(crate) fn load_spend(&self, tenant: Option<&str>) -> SpendData {
-        if tenant.is_none() {
-            return self
-                .spend_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-        }
-        let tenant = tenant.unwrap_or("");
-        // Prefer the in-memory per-tenant cache; fall back to journal replay
-        // when the tenant has not yet been touched in this process (e.g. read
-        // before any record_spend call).
+    /// Loads global spend from the in-memory cache.
+    ///
+    /// Infallible: the cache is populated once at `GrobStore::open`, which
+    /// already refuses to start on a damaged journal, so there is no read of
+    /// external state left to fail here.
+    pub(crate) fn load_spend(&self) -> SpendData {
+        self.spend_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Loads spend for one tenant.
+    ///
+    /// Prefers the in-memory per-tenant cache and falls back to a journal
+    /// replay when the tenant has not been touched in this process (e.g. a
+    /// read before any `record_spend` call).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when that fallback replay hits a damaged journal.
+    /// Spend authorizes the request (ADR-0030), so an unreadable journal must
+    /// surface as a denial rather than as `$0 spent`.
+    pub(crate) fn load_tenant_spend(&self, tenant: &str) -> anyhow::Result<SpendData> {
         let caches = self.tenant_caches.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(data) = caches.get(tenant) {
-            return data.clone();
+            return Ok(data.clone());
         }
         drop(caches);
         let journal = self.journal.lock().unwrap_or_else(|e| e.into_inner());

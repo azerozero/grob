@@ -99,14 +99,25 @@ impl SpendJournal {
     }
 
     /// Replays the current month's journal into a [`SpendData`].
-    pub fn replay_current(&self) -> SpendData {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the journal exists but cannot be read or contains
+    /// an unparseable line. A missing file is not an error: it means no spend
+    /// has been recorded this month. See [`Self::replay_file`].
+    pub fn replay_current(&self) -> Result<SpendData> {
         let month = &self.current_month;
         let path = self.month_path(month);
         Self::replay_file(&path, month)
     }
 
     /// Replays a specific month's journal for tenant data.
-    pub fn replay_for_tenant(&self, tenant: &str) -> SpendData {
+    ///
+    /// # Errors
+    ///
+    /// Same contract as [`Self::replay_current`]: missing is fine, damaged is
+    /// an error.
+    pub fn replay_for_tenant(&self, tenant: &str) -> Result<SpendData> {
         let month = &self.current_month;
         let path = self.month_path(month);
         Self::replay_file_for_tenant(&path, month, tenant)
@@ -118,22 +129,40 @@ impl SpendJournal {
     /// Untagged events (those without a `tenant` field) are bucketed under
     /// the [`crate::storage::DEFAULT_TENANT`] key so per-tenant budget
     /// enforcement covers legacy callers identically.
-    pub fn replay_all_tenants(&self) -> HashMap<String, SpendData> {
+    ///
+    /// # Errors
+    ///
+    /// Same contract as [`Self::replay_current`].
+    pub fn replay_all_tenants(&self) -> Result<HashMap<String, SpendData>> {
         let path = self.month_path(&self.current_month);
         let mut out: HashMap<String, SpendData> = HashMap::new();
         let file = match File::open(&path) {
             Ok(f) => f,
-            Err(_) => return out,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("failed to read spend journal: {}", path.display()))
+            }
         };
         let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let Ok(line) = line else { continue };
+        for (n, line) in reader.lines().enumerate() {
+            let line = line.with_context(|| {
+                format!(
+                    "failed to read spend journal {} at line {}",
+                    path.display(),
+                    n + 1
+                )
+            })?;
             if line.is_empty() {
                 continue;
             }
-            let Ok(event) = serde_json::from_str::<SpendEvent>(&line) else {
-                continue;
-            };
+            let event = serde_json::from_str::<SpendEvent>(&line).with_context(|| {
+                format!(
+                    "malformed spend journal {} at line {}",
+                    path.display(),
+                    n + 1
+                )
+            })?;
             let tenant_key = event
                 .tenant
                 .clone()
@@ -144,30 +173,51 @@ impl SpendJournal {
             *entry.by_model.entry(event.model.clone()).or_default() += event.cost_usd;
             *entry.by_provider_count.entry(event.provider).or_default() += 1;
         }
-        out
+        Ok(out)
     }
 
     fn month_path(&self, month: &str) -> PathBuf {
         self.spend_dir.join(format!("{month}.jsonl"))
     }
 
-    fn replay_file(path: &Path, _expected_month: &str) -> SpendData {
+    /// Reads one journal file into a [`SpendData`].
+    ///
+    /// Spend is an *authorizing* input (ADR-0030): the budget check consults
+    /// the replayed total to decide whether a request may proceed. Treating a
+    /// damaged journal as "no spend" would silently reset the counter to zero
+    /// and reopen an exhausted budget, so anything other than a cleanly absent
+    /// file is an error and the caller must refuse to serve.
+    fn replay_file(path: &Path, _expected_month: &str) -> Result<SpendData> {
         let file = match File::open(path) {
             Ok(f) => f,
-            Err(_) => return SpendData::default(),
+            // No journal yet simply means nothing has been spent this month.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SpendData::default()),
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("failed to read spend journal: {}", path.display()))
+            }
         };
         let reader = BufReader::new(file);
         let mut data = SpendData::default();
 
-        for line in reader.lines() {
-            let Ok(line) = line else { continue };
+        for (n, line) in reader.lines().enumerate() {
+            let line = line.with_context(|| {
+                format!(
+                    "failed to read spend journal {} at line {}",
+                    path.display(),
+                    n + 1
+                )
+            })?;
             if line.is_empty() {
                 continue;
             }
-            let Ok(event) = serde_json::from_str::<SpendEvent>(&line) else {
-                tracing::warn!(line = %line, "skipping malformed journal line");
-                continue;
-            };
+            let event = serde_json::from_str::<SpendEvent>(&line).with_context(|| {
+                format!(
+                    "malformed spend journal {} at line {}",
+                    path.display(),
+                    n + 1
+                )
+            })?;
             // Skip tenant-scoped events for global replay.
             if event.tenant.is_some() {
                 continue;
@@ -177,25 +227,46 @@ impl SpendJournal {
             *data.by_model.entry(event.model.clone()).or_default() += event.cost_usd;
             *data.by_provider_count.entry(event.provider).or_default() += 1;
         }
-        data
+        Ok(data)
     }
 
-    fn replay_file_for_tenant(path: &Path, _expected_month: &str, tenant: &str) -> SpendData {
+    /// Reads one journal file, keeping only events for `tenant`.
+    ///
+    /// Same fail-closed contract as [`Self::replay_file`].
+    fn replay_file_for_tenant(
+        path: &Path,
+        _expected_month: &str,
+        tenant: &str,
+    ) -> Result<SpendData> {
         let file = match File::open(path) {
             Ok(f) => f,
-            Err(_) => return SpendData::default(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SpendData::default()),
+            Err(e) => {
+                return Err(e)
+                    .with_context(|| format!("failed to read spend journal: {}", path.display()))
+            }
         };
         let reader = BufReader::new(file);
         let mut data = SpendData::default();
 
-        for line in reader.lines() {
-            let Ok(line) = line else { continue };
+        for (n, line) in reader.lines().enumerate() {
+            let line = line.with_context(|| {
+                format!(
+                    "failed to read spend journal {} at line {}",
+                    path.display(),
+                    n + 1
+                )
+            })?;
             if line.is_empty() {
                 continue;
             }
-            let Ok(event) = serde_json::from_str::<SpendEvent>(&line) else {
-                continue;
-            };
+            let event = serde_json::from_str::<SpendEvent>(&line).with_context(|| {
+                format!(
+                    "malformed spend journal {} at line {}",
+                    path.display(),
+                    n + 1
+                )
+            })?;
             if event.tenant.as_deref() != Some(tenant) {
                 continue;
             }
@@ -204,7 +275,7 @@ impl SpendJournal {
             *data.by_model.entry(event.model.clone()).or_default() += event.cost_usd;
             *data.by_provider_count.entry(event.provider).or_default() += 1;
         }
-        data
+        Ok(data)
     }
 
     fn seal_current(&mut self) -> Result<()> {
@@ -269,7 +340,7 @@ mod tests {
 
         journal.fsync().unwrap();
 
-        let data = journal.replay_current();
+        let data = journal.replay_current().unwrap();
         assert!((data.total - 0.15).abs() < 0.001);
         assert!((data.by_provider["anthropic"] - 0.05).abs() < 0.001);
         assert!((data.by_provider["openai"] - 0.10).abs() < 0.001);
@@ -305,15 +376,20 @@ mod tests {
             .unwrap();
         journal.fsync().unwrap();
 
-        let global = journal.replay_current();
+        let global = journal.replay_current().unwrap();
         assert!((global.total - 1.0).abs() < 0.001);
 
-        let tenant = journal.replay_for_tenant("tenant-a");
+        let tenant = journal.replay_for_tenant("tenant-a").unwrap();
         assert!((tenant.total - 2.0).abs() < 0.001);
     }
 
+    /// A corrupted journal must be refused, not silently treated as no spend.
+    ///
+    /// This is the fail-open that ADR-0030 forbids: skipping the broken line
+    /// would under-report spend, and an unreadable file would report `$0`,
+    /// reopening a budget the operator had already exhausted.
     #[test]
-    fn malformed_lines_skipped() {
+    fn malformed_line_is_an_error() {
         let dir = tempfile::tempdir().unwrap();
         let spend_dir = dir.path().join("spend");
         fs::create_dir_all(&spend_dir).unwrap();
@@ -323,15 +399,20 @@ mod tests {
         fs::write(&path, "{\"ts\":\"t\",\"kind\":\"spend\",\"provider\":\"a\",\"model\":\"b\",\"cost_usd\":1.0}\n{broken\n{\"ts\":\"t\",\"kind\":\"spend\",\"provider\":\"c\",\"model\":\"d\",\"cost_usd\":2.0}\n").unwrap();
 
         let journal = SpendJournal::open(dir.path()).unwrap();
-        let data = journal.replay_current();
-        assert!((data.total - 3.0).abs() < 0.001);
+        let err = journal
+            .replay_current()
+            .expect_err("a damaged journal must not silently under-report spend");
+        assert!(
+            err.to_string().contains("malformed spend journal"),
+            "error should name the problem, got: {err}"
+        );
     }
 
     #[test]
     fn empty_journal_replays_to_default() {
         let dir = tempfile::tempdir().unwrap();
         let journal = SpendJournal::open(dir.path()).unwrap();
-        let data = journal.replay_current();
+        let data = journal.replay_current().unwrap();
         assert_eq!(data.total, 0.0);
     }
 }
