@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.99](https://github.com/azerozero/grob/compare/v0.36.98...v0.36.99) - 2026-09-01
+
+### Fixed
+
+- *(server)* do not fail startup when the metrics recorder is unavailable ([#556](https://github.com/azerozero/grob/pull/556))
+
+### Other
+
+- *(conformance)* gate agent-turn semantic fidelity per route ([#554](https://github.com/azerozero/grob/pull/554))
+
 ## [0.36.98](https://github.com/azerozero/grob/compare/v0.36.97...v0.36.98) - 2026-09-01
 
 ### Added
