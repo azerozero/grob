@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.103](https://github.com/azerozero/grob/compare/v0.36.102...v0.36.103) - 2026-09-02
+
+### Added
+
+- *(security)* rate limit by OIDC client, and run the limiter after auth ([#562](https://github.com/azerozero/grob/pull/562))
+
 ## [0.36.102](https://github.com/azerozero/grob/compare/v0.36.101...v0.36.102) - 2026-09-02
 
 ### Fixed
