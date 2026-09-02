@@ -172,3 +172,42 @@ fn observing_dependencies_do_not_block_reads() {
         "a read must not depend on metrics or audit being available"
     );
 }
+
+// ── Shared storage is not shared state ───────────────────────────
+
+/// Two live processes over one storage dir do NOT see each other's spend.
+///
+/// This is the boundary that decides whether a budget is a fleet-wide cap or a
+/// per-replica one. The in-memory total is seeded once at open and updated only
+/// by this process, so a peer writing to the same journal stays invisible until
+/// restart. Mounting a shared volume therefore does **not** make the budget
+/// shared, which is exactly the assumption an operator is likely to make.
+#[test]
+fn spend_is_not_shared_between_live_stores() {
+    let dir = TempDir::new().expect("tempdir");
+
+    // Two stores over the same directory: two replicas on one volume.
+    let a = open_store(&dir).expect("store a");
+    let b = open_store(&dir).expect("store b");
+
+    a.record_spend(None, 10.0, "anthropic", "claude-opus");
+    a.flush_spend();
+
+    assert!(
+        (a.load_spend().total - 10.0).abs() < 1e-9,
+        "the writing replica sees its own spend"
+    );
+    assert_eq!(
+        b.load_spend().total,
+        0.0,
+        "a live peer does NOT see it: caches are per process, so a budget binds \
+         per replica even on shared storage"
+    );
+
+    // A restart does pick it up, which is what makes the journal the record.
+    let c = open_store(&dir).expect("store c");
+    assert!(
+        (c.load_spend().total - 10.0).abs() < 1e-9,
+        "a fresh process replays the journal and sees the peer's spend"
+    );
+}
