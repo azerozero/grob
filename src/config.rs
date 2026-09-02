@@ -205,9 +205,54 @@ impl AppConfig {
             .with_context(|| format!("Failed to parse config from {}", source_label))?;
 
         config.resolve_env_vars()?;
+        config.resolve_replica_count();
         config.validate()?;
 
         Ok(config)
+    }
+
+    /// Applies the `GROB_REPLICAS` override to every fleet-share setting.
+    ///
+    /// The fleet-share maths turns a configured limit into a real ceiling by
+    /// dividing it across replicas, but the replica count is a number the
+    /// operator writes by hand. In a container orchestrator that number is not
+    /// static: it is a Deployment field, and an HPA changes it without anyone
+    /// editing the config.
+    ///
+    /// Reading it from the environment is what makes the guarantee survive
+    /// there. On Kubernetes the count is already known to the control plane and
+    /// can be injected without any coupling to grob:
+    ///
+    /// ```yaml
+    /// env:
+    ///   - name: GROB_REPLICAS
+    ///     valueFrom:
+    ///       resourceFieldRef: { containerName: grob, resource: limits.cpu }
+    /// ```
+    ///
+    /// or, more usually, straight from the Deployment's `spec.replicas` via a
+    /// templating value. Under an HPA, set it to `maxReplicas`: over-declaring
+    /// only under-uses the quota, while under-declaring breaks the ceiling.
+    ///
+    /// An unset or unparseable value leaves the file config untouched, so the
+    /// static single-daemon deployment is unaffected. `0` is ignored rather
+    /// than treated as "no replicas", which would mean dividing by zero.
+    fn resolve_replica_count(&mut self) {
+        let Ok(raw) = std::env::var("GROB_REPLICAS") else {
+            return;
+        };
+        let Ok(count) = raw.trim().parse::<u32>() else {
+            tracing::warn!(
+                value = %raw,
+                "GROB_REPLICAS is not a number; keeping the configured replica count"
+            );
+            return;
+        };
+        if count == 0 {
+            tracing::warn!("GROB_REPLICAS=0 is meaningless; keeping the configured count");
+            return;
+        }
+        self.security.rate_limit_replicas = count;
     }
 
     /// Resolves `$ENV_VAR` references in provider API keys.
@@ -876,5 +921,127 @@ think = "my-think-model"
             match_conditions: None,
         }];
         assert!(AppConfig::validate_tiers(&bad_provider, &providers, &models).is_err());
+    }
+
+    /// The environment overrides the file's replica count.
+    ///
+    /// This is what makes the fleet ceiling usable on Kubernetes, where the
+    /// replica count lives in the Deployment (and moves under an HPA) rather
+    /// than in a config file baked into a ConfigMap.
+    #[test]
+    fn grob_replicas_env_overrides_the_config() {
+        let _guard = crate::GROB_REPLICAS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let toml = r#"
+[router]
+default = "m"
+
+[security]
+rate_limit_rps = 100
+rate_limit_replicas = 2
+
+[[models]]
+name = "m"
+
+[[models.mappings]]
+priority = 1
+provider = "p"
+actual_model = "m"
+
+[[providers]]
+name = "p"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+models = ["m"]
+"#;
+        std::env::set_var("GROB_REPLICAS", "7");
+        let config = AppConfig::from_content(toml, "replica_env_test").expect("parses");
+        std::env::remove_var("GROB_REPLICAS");
+
+        assert_eq!(
+            config.security.rate_limit_replicas, 7,
+            "the orchestrator's count must win over the file"
+        );
+    }
+
+    /// An unset variable leaves the file config alone.
+    #[test]
+    fn unset_grob_replicas_keeps_the_configured_count() {
+        let _guard = crate::GROB_REPLICAS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("GROB_REPLICAS");
+
+        let toml = r#"
+[router]
+default = "m"
+
+[security]
+rate_limit_replicas = 3
+
+[[models]]
+name = "m"
+
+[[models.mappings]]
+priority = 1
+provider = "p"
+actual_model = "m"
+
+[[providers]]
+name = "p"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+models = ["m"]
+"#;
+        let config = AppConfig::from_content(toml, "replica_env_test").expect("parses");
+        assert_eq!(config.security.rate_limit_replicas, 3);
+    }
+
+    /// Garbage and zero must not silently break the ceiling.
+    ///
+    /// `0` would divide the limit by zero replicas; a typo would otherwise
+    /// parse as "no replicas declared" and quietly restore the per-replica
+    /// behaviour the operator was trying to avoid.
+    #[test]
+    fn invalid_grob_replicas_is_ignored() {
+        let _guard = crate::GROB_REPLICAS_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let toml = r#"
+[router]
+default = "m"
+
+[security]
+rate_limit_replicas = 4
+
+[[models]]
+name = "m"
+
+[[models.mappings]]
+priority = 1
+provider = "p"
+actual_model = "m"
+
+[[providers]]
+name = "p"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+models = ["m"]
+"#;
+        for bad in ["", "abc", "0", "-1", "3.5"] {
+            std::env::set_var("GROB_REPLICAS", bad);
+            let config = AppConfig::from_content(toml, "replica_env_test").expect("parses");
+            assert_eq!(
+                config.security.rate_limit_replicas, 4,
+                "GROB_REPLICAS={bad:?} must be ignored, not applied"
+            );
+        }
+        std::env::remove_var("GROB_REPLICAS");
     }
 }

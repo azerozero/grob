@@ -22,6 +22,13 @@ use std::path::PathBuf;
 #[cfg(test)]
 pub(crate) static GROB_HOME_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+/// Serialises tests that set `GROB_REPLICAS`.
+///
+/// Same hazard as [`GROB_HOME_TEST_LOCK`]: the environment is process-global,
+/// so two tests mutating it in parallel would read each other's value.
+#[cfg(test)]
+pub(crate) static GROB_REPLICAS_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Returns the Grob home directory (`~/.grob`).
 ///
 /// When the `dirs` feature is disabled, falls back to reading `GROB_HOME`
