@@ -188,6 +188,14 @@ pub fn warn_if_cleartext(url: &str, provider_name: &str) {
 ///     Ok(response.model)
 /// }
 /// ```
+// `async_trait` desugars every method to `-> Pin<Box<dyn Future>>` and stamps
+// its own `#[must_use]` on it. Beta clippy then sees a `must_use` attribute on a
+// type that is already `must_use` and fires `double_must_use`, pointing at the
+// macro rather than at anything written here. There is nothing to fix in this
+// trait: the attribute is not ours, and the lint's advice ("remove `must_use`")
+// cannot be followed. Allowed rather than reshaped so a genuine double
+// `must_use` written by hand elsewhere still gets caught.
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     /// Sends a non-streaming message request to the provider.
