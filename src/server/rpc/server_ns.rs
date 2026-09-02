@@ -59,9 +59,12 @@ pub async fn reload_config(
         "RPC reload_config requested"
     );
 
-    let new_config = AppConfig::from_source(&state.config_source)
+    let mut new_config = AppConfig::from_source(&state.config_source)
         .await
         .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to reload config: {e}")))?;
+    // Same reason as the HTTP path: without this a container-mode reload is
+    // rejected for a `server.host` the operator never wrote.
+    crate::server::config_guard::preserve_startup_overrides(state, &mut new_config);
 
     // Same shared fail-closed guard as the HTTP reload path.
     crate::server::config_guard::ensure_config_reloadable(state, &new_config)

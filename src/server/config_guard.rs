@@ -165,6 +165,28 @@ pub fn ensure_metrics_auth_reloadable(
     Ok(())
 }
 
+/// Carries the startup-time bind overrides onto a freshly parsed config.
+///
+/// Container mode rewrites `server.host` in memory (`commands::run::cmd_run`),
+/// and `--host` / `--port` do the same. Those values live only in the running
+/// snapshot, never on disk, so a re-parse always disagrees with them and
+/// [`ensure_config_reloadable`] rejects a reload where the file did not change
+/// at all.
+///
+/// Preserving them is also the only honest answer: the listener is already
+/// bound, so neither field can take effect without a restart regardless.
+///
+/// Every reload path must call this before the guard, or that path reintroduces
+/// the bug.
+pub fn preserve_startup_overrides(
+    state: &Arc<super::AppState>,
+    candidate: &mut crate::config::AppConfig,
+) {
+    let live = state.snapshot();
+    candidate.server.host = live.config.server.host.clone();
+    candidate.server.port = live.config.server.port;
+}
+
 /// Rejects candidates that would make the atomic config snapshot disagree with
 /// subsystems initialized only at process startup.
 ///
@@ -553,5 +575,101 @@ actual_model = "alpha"
             assert!(!is_key_denied(&ConfigSection::Router, "default"));
             assert!(!is_key_denied(&ConfigSection::Cache, "ttl_secs"));
         }
+    }
+
+    /// A container-mode reload must not be rejected for a host it rewrote itself.
+    ///
+    /// `cmd_run` sets `server.host = "::"` in memory while the file still says
+    /// `0.0.0.0`. Without carrying that override onto the candidate, the guard
+    /// compares the two, sees `[server]` differ, and refuses a reload where the
+    /// operator changed nothing — which is exactly what the e2e suite caught.
+    #[tokio::test]
+    async fn container_host_override_does_not_block_reload() {
+        let file_toml = r#"
+[server]
+host = "0.0.0.0"
+port = 18095
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "p"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "p"
+actual_model = "alpha"
+"#;
+        // Live snapshot as container mode leaves it.
+        let mut live =
+            crate::cli::AppConfig::from_content(file_toml, "guard_test").expect("parses");
+        live.server.host = "::".to_string();
+        let state = crate::server::test_app_state(live, crate::providers::ProviderRegistry::new());
+
+        // Candidate as re-parsed from the unchanged file.
+        let mut candidate =
+            crate::cli::AppConfig::from_content(file_toml, "guard_test").expect("parses");
+
+        assert!(
+            ensure_config_reloadable(&state, &candidate).is_err(),
+            "sanity: without the override the guard does reject this"
+        );
+
+        preserve_startup_overrides(&state, &mut candidate);
+        assert!(
+            ensure_config_reloadable(&state, &candidate).is_ok(),
+            "a reload of an unchanged file must be allowed once the startup \
+             overrides are carried across"
+        );
+    }
+
+    /// The override must not mask a genuine `[server]` change.
+    ///
+    /// Only host and port are carried over; anything else the operator edits in
+    /// a startup-only section must still be refused.
+    #[tokio::test]
+    async fn preserving_overrides_still_catches_real_server_changes() {
+        let base = r#"
+[server]
+host = "0.0.0.0"
+port = 18096
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "p"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "p"
+actual_model = "alpha"
+"#;
+        let live = crate::cli::AppConfig::from_content(base, "guard_test").expect("parses");
+        let state = crate::server::test_app_state(live, crate::providers::ProviderRegistry::new());
+
+        // The operator really did change a startup-only field.
+        let changed = base.replace("[server]", "[server]\nlog_level = \"trace\"");
+        let mut candidate =
+            crate::cli::AppConfig::from_content(&changed, "guard_test").expect("parses");
+        preserve_startup_overrides(&state, &mut candidate);
+
+        assert!(
+            ensure_config_reloadable(&state, &candidate).is_err(),
+            "a real [server] edit must still require a restart"
+        );
     }
 }

@@ -222,7 +222,10 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
 
     // 1. Read and parse new config from source
     let new_config: AppConfig = match AppConfig::from_source(&state.config_source).await {
-        Ok(c) => c,
+        Ok(mut c) => {
+            super::config_guard::preserve_startup_overrides(&state, &mut c);
+            c
+        }
         Err(e) => {
             error!("Failed to reload config: {}", e);
             return (
