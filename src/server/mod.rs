@@ -354,8 +354,26 @@ pub(crate) fn test_app_state_with_source(
             pricing_table,
         },
         security: SecurityState {
-            jwt_validator: None,
-            rate_limiter: None,
+            // Mirror real startup for the two pieces middleware ordering
+            // depends on: without them every request is either unauthenticated
+            // or unthrottled, and an ordering bug between the two is invisible.
+            jwt_validator: if config.auth.mode == "jwt" {
+                crate::auth::JwtValidator::from_config(&config.auth.jwt)
+                    .ok()
+                    .map(Arc::new)
+            } else {
+                None
+            },
+            rate_limiter: (config.security.enabled && config.security.rate_limit_rps > 0).then(
+                || {
+                    Arc::new(crate::security::RateLimiter::new(
+                        crate::security::RateLimitConfig {
+                            requests_per_second: config.security.rate_limit_rps,
+                            burst: config.security.rate_limit_burst,
+                        },
+                    ))
+                },
+            ),
             dlp_sessions: None,
             provider_availability: None,
             audit_log: None,
@@ -588,14 +606,21 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
         tenant_required_middleware,
     ));
 
+    // Rate limiting must also run *after* auth, for the same reason: it keys on
+    // `GrobClaims` / `VirtualKeyContext`, which only exist once auth has run.
+    // Layered before `auth_middleware` here means it executes after it.
+    //
+    // Ordered this way it also stops counting a request that auth is about to
+    // reject, so a flood of bad credentials no longer consumes a legitimate
+    // caller's quota.
     let app = app.layer(axum::middleware::from_fn_with_state(
         state.clone(),
-        auth_middleware,
+        rate_limit_check_middleware,
     ));
 
     let app = app.layer(axum::middleware::from_fn_with_state(
         state.clone(),
-        rate_limit_check_middleware,
+        auth_middleware,
     ));
 
     let app = if config.security.security_headers {
@@ -912,3 +937,131 @@ const _: fn() = || {
     assert_send_sync::<AppState>();
     assert_send_sync::<ReloadableState>();
 };
+
+#[cfg(test)]
+mod middleware_order_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    /// Config with JWT auth and a rate limit of exactly one request.
+    fn config() -> AppConfig {
+        let toml = r#"
+[server]
+host = "127.0.0.1"
+port = 18097
+
+[router]
+default = "alpha"
+
+[auth]
+mode = "jwt"
+
+[auth.jwt]
+hmac_secret = "test-secret-256-bits-minimum!!"
+
+[security]
+rate_limit_rps = 1
+rate_limit_burst = 1
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "alpha"
+"#;
+        AppConfig::from_content(toml, "middleware_order_test").expect("config parses")
+    }
+
+    /// Signs an HMAC token matching the test config's secret.
+    fn sign_token(sub: &str, exp: u64) -> String {
+        let claims = crate::auth::GrobClaims {
+            sub: sub.to_string(),
+            exp,
+            ..Default::default()
+        };
+        jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(b"test-secret-256-bits-minimum!!"),
+        )
+        .expect("token signs")
+    }
+
+    fn request_with(auth: &str) -> Request<Body> {
+        Request::builder()
+            .method("POST")
+            .uri("/v1/messages")
+            .header("authorization", auth)
+            .header("content-type", "application/json")
+            .body(Body::from(
+                r#"{"model":"alpha","max_tokens":1,"messages":[{"role":"user","content":"x"}]}"#,
+            ))
+            .expect("request builds")
+    }
+
+    /// Rate limiting must run **after** authentication.
+    ///
+    /// The limiter keys on `GrobClaims` / `VirtualKeyContext`, which only exist
+    /// once auth has populated them. Layered the other way round those branches
+    /// are unreachable and every request falls back to keying on the raw
+    /// credential string — so two tokens for the same subject silently get two
+    /// separate buckets, and per-tenant (or per-client) limiting does not work
+    /// at all despite looking correct in isolation.
+    ///
+    /// Asserted through the ordering's observable consequence: two *different*
+    /// tokens carrying the same subject must share one bucket. Keying happens on
+    /// `GrobClaims::tenant_id()` only if the claims exist by then; otherwise the
+    /// limiter falls back to the raw credential string and each token gets its
+    /// own bucket, which is indistinguishable from "rate limiting works" unless
+    /// you look for exactly this.
+    #[tokio::test]
+    async fn rate_limiting_runs_after_authentication() {
+        let state = test_app_state(config(), crate::providers::ProviderRegistry::new());
+        let app = build_app_router(&state.snapshot().config.clone(), state);
+
+        // Same `sub`, different `exp` → same tenant, different credential string.
+        let now = chrono::Utc::now().timestamp() as u64;
+        let token_a = sign_token("same-user", now + 3600);
+        let token_b = sign_token("same-user", now + 3607);
+        assert_ne!(token_a, token_b, "the two tokens must differ byte-wise");
+
+        // Burst is 1: the first request spends the only token.
+        let first = app
+            .clone()
+            .oneshot(request_with(&format!("Bearer {token_a}")))
+            .await
+            .expect("router responds");
+        assert_ne!(
+            first.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "the first request must not be throttled"
+        );
+
+        // The second, with a different token for the same subject, must hit the
+        // same bucket. If it does not, the limiter keyed on the credential
+        // string, meaning it ran before auth and never saw the claims.
+        let second = app
+            .clone()
+            .oneshot(request_with(&format!("Bearer {token_b}")))
+            .await
+            .expect("router responds");
+        assert_eq!(
+            second.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "a second token for the same subject must share the tenant's bucket; \
+             anything else means the limiter ran before auth and keyed on the raw \
+             credential, silently giving one principal a bucket per token"
+        );
+    }
+}

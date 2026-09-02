@@ -26,6 +26,7 @@ mod tests {
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
             iss: None,
             aud: None,
+            ..Default::default()
         }
     }
 
@@ -127,6 +128,7 @@ mod tests {
             exp: (chrono::Utc::now() - chrono::Duration::hours(1)).timestamp() as u64,
             iss: None,
             aud: None,
+            ..Default::default()
         };
         let token = make_token(&expired_claims, TEST_SECRET);
 

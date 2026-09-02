@@ -43,6 +43,7 @@ mod tests {
                 exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
                 iss: None,
                 aud: None,
+                ..Default::default()
             },
         };
 

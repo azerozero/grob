@@ -7,7 +7,10 @@ use std::sync::RwLock;
 use crate::security::cache::{jwt_validation_cache, JwtValidationCache};
 
 /// JWT claims expected by Grob.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Default` is derived so call sites can spread `..Default::default()` and stay
+/// source-compatible as optional claims are added.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GrobClaims {
     /// Subject — user ID, used as tenant_id when no explicit tenant claim
     pub sub: String,
@@ -22,12 +25,39 @@ pub struct GrobClaims {
     /// Audience
     #[serde(default)]
     pub aud: Option<String>,
+    /// Authorized party (OIDC `azp`) — the OAuth client the token was issued to.
+    ///
+    /// Distinct from [`GrobClaims::sub`], which identifies the *end user*. One
+    /// client serving many users has one `azp` and many `sub`s, so throttling on
+    /// `sub` does not bound what a single application can send.
+    #[serde(default)]
+    pub azp: Option<String>,
+    /// `client_id` claim, used by IdPs that do not emit `azp`.
+    ///
+    /// Keycloak and Auth0 send `azp`; others (and RFC 9068 access tokens) send
+    /// `client_id`. Accepting both means no IdP-specific configuration.
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 impl GrobClaims {
     /// Returns the effective tenant ID: explicit `tenant` claim, or `sub`.
     pub fn tenant_id(&self) -> &str {
         self.tenant.as_deref().unwrap_or(&self.sub)
+    }
+
+    /// Returns the OIDC client identity: `azp`, else `client_id`.
+    ///
+    /// `None` when the token carries neither, which is the normal shape of a
+    /// plain self-signed HMAC token. Callers must treat `None` as "not a
+    /// client-scoped token" rather than substituting the subject: silently
+    /// falling back to `sub` would apply a per-client limit to an individual
+    /// user and throttle the wrong principal.
+    pub fn client_id(&self) -> Option<&str> {
+        self.azp
+            .as_deref()
+            .or(self.client_id.as_deref())
+            .filter(|s| !s.is_empty())
     }
 }
 
@@ -385,6 +415,7 @@ mod tests {
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
             iss: None,
             aud: None,
+            ..Default::default()
         };
 
         let token = make_token(&claims, "test-secret-256-bits-minimum!!");
@@ -407,6 +438,7 @@ mod tests {
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
             iss: None,
             aud: None,
+            ..Default::default()
         };
 
         let token = make_token(&claims, "test-secret-256-bits-minimum!!");
@@ -428,6 +460,7 @@ mod tests {
             exp: (chrono::Utc::now() - chrono::Duration::hours(1)).timestamp() as u64,
             iss: None,
             aud: None,
+            ..Default::default()
         };
 
         let token = make_token(&claims, "test-secret-256-bits-minimum!!");
@@ -449,6 +482,7 @@ mod tests {
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
             iss: None,
             aud: None,
+            ..Default::default()
         };
 
         let token = make_token(&claims, "wrong-secret-256-bits-minim!!");
@@ -472,6 +506,7 @@ mod tests {
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
             iss: Some("grob-auth".to_string()),
             aud: None,
+            ..Default::default()
         };
         let token = make_token(&claims, "test-secret-256-bits-minimum!!");
         assert!(validator.validate(&token).is_ok());
@@ -492,6 +527,7 @@ mod tests {
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
             iss: None,
             aud: None,
+            ..Default::default()
         }
     }
 
@@ -567,5 +603,84 @@ mod tests {
             validator.validate(&token),
             Err(AuthError::InvalidToken(_))
         ));
+    }
+
+    /// `azp` is the client identity (Keycloak, Auth0).
+    #[test]
+    fn client_id_prefers_azp() {
+        let claims = GrobClaims {
+            sub: "user-1".to_string(),
+            azp: Some("my-app".to_string()),
+            client_id: Some("ignored".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(claims.client_id(), Some("my-app"));
+    }
+
+    /// `client_id` is the fallback for IdPs that do not emit `azp`.
+    #[test]
+    fn client_id_falls_back_to_client_id_claim() {
+        let claims = GrobClaims {
+            sub: "user-1".to_string(),
+            client_id: Some("svc-account".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(claims.client_id(), Some("svc-account"));
+    }
+
+    /// A token with no client claim is not client-scoped.
+    ///
+    /// Must be `None`, never a fallback to `sub`: substituting the subject would
+    /// apply a per-client quota to one individual user, throttling the wrong
+    /// principal while leaving the application unbounded.
+    #[test]
+    fn client_id_is_none_without_a_client_claim() {
+        let claims = GrobClaims {
+            sub: "user-1".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(claims.client_id(), None);
+    }
+
+    /// An empty claim is absent, not a client named "".
+    ///
+    /// An IdP emitting `"azp": ""` would otherwise collapse every such token
+    /// into one shared bucket.
+    #[test]
+    fn empty_client_claim_is_treated_as_absent() {
+        let claims = GrobClaims {
+            sub: "user-1".to_string(),
+            azp: Some(String::new()),
+            ..Default::default()
+        };
+        assert_eq!(claims.client_id(), None);
+    }
+
+    /// The client claims must survive a real validation round-trip.
+    ///
+    /// The accessor is only useful if `azp` actually deserializes off the wire;
+    /// a missing `#[serde]` field would silently read as `None` forever.
+    #[test]
+    fn azp_survives_token_validation() {
+        let config = JwtConfig {
+            hmac_secret: "test-secret-256-bits-minimum!!".to_string(),
+            ..Default::default()
+        };
+        let validator = JwtValidator::from_config(&config).unwrap();
+
+        let claims = GrobClaims {
+            sub: "user-123".to_string(),
+            exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
+            azp: Some("batch-indexer".to_string()),
+            ..Default::default()
+        };
+
+        let token = make_token(&claims, "test-secret-256-bits-minimum!!");
+        let decoded = validator.validate(&token).unwrap();
+        assert_eq!(
+            decoded.client_id(),
+            Some("batch-indexer"),
+            "azp must round-trip through signing and validation"
+        );
     }
 }

@@ -279,6 +279,69 @@ pub(crate) async fn request_id_middleware(mut request: Request<Body>, next: Next
     response
 }
 
+/// Hex-encoded SHA-256 of a credential, for use as an opaque bucket key.
+///
+/// Same input yields the same bucket, so throttling is unaffected; what changes
+/// is that the secret itself is never held in the bucket map.
+fn hash_credential(credential: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(credential.as_bytes()))
+}
+
+/// Returns the per-client rate-limit key for `claims`, when enabled and available.
+///
+/// `None` means "not client-scoped": either the feature is off or the token
+/// carries no `azp`/`client_id`. The caller then keeps the tenant key rather
+/// than inventing one, so a self-signed token or an API key is never merged
+/// into a client bucket it does not belong to.
+fn client_rate_limit_key(
+    state: &AppState,
+    claims: &crate::auth::GrobClaims,
+) -> Option<RateLimitKey> {
+    let inner = state.snapshot();
+    if !inner.config.security.rate_limit_by_client {
+        return None;
+    }
+    claims
+        .client_id()
+        .map(|id| RateLimitKey::Client(id.to_string()))
+}
+
+/// Returns the rate-limit configuration for a client key, when overridden.
+///
+/// Only [`RateLimitKey::Client`] can carry an override: the map is keyed by
+/// client id, and matching it against a tenant or IP key would apply one
+/// client's quota to an unrelated principal that happens to share the string.
+///
+/// The burst is scaled by the same factor as the rate, so a client granted 10x
+/// the throughput also gets 10x the burst window rather than inheriting a burst
+/// sized for the default rate.
+fn client_rps_override(
+    state: &AppState,
+    key: &RateLimitKey,
+) -> Option<crate::security::RateLimitConfig> {
+    let RateLimitKey::Client(id) = key else {
+        return None;
+    };
+    let inner = state.snapshot();
+    let security = &inner.config.security;
+    let rps = security.rate_limit_clients.get(id).copied()?;
+    if rps == 0 {
+        return None;
+    }
+    let default_rps = security.rate_limit_rps.max(1);
+    let burst = security
+        .rate_limit_burst
+        .saturating_mul(rps)
+        .checked_div(default_rps)
+        .unwrap_or(rps)
+        .max(rps);
+    Some(crate::security::RateLimitConfig {
+        requests_per_second: rps,
+        burst,
+    })
+}
+
 /// Rate limiting middleware: checks rate limiter before processing.
 /// Returns 429 with Retry-After header when rate exceeded.
 pub(crate) async fn rate_limit_check_middleware(
@@ -302,14 +365,30 @@ pub(crate) async fn rate_limit_check_middleware(
     {
         RateLimitKey::Tenant(format!("vk:{}", vk.key_id))
     } else if let Some(claims) = request.extensions().get::<crate::auth::GrobClaims>() {
-        RateLimitKey::Tenant(claims.tenant_id().to_string())
+        // Prefer the OIDC client when asked to: `sub` is the end user, so a
+        // per-subject bucket does not bound what one application can send.
+        // Falls back to the tenant when the token carries no client claim, so
+        // enabling this cannot lump unrelated callers together.
+        match client_rate_limit_key(&state, claims) {
+            Some(key) => key,
+            None => RateLimitKey::Tenant(claims.tenant_id().to_string()),
+        }
     } else if let Some(credential) = extract_api_credential(request.headers()) {
-        RateLimitKey::Tenant(credential.to_string())
+        // Hash rather than store the raw credential: this key lives in the
+        // bucket map for up to ten idle minutes and derives `Debug`, so a
+        // future log line or panic message would otherwise print a usable API
+        // key. The digest partitions callers identically.
+        RateLimitKey::Tenant(format!("cred:{}", hash_credential(credential)))
     } else {
         RateLimitKey::Ip("anonymous".to_string())
     };
 
-    let (allowed, _remaining, reset_after) = limiter.check(&key).await;
+    // A per-client override replaces the default rate for that bucket only,
+    // keeping the deployment's configured burst.
+    let (allowed, _remaining, reset_after) = match client_rps_override(&state, &key) {
+        Some(config) => limiter.check_with_config(&key, config).await,
+        None => limiter.check(&key).await,
+    };
 
     if !allowed {
         metrics::counter!("grob_ratelimit_rejected_total").increment(1);
@@ -603,6 +682,187 @@ pub(crate) async fn tenant_required_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Per-client rate limiting ──────────────────────────────────
+
+    /// Minimal config with the security knobs under test.
+    fn rl_config(extra: &str) -> crate::cli::AppConfig {
+        let toml = format!(
+            r#"
+[server]
+host = "127.0.0.1"
+port = 18098
+
+[router]
+default = "alpha"
+
+[[providers]]
+name = "mock"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "mock"
+actual_model = "alpha"
+
+[security]
+rate_limit_rps = 10
+rate_limit_burst = 20
+{extra}
+"#
+        );
+        crate::cli::AppConfig::from_content(&toml, "rate_limit_client_test").expect("config parses")
+    }
+
+    fn state_for(extra: &str) -> Arc<AppState> {
+        crate::server::test_app_state(rl_config(extra), crate::providers::ProviderRegistry::new())
+    }
+
+    fn claims_with_azp(sub: &str, azp: Option<&str>) -> crate::auth::GrobClaims {
+        crate::auth::GrobClaims {
+            sub: sub.to_string(),
+            azp: azp.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    /// Disabled by default: the key must stay the tenant.
+    ///
+    /// Turning this on changes who gets throttled, so it must never happen
+    /// implicitly on an existing deployment.
+    #[tokio::test]
+    async fn client_key_is_not_used_unless_enabled() {
+        let state = state_for("");
+        let claims = claims_with_azp("user-1", Some("my-app"));
+        assert!(
+            client_rate_limit_key(&state, &claims).is_none(),
+            "per-client keying must be opt-in"
+        );
+    }
+
+    /// Enabled: two users of one client share a bucket.
+    ///
+    /// This is the entire point. Keyed by `sub`, an application serving many
+    /// users gets one bucket each and is not bounded at all.
+    #[tokio::test]
+    async fn enabled_keys_two_users_of_one_client_together() {
+        let state = state_for("rate_limit_by_client = true");
+        let a = client_rate_limit_key(&state, &claims_with_azp("user-1", Some("my-app")));
+        let b = client_rate_limit_key(&state, &claims_with_azp("user-2", Some("my-app")));
+
+        assert_eq!(
+            a,
+            Some(crate::security::RateLimitKey::Client("my-app".to_string()))
+        );
+        assert_eq!(a, b, "two users of the same client must share one bucket");
+    }
+
+    /// Different clients stay separate even for the same user.
+    #[tokio::test]
+    async fn enabled_keeps_distinct_clients_apart() {
+        let state = state_for("rate_limit_by_client = true");
+        let a = client_rate_limit_key(&state, &claims_with_azp("user-1", Some("app-a")));
+        let b = client_rate_limit_key(&state, &claims_with_azp("user-1", Some("app-b")));
+        assert_ne!(
+            a, b,
+            "one user acting through two clients must not share a bucket"
+        );
+    }
+
+    /// A token with no client claim falls back to the tenant key.
+    ///
+    /// Enabling the feature must not silently merge self-signed tokens, API
+    /// keys or anonymous callers into one shared bucket.
+    #[tokio::test]
+    async fn token_without_client_claim_falls_back_to_tenant() {
+        let state = state_for("rate_limit_by_client = true");
+        assert!(
+            client_rate_limit_key(&state, &claims_with_azp("user-1", None)).is_none(),
+            "no client claim means no client bucket"
+        );
+    }
+
+    /// No override configured → no per-key config, so the default applies.
+    #[tokio::test]
+    async fn no_override_uses_the_default_rate() {
+        let state = state_for("rate_limit_by_client = true");
+        let key = crate::security::RateLimitKey::Client("unlisted".to_string());
+        assert!(client_rps_override(&state, &key).is_none());
+    }
+
+    /// A configured override applies its rate and scales the burst with it.
+    ///
+    /// A client granted 10x throughput but left with the default burst would be
+    /// throttled on exactly the traffic shape the override was meant to allow.
+    #[tokio::test]
+    async fn override_applies_rate_and_scales_burst() {
+        let state = state_for(
+            "rate_limit_by_client = true\n\n[security.rate_limit_clients]\n\"batch\" = 100",
+        );
+        let key = crate::security::RateLimitKey::Client("batch".to_string());
+        let config = client_rps_override(&state, &key).expect("override must be found");
+
+        assert_eq!(config.requests_per_second, 100);
+        // default burst 20 at default rps 10 → 10x the rate means 10x the burst.
+        assert_eq!(config.burst, 200, "burst must scale with the granted rate");
+    }
+
+    /// A raw API key must never become the bucket key.
+    ///
+    /// Bucket keys live in memory for up to ten idle minutes and `RateLimitKey`
+    /// derives `Debug`, so storing the credential verbatim would put a usable
+    /// secret one stray log line or panic message away from disclosure.
+    #[test]
+    fn api_credential_is_hashed_not_stored_verbatim() {
+        let secret = "sk-live-super-secret-value";
+        let hashed = hash_credential(secret);
+
+        assert!(
+            !hashed.contains(secret),
+            "the digest must not contain the credential"
+        );
+        assert_eq!(hashed.len(), 64, "sha-256 hex is 64 chars");
+        assert_eq!(
+            hashed,
+            hash_credential(secret),
+            "hashing must be stable, or a caller would get a new bucket per request"
+        );
+        assert_ne!(
+            hashed,
+            hash_credential("sk-live-super-secret-valuf"),
+            "distinct credentials must land in distinct buckets"
+        );
+    }
+
+    /// An override must never be applied to a tenant or IP key.
+    ///
+    /// The map is keyed by client id; matching it against a tenant that happens
+    /// to share the string would hand one principal another's quota.
+    #[tokio::test]
+    async fn override_never_applies_to_a_tenant_or_ip_key() {
+        let state = state_for(
+            "rate_limit_by_client = true\n\n[security.rate_limit_clients]\n\"batch\" = 100",
+        );
+        assert!(
+            client_rps_override(
+                &state,
+                &crate::security::RateLimitKey::Tenant("batch".to_string())
+            )
+            .is_none(),
+            "a tenant named like a client must not inherit its quota"
+        );
+        assert!(client_rps_override(
+            &state,
+            &crate::security::RateLimitKey::Ip("batch".to_string())
+        )
+        .is_none());
+    }
 
     #[test]
     fn test_constant_time_eq_same() {

@@ -67,6 +67,13 @@ pub enum RateLimitKey {
     Tenant(String),
     /// Keyed by source IP address (fallback).
     Ip(String),
+    /// Keyed by OIDC client (`azp` / `client_id`).
+    ///
+    /// A separate variant rather than a prefixed [`RateLimitKey::Tenant`] so a
+    /// client id can never collide with a tenant id that happens to share the
+    /// same string, which would silently merge two different principals into
+    /// one bucket.
+    Client(String),
 }
 
 /// Rate limiter with automatic cleanup
@@ -159,6 +166,44 @@ impl RateLimiter {
         (allowed, remaining, reset_after)
     }
 
+    /// Like [`RateLimiter::check`], but overrides this key's rate **and** burst.
+    ///
+    /// Distinct from [`RateLimiter::check_with_rps`], which pins `burst = rps`
+    /// and is meant for a dedicated policy limiter. Per-client overrides share
+    /// the middleware's limiter, where the deployment's configured burst is a
+    /// separate knob and must be preserved: collapsing it to `rps` would
+    /// silently remove the burst allowance for exactly the clients that were
+    /// given a custom rate.
+    pub async fn check_with_config(
+        &self,
+        key: &RateLimitKey,
+        config: RateLimitConfig,
+    ) -> (bool, u32, Option<Duration>) {
+        let rps = config.requests_per_second.max(1);
+        let burst_milli = config.burst.max(1) as u64 * 1000;
+
+        let mut buckets = self.buckets.write().await;
+        let bucket = buckets
+            .entry(key.clone())
+            .or_insert_with(|| TokenBucket::new(config.clone()));
+
+        // Honour the current configuration even if the bucket predates it, so a
+        // config reload takes effect without waiting for bucket expiry.
+        bucket.rps = rps;
+        bucket.burst_milli = burst_milli;
+        bucket.tokens_milli = bucket.tokens_milli.min(burst_milli);
+
+        let allowed = bucket.try_consume();
+        let remaining = bucket.remaining();
+        let reset_after = if allowed {
+            None
+        } else {
+            let needed_milli = 1000u64.saturating_sub(bucket.tokens_milli);
+            Some(Duration::from_millis(needed_milli / rps as u64))
+        };
+        (allowed, remaining, reset_after)
+    }
+
     /// Cleanup stale buckets (idle > 10 minutes)
     async fn cleanup_stale_buckets(buckets: &Arc<RwLock<HashMap<RateLimitKey, TokenBucket>>>) {
         const IDLE_TIMEOUT: Duration = Duration::from_secs(600);
@@ -226,5 +271,114 @@ mod tests {
         assert!(!allowed);
         assert_eq!(remaining, 0);
         assert!(reset.is_some());
+    }
+
+    /// Distinct clients must not share a bucket.
+    ///
+    /// The whole point of keying by client: exhausting one application's quota
+    /// must not throttle another.
+    #[tokio::test]
+    async fn client_keys_are_isolated() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            requests_per_second: 1,
+            burst: 1,
+        });
+        let a = RateLimitKey::Client("app-a".to_string());
+        let b = RateLimitKey::Client("app-b".to_string());
+
+        assert!(limiter.check(&a).await.0, "first request for app-a passes");
+        assert!(!limiter.check(&a).await.0, "app-a is now out of tokens");
+        assert!(
+            limiter.check(&b).await.0,
+            "app-b must be unaffected by app-a exhausting its bucket"
+        );
+    }
+
+    /// A client id must not collide with an identical tenant id.
+    ///
+    /// Both are user-controlled strings from different namespaces. If the key
+    /// were a prefixed string rather than a distinct variant, a tenant named
+    /// like a client would silently share its quota.
+    #[tokio::test]
+    async fn client_and_tenant_keys_do_not_collide() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            requests_per_second: 1,
+            burst: 1,
+        });
+        let as_client = RateLimitKey::Client("same-name".to_string());
+        let as_tenant = RateLimitKey::Tenant("same-name".to_string());
+
+        assert!(limiter.check(&as_client).await.0);
+        assert!(!limiter.check(&as_client).await.0, "client bucket drained");
+        assert!(
+            limiter.check(&as_tenant).await.0,
+            "a tenant sharing the client's name must have its own bucket"
+        );
+    }
+
+    /// A per-client override must apply its own rate *and* burst.
+    #[tokio::test]
+    async fn check_with_config_applies_rate_and_burst() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            requests_per_second: 1,
+            burst: 1,
+        });
+        let key = RateLimitKey::Client("batch".to_string());
+        let generous = RateLimitConfig {
+            requests_per_second: 50,
+            burst: 5,
+        };
+
+        // Five requests fit the overridden burst, where the default allowed one.
+        for i in 0..5 {
+            assert!(
+                limiter.check_with_config(&key, generous.clone()).await.0,
+                "request {i} must fit the overridden burst of 5"
+            );
+        }
+        assert!(
+            !limiter.check_with_config(&key, generous).await.0,
+            "the sixth must be throttled: an override raises the limit, not removes it"
+        );
+    }
+
+    /// A config change must take effect on an existing bucket.
+    ///
+    /// Buckets outlive a reload, so an override that only applied to freshly
+    /// created buckets would leave live clients on the old quota until they
+    /// went idle for ten minutes.
+    ///
+    /// Note what is asserted: raising the rate does **not** instantly grant
+    /// tokens (a token bucket accrues them over time, and handing out a windfall
+    /// on every reload would let a client burst past its quota by triggering
+    /// reloads). What must change is the *refill speed*.
+    #[tokio::test]
+    async fn check_with_config_updates_an_existing_bucket() {
+        let tight = RateLimitConfig {
+            requests_per_second: 1,
+            burst: 1,
+        };
+        let loose = RateLimitConfig {
+            requests_per_second: 200,
+            burst: 10,
+        };
+
+        // Baseline: at 1 rps, 30 ms is far too short to earn a token back.
+        let limiter = RateLimiter::new(tight.clone());
+        let key = RateLimitKey::Client("app".to_string());
+        assert!(limiter.check_with_config(&key, tight.clone()).await.0);
+        assert!(!limiter.check_with_config(&key, tight.clone()).await.0);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(
+            !limiter.check_with_config(&key, tight).await.0,
+            "at 1 rps the bucket must still be empty after 30 ms"
+        );
+
+        // Same bucket, raised quota: the same wait now refills it.
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert!(
+            limiter.check_with_config(&key, loose).await.0,
+            "the raised rate must apply to the bucket that already exists"
+        );
     }
 }
