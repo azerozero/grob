@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.107](https://github.com/azerozero/grob/compare/v0.36.106...v0.36.107) - 2026-09-02
+
+### Added
+
+- *(config)* let the orchestrator declare the replica count via GROB_REPLICAS ([#568](https://github.com/azerozero/grob/pull/568))
+
 ## [0.36.106](https://github.com/azerozero/grob/compare/v0.36.105...v0.36.106) - 2026-09-02
 
 ### Fixed
