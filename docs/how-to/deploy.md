@@ -50,6 +50,7 @@ A sample manifest is provided in `deploy/grob-kube.yml`. Key points:
 - The health endpoint is `GET /health` (returns 200 with PID)
 - Metrics are at `GET /metrics` (Prometheus format)
 - The container runs as non-root (UID/GID 65534); hostPath volumes must be writable by that user
+- Set `GROB_REPLICAS` from the Deployment's replica count if you enforce fleet-wide limits (see below)
 
 ```yaml
 livenessProbe:
@@ -65,6 +66,55 @@ startupProbe:
     path: /health
     port: 8080
 ```
+
+### Fleet-wide limits with more than one pod
+
+Rate-limit buckets and spend counters are **per process**. Each pod enforces the
+configured limit on its own, so N pods let the fleet through `N x` the limit.
+`rate_limit_replicas` (and `[budget] replicas`) fix that by making each pod
+enforce its share — but they are numbers written in a file, and on Kubernetes
+the replica count lives in the Deployment and moves under an HPA.
+
+Inject it instead of hardcoding it:
+
+```yaml
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+        - name: grob
+          env:
+            - name: GROB_REPLICAS
+              value: "5"          # keep in sync with spec.replicas
+```
+
+`GROB_REPLICAS` overrides the file's replica count. Unset, unparseable, or `0`
+leaves the config untouched, so a templating mistake degrades to the previous
+behaviour rather than dividing by zero.
+
+With Helm, template it from the same value that sets `spec.replicas` so the two
+cannot drift:
+
+```yaml
+env:
+  - name: GROB_REPLICAS
+    value: "{{ .Values.replicaCount }}"
+```
+
+**Under an HPA, use `maxReplicas`.** Over-declaring only under-uses the quota;
+under-declaring breaks the ceiling. An HPA scaling from 3 to 10 pods against a
+declaration of 3 would let the fleet reach 333% of the configured limit.
+
+grob deliberately does **not** query the Kubernetes API to count its own pods:
+that would mean a cluster-role, a watch, and a hard dependency on the
+orchestrator — for a number the orchestrator can simply hand over. The count
+stays a declaration; the environment is just a better place to declare it than
+a ConfigMap.
+
+Each pod keeps its own `GROB_HOME` (an `emptyDir` is fine). A shared volume is
+**not** required and does not make limits shared: spend counters are in-memory
+per process, so a peer's writes are invisible until restart.
 
 ## Build from source
 
