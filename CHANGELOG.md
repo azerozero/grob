@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.102](https://github.com/azerozero/grob/compare/v0.36.101...v0.36.102) - 2026-09-02
+
+### Fixed
+
+- *(storage)* fail closed when the spend journal cannot be trusted ([#552](https://github.com/azerozero/grob/pull/552))
+
 ## [0.36.101](https://github.com/azerozero/grob/compare/v0.36.100...v0.36.101) - 2026-09-02
 
 ### Fixed
