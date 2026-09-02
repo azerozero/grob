@@ -45,7 +45,17 @@ pub(super) async fn health_check(State(state): State<Arc<AppState>>) -> impl Int
         "active_requests": active,
         "spend": {
             "total_usd": spend_total,
+            // The FLEET-wide cap as configured.
             "budget_usd": budget_limit,
+            // What THIS replica will actually allow. Differs from `budget_usd`
+            // when the budget is split across replicas, and that difference is
+            // what reconciles the configured cap with observed spend.
+            "budget_usd_this_replica": crate::security::replica_budget_share(
+                budget_limit,
+                inner.config.budget.replicas,
+                inner.config.budget.margin_percent,
+            ),
+            "replicas": inner.config.budget.replicas.max(1),
         },
         // Content hashes of the *active* snapshot on this replica. Two replicas
         // reporting different revisions are enforcing different policies, which
