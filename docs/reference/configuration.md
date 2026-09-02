@@ -101,6 +101,26 @@ shared store, no gossip, not a single packet between replicas. A replica cannot
 spend an idle peer's share. For a *cost* cap that is usually the right way
 round: under-spending is recoverable, an overrun is not.
 
+### Which limits are fleet-aware
+
+Not every limit accumulates across replicas, so not every limit needs dividing.
+The distinction is whether the thing being counted is **shared** by the fleet:
+
+| Limit | Fleet-aware | Why |
+|---|---|---|
+| `[security] rate_limit_rps` / `burst` | ✅ `rate_limit_replicas` | every replica throttles the same caller |
+| `[security.rate_limit_clients]` overrides | ✅ same knob | a named client must not escape the ceiling |
+| `[[policies]] rate_limit.rps` | ✅ same knob | a policy must not escape it either |
+| `[budget] monthly_limit_usd` | ✅ `[budget] replicas` | the money is one pot |
+| `[[providers]] budget_usd`, `[[models]] budget_usd` | ✅ same knob | same pot, narrower scope |
+| `[[policies]] budget.monthly_usd` | ✅ same knob | same pot again |
+| `tool_spike_*_per_min` | ❌ not needed | keyed per **session**, and a session is served by one replica |
+| `[cache] max_capacity`, `max_entry_bytes` | ❌ not needed | a per-process memory bound, not a shared quota |
+| `max_body_size` | ❌ not needed | a property of a single request |
+
+A limit in the second group is already correct on every replica: dividing it
+would shrink a per-process bound for no reason.
+
 `replicas` is a **declaration grob cannot verify** — it never counts its peers,
 which is precisely what avoids the coordination. If an autoscaler runs more
 replicas than declared, the ceiling scales with them. Declare the autoscaler's
