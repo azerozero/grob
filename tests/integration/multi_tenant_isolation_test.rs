@@ -367,6 +367,7 @@ fn tenant_jwt_claim_is_authoritative() {
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
         iss: None,
         aud: None,
+        ..Default::default()
     };
     assert_eq!(
         claims.tenant_id(),
@@ -380,6 +381,7 @@ fn tenant_jwt_claim_is_authoritative() {
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as u64,
         iss: None,
         aud: None,
+        ..Default::default()
     };
     assert_eq!(
         claims_sub_only.tenant_id(),

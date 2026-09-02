@@ -251,6 +251,7 @@ Control rate limiting, security headers, body size limits, circuit breakers, and
 enabled = true                  # Master switch for all security middleware (default: true)
 rate_limit_rps = 0              # Requests per second per tenant/IP (default: 0 = disabled)
 rate_limit_burst = 0            # Burst allowance (default: 0; used only when rate_limit_rps > 0)
+rate_limit_by_client = false    # Key the limiter on the OIDC client, not the subject (default: false)
 max_body_size = 0               # Max request body in bytes (default: 0 = unlimited)
 security_headers = true         # Apply OWASP security headers (default: true)
 circuit_breaker = true          # Enable circuit breaker per provider (default: true)
@@ -267,6 +268,42 @@ scoring_persist = false         # Reserved; score persistence is not implemented
 ```
 
 When `enabled = false`, rate limiting, security headers, and circuit breaker middleware are all skipped. Individual features can also be toggled independently.
+
+### Rate limiting by OIDC client
+
+By default the limiter keys on the tenant, which for a user token is the `sub`
+claim — the individual **end user**. One application serving a thousand users
+therefore gets a thousand independent buckets and is not bounded at all. That is
+usually not what an API quota means.
+
+Set `rate_limit_by_client = true` to key client-scoped tokens on the OIDC client
+(`azp`, falling back to `client_id`) instead:
+
+```toml
+[security]
+rate_limit_rps = 10
+rate_limit_burst = 20
+rate_limit_by_client = true
+
+# Optional per-client overrides. A client absent from this map uses
+# rate_limit_rps, so only the exceptions need naming.
+[security.rate_limit_clients]
+"batch-indexer" = 200   # a trusted job that may push harder
+"partner-app"   = 5     # a third-party integration that must not
+```
+
+An override scales the burst by the same factor as the rate, so a client granted
+10x the throughput also gets 10x the burst rather than inheriting one sized for
+the default.
+
+Tokens carrying **no** client claim (a self-signed HMAC token, an API key, an
+anonymous request) keep their existing tenant/IP key, so enabling this cannot
+merge unrelated callers into one bucket.
+
+Two limits worth knowing: buckets are in-memory and therefore **per replica**
+(with N replicas the effective limit is N × `rate_limit_rps`), and the limiter
+runs after authentication, so rejected credentials never consume a legitimate
+caller's quota.
 
 The circuit breaker opens after 5 consecutive failures (30s timeout, 3 successes to close). When open, requests skip the provider and fall through to the next mapping.
 

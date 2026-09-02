@@ -22,6 +22,33 @@ pub struct SecurityConfig {
     /// Rate limit: burst capacity (only used when `rate_limit_rps` > 0).
     #[serde(default = "default_rate_limit_burst")]
     pub rate_limit_burst: u32,
+    /// Throttle by OIDC client (`azp` / `client_id`) instead of by subject.
+    ///
+    /// The default key is the tenant, which for a user token is the individual
+    /// end user. One application serving a thousand users therefore gets a
+    /// thousand independent buckets and is not bounded at all. Enabling this
+    /// keys client-scoped tokens by the *application*, which is what an API
+    /// quota usually means.
+    ///
+    /// Tokens with no client claim (a plain self-signed HMAC token, an API key,
+    /// an anonymous request) keep their existing key, so turning this on cannot
+    /// merge unrelated callers into one bucket.
+    #[serde(default)]
+    pub rate_limit_by_client: bool,
+    /// Per-client request-per-second overrides, keyed by OIDC client id.
+    ///
+    /// Only consulted when `rate_limit_by_client` is enabled. A client absent
+    /// from the map falls back to `rate_limit_rps`, so a deployment only has to
+    /// name the clients that differ from the default (a batch job that may push
+    /// harder, a partner integration that must push less).
+    ///
+    /// ```toml
+    /// [security.rate_limit_clients]
+    /// "batch-indexer" = 200
+    /// "partner-app"   = 5
+    /// ```
+    #[serde(default)]
+    pub rate_limit_clients: std::collections::HashMap<String, u32>,
     /// Maximum request body size in bytes (default 0 = unlimited).
     ///
     /// `0` disables the limit (no `RequestBodyLimitLayer` is installed). Set a
@@ -94,6 +121,8 @@ impl Default for SecurityConfig {
             enabled: true,
             rate_limit_rps: default_rate_limit_rps(),
             rate_limit_burst: default_rate_limit_burst(),
+            rate_limit_by_client: false,
+            rate_limit_clients: std::collections::HashMap::new(),
             max_body_size: BodySizeLimit::default(),
             security_headers: true,
             circuit_breaker: true,
