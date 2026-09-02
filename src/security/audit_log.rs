@@ -151,6 +151,16 @@ pub struct AuditEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub span_id: Option<String>,
 
+    /// Content hash of the policy set that was active when this request was
+    /// evaluated.
+    ///
+    /// Makes "which policy actually applied?" answerable after the fact. Without
+    /// it, an audit trail from a fleet mid-rollout cannot distinguish a request
+    /// judged under the old policy from one judged under the new, because both
+    /// lines look identical. Optional so existing audit files keep parsing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_revision: Option<String>,
+
     // ── Merkle batch fields ──
     /// Batch ID (UUID v4). Present when batch_size > 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -587,6 +597,7 @@ mod tests {
             batch_index: None,
             merkle_root: None,
             merkle_proof: None,
+            policy_revision: None,
         }
     }
 
