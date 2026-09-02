@@ -119,13 +119,21 @@ impl GrobStore {
             .context("failed to initialize storage encryption")?;
 
         // Open spend journal and replay current month.
+        //
+        // A damaged journal is fatal by design (ADR-0030): the replayed total
+        // is what the budget check authorizes against, so silently starting
+        // from zero would reopen an already-exhausted budget.
         let journal =
             journal::SpendJournal::open(&base_dir).context("failed to open spend journal")?;
-        let spend_cache = journal.replay_current();
+        let spend_cache = journal
+            .replay_current()
+            .context("refusing to start with an unreadable spend journal")?;
 
         // Replay per-tenant caches from the global journal so per-tenant
         // budget enforcement survives a restart.
-        let tenant_caches = journal.replay_all_tenants();
+        let tenant_caches = journal
+            .replay_all_tenants()
+            .context("refusing to start with an unreadable spend journal")?;
 
         Ok(Self {
             base_dir,
@@ -169,6 +177,9 @@ fn sanitize_filename(s: &str) -> String {
 }
 
 #[cfg(test)]
+mod fault_injection_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::auth::token_store::OAuthToken;
@@ -182,14 +193,14 @@ mod tests {
         let db_path = dir.path().join("grob.db");
         let store = GrobStore::open(&db_path).unwrap();
 
-        let spend = store.load_spend(None);
+        let spend = store.load_spend();
         assert_eq!(spend.total, 0.0);
 
         store.record_spend(None, 0.05, "openrouter", "claude-sonnet");
         store.record_spend(None, 0.10, "anthropic", "claude-opus");
         store.flush_spend();
 
-        let spend = store.load_spend(None);
+        let spend = store.load_spend();
         assert!((spend.total - 0.15).abs() < 0.001);
         assert!((spend.by_provider["openrouter"] - 0.05).abs() < 0.001);
         assert!((spend.by_provider["anthropic"] - 0.10).abs() < 0.001);
@@ -233,13 +244,13 @@ mod tests {
         store.record_spend(Some("tenant-b"), 2.0, "provider", "model");
         store.record_spend(None, 3.0, "provider", "model");
 
-        let global = store.load_spend(None);
+        let global = store.load_spend();
         assert!((global.total - 3.0).abs() < 0.001);
 
-        let tenant_a = store.load_spend(Some("tenant-a"));
+        let tenant_a = store.load_tenant_spend("tenant-a").unwrap();
         assert!((tenant_a.total - 1.0).abs() < 0.001);
 
-        let tenant_b = store.load_spend(Some("tenant-b"));
+        let tenant_b = store.load_tenant_spend("tenant-b").unwrap();
         assert!((tenant_b.total - 2.0).abs() < 0.001);
     }
 
@@ -255,7 +266,7 @@ mod tests {
         }
 
         let store = GrobStore::open(&db_path).unwrap();
-        let spend = store.load_spend(None);
+        let spend = store.load_spend();
         assert!((spend.total - 5.0).abs() < 0.001);
     }
 

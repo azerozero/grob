@@ -52,7 +52,7 @@ pub struct SpendTracker {
 impl SpendTracker {
     /// Create a SpendTracker backed by a GrobStore.
     pub fn with_store(store: std::sync::Arc<crate::storage::GrobStore>) -> Self {
-        let data = store.load_spend(None);
+        let data = store.load_spend();
         Self {
             store: Some(store),
             data,
@@ -114,7 +114,7 @@ impl SpendTracker {
     pub fn record(&mut self, provider: &str, model: &str, cost: f64) {
         if let Some(ref store) = self.store {
             store.record_spend(None, cost, provider, model);
-            self.data = store.load_spend(None);
+            self.data = store.load_spend();
         } else {
             self.reset_if_new_month();
             self.data.total += cost;
@@ -151,7 +151,7 @@ impl SpendTracker {
             // Refresh the local view of the global cache so accessors that
             // surface "request count seen" stay consistent. Global $ totals
             // intentionally do not include tenant-tagged spend.
-            self.data = store.load_spend(None);
+            self.data = store.load_spend();
         } else {
             // No store available (test/CLI mode): only month-reset bookkeeping
             // runs here. Per-tenant amounts are intentionally NOT tracked in
@@ -185,7 +185,7 @@ impl SpendTracker {
         // Mirror the non-agent paths: refresh the global view so request-count
         // accessors stay consistent. Tenant-tagged dollars stay out of the
         // global total, exactly as `record_tenant` documents.
-        self.data = store.load_spend(None);
+        self.data = store.load_spend();
     }
 
     /// Get total spend for current month
@@ -204,12 +204,16 @@ impl SpendTracker {
     }
 
     /// Load spend for a specific tenant.
+    ///
+    /// # Errors
+    ///
+    /// Propagates a damaged-journal error from the store.
     #[allow(dead_code)]
-    pub(crate) fn tenant_spend(&self, tenant: &str) -> SpendData {
+    pub(crate) fn tenant_spend(&self, tenant: &str) -> anyhow::Result<SpendData> {
         if let Some(ref store) = self.store {
-            store.load_spend(Some(tenant))
+            store.load_tenant_spend(tenant)
         } else {
-            SpendData::default()
+            Ok(SpendData::default())
         }
     }
 
@@ -276,7 +280,25 @@ impl SpendTracker {
             return self.check_budget(provider, model, tenant_limit, provider_limit, model_limit);
         };
         let tenant_key = tenant.unwrap_or(crate::storage::DEFAULT_TENANT);
-        let data = store.load_spend(Some(tenant_key));
+        // Fail closed: if the tenant's spend cannot be established, we cannot
+        // prove the request is within budget, so deny it (ADR-0030). Reading
+        // an unavailable counter as "$0 spent" would grant unlimited spend
+        // exactly when accounting is broken.
+        let data = match store.load_tenant_spend(tenant_key) {
+            Ok(data) => data,
+            Err(e) => {
+                tracing::error!(
+                    tenant = %tenant_key,
+                    error = %e,
+                    "spend journal unreadable; denying request to stay within budget"
+                );
+                return Err(BudgetError {
+                    message: format!("Budget state unavailable for tenant '{tenant_key}': {e}"),
+                    limit_usd: tenant_limit,
+                    actual_usd: f64::INFINITY,
+                });
+            }
+        };
 
         if let Some(limit) = model_limit {
             let spend = data.by_model.get(model).copied().unwrap_or(0.0);
