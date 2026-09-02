@@ -60,6 +60,37 @@ impl TokenBucket {
     }
 }
 
+/// Scales a fleet-wide limit down to one replica's share.
+///
+/// `N` replicas each enforcing the configured limit let the fleet through
+/// `N * limit`. Dividing by the replica count and withholding a margin turns
+/// the configured number into a ceiling the fleet cannot exceed — with no
+/// coordination at all: no shared store, no gossip, not one packet.
+///
+/// The floor of `1` is deliberate. A large fleet with a small limit would
+/// otherwise round each share down to zero and reject **all** traffic, turning
+/// a rate limiter into an outage. Overshooting a tiny limit is a far better
+/// failure than serving nothing, so the share never drops below one.
+///
+/// Returns the input unchanged for a single replica with no margin, so the
+/// default deployment is bit-for-bit unaffected.
+#[must_use]
+pub fn replica_share(limit: u32, replicas: u32, margin_percent: u32) -> u32 {
+    if limit == 0 {
+        // 0 means "no limit configured"; scaling it would invent one.
+        return 0;
+    }
+    let replicas = replicas.max(1);
+    // Cap the margin below 100: a 100% margin would withhold the entire quota.
+    let margin = margin_percent.min(99);
+
+    let after_margin = u64::from(limit) * u64::from(100 - margin) / 100;
+    let share = after_margin / u64::from(replicas);
+
+    // Never fewer than one token: see the floor rationale above.
+    u32::try_from(share).unwrap_or(u32::MAX).max(1)
+}
+
 /// Rate limiter key (tenant_id or IP fallback)
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum RateLimitKey {
@@ -380,5 +411,77 @@ mod tests {
             limiter.check_with_config(&key, loose).await.0,
             "the raised rate must apply to the bucket that already exists"
         );
+    }
+
+    /// The default deployment must be bit-for-bit unchanged.
+    #[test]
+    fn single_replica_no_margin_is_identity() {
+        assert_eq!(replica_share(100, 1, 0), 100);
+        assert_eq!(replica_share(7, 1, 0), 7);
+    }
+
+    /// The fleet total must never exceed the configured limit.
+    ///
+    /// This is the whole point: the configured number becomes a real ceiling
+    /// instead of a per-replica one that multiplies by the replica count.
+    #[test]
+    fn fleet_total_never_exceeds_the_configured_limit() {
+        for limit in [10u32, 100, 1000, 9999] {
+            for replicas in 1u32..=16 {
+                for margin in [0u32, 5, 20] {
+                    let share = replica_share(limit, replicas, margin);
+                    let fleet_total = u64::from(share) * u64::from(replicas);
+                    // The floor of 1 can overshoot a limit smaller than the
+                    // replica count; that case is asserted separately below.
+                    if u64::from(limit) >= u64::from(replicas) {
+                        assert!(
+                            fleet_total <= u64::from(limit),
+                            "limit={limit} replicas={replicas} margin={margin}: \
+                             fleet total {fleet_total} exceeds the configured limit"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The margin is withheld from the fleet limit, as a percentage.
+    #[test]
+    fn margin_withholds_the_requested_share() {
+        // 1000 rps over 4 replicas, 5% withheld → 950 / 4 = 237.
+        assert_eq!(replica_share(1000, 4, 5), 237);
+        // 20% withheld → 800 / 4 = 200.
+        assert_eq!(replica_share(1000, 4, 20), 200);
+        // Margin alone, single replica.
+        assert_eq!(replica_share(1000, 1, 10), 900);
+    }
+
+    /// A limit smaller than the fleet must not reject everything.
+    ///
+    /// Dividing 5 rps across 10 replicas rounds each share to zero. Enforcing
+    /// that would serve **no** traffic at all — a rate limiter becoming the
+    /// outage it exists to prevent. Overshooting a tiny limit is the better
+    /// failure, so the share floors at one.
+    #[test]
+    fn share_never_floors_to_zero() {
+        assert_eq!(replica_share(5, 10, 0), 1, "must not reject all traffic");
+        assert_eq!(replica_share(1, 100, 0), 1);
+        // Even a pathological margin leaves one token.
+        assert_eq!(replica_share(10, 2, 99), 1);
+        assert_eq!(replica_share(10, 2, 100), 1, "margin is capped below 100%");
+    }
+
+    /// An unconfigured limit must stay unconfigured.
+    ///
+    /// Scaling zero would invent a limit where the operator asked for none.
+    #[test]
+    fn zero_limit_stays_zero() {
+        assert_eq!(replica_share(0, 8, 20), 0);
+    }
+
+    /// A zero replica count must not divide by zero.
+    #[test]
+    fn zero_replicas_is_treated_as_one() {
+        assert_eq!(replica_share(100, 0, 0), 100);
     }
 }

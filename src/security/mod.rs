@@ -19,6 +19,6 @@ pub use audit_log::AuditLog;
 pub use circuit_breaker::{CircuitBreakerRegistry, CircuitState};
 pub use fips::FipsStatus;
 pub use headers::{apply_security_headers, SecurityHeadersConfig};
-pub use rate_limit::{RateLimitConfig, RateLimitKey, RateLimiter};
+pub use rate_limit::{replica_share, RateLimitConfig, RateLimitKey, RateLimiter};
 pub use tee::TeeStatus;
 pub use tool_spike::{SpikeAction, ToolSpikeConfig, ToolSpikeDetector};

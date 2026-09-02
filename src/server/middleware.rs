@@ -279,6 +279,71 @@ pub(crate) async fn request_id_middleware(mut request: Request<Body>, next: Next
     response
 }
 
+/// Quota advertised to clients, in requests.
+///
+/// The bucket's capacity (`burst`), not the refill rate. `remaining` is a count
+/// of tokens held, which is bounded by the capacity, so advertising the rate
+/// instead would let `remaining` exceed the limit — a client seeing
+/// `limit=10, remaining=19` cannot pace itself against either number.
+fn advertised_quota(config: &crate::security::RateLimitConfig) -> u32 {
+    config.burst.max(config.requests_per_second)
+}
+
+/// Window advertised for a quota, in whole seconds.
+///
+/// A token bucket has no fixed window: it refills continuously. The closest
+/// honest equivalent is how long a full burst takes to accrue, which is what a
+/// client needs in order to pace itself. Rounded up and floored at 1, because
+/// the IETF field is a non-zero integer number of seconds.
+fn window_seconds(config: &crate::security::RateLimitConfig) -> u64 {
+    let rps = u64::from(config.requests_per_second.max(1));
+    let burst = u64::from(config.burst.max(1));
+    burst.div_ceil(rps).max(1)
+}
+
+/// Writes the quota fields onto a response.
+///
+/// Emits both the IETF `RateLimit` / `RateLimit-Policy` fields
+/// (draft-ietf-httpapi-ratelimit-headers) and the de-facto `X-RateLimit-*`
+/// headers. The draft is not yet an RFC and no client library speaks it
+/// exclusively, so sending only the standard fields would be correct and
+/// useless; sending only `X-` would ignore where the ecosystem is going. Both
+/// carry identical numbers.
+///
+/// Silently skips a field whose value will not parse as a header, so a
+/// malformed quota can never turn a served response into a failure: these
+/// fields are advisory, and the request has already been decided.
+fn apply_ratelimit_headers(headers: &mut HeaderMap, limit: u32, remaining: u32, window_secs: u64) {
+    // A limit of 0 means "no quota configured"; advertising it would tell the
+    // client it may never send anything.
+    if limit == 0 {
+        return;
+    }
+
+    let set = |headers: &mut HeaderMap, name: &'static str, value: String| {
+        if let Ok(v) = HeaderValue::from_str(&value) {
+            headers.insert(name, v);
+        }
+    };
+
+    // IETF structured fields: the policy is stable, the service limit is not.
+    set(
+        headers,
+        "ratelimit-policy",
+        format!(r#""default";q={limit};w={window_secs}"#),
+    );
+    set(
+        headers,
+        "ratelimit",
+        format!(r#""default";r={remaining};t={window_secs}"#),
+    );
+
+    // De-facto headers, for every client that already parses them.
+    set(headers, "x-ratelimit-limit", limit.to_string());
+    set(headers, "x-ratelimit-remaining", remaining.to_string());
+    set(headers, "x-ratelimit-reset", window_secs.to_string());
+}
+
 /// Hex-encoded SHA-256 of a credential, for use as an opaque bucket key.
 ///
 /// Same input yields the same bucket, so throttling is unaffected; what changes
@@ -336,9 +401,20 @@ fn client_rps_override(
         .checked_div(default_rps)
         .unwrap_or(rps)
         .max(rps);
+    // A per-client quota is a fleet-wide number too, so it takes the same
+    // share; otherwise naming a client in the overrides map would quietly
+    // exempt it from the fleet ceiling.
     Some(crate::security::RateLimitConfig {
-        requests_per_second: rps,
-        burst,
+        requests_per_second: crate::security::replica_share(
+            rps,
+            security.rate_limit_replicas,
+            security.rate_limit_margin_percent,
+        ),
+        burst: crate::security::replica_share(
+            burst,
+            security.rate_limit_replicas,
+            security.rate_limit_margin_percent,
+        ),
     })
 }
 
@@ -383,10 +459,38 @@ pub(crate) async fn rate_limit_check_middleware(
         RateLimitKey::Ip("anonymous".to_string())
     };
 
+    // Default quota, unless a per-client override replaces it below.
+    //
+    // Scaled to this replica's share when the deployment declares a fleet size,
+    // so the configured number is a fleet-wide ceiling rather than a per-process
+    // one that silently multiplies by the replica count.
+    let default_config = {
+        let inner = state.snapshot();
+        let sec = &inner.config.security;
+        crate::security::RateLimitConfig {
+            requests_per_second: crate::security::replica_share(
+                sec.rate_limit_rps,
+                sec.rate_limit_replicas,
+                sec.rate_limit_margin_percent,
+            ),
+            burst: crate::security::replica_share(
+                sec.rate_limit_burst,
+                sec.rate_limit_replicas,
+                sec.rate_limit_margin_percent,
+            ),
+        }
+    };
+    let mut effective_limit = advertised_quota(&default_config);
+    let mut effective_window = window_seconds(&default_config);
+
     // A per-client override replaces the default rate for that bucket only,
     // keeping the deployment's configured burst.
-    let (allowed, _remaining, reset_after) = match client_rps_override(&state, &key) {
-        Some(config) => limiter.check_with_config(&key, config).await,
+    let (allowed, remaining, reset_after) = match client_rps_override(&state, &key) {
+        Some(config) => {
+            effective_limit = advertised_quota(&config);
+            effective_window = window_seconds(&config);
+            limiter.check_with_config(&key, config).await
+        }
         None => limiter.check(&key).await,
     };
 
@@ -395,10 +499,9 @@ pub(crate) async fn rate_limit_check_middleware(
         let retry_after = reset_after
             .map(|d| d.as_secs().max(1).to_string())
             .unwrap_or_else(|| "1".to_string());
-        return Response::builder()
+        let mut response = Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
             .header("Retry-After", &retry_after)
-            .header("X-RateLimit-Remaining", "0")
             .header("Content-Type", "application/json")
             .body(Body::from(
                 r#"{"error":{"type":"rate_limit_error","message":"Rate limit exceeded. Please slow down."}}"#,
@@ -407,9 +510,21 @@ pub(crate) async fn rate_limit_check_middleware(
             .unwrap_or_else(|_| {
                 Response::new(Body::from(r#"{"error":{"type":"rate_limit_error","message":"Rate limit exceeded."}}"#))
             });
+        apply_ratelimit_headers(response.headers_mut(), effective_limit, 0, effective_window);
+        return response;
     }
 
-    next.run(request).await
+    // Advertise the quota on the *successful* path too: a client that only
+    // learns its budget from a 429 has already been throttled, which is exactly
+    // the outcome these fields exist to avoid.
+    let mut response = next.run(request).await;
+    apply_ratelimit_headers(
+        response.headers_mut(),
+        effective_limit,
+        remaining,
+        effective_window,
+    );
+    response
 }
 
 /// Security headers middleware: applies OWASP security headers to all responses.
@@ -811,6 +926,84 @@ rate_limit_burst = 20
         assert_eq!(config.requests_per_second, 100);
         // default burst 20 at default rps 10 → 10x the rate means 10x the burst.
         assert_eq!(config.burst, 200, "burst must scale with the granted rate");
+    }
+
+    /// The advertised window is how long a full burst takes to accrue.
+    ///
+    /// A token bucket has no fixed window; this is the closest honest number a
+    /// client can pace itself against.
+    #[test]
+    fn window_seconds_reports_burst_refill_time() {
+        let cfg = |rps, burst| crate::security::RateLimitConfig {
+            requests_per_second: rps,
+            burst,
+        };
+        // 20 tokens accruing at 10/s take 2 s to refill.
+        assert_eq!(window_seconds(&cfg(10, 20)), 2);
+        // Sub-second windows round up: the field is a non-zero integer.
+        assert_eq!(window_seconds(&cfg(100, 10)), 1);
+        // Degenerate config must not divide by zero.
+        assert_eq!(window_seconds(&cfg(0, 0)), 1);
+    }
+
+    /// The advertised quota is the bucket capacity, so `remaining` can never
+    /// exceed it.
+    ///
+    /// Advertising the refill rate instead produced `limit=10, remaining=19`,
+    /// which is unusable: a client cannot pace itself against a budget its own
+    /// balance exceeds.
+    #[test]
+    fn advertised_quota_is_never_below_remaining() {
+        let cfg = crate::security::RateLimitConfig {
+            requests_per_second: 10,
+            burst: 20,
+        };
+        let quota = advertised_quota(&cfg);
+        assert_eq!(quota, 20, "the quota is the bucket capacity");
+        assert!(
+            quota >= cfg.burst,
+            "remaining is capped at burst, so the advertised quota must cover it"
+        );
+
+        // Burst unset (0) must fall back to the rate rather than advertise zero.
+        let no_burst = crate::security::RateLimitConfig {
+            requests_per_second: 7,
+            burst: 0,
+        };
+        assert_eq!(advertised_quota(&no_burst), 7);
+    }
+
+    /// Quota fields must be emitted in both the IETF and de-facto spellings.
+    #[test]
+    fn ratelimit_headers_carry_both_spellings() {
+        let mut headers = HeaderMap::new();
+        apply_ratelimit_headers(&mut headers, 100, 87, 60);
+
+        // IETF structured fields (draft-ietf-httpapi-ratelimit-headers).
+        assert_eq!(
+            headers.get("ratelimit-policy").unwrap(),
+            "\"default\";q=100;w=60"
+        );
+        assert_eq!(headers.get("ratelimit").unwrap(), "\"default\";r=87;t=60");
+
+        // De-facto headers, which is what clients actually parse today.
+        assert_eq!(headers.get("x-ratelimit-limit").unwrap(), "100");
+        assert_eq!(headers.get("x-ratelimit-remaining").unwrap(), "87");
+        assert_eq!(headers.get("x-ratelimit-reset").unwrap(), "60");
+    }
+
+    /// With no quota configured, nothing must be advertised.
+    ///
+    /// Emitting `limit=0` would tell a client it may never send a request,
+    /// which is the opposite of "unlimited".
+    #[test]
+    fn no_quota_advertises_nothing() {
+        let mut headers = HeaderMap::new();
+        apply_ratelimit_headers(&mut headers, 0, 0, 1);
+        assert!(
+            headers.is_empty(),
+            "an unconfigured limiter must not advertise a zero quota"
+        );
     }
 
     /// A raw API key must never become the bucket key.

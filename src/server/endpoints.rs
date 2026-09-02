@@ -54,8 +54,54 @@ pub(super) async fn health_check(State(state): State<Arc<AppState>>) -> impl Int
         "revision": {
             "config": inner.config_revision.full(),
             "policy": inner.policy_revision.full(),
-        }
+        },
+        // What the limiter actually enforces on THIS replica. A limit that is
+        // only per-process is a different guarantee from a fleet-wide one, and
+        // the difference is invisible from a response: both just answer 200.
+        // Stating the scope is what lets an operator compute the real
+        // fleet-wide ceiling instead of assuming the configured number.
+        "rate_limit": rate_limit_status(&inner, state.security.rate_limiter.is_some()),
     }))
+}
+
+/// Reports the limiter's configuration and, crucially, its enforcement scope.
+///
+/// The scope is the honest part. Buckets are per process, so with N replicas
+/// the fleet-wide ceiling is `N * rps`, not `rps`. LiteLLM's equivalent silently
+/// degrades a configured global limit into a per-pod one on a Redis error;
+/// grob has no shared store to lose, but the same reasoning applies — the
+/// deployment must be told which guarantee it actually has.
+fn rate_limit_status(
+    inner: &crate::server::ReloadableState,
+    limiter_active: bool,
+) -> serde_json::Value {
+    let security = &inner.config.security;
+    if !limiter_active || security.rate_limit_rps == 0 {
+        return serde_json::json!({ "enabled": false });
+    }
+    let replicas = security.rate_limit_replicas.max(1);
+    let share = crate::security::replica_share(
+        security.rate_limit_rps,
+        replicas,
+        security.rate_limit_margin_percent,
+    );
+    serde_json::json!({
+        "enabled": true,
+        // The scope is a promise about the blast radius of `rps`, not a
+        // description of the storage backend. `fleet` means the configured
+        // number is a real ceiling because each replica enforces its share;
+        // `per_replica` means the fleet can reach `replicas * rps`.
+        "scope": if replicas > 1 { "fleet" } else { "per_replica" },
+        "rps": security.rate_limit_rps,
+        "burst": security.rate_limit_burst,
+        // What THIS process actually enforces, which is what an operator needs
+        // to reconcile the configured number with observed throughput.
+        "effective_rps_this_replica": share,
+        "replicas": replicas,
+        "margin_percent": security.rate_limit_margin_percent,
+        "keyed_by": if security.rate_limit_by_client { "oidc_client" } else { "tenant" },
+        "client_overrides": security.rate_limit_clients.len(),
+    })
 }
 
 /// Liveness probe: process is alive, returns 200 always.
@@ -406,6 +452,69 @@ actual_model = "alpha"
             resp.status(),
             StatusCode::OK,
             "the 12-char form shown in logs must be usable as a pin"
+        );
+    }
+
+    /// Health must state the limiter's enforcement scope.
+    ///
+    /// A per-replica limit and a fleet-wide one are indistinguishable from a
+    /// response, so the scope has to be stated for the number to mean anything.
+    #[tokio::test]
+    async fn health_reports_rate_limit_scope() {
+        // The section must be a real `[security]` table: `config()` appends its
+        // argument at the end of the document, so bare keys would land in
+        // whatever table happens to be last.
+        let state = test_app_state(
+            config("\n[security]\nrate_limit_rps = 10\nrate_limit_burst = 20\n"),
+            registry_with_provider(),
+        );
+        let resp = health_check(State(state)).await.into_response();
+        let body = json_body(resp).await;
+
+        assert_eq!(body["rate_limit"]["enabled"], true);
+        assert_eq!(
+            body["rate_limit"]["scope"], "per_replica",
+            "the scope must be explicit: with N replicas the real ceiling is N * rps"
+        );
+        assert_eq!(body["rate_limit"]["rps"], 10);
+        assert_eq!(body["rate_limit"]["keyed_by"], "tenant");
+    }
+
+    /// Declaring a fleet must flip the scope and report the real share.
+    #[tokio::test]
+    async fn health_reports_fleet_scope_and_effective_share() {
+        let state = test_app_state(
+            config(
+                "\n[security]\nrate_limit_rps = 1000\nrate_limit_burst = 2000\n\
+                 rate_limit_replicas = 4\nrate_limit_margin_percent = 5\n",
+            ),
+            registry_with_provider(),
+        );
+        let resp = health_check(State(state)).await.into_response();
+        let body = json_body(resp).await;
+
+        assert_eq!(
+            body["rate_limit"]["scope"], "fleet",
+            "declaring replicas makes the configured number a real ceiling"
+        );
+        assert_eq!(body["rate_limit"]["rps"], 1000, "the fleet-wide limit");
+        // 1000 - 5% = 950, split four ways.
+        assert_eq!(
+            body["rate_limit"]["effective_rps_this_replica"], 237,
+            "the operator must see what THIS process enforces"
+        );
+        assert_eq!(body["rate_limit"]["replicas"], 4);
+    }
+
+    /// A disabled limiter must say so rather than report a phantom quota.
+    #[tokio::test]
+    async fn health_reports_rate_limit_disabled() {
+        let state = test_app_state(config(""), registry_with_provider());
+        let resp = health_check(State(state)).await.into_response();
+        let body = json_body(resp).await;
+        assert_eq!(
+            body["rate_limit"]["enabled"], false,
+            "no configured quota must not look like an enforced one"
         );
     }
 

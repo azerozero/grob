@@ -635,18 +635,45 @@ pub(crate) fn init_security(config: &AppConfig) -> anyhow::Result<SecurityServic
     // A rate_limit_rps of 0 disables throttling — don't install the limiter
     // (rps=0 would otherwise starve the token bucket and reject every request).
     let rate_limiter = if security_enabled && config.security.rate_limit_rps > 0 {
+        // The limiter is built once with THIS replica's share, because
+        // `RateLimiter::check` uses the bucket's own config: scaling only at
+        // the call site would leave the default path enforcing the whole fleet
+        // limit on every replica.
         let rl_config = RateLimitConfig {
-            requests_per_second: config.security.rate_limit_rps,
-            burst: config.security.rate_limit_burst,
+            requests_per_second: crate::security::replica_share(
+                config.security.rate_limit_rps,
+                config.security.rate_limit_replicas,
+                config.security.rate_limit_margin_percent,
+            ),
+            burst: crate::security::replica_share(
+                config.security.rate_limit_burst,
+                config.security.rate_limit_replicas,
+                config.security.rate_limit_margin_percent,
+            ),
         };
-        info!(
-            "🛡️  Security: rate limit {}rps burst={}, body limit {}, headers={}, circuit_breaker={}",
-            config.security.rate_limit_rps,
-            config.security.rate_limit_burst,
-            body_limit_desc,
-            config.security.security_headers,
-            config.security.circuit_breaker,
-        );
+        if config.security.rate_limit_replicas > 1 {
+            info!(
+                "🛡️  Security: fleet rate limit {}rps burst={} over {} replicas                  (margin {}%) → this replica enforces {}rps burst={}, body limit {},                  headers={}, circuit_breaker={}",
+                config.security.rate_limit_rps,
+                config.security.rate_limit_burst,
+                config.security.rate_limit_replicas,
+                config.security.rate_limit_margin_percent,
+                rl_config.requests_per_second,
+                rl_config.burst,
+                body_limit_desc,
+                config.security.security_headers,
+                config.security.circuit_breaker,
+            );
+        } else {
+            info!(
+                "🛡️  Security: rate limit {}rps burst={}, body limit {}, headers={}, circuit_breaker={}",
+                config.security.rate_limit_rps,
+                config.security.rate_limit_burst,
+                body_limit_desc,
+                config.security.security_headers,
+                config.security.circuit_breaker,
+            );
+        }
         Some(Arc::new(RateLimiter::new(rl_config)))
     } else if security_enabled {
         info!(
