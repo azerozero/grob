@@ -401,9 +401,20 @@ fn client_rps_override(
         .checked_div(default_rps)
         .unwrap_or(rps)
         .max(rps);
+    // A per-client quota is a fleet-wide number too, so it takes the same
+    // share; otherwise naming a client in the overrides map would quietly
+    // exempt it from the fleet ceiling.
     Some(crate::security::RateLimitConfig {
-        requests_per_second: rps,
-        burst,
+        requests_per_second: crate::security::replica_share(
+            rps,
+            security.rate_limit_replicas,
+            security.rate_limit_margin_percent,
+        ),
+        burst: crate::security::replica_share(
+            burst,
+            security.rate_limit_replicas,
+            security.rate_limit_margin_percent,
+        ),
     })
 }
 
@@ -449,9 +460,25 @@ pub(crate) async fn rate_limit_check_middleware(
     };
 
     // Default quota, unless a per-client override replaces it below.
-    let default_config = crate::security::RateLimitConfig {
-        requests_per_second: state.snapshot().config.security.rate_limit_rps,
-        burst: state.snapshot().config.security.rate_limit_burst,
+    //
+    // Scaled to this replica's share when the deployment declares a fleet size,
+    // so the configured number is a fleet-wide ceiling rather than a per-process
+    // one that silently multiplies by the replica count.
+    let default_config = {
+        let inner = state.snapshot();
+        let sec = &inner.config.security;
+        crate::security::RateLimitConfig {
+            requests_per_second: crate::security::replica_share(
+                sec.rate_limit_rps,
+                sec.rate_limit_replicas,
+                sec.rate_limit_margin_percent,
+            ),
+            burst: crate::security::replica_share(
+                sec.rate_limit_burst,
+                sec.rate_limit_replicas,
+                sec.rate_limit_margin_percent,
+            ),
+        }
     };
     let mut effective_limit = advertised_quota(&default_config);
     let mut effective_window = window_seconds(&default_config);

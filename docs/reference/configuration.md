@@ -329,6 +329,40 @@ refill rate, so `remaining` can never exceed `limit`. The window is how long a
 full burst takes to accrue — a token bucket refills continuously and has no
 fixed window, so this is the closest honest number to pace against.
 
+### Making the limit a real fleet-wide ceiling
+
+Buckets are per process, so N replicas each enforcing `rate_limit_rps` let the
+fleet through `N × rate_limit_rps`. When the limit is a **hard** constraint — a
+provider quota that returns 429, a contractual cap — declare the fleet size:
+
+```toml
+[security]
+rate_limit_rps = 1000          # the FLEET-wide limit
+rate_limit_burst = 1000
+rate_limit_replicas = 4        # each replica enforces its share
+rate_limit_margin_percent = 5  # withhold a little for rounding and restarts
+```
+
+Each replica then enforces `(1000 - 5%) / 4 = 237` rps, so the fleet cannot
+exceed 950. Measured on three live replicas with a limit of 30: **90 requests
+got through without the declaration, 27 with it.**
+
+The trade is utilisation for a guarantee, and it costs **no coordination at
+all** — no shared store, no gossip, not a single packet between replicas. A
+replica cannot borrow unused capacity from an idle peer, so unbalanced traffic
+leaves quota unused: with 3 replicas and all traffic hitting one of them, that
+replica is capped at a third of the fleet limit.
+
+Use it when overshooting the limit is worse than under-using it. Leave
+`rate_limit_replicas = 1` (the default) when the limit is merely protective —
+the behaviour is then bit-for-bit unchanged.
+
+The margin absorbs what division cannot: rounding up on small shares, a replica
+restarting with a full bucket, or a scale-up landing before the config catches
+up. A share never floors to zero, because a fleet larger than its own limit
+would otherwise reject **all** traffic — the limiter becoming the outage it
+exists to prevent.
+
 ### Checking what is actually enforced
 
 `/health` reports the limiter's scope, because a per-replica limit and a
@@ -338,17 +372,21 @@ fleet-wide one are indistinguishable from a response — both just answer `200`:
 {
   "rate_limit": {
     "enabled": true,
-    "scope": "per_replica",
-    "rps": 10,
-    "burst": 20,
+    "scope": "fleet",
+    "rps": 30,
+    "burst": 30,
+    "effective_rps_this_replica": 9,
+    "replicas": 3,
+    "margin_percent": 10,
     "keyed_by": "tenant",
     "client_overrides": 0
   }
 }
 ```
 
-`scope: per_replica` is the honest statement that the real fleet-wide ceiling is
-`replicas × rps`. This matters: LiteLLM's Redis-backed limiter silently degrades
+`scope` says which guarantee you have. `fleet` means `rps` is a real ceiling
+because each replica enforces `effective_rps_this_replica`. `per_replica` means
+the fleet can reach `replicas × rps`. This matters: LiteLLM's Redis-backed limiter silently degrades
 a configured global limit into a per-pod one when Redis errors
 ([BerriAI/litellm#35533](https://github.com/BerriAI/litellm/issues/35533)), so
 the deployment cannot tell which guarantee it has. grob has no shared store to

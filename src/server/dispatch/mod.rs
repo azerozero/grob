@@ -703,6 +703,16 @@ async fn enforce_post_route_policy(
         let key = crate::security::RateLimitKey::Tenant(
             ctx.tenant_id.clone().unwrap_or_else(|| "anon".to_string()),
         );
+        // A policy rps is a fleet-wide number like every other configured
+        // limit, so it takes this replica's share too. Without this, naming a
+        // rate limit in a policy would quietly exempt it from the fleet
+        // ceiling that `[security]` enforces everywhere else.
+        let sec = &ctx.inner.config.security;
+        let rps = crate::security::replica_share(
+            rps,
+            sec.rate_limit_replicas,
+            sec.rate_limit_margin_percent,
+        );
         let (allowed, _, _) = ctx
             .state
             .policy_rate_limiter

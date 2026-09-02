@@ -49,6 +49,32 @@ pub struct SecurityConfig {
     /// ```
     #[serde(default)]
     pub rate_limit_clients: std::collections::HashMap<String, u32>,
+    /// Number of replicas sharing the configured limit (default 1).
+    ///
+    /// Buckets are per process, so N replicas each enforcing `rate_limit_rps`
+    /// let the fleet through `N * rate_limit_rps`. Declaring the replica count
+    /// makes each one enforce its **share** instead, turning the configured
+    /// number into a real fleet-wide ceiling.
+    ///
+    /// This trades utilisation for a hard guarantee, and it needs no
+    /// coordination: no shared store, no gossip, not a single packet between
+    /// replicas. The cost is that a replica cannot borrow unused capacity from
+    /// an idle peer, so unbalanced traffic leaves quota on the table.
+    ///
+    /// `1` (the default) keeps the historical behaviour exactly.
+    #[serde(default = "default_replica_count")]
+    pub rate_limit_replicas: u32,
+    /// Safety margin withheld from the fleet limit, in percent (default 0).
+    ///
+    /// Applied on top of the per-replica share. Absorbs the residual overshoot
+    /// that division cannot: rounding up on small shares, a replica restarting
+    /// with a full bucket, or a scale-up landing before the config catches up.
+    ///
+    /// Set it when the limit is a hard external constraint — a provider quota
+    /// that returns 429, a contractual cap — and leave it at 0 when the limit
+    /// is merely protective.
+    #[serde(default)]
+    pub rate_limit_margin_percent: u32,
     /// Maximum request body size in bytes (default 0 = unlimited).
     ///
     /// `0` disables the limit (no `RequestBodyLimitLayer` is installed). Set a
@@ -123,6 +149,8 @@ impl Default for SecurityConfig {
             rate_limit_burst: default_rate_limit_burst(),
             rate_limit_by_client: false,
             rate_limit_clients: std::collections::HashMap::new(),
+            rate_limit_replicas: default_replica_count(),
+            rate_limit_margin_percent: 0,
             max_body_size: BodySizeLimit::default(),
             security_headers: true,
             circuit_breaker: true,
@@ -157,6 +185,12 @@ fn default_flush_interval_ms() -> u64 {
 // legitimate burst (an autonomous agent easily exceeds any fixed rps). Re-enable
 // for multi-tenant deployments by setting `rate_limit_rps` (e.g. 100) in
 // `[security]`; a value of `0` skips installing the limiter entirely.
+// A single daemon is the default deployment, so the fleet is one replica and
+// the configured limit is already the fleet limit.
+fn default_replica_count() -> u32 {
+    1
+}
+
 fn default_rate_limit_rps() -> u32 {
     0
 }

@@ -79,13 +79,26 @@ fn rate_limit_status(
     if !limiter_active || security.rate_limit_rps == 0 {
         return serde_json::json!({ "enabled": false });
     }
+    let replicas = security.rate_limit_replicas.max(1);
+    let share = crate::security::replica_share(
+        security.rate_limit_rps,
+        replicas,
+        security.rate_limit_margin_percent,
+    );
     serde_json::json!({
         "enabled": true,
-        // "per_replica" is a promise about the blast radius of this number, not
-        // a description of the storage backend.
-        "scope": "per_replica",
+        // The scope is a promise about the blast radius of `rps`, not a
+        // description of the storage backend. `fleet` means the configured
+        // number is a real ceiling because each replica enforces its share;
+        // `per_replica` means the fleet can reach `replicas * rps`.
+        "scope": if replicas > 1 { "fleet" } else { "per_replica" },
         "rps": security.rate_limit_rps,
         "burst": security.rate_limit_burst,
+        // What THIS process actually enforces, which is what an operator needs
+        // to reconcile the configured number with observed throughput.
+        "effective_rps_this_replica": share,
+        "replicas": replicas,
+        "margin_percent": security.rate_limit_margin_percent,
         "keyed_by": if security.rate_limit_by_client { "oidc_client" } else { "tenant" },
         "client_overrides": security.rate_limit_clients.len(),
     })
@@ -465,6 +478,32 @@ actual_model = "alpha"
         );
         assert_eq!(body["rate_limit"]["rps"], 10);
         assert_eq!(body["rate_limit"]["keyed_by"], "tenant");
+    }
+
+    /// Declaring a fleet must flip the scope and report the real share.
+    #[tokio::test]
+    async fn health_reports_fleet_scope_and_effective_share() {
+        let state = test_app_state(
+            config(
+                "\n[security]\nrate_limit_rps = 1000\nrate_limit_burst = 2000\n\
+                 rate_limit_replicas = 4\nrate_limit_margin_percent = 5\n",
+            ),
+            registry_with_provider(),
+        );
+        let resp = health_check(State(state)).await.into_response();
+        let body = json_body(resp).await;
+
+        assert_eq!(
+            body["rate_limit"]["scope"], "fleet",
+            "declaring replicas makes the configured number a real ceiling"
+        );
+        assert_eq!(body["rate_limit"]["rps"], 1000, "the fleet-wide limit");
+        // 1000 - 5% = 950, split four ways.
+        assert_eq!(
+            body["rate_limit"]["effective_rps_this_replica"], 237,
+            "the operator must see what THIS process enforces"
+        );
+        assert_eq!(body["rate_limit"]["replicas"], 4);
     }
 
     /// A disabled limiter must say so rather than report a phantom quota.
