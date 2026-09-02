@@ -678,6 +678,17 @@ async fn enforce_post_route_policy(
 
     // (2) Budget override — enforced before the provider loop's spend check.
     if let Some(limit) = policy.budget.as_ref().and_then(|b| b.monthly_usd) {
+        // A policy budget is a fleet-wide amount like every other cap, so it
+        // takes this replica's share. Without this, moving a cap into a policy
+        // would quietly exempt it from the fleet ceiling that `[budget]`
+        // enforces everywhere else — the limit would still be honoured per
+        // process, and still be multiplied by the replica count.
+        let budget_config = &ctx.inner.config.budget;
+        let limit = crate::security::replica_budget_share(
+            limit,
+            budget_config.replicas,
+            budget_config.margin_percent,
+        );
         let tracker = ctx.state.observability.spend_tracker.lock().await;
         let result = match ctx.tenant_id.as_deref() {
             Some(tenant) => tracker.check_tenant_budget(
@@ -1480,6 +1491,49 @@ provider = "{provider}"
         assert!(
             !called.load(std::sync::atomic::Ordering::SeqCst),
             "the provider must NOT be reached when the budget policy blocks"
+        );
+    }
+
+    /// A policy budget must take the fleet share like every other cap.
+    ///
+    /// Otherwise moving a cap into a policy would quietly exempt it from the
+    /// fleet ceiling: the limit would still be honoured per process, and still
+    /// be multiplied by the replica count. Spend here sits *under* the
+    /// configured cap but *over* this replica's share, so it can only block if
+    /// the share is applied.
+    #[cfg(feature = "policies")]
+    #[tokio::test]
+    async fn dispatch_policy_budget_override_takes_the_fleet_share() {
+        let mut config = policy_config("default", "[policies.budget]\nmonthly_usd = 100.0");
+        // Four replicas, 5% withheld → this one may spend 100 * 0.95 / 4 = 23.75.
+        config.budget.replicas = 4;
+        config.budget.margin_percent = 5;
+
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test(
+            "anthropic",
+            Arc::new(CountingProvider {
+                called: called.clone(),
+            }),
+        );
+        let state = crate::server::test_app_state(config, registry);
+
+        {
+            let mut tracker = state.observability.spend_tracker.lock().await;
+            // Well under the 100.0 policy cap, but over this replica's 23.75.
+            tracker.record("anthropic", "alpha", 30.0);
+        }
+
+        let result = run_dispatch(&state, None).await;
+        assert!(
+            matches!(result, Err(RequestError::BudgetExceeded { .. })),
+            "a policy budget must be divided across replicas: $30 is under the \
+             $100 cap but over this replica's $23.75 share"
+        );
+        assert!(
+            !called.load(std::sync::atomic::Ordering::SeqCst),
+            "the provider must not be reached once the share is exhausted"
         );
     }
 
