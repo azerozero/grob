@@ -17,6 +17,7 @@ pub struct AuditEntryBuilder {
     dlp_had_injection: bool,
     dlp_had_pii: bool,
     dlp_had_redact_or_warn: bool,
+    policy_revision: Option<String>,
 }
 
 impl AuditEntryBuilder {
@@ -43,7 +44,18 @@ impl AuditEntryBuilder {
             dlp_had_injection: false,
             dlp_had_pii: false,
             dlp_had_redact_or_warn: false,
+            policy_revision: None,
         }
+    }
+
+    /// Stamps the policy revision active when the request was evaluated.
+    ///
+    /// Call sites pass the revision from the request's own state snapshot, not
+    /// from a fresh read: a reload racing the request would otherwise attribute
+    /// the decision to a policy that was not the one applied.
+    pub fn policy_revision(mut self, revision: impl Into<String>) -> Self {
+        self.policy_revision = Some(revision.into());
+        self
     }
 
     /// Sets the DLP rules triggered during the request.
@@ -142,6 +154,7 @@ impl AuditEntryBuilder {
             risk_level: self.risk_level,
             trace_id,
             span_id,
+            policy_revision: self.policy_revision,
             batch_id: None,     // filled by batch flush
             batch_index: None,  // filled by batch flush
             merkle_root: None,  // filled by batch flush
@@ -172,6 +185,8 @@ pub(crate) struct AuditParams<'a> {
     pub dlp_had_injection: bool,
     pub dlp_had_pii: bool,
     pub dlp_had_redact_or_warn: bool,
+    /// Policy revision active on the snapshot this request was evaluated against.
+    pub policy_revision: &'a str,
 }
 
 /// Fire-and-forget audit log entry writer.
@@ -180,7 +195,8 @@ pub(crate) struct AuditParams<'a> {
 /// and risk level per Articles 12 and 14.
 pub(crate) fn log_audit(p: &AuditParams<'_>) {
     let mut builder = AuditEntryBuilder::new(p.tenant_id, p.action, p.backend, p.ip, p.duration_ms)
-        .dlp_rules(p.dlp_rules.clone());
+        .dlp_rules(p.dlp_rules.clone())
+        .policy_revision(p.policy_revision);
     if p.dlp_blocked {
         builder = builder.dlp_blocked();
     }

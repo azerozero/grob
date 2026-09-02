@@ -260,6 +260,10 @@ impl DispatchContext<'_> {
                 dlp_had_injection: entry.dlp_had_injection,
                 dlp_had_pii: entry.dlp_had_pii,
                 dlp_had_redact_or_warn: entry.dlp_had_redact_or_warn,
+                // From this request's own snapshot, so a concurrent reload
+                // cannot attribute the decision to a policy set that was not
+                // the one applied.
+                policy_revision: self.inner.policy_revision.full(),
             });
             // Flag so the outer audit middleware skips a duplicate entry.
             self.audited

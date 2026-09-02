@@ -17,6 +17,13 @@ use grob::server::{
 };
 use tempfile::TempDir;
 
+/// Stand-in policy revision for the middleware under test.
+///
+/// The middleware only forwards this value; its computation is covered by
+/// `server::revision`. A recognisable constant makes an assertion failure
+/// obvious rather than looking like a real digest.
+const TEST_POLICY_REVISION: &str = "sha256:test-policy-revision";
+
 fn build_audit_log() -> (TempDir, AuditLog) {
     let dir = TempDir::new().expect("tempdir");
     let log = AuditLog::new(AuditConfig {
@@ -79,7 +86,7 @@ fn audit_middleware_emits_one_entry_per_request_lifecycle() {
     for status in cases {
         let capture = make_capture();
         let response = build_response(status);
-        let written = emit_request_processed(&audit, &capture, &response);
+        let written = emit_request_processed(&audit, &capture, &response, TEST_POLICY_REVISION);
         assert!(
             written,
             "audit middleware must emit an entry for {}",
@@ -108,7 +115,7 @@ fn audit_middleware_skips_when_handler_already_audited() {
     let mut response = build_response(StatusCode::OK);
     response.extensions_mut().insert(AuditedAlready);
 
-    let written = emit_request_processed(&audit, &capture, &response);
+    let written = emit_request_processed(&audit, &capture, &response, TEST_POLICY_REVISION);
     assert!(
         !written,
         "audit middleware must not double-log when handler already logged"
@@ -135,7 +142,7 @@ fn audit_middleware_captures_provider_from_response_header() {
         .headers_mut()
         .insert("x-ai-model", HeaderValue::from_static("claude-opus-4-7"));
 
-    let written = emit_request_processed(&audit, &capture, &response);
+    let written = emit_request_processed(&audit, &capture, &response, TEST_POLICY_REVISION);
     assert!(written);
 
     let entries = read_entries(&dir);
@@ -158,7 +165,7 @@ fn audit_middleware_includes_error_variant_tag_in_dlp_rules_field() {
         .extensions_mut()
         .insert(grob::server::ErrorVariantTag("budget_exceeded".to_string()));
 
-    let written = emit_request_processed(&audit, &capture, &response);
+    let written = emit_request_processed(&audit, &capture, &response, TEST_POLICY_REVISION);
     assert!(written);
 
     let entries = read_entries(&dir);
@@ -174,7 +181,7 @@ fn audit_middleware_emits_low_risk_for_2xx() {
     let (dir, audit) = build_audit_log();
     let capture = make_capture();
     let response = build_response(StatusCode::OK);
-    emit_request_processed(&audit, &capture, &response);
+    emit_request_processed(&audit, &capture, &response, TEST_POLICY_REVISION);
     let entries = read_entries(&dir);
     assert_eq!(entries.len(), 1);
     assert_eq!(
@@ -188,7 +195,7 @@ fn audit_middleware_emits_medium_risk_for_4xx() {
     let (dir, audit) = build_audit_log();
     let capture = make_capture();
     let response = build_response(StatusCode::BAD_REQUEST);
-    emit_request_processed(&audit, &capture, &response);
+    emit_request_processed(&audit, &capture, &response, TEST_POLICY_REVISION);
     let entries = read_entries(&dir);
     assert_eq!(entries.len(), 1);
     assert_eq!(
@@ -202,7 +209,7 @@ fn audit_middleware_emits_high_risk_for_5xx() {
     let (dir, audit) = build_audit_log();
     let capture = make_capture();
     let response = build_response(StatusCode::INTERNAL_SERVER_ERROR);
-    emit_request_processed(&audit, &capture, &response);
+    emit_request_processed(&audit, &capture, &response, TEST_POLICY_REVISION);
     let entries = read_entries(&dir);
     assert_eq!(entries.len(), 1);
     assert_eq!(
@@ -217,7 +224,7 @@ fn audit_middleware_falls_back_to_client_ip_when_tenant_missing() {
     let mut capture = make_capture();
     capture.tenant_id = String::new();
     let response = build_response(StatusCode::OK);
-    emit_request_processed(&audit, &capture, &response);
+    emit_request_processed(&audit, &capture, &response, TEST_POLICY_REVISION);
     let entries = read_entries(&dir);
     assert_eq!(entries.len(), 1);
     assert_eq!(

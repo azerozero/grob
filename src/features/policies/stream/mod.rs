@@ -221,6 +221,9 @@ pub(crate) fn write_hit_receipt(
             risk_level: Some(RiskLevel::High),
             trace_id,
             span_id,
+            // HIT approval is a signed receipt for one tool call, not a routed
+            // request evaluated against the policy set.
+            policy_revision: None,
             batch_id: None,
             batch_index: None,
             merkle_root: None,

@@ -55,6 +55,19 @@ pub struct ServerConfig {
     /// startup stays offline-safe and free of surprise spend.
     #[serde(default)]
     pub validate_on_start: bool,
+    /// Config revision this replica is expected to be serving.
+    ///
+    /// Multi-replica deployments only. When set, `/ready` fails while the
+    /// replica's own [`crate::server::revision`] does not match, so an
+    /// orchestrator pulls it from the load balancer instead of letting it serve
+    /// a stale policy. The deployment sets this to the revision it just rolled
+    /// out; a replica that missed the reload reports itself unready rather than
+    /// silently enforcing yesterday's rules.
+    ///
+    /// Unset (the default) disables the check entirely, which is correct for the
+    /// single-daemon case: there is nothing to be inconsistent with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_config_revision: Option<String>,
 }
 
 // NOTE: 1455 is an unregistered IANA port unlikely to conflict with common
@@ -76,6 +89,7 @@ impl Default for ServerConfig {
             oauth_callback_port: default_oauth_callback_port(),
             warmup_connections: false,
             validate_on_start: false,
+            expected_config_revision: None,
         }
     }
 }
