@@ -279,6 +279,15 @@ pub(crate) async fn request_id_middleware(mut request: Request<Body>, next: Next
     response
 }
 
+/// Hex-encoded SHA-256 of a credential, for use as an opaque bucket key.
+///
+/// Same input yields the same bucket, so throttling is unaffected; what changes
+/// is that the secret itself is never held in the bucket map.
+fn hash_credential(credential: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(credential.as_bytes()))
+}
+
 /// Returns the per-client rate-limit key for `claims`, when enabled and available.
 ///
 /// `None` means "not client-scoped": either the feature is off or the token
@@ -365,7 +374,11 @@ pub(crate) async fn rate_limit_check_middleware(
             None => RateLimitKey::Tenant(claims.tenant_id().to_string()),
         }
     } else if let Some(credential) = extract_api_credential(request.headers()) {
-        RateLimitKey::Tenant(credential.to_string())
+        // Hash rather than store the raw credential: this key lives in the
+        // bucket map for up to ten idle minutes and derives `Debug`, so a
+        // future log line or panic message would otherwise print a usable API
+        // key. The digest partitions callers identically.
+        RateLimitKey::Tenant(format!("cred:{}", hash_credential(credential)))
     } else {
         RateLimitKey::Ip("anonymous".to_string())
     };
@@ -798,6 +811,33 @@ rate_limit_burst = 20
         assert_eq!(config.requests_per_second, 100);
         // default burst 20 at default rps 10 → 10x the rate means 10x the burst.
         assert_eq!(config.burst, 200, "burst must scale with the granted rate");
+    }
+
+    /// A raw API key must never become the bucket key.
+    ///
+    /// Bucket keys live in memory for up to ten idle minutes and `RateLimitKey`
+    /// derives `Debug`, so storing the credential verbatim would put a usable
+    /// secret one stray log line or panic message away from disclosure.
+    #[test]
+    fn api_credential_is_hashed_not_stored_verbatim() {
+        let secret = "sk-live-super-secret-value";
+        let hashed = hash_credential(secret);
+
+        assert!(
+            !hashed.contains(secret),
+            "the digest must not contain the credential"
+        );
+        assert_eq!(hashed.len(), 64, "sha-256 hex is 64 chars");
+        assert_eq!(
+            hashed,
+            hash_credential(secret),
+            "hashing must be stable, or a caller would get a new bucket per request"
+        );
+        assert_ne!(
+            hashed,
+            hash_credential("sk-live-super-secret-valuf"),
+            "distinct credentials must land in distinct buckets"
+        );
     }
 
     /// An override must never be applied to a tenant or IP key.
