@@ -133,18 +133,31 @@ pub(crate) async fn check_budget_for_tenant(
     tenant_id: Option<&str>,
 ) -> Result<(), RequestError> {
     let budget_config = &inner.config.budget;
-    let global_limit = budget_config.monthly_limit_usd.value();
+
+    // Every configured cap is a FLEET-wide amount, scaled to this replica's
+    // share. Spend is tracked per process (a peer's writes are invisible until
+    // restart), so without this each replica would allow the full cap and the
+    // fleet could spend `replicas x limit`.
+    let share = |limit: f64| {
+        crate::security::replica_budget_share(
+            limit,
+            budget_config.replicas,
+            budget_config.margin_percent,
+        )
+    };
+
+    let global_limit = share(budget_config.monthly_limit_usd.value());
 
     let provider_limit = inner
         .config
         .providers
         .iter()
         .find(|p| p.name == provider_name)
-        .and_then(|p| p.budget_usd.map(|b| b.value()));
+        .and_then(|p| p.budget_usd.map(|b| share(b.value())));
 
     let model_limit = inner
         .find_model(model_name)
-        .and_then(|m| m.budget_usd.map(|b| b.value()));
+        .and_then(|m| m.budget_usd.map(|b| share(b.value())));
 
     let tracker = state.observability.spend_tracker.lock().await;
 

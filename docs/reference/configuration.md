@@ -60,6 +60,52 @@ Budget checks follow a priority order: model limit > provider limit > global lim
 
 Spend is tracked in append-only JSONL journals (`~/.grob/spend/YYYY-MM.jsonl`) and resets automatically each month.
 
+### Budget across multiple replicas
+
+Spend is tracked **per process**. The in-memory total is seeded once at startup
+and updated only by that replica, so a peer writing to the same journal stays
+invisible until restart. **Mounting a shared volume does not make the budget
+shared** — a natural assumption, and a costly one: N replicas each allow the
+full cap, so the fleet can spend `N × monthly_limit_usd`.
+
+If the point of the cap is "do not spend more than this", declare the fleet:
+
+```toml
+[budget]
+monthly_limit_usd = 100.0   # the FLEET-wide cap
+replicas = 5                # each replica enforces its share
+margin_percent = 1          # withheld for rounding and restarts
+```
+
+Each replica then allows `$19.80`, so five of them cap the fleet at `$99.00`.
+Verified on a live replica: with `$19.90` recorded, the next request is refused
+with HTTP 402 even though the fleet cap of `$100` is far from reached.
+
+`/health` shows both numbers, so the configured cap can be reconciled with
+observed spend:
+
+```json
+{
+  "spend": {
+    "total_usd": 19.9,
+    "budget_usd": 100.0,
+    "budget_usd_this_replica": 19.8,
+    "replicas": 5
+  }
+}
+```
+
+The trade is the same as for [rate limiting](#making-the-limit-a-real-fleet-wide-ceiling):
+utilisation for a guarantee, at the cost of **no coordination at all** — no
+shared store, no gossip, not a single packet between replicas. A replica cannot
+spend an idle peer's share. For a *cost* cap that is usually the right way
+round: under-spending is recoverable, an overrun is not.
+
+`replicas` is a **declaration grob cannot verify** — it never counts its peers,
+which is precisely what avoids the coordination. If an autoscaler runs more
+replicas than declared, the ceiling scales with them. Declare the autoscaler's
+**maximum**, not its nominal size.
+
 ## Pricing
 
 Controls where model prices come from and how token usage is accounted.
