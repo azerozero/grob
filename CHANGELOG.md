@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.105](https://github.com/azerozero/grob/compare/v0.36.104...v0.36.105) - 2026-09-02
+
+### Fixed
+
+- *(budget)* apply the fleet share to policy budget overrides ([#569](https://github.com/azerozero/grob/pull/569))
+
 ## [0.36.104](https://github.com/azerozero/grob/compare/v0.36.103...v0.36.104) - 2026-09-02
 
 ### Added
