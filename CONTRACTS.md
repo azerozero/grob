@@ -156,7 +156,7 @@
 - INV-2 (Non-blocking): Budget check reads current spend but does not record or modify anything.
 - INV-3 (Threshold semantics): The check uses `>=` (greater-than-or-equal), meaning the exact limit value is already considered exceeded.
 - INV-4 (Zero global bypass): A `global_limit` of `0.0` means no global limit (skipped, not "zero budget").
-- INV-5 (Tenant isolation): `check_tenant_budget(tenant, ...)` evaluates the supplied limits against the **tenant-local** spend cache (`load_spend(Some(tenant))`), not the global counter. One tenant exceeding its quota cannot block another. `tenant == None` falls back to [`DEFAULT_TENANT`](crate::storage::DEFAULT_TENANT) so legacy single-tenant callers still go through the per-tenant path.
+- INV-5 (Tenant isolation): `check_tenant_budget(tenant, ...)` evaluates the supplied limits against the **tenant-local** spend cache (`load_spend(Some(tenant))`), not the global counter. One tenant exceeding its quota cannot block another. `tenant == None` falls back to `DEFAULT_TENANT` (`src/storage/mod.rs`) so legacy single-tenant callers still go through the per-tenant path.
 
 **Preconditions:**
 - Spend data is loaded and reflects the current month
