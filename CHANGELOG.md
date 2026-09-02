@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.106](https://github.com/azerozero/grob/compare/v0.36.105...v0.36.106) - 2026-09-02
+
+### Fixed
+
+- *(config)* stop rejecting a reload for a host the daemon rewrote itself ([#572](https://github.com/azerozero/grob/pull/572))
+
+### Other
+
+- *(dispatch)* kill the surviving agent_id and gate_media mutants ([#573](https://github.com/azerozero/grob/pull/573))
+
 ## [0.36.105](https://github.com/azerozero/grob/compare/v0.36.104...v0.36.105) - 2026-09-02
 
 ### Fixed
