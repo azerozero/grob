@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.104](https://github.com/azerozero/grob/compare/v0.36.103...v0.36.104) - 2026-09-02
+
+### Added
+
+- *(budget)* enforce a fleet-wide spend cap across replicas ([#566](https://github.com/azerozero/grob/pull/566))
+- *(security)* enforce a fleet-wide rate limit without any coordination ([#565](https://github.com/azerozero/grob/pull/565))
+
 ## [0.36.103](https://github.com/azerozero/grob/compare/v0.36.102...v0.36.103) - 2026-09-02
 
 ### Added
