@@ -54,8 +54,41 @@ pub(super) async fn health_check(State(state): State<Arc<AppState>>) -> impl Int
         "revision": {
             "config": inner.config_revision.full(),
             "policy": inner.policy_revision.full(),
-        }
+        },
+        // What the limiter actually enforces on THIS replica. A limit that is
+        // only per-process is a different guarantee from a fleet-wide one, and
+        // the difference is invisible from a response: both just answer 200.
+        // Stating the scope is what lets an operator compute the real
+        // fleet-wide ceiling instead of assuming the configured number.
+        "rate_limit": rate_limit_status(&inner, state.security.rate_limiter.is_some()),
     }))
+}
+
+/// Reports the limiter's configuration and, crucially, its enforcement scope.
+///
+/// The scope is the honest part. Buckets are per process, so with N replicas
+/// the fleet-wide ceiling is `N * rps`, not `rps`. LiteLLM's equivalent silently
+/// degrades a configured global limit into a per-pod one on a Redis error;
+/// grob has no shared store to lose, but the same reasoning applies — the
+/// deployment must be told which guarantee it actually has.
+fn rate_limit_status(
+    inner: &crate::server::ReloadableState,
+    limiter_active: bool,
+) -> serde_json::Value {
+    let security = &inner.config.security;
+    if !limiter_active || security.rate_limit_rps == 0 {
+        return serde_json::json!({ "enabled": false });
+    }
+    serde_json::json!({
+        "enabled": true,
+        // "per_replica" is a promise about the blast radius of this number, not
+        // a description of the storage backend.
+        "scope": "per_replica",
+        "rps": security.rate_limit_rps,
+        "burst": security.rate_limit_burst,
+        "keyed_by": if security.rate_limit_by_client { "oidc_client" } else { "tenant" },
+        "client_overrides": security.rate_limit_clients.len(),
+    })
 }
 
 /// Liveness probe: process is alive, returns 200 always.
@@ -406,6 +439,43 @@ actual_model = "alpha"
             resp.status(),
             StatusCode::OK,
             "the 12-char form shown in logs must be usable as a pin"
+        );
+    }
+
+    /// Health must state the limiter's enforcement scope.
+    ///
+    /// A per-replica limit and a fleet-wide one are indistinguishable from a
+    /// response, so the scope has to be stated for the number to mean anything.
+    #[tokio::test]
+    async fn health_reports_rate_limit_scope() {
+        // The section must be a real `[security]` table: `config()` appends its
+        // argument at the end of the document, so bare keys would land in
+        // whatever table happens to be last.
+        let state = test_app_state(
+            config("\n[security]\nrate_limit_rps = 10\nrate_limit_burst = 20\n"),
+            registry_with_provider(),
+        );
+        let resp = health_check(State(state)).await.into_response();
+        let body = json_body(resp).await;
+
+        assert_eq!(body["rate_limit"]["enabled"], true);
+        assert_eq!(
+            body["rate_limit"]["scope"], "per_replica",
+            "the scope must be explicit: with N replicas the real ceiling is N * rps"
+        );
+        assert_eq!(body["rate_limit"]["rps"], 10);
+        assert_eq!(body["rate_limit"]["keyed_by"], "tenant");
+    }
+
+    /// A disabled limiter must say so rather than report a phantom quota.
+    #[tokio::test]
+    async fn health_reports_rate_limit_disabled() {
+        let state = test_app_state(config(""), registry_with_provider());
+        let resp = health_check(State(state)).await.into_response();
+        let body = json_body(resp).await;
+        assert_eq!(
+            body["rate_limit"]["enabled"], false,
+            "no configured quota must not look like an enforced one"
         );
     }
 

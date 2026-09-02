@@ -305,6 +305,55 @@ Two limits worth knowing: buckets are in-memory and therefore **per replica**
 runs after authentication, so rejected credentials never consume a legitimate
 caller's quota.
 
+### Quota headers
+
+Every response carries the current quota, not just the `429`. A client that only
+learns its budget from a rejection has already been throttled, which is what
+these fields exist to prevent.
+
+```http
+RateLimit-Policy: "default";q=20;w=2
+RateLimit: "default";r=19;t=2
+X-RateLimit-Limit: 20
+X-RateLimit-Remaining: 19
+X-RateLimit-Reset: 2
+```
+
+Both spellings are emitted with identical numbers: the IETF structured fields
+(`draft-ietf-httpapi-ratelimit-headers`) because that is where the ecosystem is
+heading, and the de-facto `X-RateLimit-*` because that is what clients parse
+today.
+
+The advertised quota is the **bucket capacity** (`rate_limit_burst`), not the
+refill rate, so `remaining` can never exceed `limit`. The window is how long a
+full burst takes to accrue — a token bucket refills continuously and has no
+fixed window, so this is the closest honest number to pace against.
+
+### Checking what is actually enforced
+
+`/health` reports the limiter's scope, because a per-replica limit and a
+fleet-wide one are indistinguishable from a response — both just answer `200`:
+
+```json
+{
+  "rate_limit": {
+    "enabled": true,
+    "scope": "per_replica",
+    "rps": 10,
+    "burst": 20,
+    "keyed_by": "tenant",
+    "client_overrides": 0
+  }
+}
+```
+
+`scope: per_replica` is the honest statement that the real fleet-wide ceiling is
+`replicas × rps`. This matters: LiteLLM's Redis-backed limiter silently degrades
+a configured global limit into a per-pod one when Redis errors
+([BerriAI/litellm#35533](https://github.com/BerriAI/litellm/issues/35533)), so
+the deployment cannot tell which guarantee it has. grob has no shared store to
+lose, but states the scope so the number can be reasoned about.
+
 The circuit breaker opens after 5 consecutive failures (30s timeout, 3 successes to close). When open, requests skip the provider and fall through to the next mapping.
 
 When `adaptive_scoring = true`, Grob ranks providers by a composite score (success rate, latency, recency) and computes `declared_priority / adaptive_factor` before the fallback loop. A degraded provider can move behind a lower-priority healthy provider. Scores are in-memory and decay over time to prevent stale rankings.
