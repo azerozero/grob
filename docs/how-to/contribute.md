@@ -20,7 +20,7 @@ cargo nextest run
 cargo test --doc
 ```
 
-5. Open a pull request against `main`. Enable auto-merge: `gh pr merge <num> --auto --merge`.
+5. Open a pull request against `main`. Enable auto-merge: `gh pr merge <num> --auto --squash`.
 
 ## Code style
 

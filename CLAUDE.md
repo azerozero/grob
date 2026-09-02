@@ -190,3 +190,20 @@ Every doc belongs to exactly one category. Do not mix types in one file.
 | How components interact | `docs/explanation/` |
 | Setup procedures | `docs/tutorials/` or `docs/how-to/` |
 | Config options | `docs/reference/` |
+
+## Where Tests Go
+
+Three locations coexist. Pick by scope, not by habit.
+
+| Scope | Location | Example |
+|-------|----------|---------|
+| One function or one small module | Inline `#[cfg(test)] mod tests` at the bottom of the file | `src/security/merkle.rs` |
+| A module whose tests outgrow the file (roughly 300+ lines) | Sibling `tests.rs`, declared `#[cfg(test)] mod tests;` | `src/features/dlp/tests.rs`, `src/routing/classify/tests.rs` |
+| Crosses module boundaries, or drives the HTTP surface | `tests/integration/`, `tests/e2e/`, `tests/enterprise/` | `tests/integration/http_test.rs` |
+
+A module may have both: `src/features/dlp/` keeps small per-detector tests
+inline in `pii.rs`, `names.rs`, and so on, and puts engine-level and
+mutation-killing tests in `tests.rs`. That is intended, not drift.
+
+`tests/unit/` predates the sibling-`tests.rs` convention. Do not add to it;
+put new unit tests next to the code they cover.

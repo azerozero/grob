@@ -46,6 +46,33 @@ their native wire formats internally (per ADR-0005).
 - Cost calculation (delegated to `pricing` + `features::token_pricing`).
 - HTTP transport for grob's own surface (delegated to `server/`).
 
+## Adding a provider
+
+Most new backends are OpenAI-compatible and need **no new provider type**: add a
+`[[providers]]` entry with `provider_type = "openai"` and a `base_url`. Nothing
+in this directory changes. Do that first and stop, unless the backend has a wire
+format or auth model that genuinely differs.
+
+If it does need code, the two paths differ sharply in cost:
+
+**OpenAI-compatible with quirks** (the `deepseek` shape, ~8 files):
+
+1. `registry.rs` — a new arm in the `match config.provider_type` at
+   `create_provider`. This is the entry point; start here.
+2. `pricing.rs` — per-model input/output rates, or spend is undercounted.
+3. `routing/classify/inference.rs` and `model_name.rs` — model-name prefix
+   inference and canonicalization.
+4. `models/mod.rs` — the provider-type enum.
+5. `commands/setup/types.rs` and `commands/credential_check.rs` — so the wizard
+   and `grob doctor` know the credential.
+
+**Its own wire format or auth model** (the `gemini` shape, ~28 files): all of
+the above, plus a `providers/<name>/` module with its own request/response
+translation, and `auth/` work if it uses OAuth rather than a bearer key.
+
+Grep an existing provider name across `src/` before starting; that list is the
+real checklist, and it is shorter for `deepseek` than for `gemini`.
+
 ## Tests
 
 - `tests/unit/provider_test.rs` covers `ProviderRegistry` registration and lookup.
