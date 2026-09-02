@@ -1429,6 +1429,228 @@ provider = "{provider}"
         dispatch(&ctx, &mut request).await
     }
 
+    /// Runs dispatch with a request carrying an image, so the media gate is
+    /// actually exercised.
+    async fn run_dispatch_with_image(
+        state: &Arc<AppState>,
+    ) -> Result<DispatchResult, RequestError> {
+        let inner = state.snapshot();
+        let dlp: Option<Arc<DlpEngine>> = None;
+        let headers = HeaderMap::new();
+        let ctx = DispatchContext {
+            state,
+            inner: &inner,
+            dlp: &dlp,
+            model: "alpha".to_string(),
+            is_streaming: false,
+            tenant_id: None,
+            #[cfg(feature = "agents")]
+            agent: crate::features::agents::AgentContext::default(),
+            allowed_models: None,
+            allowed_providers: Vec::new(),
+            peer_ip: "127.0.0.1".to_string(),
+            req_id: "test",
+            start_time: std::time::Instant::now(),
+            headers: &headers,
+            trace_id: None,
+            audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resolved_policy: None,
+        };
+        // A payload that is not a decodable image: blocking inspection cannot
+        // complete, so `on_failure = deny` must refuse it.
+        let mut request: CanonicalRequest = serde_json::from_value(serde_json::json!({
+            "model": "alpha",
+            "max_tokens": 16,
+            "messages": [{ "role": "user", "content": [
+                { "type": "text", "text": "what is this?" },
+                { "type": "image", "source": {
+                    "type": "base64", "media_type": "image/png", "data": "bm90LWFuLWltYWdl"
+                } }
+            ] }]
+        }))
+        .expect("request");
+        dispatch(&ctx, &mut request).await
+    }
+
+    /// Agent attribution must survive the trip through `DispatchContext`.
+    ///
+    /// `agent_id()` is what tags a spend journal entry and a retry record with
+    /// the calling agent. A mutant returning `None` silently drops that
+    /// attribution — spend still records, so nothing fails, but per-agent
+    /// accounting quietly becomes anonymous. A mutant returning a constant is
+    /// worse: it attributes every request to one agent.
+    #[cfg(feature = "agents")]
+    #[tokio::test]
+    async fn agent_id_round_trips_through_the_dispatch_context() {
+        use crate::features::agents::{AgentContext, AgentId};
+
+        let state = crate::server::test_app_state(
+            policy_config("default", ""),
+            crate::providers::ProviderRegistry::new(),
+        );
+        let inner = state.snapshot();
+        let dlp: Option<Arc<DlpEngine>> = None;
+        let headers = HeaderMap::new();
+
+        let agent = AgentContext {
+            agent_id: Some(AgentId::parse("billing-agent").expect("valid id")),
+            ..Default::default()
+        };
+        let ctx = DispatchContext {
+            state: &state,
+            inner: &inner,
+            dlp: &dlp,
+            model: "alpha".to_string(),
+            is_streaming: false,
+            tenant_id: None,
+            agent,
+            allowed_models: None,
+            allowed_providers: Vec::new(),
+            peer_ip: "127.0.0.1".to_string(),
+            req_id: "test",
+            start_time: std::time::Instant::now(),
+            headers: &headers,
+            trace_id: None,
+            audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resolved_policy: None,
+        };
+
+        assert_eq!(
+            ctx.agent_id(),
+            Some("billing-agent"),
+            "the calling agent must reach spend attribution unchanged"
+        );
+    }
+
+    /// No agent must stay no agent.
+    ///
+    /// Pins the other direction, so a mutant returning a constant id — which
+    /// would attribute every anonymous request to one agent — is caught.
+    #[cfg(feature = "agents")]
+    #[tokio::test]
+    async fn absent_agent_is_not_invented() {
+        let state = crate::server::test_app_state(
+            policy_config("default", ""),
+            crate::providers::ProviderRegistry::new(),
+        );
+        let inner = state.snapshot();
+        let dlp: Option<Arc<DlpEngine>> = None;
+        let headers = HeaderMap::new();
+        let ctx = DispatchContext {
+            state: &state,
+            inner: &inner,
+            dlp: &dlp,
+            model: "alpha".to_string(),
+            is_streaming: false,
+            tenant_id: None,
+            agent: crate::features::agents::AgentContext::default(),
+            allowed_models: None,
+            allowed_providers: Vec::new(),
+            peer_ip: "127.0.0.1".to_string(),
+            req_id: "test",
+            start_time: std::time::Instant::now(),
+            headers: &headers,
+            trace_id: None,
+            audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            resolved_policy: None,
+        };
+
+        assert_eq!(
+            ctx.agent_id(),
+            None,
+            "an unattributed request must not be credited to an agent"
+        );
+    }
+
+    /// The media gate must refuse an uninspectable image before any provider.
+    ///
+    /// `gate_media` is a security control: `on_failure = "deny"` is the promise
+    /// that an image which cannot be inspected does not reach the model. A
+    /// mutant replacing the whole function with `Ok(())` silently disables
+    /// media blocking, and until this test nothing caught it — the existing
+    /// dispatch tests all send text-only requests, so the gate was never
+    /// reached.
+    ///
+    /// Gated on the `media` feature: without it there is no `[media]` section
+    /// to configure, and `gate_media` compiles to a no-op.
+    #[cfg(feature = "media")]
+    #[tokio::test]
+    async fn media_gate_blocks_an_uninspectable_image() {
+        let toml = r#"
+[server]
+host = "127.0.0.1"
+port = 18092
+
+[router]
+default = "alpha"
+
+[media]
+mode = "blocking"
+on_failure = "deny"
+
+[[providers]]
+name = "anthropic"
+provider_type = "openai"
+auth_type = "apikey"
+api_key = "sk-test"
+base_url = "http://127.0.0.1:1"
+models = ["alpha"]
+
+[[models]]
+name = "alpha"
+[[models.mappings]]
+priority = 1
+provider = "anthropic"
+actual_model = "alpha"
+"#;
+        let config =
+            crate::cli::AppConfig::from_content(toml, "media_gate_test").expect("config parses");
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test(
+            "anthropic",
+            Arc::new(CountingProvider {
+                called: called.clone(),
+            }),
+        );
+        let state = crate::server::test_app_state(config, registry);
+
+        let result = run_dispatch_with_image(&state).await;
+        assert!(
+            matches!(result, Err(RequestError::Forbidden(_))),
+            "an image that cannot be inspected must be refused under \
+             on_failure = deny"
+        );
+        assert!(
+            !called.load(std::sync::atomic::Ordering::SeqCst),
+            "the provider must NOT be reached when the media gate denies"
+        );
+    }
+
+    /// With media inspection off, the same request must pass the gate.
+    ///
+    /// Pins the other direction: the gate must not reject when it is disabled,
+    /// so a mutant that always denies is caught too.
+    #[tokio::test]
+    async fn media_gate_is_inert_when_disabled() {
+        let config = policy_config("default", "");
+        let called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut registry = crate::providers::ProviderRegistry::new();
+        registry.insert_provider_for_test(
+            "anthropic",
+            Arc::new(CountingProvider {
+                called: called.clone(),
+            }),
+        );
+        let state = crate::server::test_app_state(config, registry);
+
+        let result = run_dispatch_with_image(&state).await;
+        assert!(
+            !matches!(result, Err(RequestError::Forbidden(_))),
+            "media blocking is off by default; the gate must not refuse"
+        );
+    }
+
     // (1) Matching is fixed: a policy keyed on route_type matches only once the
     // context is enriched. The empty pre-route context (route_type = "") — what
     // the handler eval produces — never matches, which is the bug.
