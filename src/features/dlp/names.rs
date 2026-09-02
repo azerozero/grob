@@ -499,12 +499,11 @@ fn is_capitalized(word: &str) -> bool {
     let mut chars = word.chars();
     match chars.next() {
         Some(c) if c.is_ascii_uppercase() => {
-            // Reject ALL-CAPS words (likely acronyms, not names)
+            // Reject ALL-CAPS words (likely acronyms, not names). Two or more
+            // remaining chars, all uppercase, means `NASA` rather than `Nasa`.
             let rest: String = chars.collect();
-            if rest.len() >= 2 && rest.chars().all(|c| c.is_ascii_uppercase()) {
-                return false;
-            }
-            true
+            let is_acronym = rest.len() >= 2 && rest.chars().all(|c| c.is_ascii_uppercase());
+            !is_acronym
         }
         _ => false,
     }
