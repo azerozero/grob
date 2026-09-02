@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.101](https://github.com/azerozero/grob/compare/v0.36.100...v0.36.101) - 2026-09-02
+
+### Fixed
+
+- *(lint)* silence the async_trait double_must_use false positive ([#560](https://github.com/azerozero/grob/pull/560))
+
+### Other
+
+- fix the instructions that actively mislead their reader ([#547](https://github.com/azerozero/grob/pull/547))
+
 ## [0.36.100](https://github.com/azerozero/grob/compare/v0.36.99...v0.36.100) - 2026-09-01
 
 ### Added
