@@ -91,6 +91,24 @@ pub fn replica_share(limit: u32, replicas: u32, margin_percent: u32) -> u32 {
     u32::try_from(share).unwrap_or(u32::MAX).max(1)
 }
 
+/// Scales a fleet-wide budget down to one replica's share.
+///
+/// The money equivalent of [`replica_share`]. Kept separate because a budget is
+/// a continuous amount, not a token count: there is no "one token" floor to
+/// apply, and rounding to whole units would be wrong on a cap of a few dollars.
+///
+/// `0.0` means "unlimited" throughout the budget code, so it passes through
+/// unchanged: scaling it would invent a cap the operator did not ask for.
+#[must_use]
+pub fn replica_budget_share(limit: f64, replicas: u32, margin_percent: u32) -> f64 {
+    if limit <= 0.0 {
+        return limit;
+    }
+    let replicas = f64::from(replicas.max(1));
+    let margin = f64::from(margin_percent.min(99));
+    limit * (100.0 - margin) / 100.0 / replicas
+}
+
 /// Rate limiter key (tenant_id or IP fallback)
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub enum RateLimitKey {
@@ -483,5 +501,53 @@ mod tests {
     #[test]
     fn zero_replicas_is_treated_as_one() {
         assert_eq!(replica_share(100, 0, 0), 100);
+    }
+
+    /// A single replica with no margin must leave the budget untouched.
+    #[test]
+    fn budget_share_is_identity_for_one_replica() {
+        assert!((replica_budget_share(100.0, 1, 0) - 100.0).abs() < 1e-9);
+    }
+
+    /// The fleet total must never exceed the configured budget.
+    #[test]
+    fn budget_fleet_total_never_exceeds_the_cap() {
+        for limit in [1.0_f64, 10.0, 250.0, 9999.99] {
+            for replicas in 1u32..=12 {
+                for margin in [0u32, 1, 5] {
+                    let share = replica_budget_share(limit, replicas, margin);
+                    let total = share * f64::from(replicas);
+                    assert!(
+                        total <= limit + 1e-9,
+                        "limit={limit} replicas={replicas} margin={margin}: \
+                         fleet total {total} exceeds the cap"
+                    );
+                }
+            }
+        }
+    }
+
+    /// Unlimited must stay unlimited.
+    ///
+    /// `0.0` means "no cap" in the budget code; dividing it would invent one.
+    #[test]
+    fn budget_share_keeps_unlimited_unlimited() {
+        assert_eq!(replica_budget_share(0.0, 8, 5), 0.0);
+    }
+
+    /// A small budget must not round away to nothing.
+    ///
+    /// Unlike a token bucket there is no "one token" floor, but the share must
+    /// stay a usable positive amount rather than collapsing to zero — which the
+    /// budget code would read as "unlimited", the exact opposite.
+    #[test]
+    fn budget_share_stays_positive_for_small_caps() {
+        let share = replica_budget_share(1.0, 100, 5);
+        assert!(
+            share > 0.0,
+            "a small budget split many ways must not become 0.0, which the \
+             budget code reads as unlimited"
+        );
+        assert!((share - 0.0095).abs() < 1e-9);
     }
 }
