@@ -490,10 +490,15 @@ jobs:
           if [ -n "${{ matrix.mutants_shard }}" ]; then
             SHARD_ARGS+=(--shard "${{ matrix.mutants_shard }}")
           fi
+          # --all-features: several mutated functions only exist behind a
+          # non-default feature (`gate_media` is a no-op without `media`,
+          # `agent_id` without `agents`). Building the default feature set meant
+          # the tests that kill those mutants were never compiled, so the
+          # mutants survived against a suite that could not see them.
           cargo mutants --package grob --timeout 120 -j 2 \
             "${SHARD_ARGS[@]}" \
             --file ${{ matrix.file }} \
-            -- --lib
+            -- --lib --all-features
       - name: Upload mutation testing results
         if: always()
         uses: actions/upload-artifact@v7

@@ -35,4 +35,16 @@ exclude_re = [
     "replace % with \\+ in generate_canary_iban",
     "replace build_encrypted_content -> .* with",
     "in build_encrypted_content$",
+    # `agent_id` a deux corps mutuellement exclusifs (`#[cfg(feature =
+    # "agents")]` / `#[cfg(not(...))]`). cargo-mutants mute le *source*, donc
+    # sous `--all-features` il propose aussi des mutants sur le corps de repli,
+    # qui n'est pas compile et retourne `None` par construction: aucun test ne
+    # peut les tuer, et retirer `--all-features` ne ferait que deplacer le
+    # probleme sur l'autre corps.
+    #
+    # Seul le corps de repli est exclu, via le retour `Some(...)` qu'il ne peut
+    # pas produire. Les mutants du corps reel restent actifs et sont tues par
+    # `agent_id_round_trips_through_the_dispatch_context` (contre `None`) et
+    # `absent_agent_is_not_invented` (contre une constante).
+    "replace DispatchContext<.*>::agent_id -> Option<&str> with Some",
 ]
