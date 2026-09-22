@@ -145,12 +145,13 @@ main() {
   "${timeout_bin}" --foreground --preserve-status "${TIMEOUT_SECONDS}" \
     cargo mutants \
       --package grob \
+      --all-features \
+      --cargo-arg=--lib \
       --timeout "${PER_MUTANT_TIMEOUT}" \
       -j 2 \
       --no-shuffle \
       --colors=never \
-      "${mutants_args[@]}" \
-      -- --lib
+      "${mutants_args[@]}"
   exit_code=$?
   set -e
 

@@ -34,3 +34,7 @@ jobs:
       - uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      # The action opens issues on scheduled runs but does not fail the job.
+      # Keep reporting, then enforce the same audit on every invocation.
+      - name: Reject vulnerable or yanked dependencies
+        run: cargo audit --deny yanked

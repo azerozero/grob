@@ -630,7 +630,6 @@ fn context_window_exceeded_message(info: &ContextGuardInfo) -> String {
 /// slice (explicit follow-up).
 ///
 /// [`RequestContext`]: crate::features::policies::context::RequestContext
-#[cfg(feature = "policies")]
 async fn enforce_post_route_policy(
     ctx: &DispatchContext<'_>,
     request: &CanonicalRequest,
@@ -640,116 +639,116 @@ async fn enforce_post_route_policy(
 ) -> Result<(), RequestError> {
     ctx.gate_media(request).await?;
 
-    let Some(matcher) = ctx.inner.policy_matcher.as_ref() else {
-        return Ok(());
-    };
-
-    // Best-effort estimated cost (input only — output is unknown pre-call) so
-    // `cost_above`-keyed policies can match.
-    let input_tokens = super::estimate_input_tokens(request);
-    let estimated_cost = calculate_cost(ctx.state, &decision.model_name, input_tokens, 0, 0, false)
-        .await
-        .estimated_cost_usd;
-
-    let header = |name: &str| {
-        ctx.headers
-            .get(name)
-            .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string())
-    };
-    let rctx = crate::features::policies::context::RequestContext {
-        tenant: ctx.tenant_id.clone(),
-        zone: None,
-        project: header("x-grob-project"),
-        user: None,
-        agent: header("user-agent"),
-        compliance: vec![],
-        model: decision.model_name.clone(),
-        provider: provider.to_string(),
-        route_type: decision.route_type.to_string(),
-        dlp_triggered,
-        estimated_cost,
-    };
-
-    let policy = matcher.evaluate(&rctx);
-    if !policy.matched {
-        return Ok(());
+    // Keep the media gate in one body for every feature combination. A second
+    // cfg-disabled function body also appears in cargo-mutants' source scan,
+    // producing a survivor that no all-features test can execute.
+    #[cfg(not(feature = "policies"))]
+    {
+        let _ = (decision, provider, dlp_triggered);
+        Ok(())
     }
 
-    // (2) Budget override — enforced before the provider loop's spend check.
-    if let Some(limit) = policy.budget.as_ref().and_then(|b| b.monthly_usd) {
-        // A policy budget is a fleet-wide amount like every other cap, so it
-        // takes this replica's share. Without this, moving a cap into a policy
-        // would quietly exempt it from the fleet ceiling that `[budget]`
-        // enforces everywhere else — the limit would still be honoured per
-        // process, and still be multiplied by the replica count.
-        let budget_config = &ctx.inner.config.budget;
-        let limit = crate::security::replica_budget_share(
-            limit,
-            budget_config.replicas,
-            budget_config.margin_percent,
-        );
-        let tracker = ctx.state.observability.spend_tracker.lock().await;
-        let result = match ctx.tenant_id.as_deref() {
-            Some(tenant) => tracker.check_tenant_budget(
-                Some(tenant),
-                provider,
-                &decision.model_name,
-                limit,
-                None,
-                None,
-            ),
-            None => tracker.check_budget(provider, &decision.model_name, limit, None, None),
+    #[cfg(feature = "policies")]
+    {
+        let Some(matcher) = ctx.inner.policy_matcher.as_ref() else {
+            return Ok(());
         };
-        if let Err(e) = result {
-            return Err(RequestError::BudgetExceeded {
-                limit_usd: e.limit_usd,
-                actual_usd: e.actual_usd,
-            });
+
+        // Best-effort estimated cost (input only — output is unknown pre-call) so
+        // `cost_above`-keyed policies can match.
+        let input_tokens = super::estimate_input_tokens(request);
+        let estimated_cost =
+            calculate_cost(ctx.state, &decision.model_name, input_tokens, 0, 0, false)
+                .await
+                .estimated_cost_usd;
+
+        let header = |name: &str| {
+            ctx.headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        };
+        let rctx = crate::features::policies::context::RequestContext {
+            tenant: ctx.tenant_id.clone(),
+            zone: None,
+            project: header("x-grob-project"),
+            user: None,
+            agent: header("user-agent"),
+            compliance: vec![],
+            model: decision.model_name.clone(),
+            provider: provider.to_string(),
+            route_type: decision.route_type.to_string(),
+            dlp_triggered,
+            estimated_cost,
+        };
+
+        let policy = matcher.evaluate(&rctx);
+        if !policy.matched {
+            return Ok(());
         }
-    }
 
-    // (3) Rate-limit override — second, policy-aware limiter check.
-    if let Some(rps) = policy.rate_limit.as_ref().and_then(|r| r.rps) {
-        let key = crate::security::RateLimitKey::Tenant(
-            ctx.tenant_id.clone().unwrap_or_else(|| "anon".to_string()),
-        );
-        // A policy rps is a fleet-wide number like every other configured
-        // limit, so it takes this replica's share too. Without this, naming a
-        // rate limit in a policy would quietly exempt it from the fleet
-        // ceiling that `[security]` enforces everywhere else.
-        let sec = &ctx.inner.config.security;
-        let rps = crate::security::replica_share(
-            rps,
-            sec.rate_limit_replicas,
-            sec.rate_limit_margin_percent,
-        );
-        let (allowed, _, _) = ctx
-            .state
-            .policy_rate_limiter
-            .check_with_rps(&key, rps)
-            .await;
-        if !allowed {
-            return Err(RequestError::RateLimitedLocal(
-                "policy rate limit exceeded".to_string(),
-            ));
+        // (2) Budget override — enforced before the provider loop's spend check.
+        if let Some(limit) = policy.budget.as_ref().and_then(|b| b.monthly_usd) {
+            // A policy budget is a fleet-wide amount like every other cap, so it
+            // takes this replica's share. Without this, moving a cap into a policy
+            // would quietly exempt it from the fleet ceiling that `[budget]`
+            // enforces everywhere else — the limit would still be honoured per
+            // process, and still be multiplied by the replica count.
+            let budget_config = &ctx.inner.config.budget;
+            let limit = crate::security::replica_budget_share(
+                limit,
+                budget_config.replicas,
+                budget_config.margin_percent,
+            );
+            let tracker = ctx.state.observability.spend_tracker.lock().await;
+            let result = match ctx.tenant_id.as_deref() {
+                Some(tenant) => tracker.check_tenant_budget(
+                    Some(tenant),
+                    provider,
+                    &decision.model_name,
+                    limit,
+                    None,
+                    None,
+                ),
+                None => tracker.check_budget(provider, &decision.model_name, limit, None, None),
+            };
+            if let Err(e) = result {
+                return Err(RequestError::BudgetExceeded {
+                    limit_usd: e.limit_usd,
+                    actual_usd: e.actual_usd,
+                });
+            }
         }
+
+        // (3) Rate-limit override — second, policy-aware limiter check.
+        if let Some(rps) = policy.rate_limit.as_ref().and_then(|r| r.rps) {
+            let key = crate::security::RateLimitKey::Tenant(
+                ctx.tenant_id.clone().unwrap_or_else(|| "anon".to_string()),
+            );
+            // A policy rps is a fleet-wide number like every other configured
+            // limit, so it takes this replica's share too. Without this, naming a
+            // rate limit in a policy would quietly exempt it from the fleet
+            // ceiling that `[security]` enforces everywhere else.
+            let sec = &ctx.inner.config.security;
+            let rps = crate::security::replica_share(
+                rps,
+                sec.rate_limit_replicas,
+                sec.rate_limit_margin_percent,
+            );
+            let (allowed, _, _) = ctx
+                .state
+                .policy_rate_limiter
+                .check_with_rps(&key, rps)
+                .await;
+            if !allowed {
+                return Err(RequestError::RateLimitedLocal(
+                    "policy rate limit exceeded".to_string(),
+                ));
+            }
+        }
+
+        Ok(())
     }
-
-    Ok(())
-}
-
-/// No-op when the `policies` feature is disabled, so the per-candidate call sites
-/// in the provider loop / fan-out need no `#[cfg]` gating.
-#[cfg(not(feature = "policies"))]
-async fn enforce_post_route_policy(
-    ctx: &DispatchContext<'_>,
-    request: &CanonicalRequest,
-    _decision: &crate::models::RouteDecision,
-    _provider: &str,
-    _dlp_triggered: bool,
-) -> Result<(), RequestError> {
-    ctx.gate_media(request).await
 }
 
 /// Check the response cache for a hit (non-streaming requests only).
@@ -1303,7 +1302,6 @@ context_window_tokens = 100
 
     /// Config declaring one policy with a `route_type` condition plus the given
     /// `[policies.*]` override TOML block.
-    #[cfg(feature = "policies")]
     fn policy_config(route_type: &str, override_toml: &str) -> crate::cli::AppConfig {
         let toml = format!(
             r#"
@@ -1454,6 +1452,7 @@ provider = "{provider}"
             headers: &headers,
             trace_id: None,
             audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(feature = "policies")]
             resolved_policy: None,
         };
         // A payload that is not a decodable image: blocking inspection cannot
@@ -1512,6 +1511,7 @@ provider = "{provider}"
             headers: &headers,
             trace_id: None,
             audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(feature = "policies")]
             resolved_policy: None,
         };
 
@@ -1552,6 +1552,7 @@ provider = "{provider}"
             headers: &headers,
             trace_id: None,
             audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            #[cfg(feature = "policies")]
             resolved_policy: None,
         };
 

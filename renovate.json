@@ -5,20 +5,20 @@
   "timezone": "UTC",
   "dependencyDashboard": true,
   "prConcurrentLimit": 5,
+  "automergeType": "pr",
+  "automergeStrategy": "squash",
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 6am on monday"],
-    "automerge": true,
-    "automergeType": "branch"
+    "automerge": true
   },
   "packageRules": [
     {
-      "description": "Auto-merge patch updates silently",
+      "description": "Auto-merge patch PRs after required checks",
       "matchManagers": ["cargo"],
       "matchUpdateTypes": ["patch"],
       "groupName": "Cargo patch updates",
-      "automerge": true,
-      "automergeType": "branch"
+      "automerge": true
     },
     {
       "description": "Group minor updates for review",
@@ -39,16 +39,14 @@
       "matchManagers": ["cargo"],
       "matchDepTypes": ["dev-dependencies"],
       "matchUpdateTypes": ["patch", "minor"],
-      "automerge": true,
-      "automergeType": "branch"
+      "automerge": true
     },
     {
       "description": "GitHub Actions non-major auto-merge",
       "matchManagers": ["github-actions"],
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "GitHub Actions updates",
-      "automerge": true,
-      "automergeType": "branch"
+      "automerge": true
     }
   ],
   "cargo": {
