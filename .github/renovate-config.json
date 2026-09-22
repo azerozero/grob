@@ -1,0 +1,8 @@
+{
+  "platform": "github",
+  "repositories": ["azerozero/grob"],
+  "autodiscover": false,
+  "onboarding": false,
+  "requireConfig": "required",
+  "platformCommit": "enabled"
+}
