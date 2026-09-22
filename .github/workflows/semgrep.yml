@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     container:
-      image: semgrep/semgrep:1.144.0
+      image: semgrep/semgrep:1.177.0
 
     steps:
       - uses: actions/checkout@v6
