@@ -1,8 +1,8 @@
 # Code-scanning review — September 2026
 
 The review started with 34 open alerts on `main`: CodeQL 69–100 and Semgrep
-67–68. Alert numbers below refer to
-[grob code scanning](https://github.com/azerozero/grob/security/code-scanning).
+67–68. Alert numbers below refer to the repository's authenticated
+**Security → Code scanning** view on GitHub.
 They identify findings, not counts of distinct vulnerabilities.
 
 ## Credential transport corrections
