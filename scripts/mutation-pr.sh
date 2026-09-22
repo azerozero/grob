@@ -159,20 +159,16 @@ main() {
   duration_s=$((end_ts - start_ts))
   log "cargo-mutants duration: ${duration_s}s, exit: ${exit_code}"
 
-  # Parse a coarse summary from mutants.out/outcomes.json if produced.
-  # cargo-mutants writes a single JSON document of shape {"outcomes": [...]}.
-  # Each outcome carries a `summary` field with values CAUGHT, MISSED,
-  # TIMEOUT, UNVIABLE, FAILURE, SUCCESS. We project on `summary` rather than
-  # the top-level shape to stay forward-compatible.
+  # Use cargo-mutants' aggregate counters. Per-outcome summaries are enum
+  # names such as CaughtMutant, not CAUGHT, and include a baseline scenario
+  # which must not count as a tested mutant.
   local total=0 caught=0 missed=0 timeout_n=0 unviable=0
   if [[ -r mutants.out/outcomes.json ]] && command -v jq >/dev/null 2>&1; then
-    # `..` walks the entire tree to find every `summary` field, regardless
-    # of whether outcomes are at the root or nested under `outcomes:`.
-    total=$(jq '[.. | objects | select(has("summary"))] | length' mutants.out/outcomes.json 2>/dev/null || echo 0)
-    caught=$(jq '[.. | objects | select(.summary == "CAUGHT")] | length' mutants.out/outcomes.json 2>/dev/null || echo 0)
-    missed=$(jq '[.. | objects | select(.summary == "MISSED")] | length' mutants.out/outcomes.json 2>/dev/null || echo 0)
-    timeout_n=$(jq '[.. | objects | select(.summary == "TIMEOUT")] | length' mutants.out/outcomes.json 2>/dev/null || echo 0)
-    unviable=$(jq '[.. | objects | select(.summary == "UNVIABLE")] | length' mutants.out/outcomes.json 2>/dev/null || echo 0)
+    total=$(jq '.total_mutants // 0' mutants.out/outcomes.json 2>/dev/null || echo 0)
+    caught=$(jq '.caught // 0' mutants.out/outcomes.json 2>/dev/null || echo 0)
+    missed=$(jq '.missed // 0' mutants.out/outcomes.json 2>/dev/null || echo 0)
+    timeout_n=$(jq '.timeout // 0' mutants.out/outcomes.json 2>/dev/null || echo 0)
+    unviable=$(jq '.unviable // 0' mutants.out/outcomes.json 2>/dev/null || echo 0)
   fi
 
   emit "duration_s" "${duration_s}"
