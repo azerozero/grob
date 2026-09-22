@@ -61,6 +61,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Verify hedge cancellation billing (pre-work for ADR-0020) | [Verify Hedge Cancellation Billing](how-to/verify-hedge-cancellation-billing.md) |
 | Fix common problems | [Troubleshooting](how-to/troubleshooting.md) |
 | Contribute | [How to Contribute](how-to/contribute.md) |
+| Maintain dependencies | [Run Renovate](how-to/maintain-dependencies.md) |
 
 ### Reference
 

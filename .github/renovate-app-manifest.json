@@ -1,0 +1,23 @@
+{
+  "name": "azerozero-grob-renovate",
+  "url": "https://github.com/azerozero/grob",
+  "description": "Dependency updates for grob, executed by GitHub Actions.",
+  "public": false,
+  "hook_attributes": {
+    "url": "https://github.com/azerozero/grob",
+    "active": false
+  },
+  "default_events": [],
+  "default_permissions": {
+    "administration": "read",
+    "checks": "write",
+    "contents": "write",
+    "issues": "write",
+    "members": "read",
+    "metadata": "read",
+    "pull_requests": "write",
+    "statuses": "write",
+    "vulnerability_alerts": "read",
+    "workflows": "write"
+  }
+}

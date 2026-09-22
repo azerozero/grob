@@ -22,6 +22,7 @@ jobs:
               'Destynova2',
               'dependabot[bot]',
               'renovate[bot]',
+              'azerozero-grob-renovate[bot]',
               'github-actions[bot]',
               'release-plz[bot]',
               'claude[bot]',
