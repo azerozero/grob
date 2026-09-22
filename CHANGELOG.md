@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.108](https://github.com/azerozero/grob/compare/v0.36.107...v0.36.108) - 2026-09-22
+
+### Fixed
+
+- *(security)* patch rustls and repair dependency and mutation checks ([#578](https://github.com/azerozero/grob/pull/578))
+- *(ci)* run mutation testing with --all-features ([#576](https://github.com/azerozero/grob/pull/576))
+
 ## [0.36.107](https://github.com/azerozero/grob/compare/v0.36.106...v0.36.107) - 2026-09-02
 
 ### Added
