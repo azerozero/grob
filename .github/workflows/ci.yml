@@ -824,7 +824,7 @@ jobs:
           output-file: sbom-grob.spdx.json
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.1
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign container image
         run: |
@@ -1088,7 +1088,7 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@v6
-      - uses: rhysd/actionlint@v1.7.11
+      - uses: rhysd/actionlint@v1.7.12
         with:
           args: -color
 
