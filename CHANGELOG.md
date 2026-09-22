@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.109](https://github.com/azerozero/grob/compare/v0.36.108...v0.36.109) - 2026-09-22
+
+### Fixed
+
+- *(security)* protect credential transport and Gemini API keys ([#585](https://github.com/azerozero/grob/pull/585))
+
+### Other
+
+- *(deps)* update cargo patch updates ([#583](https://github.com/azerozero/grob/pull/583))
+- *(deps)* update github actions updates ([#584](https://github.com/azerozero/grob/pull/584))
+- *(renovate)* run dependency updates with a dedicated GitHub App ([#581](https://github.com/azerozero/grob/pull/581))
+- *(mutations)* correct outcome counts in PR summaries ([#580](https://github.com/azerozero/grob/pull/580))
+
 ## [0.36.108](https://github.com/azerozero/grob/compare/v0.36.107...v0.36.108) - 2026-09-22
 
 ### Fixed
