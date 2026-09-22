@@ -10,6 +10,8 @@
 #[cfg(feature = "acme")]
 pub mod acme;
 
+pub(crate) mod credential_transport;
+
 /// Server instance lifecycle helpers (PID + port probing).
 pub mod instance;
 

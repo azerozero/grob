@@ -7,10 +7,12 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::token_store::{OAuthToken, TokenStore};
+use crate::shared::credential_transport;
 
 /// Returns `true` if the URL points to a loopback address.
 fn is_localhost_url(url: &str) -> bool {
-    url.contains("://localhost") || url.contains("://127.0.0.1") || url.contains("://[::1]")
+    credential_transport::validate_endpoint(url)
+        .is_ok_and(|url| credential_transport::is_loopback(&url))
 }
 
 /// Google Gemini CLI public OAuth client ID (split to avoid secret scanners).
@@ -240,16 +242,12 @@ pub struct OAuthClient {
 impl OAuthClient {
     /// Create a new OAuth client.
     pub fn new(config: OAuthConfig, token_store: TokenStore) -> Self {
-        if config.token_url.starts_with("http://") && !is_localhost_url(&config.token_url) {
-            tracing::warn!(
-                "OAuth token_url uses plaintext HTTP for non-localhost endpoint: {}",
-                config.token_url
-            );
-        }
         Self {
             config,
             token_store,
-            http_client: reqwest::Client::new(),
+            http_client: credential_transport::client_builder()
+                .build()
+                .expect("Failed to build OAuth HTTP client"),
         }
     }
 
@@ -496,10 +494,11 @@ impl OAuthClient {
     }
 
     /// POST a form-encoded request to the token endpoint.
-    // SAFETY: OAuth token exchange requires sending credentials to the token endpoint over HTTPS.
     async fn send_form_request(&self, params: &[(&str, &str)]) -> Result<reqwest::Response> {
+        let endpoint = credential_transport::validate_endpoint(&self.config.token_url)
+            .map_err(|reason| anyhow!(reason))?;
         self.http_client
-            .post(&self.config.token_url) // CodeQL: cleartext-transmission — token_url is an HTTPS endpoint configured by the operator.
+            .post(endpoint)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .form(params)
             .send()
@@ -508,10 +507,11 @@ impl OAuthClient {
     }
 
     /// POST a JSON request to the token endpoint.
-    // SAFETY: OAuth token exchange requires sending credentials to the token endpoint over HTTPS.
     async fn send_json_request(&self, body: &impl Serialize) -> Result<reqwest::Response> {
+        let endpoint = credential_transport::validate_endpoint(&self.config.token_url)
+            .map_err(|reason| anyhow!(reason))?;
         self.http_client
-            .post(&self.config.token_url) // CodeQL: cleartext-transmission — token_url is an HTTPS endpoint configured by the operator.
+            .post(endpoint)
             .header("Content-Type", "application/json")
             .json(body)
             .send()
@@ -625,6 +625,69 @@ impl OAuthClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loopback_detection_rejects_lookalikes_and_userinfo() {
+        for endpoint in [
+            "http://localhost.evil.example",
+            "http://127.0.0.1.evil.example",
+            "http://localhost@evil.example",
+        ] {
+            assert!(!is_localhost_url(endpoint));
+        }
+    }
+
+    #[tokio::test]
+    async fn token_exchange_rejects_remote_cleartext_for_both_encodings() {
+        let mut config = OAuthConfig::gemini();
+        config.token_url = "http://localhost.evil.example/token".into();
+        let client = OAuthClient::new(config, TokenStore::new_empty());
+        let form = client
+            .send_form_request(&[("refresh_token", "synthetic-token")])
+            .await
+            .unwrap_err();
+        let json = client
+            .send_json_request(&serde_json::json!({"refresh_token": "synthetic-token"}))
+            .await
+            .unwrap_err();
+        for error in [form, json] {
+            assert!(error.to_string().contains("require HTTPS"));
+        }
+    }
+
+    #[tokio::test]
+    async fn token_exchange_does_not_forward_either_encoding_on_redirect() {
+        let mut source = mockito::Server::new_async().await;
+        let mut destination = mockito::Server::new_async().await;
+        let target = destination
+            .mock("POST", "/token")
+            .expect(0)
+            .create_async()
+            .await;
+        let redirect = source
+            .mock("POST", "/token")
+            .with_status(307)
+            .with_header("location", &format!("{}/token", destination.url()))
+            .expect(2)
+            .create_async()
+            .await;
+        let mut config = OAuthConfig::gemini();
+        config.token_url = format!("{}/token", source.url());
+        let client = OAuthClient::new(config, TokenStore::new_empty());
+        let form = client
+            .send_form_request(&[("refresh_token", "synthetic-token")])
+            .await
+            .unwrap();
+        let json = client
+            .send_json_request(&serde_json::json!({"refresh_token": "synthetic-token"}))
+            .await
+            .unwrap();
+        for response in [form, json] {
+            assert_eq!(response.status().as_u16(), 307);
+        }
+        redirect.assert_async().await;
+        target.assert_async().await;
+    }
 
     #[test]
     fn test_pkce_generation() {

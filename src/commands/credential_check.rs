@@ -5,6 +5,7 @@
 //! accepting them in the setup wizard or auto-flow. Network failures
 //! and unsupported providers are treated as warnings, never blockers.
 
+use crate::shared::credential_transport;
 use std::time::Duration;
 use tracing::warn;
 
@@ -27,9 +28,9 @@ fn validation_request(provider_name: &str, api_key: &str) -> Option<(String, Str
             format!("Bearer {api_key}"),
         )),
         "gemini" => Some((
-            format!("https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"),
-            String::new(),
-            String::new(),
+            "https://generativelanguage.googleapis.com/v1beta/models".to_string(),
+            "x-goog-api-key".to_string(),
+            api_key.to_string(),
         )),
         "openrouter" => Some((
             "https://openrouter.ai/api/v1/models".to_string(),
@@ -80,12 +81,18 @@ pub async fn validate_custom_endpoint(provider_type: &str, base_url: &str, api_k
         return true;
     };
 
-    let client = match reqwest::Client::builder().timeout(VALIDATE_TIMEOUT).build() {
+    let Ok(url) = credential_transport::validate_endpoint(&url) else {
+        return false;
+    };
+    let client = match credential_transport::client_builder()
+        .timeout(VALIDATE_TIMEOUT)
+        .build()
+    {
         Ok(c) => c,
         Err(_) => return true,
     };
 
-    let mut request = client.get(&url);
+    let mut request = client.get(url);
     if !header_name.is_empty() {
         request = request.header(&header_name, &header_value);
     }
@@ -103,7 +110,6 @@ pub async fn validate_custom_endpoint(provider_type: &str, base_url: &str, api_k
             } else {
                 warn!(
                     provider_type,
-                    base_url,
                     status = status.as_u16(),
                     "custom endpoint check returned unexpected status, accepting key"
                 );
@@ -113,8 +119,7 @@ pub async fn validate_custom_endpoint(provider_type: &str, base_url: &str, api_k
         Err(e) => {
             warn!(
                 provider_type,
-                base_url,
-                error = %e,
+                error = %e.without_url(),
                 "custom endpoint check failed (network), accepting key"
             );
             true
@@ -177,13 +182,19 @@ pub async fn check_api_key(
         };
     };
 
-    if !url.starts_with("https://") && !url.starts_with("http://") {
-        return CheckOutcome::Skipped {
-            reason: "non-http endpoint".into(),
-        };
-    }
+    let url = match credential_transport::validate_endpoint(&url) {
+        Ok(url) => url,
+        Err(reason) => {
+            return CheckOutcome::Skipped {
+                reason: reason.into(),
+            }
+        }
+    };
 
-    let client = match reqwest::Client::builder().timeout(timeout).build() {
+    let client = match credential_transport::client_builder()
+        .timeout(timeout)
+        .build()
+    {
         Ok(c) => c,
         Err(e) => {
             return CheckOutcome::Network {
@@ -192,7 +203,7 @@ pub async fn check_api_key(
         }
     };
 
-    let mut request = client.get(&url);
+    let mut request = client.get(url);
     if !header_name.is_empty() {
         request = request.header(&header_name, &header_value);
     }
@@ -223,7 +234,7 @@ pub async fn check_api_key(
             } else {
                 "network error".to_string()
             };
-            warn!(provider = provider_type, error = %e, "credential probe failed");
+            warn!(provider = provider_type, error = %e.without_url(), "credential probe failed");
             CheckOutcome::Network { reason }
         }
     }
@@ -241,19 +252,20 @@ pub async fn validate_api_key(provider_name: &str, api_key: &str) -> bool {
         return true;
     };
 
-    let client = match reqwest::Client::builder().timeout(VALIDATE_TIMEOUT).build() {
+    let Ok(url) = credential_transport::validate_endpoint(&url) else {
+        return false;
+    };
+    let client = match credential_transport::client_builder()
+        .timeout(VALIDATE_TIMEOUT)
+        .build()
+    {
         Ok(c) => c,
         Err(_) => return true,
     };
 
-    if !url.starts_with("https://") {
-        return true;
-    }
-
-    let mut request = client.get(&url);
+    let mut request = client.get(url);
     if !header_name.is_empty() {
-        // All validation URLs are HTTPS (see validation_request above).
-        request = request.header(&header_name, &header_value); // lgtm[rs/cleartext-transmission]
+        request = request.header(&header_name, &header_value);
     }
     // NOTE: Anthropic requires an anthropic-version header.
     if provider_name == "anthropic" {
@@ -281,7 +293,7 @@ pub async fn validate_api_key(provider_name: &str, api_key: &str) -> bool {
             // Network error or timeout — accept optimistically.
             warn!(
                 provider = provider_name,
-                error = %e,
+                error = %e.without_url(),
                 "credential check failed (network), accepting key"
             );
             true
@@ -292,6 +304,54 @@ pub async fn validate_api_key(provider_name: &str, api_key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn refuses_remote_cleartext_probes() {
+        let endpoint = "http://localhost.evil.example";
+        assert!(!validate_custom_endpoint("openai_compatible", endpoint, "synthetic-key").await);
+        assert!(
+            matches!(check_api_key("openai_compatible", Some(endpoint), "synthetic-key", VALIDATE_TIMEOUT).await,
+            CheckOutcome::Skipped { reason } if reason.contains("require HTTPS"))
+        );
+    }
+
+    #[tokio::test]
+    async fn probes_do_not_forward_keys_on_redirect() {
+        let mut source = mockito::Server::new_async().await;
+        let mut destination = mockito::Server::new_async().await;
+        let target = destination
+            .mock("GET", "/stolen")
+            .expect(0)
+            .create_async()
+            .await;
+        let redirect = source
+            .mock("GET", "/models")
+            .with_status(307)
+            .match_header("Authorization", "Bearer synthetic-key")
+            .with_header("location", &format!("{}/stolen", destination.url()))
+            .expect(2)
+            .create_async()
+            .await;
+        let outcome = check_api_key(
+            "openai_compatible",
+            Some(&source.url()),
+            "synthetic-key",
+            VALIDATE_TIMEOUT,
+        )
+        .await;
+        assert_eq!(
+            outcome,
+            CheckOutcome::Network {
+                reason: "HTTP 307".into()
+            }
+        );
+        // The setup wizard still accepts unexpected statuses optimistically.
+        assert!(
+            validate_custom_endpoint("openai_compatible", &source.url(), "synthetic-key").await
+        );
+        redirect.assert_async().await;
+        target.assert_async().await;
+    }
 
     #[test]
     fn unknown_provider_returns_true() {
@@ -333,11 +393,11 @@ mod tests {
     }
 
     #[test]
-    fn gemini_uses_query_param_auth() {
-        let (url, header, _) = validation_request("gemini", "AIza-test").unwrap();
-        assert!(url.contains("key=AIza-test"));
-        // No auth header for Gemini API key flow.
-        assert!(header.is_empty());
+    fn gemini_uses_header_auth() {
+        let (url, header, value) = validation_request("gemini", "synthetic-key").unwrap();
+        assert!(!url.contains("synthetic-key"));
+        assert_eq!(header, "x-goog-api-key");
+        assert_eq!(value, "synthetic-key");
     }
 
     #[tokio::test]
