@@ -123,6 +123,20 @@ pub fn build_provider_client(
     identity: Option<reqwest::Identity>,
     ca: Option<reqwest::Certificate>,
 ) -> Client {
+    provider_client_builder(connect_timeout, identity, ca)
+        .build()
+        .unwrap_or_else(|e| {
+            tracing::warn!("Provider client build failed, using defaults: {}", e);
+            Client::new()
+        })
+}
+
+/// Builds provider transport settings before applying an authentication-specific policy.
+pub(crate) fn provider_client_builder(
+    connect_timeout: Duration,
+    identity: Option<reqwest::Identity>,
+    ca: Option<reqwest::Certificate>,
+) -> reqwest::ClientBuilder {
     let mut builder = Client::builder()
         .tcp_nodelay(true)
         .connect_timeout(connect_timeout)
@@ -137,10 +151,7 @@ pub fn build_provider_client(
         builder = builder.add_root_certificate(cert);
     }
 
-    builder.build().unwrap_or_else(|e| {
-        tracing::warn!("Provider client build failed, using defaults: {}", e);
-        Client::new()
-    })
+    builder
 }
 
 /// Logs a warning if a provider base URL uses plaintext HTTP for a non-localhost endpoint.

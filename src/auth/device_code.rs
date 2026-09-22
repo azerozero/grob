@@ -16,6 +16,7 @@ use serde::Deserialize;
 
 use super::oauth::{OAuthConfig, OAuthProviderType};
 use super::token_store::{OAuthToken, TokenStore};
+use crate::shared::credential_transport;
 
 /// Google's device authorization endpoint for the OAuth 2.0 "limited input device" flow.
 const GOOGLE_DEVICE_AUTH_URL: &str = "https://oauth2.googleapis.com/device/code";
@@ -104,7 +105,9 @@ impl DeviceCodeClient {
         Ok(Self {
             config,
             token_store,
-            http: reqwest::Client::new(),
+            http: credential_transport::client_builder()
+                .build()
+                .context("Failed to build device authorization HTTP client")?,
             device_auth_url,
         })
     }
@@ -116,6 +119,8 @@ impl DeviceCodeClient {
     /// Returns an error if the HTTP request fails or the server returns a
     /// non-success status or malformed JSON.
     pub async fn start(&self) -> Result<DeviceAuthorization> {
+        let endpoint = credential_transport::validate_endpoint(&self.device_auth_url)
+            .map_err(|reason| anyhow!(reason))?;
         let scope = self.scopes_param();
         let mut params = vec![
             ("client_id", self.config.client_id.as_str()),
@@ -129,7 +134,7 @@ impl DeviceCodeClient {
 
         let response = self
             .http
-            .post(&self.device_auth_url)
+            .post(endpoint)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .form(&params)
             .send()
@@ -160,6 +165,8 @@ impl DeviceCodeClient {
     /// failures. OAuth-protocol states (pending, denied, expired) are
     /// returned as [`PollOutcome`] variants.
     pub async fn poll_once(&self, device_code: &str, provider_id: &str) -> Result<PollOutcome> {
+        let endpoint = credential_transport::validate_endpoint(&self.config.token_url)
+            .map_err(|reason| anyhow!(reason))?;
         let mut params = vec![
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
             ("client_id", self.config.client_id.as_str()),
@@ -173,7 +180,7 @@ impl DeviceCodeClient {
 
         let response = self
             .http
-            .post(&self.config.token_url)
+            .post(endpoint)
             .header("Content-Type", "application/x-www-form-urlencoded")
             .form(&params)
             .send()
@@ -285,6 +292,53 @@ pub fn headless_requested() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn rejects_remote_cleartext_device_and_token_endpoints() {
+        let mut config = OAuthConfig::gemini();
+        config.token_url = "http://localhost.evil.example/token".into();
+        let mut client = DeviceCodeClient::new(config, TokenStore::new_empty()).unwrap();
+        client.device_auth_url = "http://example.com/device/code".into();
+        assert!(client
+            .start()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("require HTTPS"));
+        let error = client
+            .poll_once("synthetic-code", "test")
+            .await
+            .err()
+            .unwrap();
+        assert!(error.to_string().contains("require HTTPS"));
+    }
+
+    #[tokio::test]
+    async fn device_and_token_requests_do_not_follow_redirects() {
+        let mut source = mockito::Server::new_async().await;
+        let mut destination = mockito::Server::new_async().await;
+        let target = destination
+            .mock("POST", "/stolen")
+            .expect(0)
+            .create_async()
+            .await;
+        let redirect = source
+            .mock("POST", "/token")
+            .with_status(307)
+            .with_header("location", &format!("{}/stolen", destination.url()))
+            .with_body("{}")
+            .expect(2)
+            .create_async()
+            .await;
+        let mut config = OAuthConfig::gemini();
+        config.token_url = format!("{}/token", source.url());
+        let mut client = DeviceCodeClient::new(config, TokenStore::new_empty()).unwrap();
+        client.device_auth_url = format!("{}/token", source.url());
+        assert!(client.start().await.is_err());
+        assert!(client.poll_once("synthetic-code", "test").await.is_err());
+        redirect.assert_async().await;
+        target.assert_async().await;
+    }
 
     #[test]
     fn device_auth_url_only_for_gemini() {

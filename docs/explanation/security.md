@@ -74,6 +74,10 @@ Scanning uses Aho-Corasick deterministic finite automata for O(n) performance on
 - OAuth tokens are stored with `0600` file permissions
 - Sensitive data (OAuth codes, PKCE verifiers, token responses, upstream bodies) is excluded from debug logs
 - API key comparison uses constant-time equality to prevent timing side-channels
+- Gemini, OAuth token exchanges, device authorization, and credential probes require HTTPS outside loopback (`localhost`, loopback IPv4, or `::1`). These clients refuse redirects; configure the final endpoint URL instead of a redirecting alias.
+- Gemini API keys use the sensitive `x-goog-api-key` header, not URL query parameters.
+
+See the [September 2026 code-scanning review](security-alert-triage.md) for the findings, trust boundaries, and regression checks behind these transport restrictions.
 
 ### Security headers
 

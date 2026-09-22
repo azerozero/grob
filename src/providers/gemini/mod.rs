@@ -2,14 +2,17 @@
 
 mod retry;
 mod transform;
+#[cfg(test)]
+mod transport_tests;
 pub(crate) mod types;
 
 use super::{
-    build_provider_client, error::is_context_window_exceeded_message, key_pool::KeyPool,
+    error::is_context_window_exceeded_message, key_pool::KeyPool, provider_client_builder,
     LlmProvider, ProviderError, ProviderResponse, StreamResponse,
 };
 use crate::auth::{OAuthConfig, TokenStore};
 use crate::models::CanonicalRequest;
+use crate::shared::credential_transport;
 use async_trait::async_trait;
 use reqwest::Client;
 use secrecy::{ExposeSecret, SecretString};
@@ -52,6 +55,7 @@ struct PreparedRequest {
     url: String,
     body: serde_json::Value,
     auth_header: Option<String>,
+    api_key: Option<reqwest::header::HeaderValue>,
     is_oauth: bool,
 }
 
@@ -82,10 +86,11 @@ impl GeminiProvider {
             }
         });
 
-        super::warn_if_cleartext(&base_url, "gemini");
-
         let client =
-            build_provider_client(params.connect_timeout, params.tls_identity, params.tls_ca);
+            provider_client_builder(params.connect_timeout, params.tls_identity, params.tls_ca)
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("Failed to build Gemini HTTP client");
         let key_pool = params.key_pool;
         Self {
             api_key,
@@ -194,6 +199,8 @@ impl GeminiProvider {
         request: &CanonicalRequest,
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
+        credential_transport::validate_endpoint(&self.base_url)
+            .map_err(|reason| ProviderError::ConfigError(reason.to_string()))?;
         let supports_tools = self.supports_tools(&request.model);
         let gemini_request = transform::transform_request(request, supports_tools)?;
 
@@ -271,6 +278,7 @@ impl GeminiProvider {
             url,
             body,
             auth_header: Some(bearer_token),
+            api_key: None,
             is_oauth: true,
         })
     }
@@ -303,7 +311,7 @@ impl GeminiProvider {
         Self::serialize_gemini_body(url, gemini_request)
     }
 
-    /// Build a public Gemini API request (API key based URL).
+    /// Build a public Gemini API request with the API key in a sensitive header.
     fn prepare_apikey_request(
         &self,
         request: &CanonicalRequest,
@@ -331,22 +339,21 @@ impl GeminiProvider {
         };
 
         let (action, alt_sse) = Self::url_parts(streaming);
-        let sep = if streaming { "&" } else { "" };
         let url = format!(
-            "{}/models/{}:{}?key={}{}{}",
-            self.base_url,
-            request.model,
-            action,
-            key_str,
-            sep,
-            alt_sse.trim_start_matches('?')
+            "{}/models/{}:{}{}",
+            self.base_url, request.model, action, alt_sse
         );
 
         if streaming {
             tracing::debug!("📡 Using Gemini API (streaming): {}", url);
         }
 
-        Self::serialize_gemini_body(url, gemini_request)
+        let mut api_key = reqwest::header::HeaderValue::from_str(&key_str)
+            .map_err(|_| ProviderError::ConfigError("Invalid Gemini API key header".to_string()))?;
+        api_key.set_sensitive(true);
+        let mut prepared = Self::serialize_gemini_body(url, gemini_request)?;
+        prepared.api_key = Some(api_key);
+        Ok(prepared)
     }
 
     /// URL action and SSE suffix for streaming vs non-streaming.
@@ -370,20 +377,23 @@ impl GeminiProvider {
             url,
             body,
             auth_header: None,
+            api_key: None,
             is_oauth: false,
         })
     }
 
     /// Build an HTTP request from prepared data (used for non-retry paths).
-    // SAFETY: Gemini API requires the API key as a URL query parameter over HTTPS.
     fn build_http_request(&self, prep: &PreparedRequest) -> reqwest::RequestBuilder {
         let mut req_builder = self
             .client
-            .post(&prep.url) // CodeQL: cleartext-transmission — URL uses HTTPS; API key in query param is Gemini's design.
+            .post(&prep.url)
             .header("Content-Type", "application/json");
 
         if let Some(ref auth) = prep.auth_header {
             req_builder = req_builder.header("Authorization", auth);
+        }
+        if let Some(ref api_key) = prep.api_key {
+            req_builder = req_builder.header("x-goog-api-key", api_key);
         }
 
         for (key, value) in &self.custom_headers {
@@ -464,6 +474,7 @@ impl LlmProvider for GeminiProvider {
         let client = self.client.clone();
         let custom_headers = self.custom_headers.clone();
         let auth_header = prep.auth_header;
+        let api_key = prep.api_key;
         let body = prep.body;
         let url = prep.url;
         let api_timeout = self.api_timeout;
@@ -471,12 +482,14 @@ impl LlmProvider for GeminiProvider {
         let response = self
             .handle_rate_limit_retry(
                 move || {
-                    // SAFETY: Gemini API requires the API key as a URL query parameter over HTTPS.
                     let mut req_builder =
-                        client.post(&url).header("Content-Type", "application/json"); // CodeQL: cleartext-transmission — URL uses HTTPS; API key in query param is Gemini's design.
+                        client.post(&url).header("Content-Type", "application/json");
 
                     if let Some(ref auth) = auth_header {
                         req_builder = req_builder.header("Authorization", auth);
+                    }
+                    if let Some(ref api_key) = api_key {
+                        req_builder = req_builder.header("x-goog-api-key", api_key);
                     }
 
                     for (key, value) in &custom_headers {
