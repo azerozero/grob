@@ -49,11 +49,10 @@
       "automerge": true
     },
     {
-      "description": "Keep the OpenTelemetry SDK, exporters and tracing bridge compatible; approve when the bridge supports the new SDK",
+      "description": "Update the OpenTelemetry SDK, exporters and tracing bridge together",
       "matchManagers": ["cargo"],
       "matchPackageNames": ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "opentelemetry-appender-tracing", "tracing-opentelemetry"],
       "groupName": "OpenTelemetry stack",
-      "dependencyDashboardApproval": true,
       "automerge": false
     }
   ],
