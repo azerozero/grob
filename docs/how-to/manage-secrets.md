@@ -124,7 +124,7 @@ the issuer request and remain authoritative over a late response.
 A durable refresh intent is written before contacting the issuer. If a process
 dies, is cancelled, or receives an ambiguous failure after the issuer may have
 rotated its token, Grob refuses to reuse that uncertain refresh token. Authenticate again
-with `grob connect`, or supply a new credential through the administrative OAuth
+with `grob connect --force-reauth`, or supply a new credential through the administrative OAuth
 flow. Do not delete the `.refresh.pending` file to force a retry. Supplying a new
 refresh token supersedes the old intent; editing expiration or reauthentication
 metadata does not. Legacy JSON stores only coordinate within one process; use

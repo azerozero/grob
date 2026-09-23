@@ -12,7 +12,7 @@ GROB_MEMORY_HARDENING=no-dump grob run
 |------|-----------|--------|
 | `off` or unset | All | Keeps the operating system's existing policy. |
 | `no-dump` | Unix | Sets both core-file limits to zero; Linux also sets `PR_SET_DUMPABLE=0`. |
-| `locked` | Linux | Adds `mlockall(MCL_CURRENT | MCL_FUTURE)` to `no-dump`. |
+| `locked` | Linux | Adds `mlockall` for current and future mappings to `no-dump`. |
 
 Grob applies these controls before it creates the Tokio runtime, loads config or
 reads credentials. Invalid modes, unsupported platforms, and failed system calls
