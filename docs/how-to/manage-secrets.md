@@ -124,8 +124,9 @@ synchronized on Unix. Concurrent first starts cannot overwrite the master key.
 
 Named provider credentials and stored OAuth tokens are not held in a persistent
 plaintext cache. Decrypted serialization buffers and transient token strings use
-zeroizing containers. Literal credentials in TOML and environment variables do
-not gain these properties: migrate them to named encrypted secrets and remove
+zeroizing containers. AES-GCM also enables its `zeroize` feature so AES and GHASH
+state is erased when the cipher is dropped. Literal credentials in TOML and
+environment variables do not gain these properties: migrate them to named encrypted secrets and remove
 old copies from configuration backups and shell setup after verifying the change.
 
 An in-process RAM-encryption library would still need a decryption key in the
