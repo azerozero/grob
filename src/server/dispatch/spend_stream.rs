@@ -20,9 +20,9 @@
 //!   `serde_json` deserialization. Only the rare usage-bearing events
 //!   (`message_start` / `message_delta`) are JSON-parsed, and only their small
 //!   `usage` object.
-//! - **Terminal recording is detached** — on stream end the cost computation,
+//! - **Terminal recording is tracked** — on stream end or cancellation the cost computation,
 //!   spend mutex, and JSONL append run in a spawned task so the final poll
-//!   returns to the client without waiting on disk I/O.
+//!   returns without disk I/O. Graceful shutdown waits for the accounting task.
 //!
 //! # Token sources
 //!
@@ -145,6 +145,11 @@ enum TraceBlock {
 pub(crate) struct SpendStream<S> {
     #[pin]
     inner: S,
+    accounting: StreamAccounting,
+}
+
+/// Commits observed usage once on EOF, provider error, or consumer cancellation.
+struct StreamAccounting {
     /// Accounting context (owned clones; outlives the request).
     ctx: SpendStreamContext,
     /// Live usage accumulator.
@@ -155,6 +160,26 @@ pub(crate) struct SpendStream<S> {
     carry: String,
     /// Guards against double-recording if polled after completion.
     recorded: bool,
+    /// Keeps shutdown draining until the body and its accounting task finish.
+    _activity: crate::server::handlers::ActiveRequestGuard,
+}
+
+impl StreamAccounting {
+    fn finish(&mut self, status: &'static str) {
+        if self.recorded {
+            return;
+        }
+        self.recorded = true;
+        flush_carry(&mut self.carry, &mut self.usage);
+        record_stream_spend(&self.ctx, &self.usage, status);
+        trace_stream_response(&self.ctx, &self.usage, status);
+    }
+}
+
+impl Drop for StreamAccounting {
+    fn drop(&mut self) {
+        self.finish("cancelled");
+    }
 }
 
 impl<S> SpendStream<S>
@@ -170,13 +195,16 @@ where
         .then(Vec::new);
         Self {
             inner,
-            ctx,
-            usage: StreamUsage {
-                trace,
-                ..Default::default()
+            accounting: StreamAccounting {
+                _activity: crate::server::handlers::ActiveRequestGuard::new(&ctx.state),
+                ctx,
+                usage: StreamUsage {
+                    trace,
+                    ..Default::default()
+                },
+                carry: String::new(),
+                recorded: false,
             },
-            carry: String::new(),
-            recorded: false,
         }
     }
 }
@@ -187,6 +215,9 @@ where
 /// SSE event is far smaller than this. The cap defends against a pathological
 /// upstream that never emits the `\n\n` delimiter.
 const MAX_CARRY: usize = 8 * 1024;
+
+#[cfg(test)]
+mod lifecycle_tests;
 
 /// Scans a chunk for usage fields and accumulates output text length.
 ///
@@ -387,14 +418,16 @@ fn build_trace_content(blocks: &[TraceBlock]) -> serde_json::Value {
 ///
 /// No-op unless tracing captured blocks (`usage.trace` is `Some`) and the context
 /// carries a `trace_id` correlating it to the `req` entry.
-fn trace_stream_response(ctx: &SpendStreamContext, usage: &StreamUsage) {
+fn trace_stream_response(ctx: &SpendStreamContext, usage: &StreamUsage, status: &'static str) {
     let (Some(trace_id), Some(blocks)) = (ctx.trace_id.as_ref(), usage.trace.as_ref()) else {
         return;
     };
     let latency_ms = ctx.start_time.elapsed().as_millis() as u64;
     let content = build_trace_content(blocks);
     // A turn that emitted any tool call stops on "tool_use"; otherwise end_turn.
-    let stop_reason = if blocks
+    let stop_reason = if status != "ok" {
+        status
+    } else if blocks
         .iter()
         .any(|b| matches!(b, TraceBlock::ToolUse { .. }))
     {
@@ -586,10 +619,8 @@ fn estimate_tokens_from_bytes(bytes: usize) -> u32 {
 
 /// Records spend and Prometheus metrics for a completed stream.
 ///
-/// Always spawns: the response is fully delivered by stream end, so there is no
-/// consistency benefit to recording synchronously, and the final poll must not
-/// stall on the spend mutex or the JSONL disk write.
-fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
+/// Spawns a tracked commit so graceful shutdown waits for the journal append.
+fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage, status: &'static str) {
     let Some((input_tokens, output_tokens)) = resolve_billed_tokens(
         usage,
         is_estimate_mode(&ctx.state),
@@ -616,7 +647,15 @@ fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
         0
     };
 
-    tokio::spawn(async move {
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+        tracing::error!(
+            "Stream dropped after runtime shutdown; observed usage could not be recorded"
+        );
+        return;
+    };
+    let activity = crate::server::handlers::ActiveRequestGuard::new(&state);
+    runtime.spawn(async move {
+        let _activity = activity;
         let cost = calculate_cost(
             &state,
             &actual_model,
@@ -631,7 +670,7 @@ fn record_stream_spend(ctx: &SpendStreamContext, usage: &StreamUsage) {
             model: &actual_model,
             provider: &provider,
             route_type: &route_type,
-            status: "ok",
+            status,
             latency_ms,
             input_tokens,
             output_tokens,
@@ -664,20 +703,19 @@ where
                 // Forward the chunk first (zero added latency); accounting is a
                 // cheap substring scan on a borrowed view of the same bytes.
                 let text = String::from_utf8_lossy(&bytes);
-                scan_chunk(&text, this.carry, this.usage);
+                scan_chunk(
+                    &text,
+                    &mut this.accounting.carry,
+                    &mut this.accounting.usage,
+                );
                 Poll::Ready(Some(Ok(bytes)))
             }
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
+            Poll::Ready(Some(Err(e))) => {
+                this.accounting.finish("error");
+                Poll::Ready(Some(Err(e)))
+            }
             Poll::Ready(None) => {
-                if !*this.recorded {
-                    *this.recorded = true;
-                    // Flush any trailing event the stream ended on without a
-                    // final `\n\n` delimiter, then detach the spend commit so
-                    // termination is never blocked on the spend mutex / disk.
-                    flush_carry(this.carry, this.usage);
-                    record_stream_spend(this.ctx, this.usage);
-                    trace_stream_response(this.ctx, this.usage);
-                }
+                this.accounting.finish("ok");
                 Poll::Ready(None)
             }
             Poll::Pending => Poll::Pending,

@@ -9,7 +9,7 @@ use secrecy::SecretString;
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-fn fixture() -> (tempfile::TempDir, Arc<AppState>, axum::Router) {
+pub(super) fn fixture() -> (tempfile::TempDir, Arc<AppState>, axum::Router) {
     let home = tempfile::tempdir().unwrap();
     let text = r#"
 [server]
@@ -99,7 +99,7 @@ fn rpc(method: &str, params: Value) -> Value {
     json!({"jsonrpc":"2.0", "id":1, "method":method, "params":params})
 }
 
-async fn agent(app: &axum::Router) -> String {
+pub(super) async fn agent(app: &axum::Router) -> String {
     let (status, created) = call(
         app,
         "/rpc",

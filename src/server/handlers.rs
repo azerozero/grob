@@ -49,10 +49,10 @@ fn extract_tenant_id(
 }
 
 /// Drop guard that decrements the active request counter
-struct ActiveRequestGuard(Arc<AppState>);
+pub(crate) struct ActiveRequestGuard(Arc<AppState>);
 
 impl ActiveRequestGuard {
-    fn new(state: &Arc<AppState>) -> Self {
+    pub(crate) fn new(state: &Arc<AppState>) -> Self {
         state
             .active_requests
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
