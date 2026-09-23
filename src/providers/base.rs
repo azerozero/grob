@@ -87,6 +87,14 @@ impl ProviderBase {
             self.secret_backend.as_deref(),
         )?;
 
+        if !effective_key.expose_secret().is_empty()
+            || self.oauth_provider.is_some()
+            || !self.custom_headers.is_empty()
+        {
+            crate::shared::credential_transport::validate_endpoint(&self.base_url)
+                .map_err(|reason| ProviderError::ConfigError(reason.into()))?;
+        }
+
         super::auth::resolve_access_token(
             self.oauth_provider.as_deref(),
             self.token_store.as_ref(),

@@ -87,10 +87,50 @@ pub(crate) fn resolve_headers<'a>(
         let secret = resolve_api_key(reference, backend)?;
         let name = reqwest::header::HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| ProviderError::ConfigError("Invalid custom header name".into()))?;
-        let mut value = reqwest::header::HeaderValue::from_str(secret.expose_secret())
-            .map_err(|_| ProviderError::ConfigError("Invalid custom header value".into()))?;
-        value.set_sensitive(true);
+        let value = sensitive_header(secret.expose_secret())?;
         result.insert(name, value);
     }
     Ok(result)
+}
+
+/// Keeps authentication values out of HTTP request debug formatting.
+pub(crate) fn sensitive_header(value: &str) -> Result<reqwest::header::HeaderValue, ProviderError> {
+    let mut header = reqwest::header::HeaderValue::from_str(value)
+        .map_err(|_| ProviderError::ConfigError("Invalid credential header value".into()))?;
+    header.set_sensitive(true);
+    Ok(header)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_credentials_are_sent_but_never_formatted_in_request_debug() {
+        let headers = std::collections::HashMap::from([
+            ("X-Custom-Token".into(), "synthetic-custom-secret".into()),
+            ("Authorization".into(), "synthetic-auth-secret".into()),
+        ]);
+        let request = reqwest::Client::new()
+            .post("https://example.com")
+            .headers(resolve_headers(&headers, None).unwrap())
+            .header(
+                "x-api-key",
+                sensitive_header("synthetic-api-secret").unwrap(),
+            )
+            .json(&serde_json::json!({"model":"test"}))
+            .build()
+            .unwrap();
+        for (name, expected) in headers {
+            assert_eq!(request.headers()[&name], expected);
+            assert!(request.headers()[&name].is_sensitive());
+        }
+        assert!(request.headers()["x-api-key"].is_sensitive());
+        assert!(!format!("{request:?}").contains("synthetic-"));
+        assert!(!request.url().as_str().contains("synthetic-"));
+        assert!(
+            !String::from_utf8_lossy(request.body().unwrap().as_bytes().unwrap())
+                .contains("synthetic-")
+        );
+    }
 }

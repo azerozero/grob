@@ -22,6 +22,8 @@ pub mod openai;
 pub mod registry;
 /// SSE streaming utilities shared across providers.
 pub mod streaming;
+#[cfg(test)]
+mod transport_tests;
 
 use crate::auth::TokenStore;
 use crate::models::{
@@ -127,7 +129,9 @@ pub fn build_provider_client(
         .build()
         .unwrap_or_else(|e| {
             tracing::warn!("Provider client build failed, using defaults: {}", e);
-            Client::new()
+            crate::shared::credential_transport::client_builder()
+                .build()
+                .expect("default provider TLS client")
         })
 }
 
@@ -137,7 +141,7 @@ pub(crate) fn provider_client_builder(
     identity: Option<reqwest::Identity>,
     ca: Option<reqwest::Certificate>,
 ) -> reqwest::ClientBuilder {
-    let mut builder = Client::builder()
+    let mut builder = crate::shared::credential_transport::client_builder()
         .tcp_nodelay(true)
         .connect_timeout(connect_timeout)
         .pool_max_idle_per_host(20)
