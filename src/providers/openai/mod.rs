@@ -250,7 +250,7 @@ impl OpenAIProvider {
             .base
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", auth_value))
+            .bearer_auth(auth_value)
             .header("Content-Type", "application/json")
             .header("accept", "text/event-stream");
 
@@ -318,7 +318,7 @@ impl OpenAIProvider {
             .base
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", auth_value))
+            .bearer_auth(auth_value)
             .header("Content-Type", "application/json");
 
         if self.base.is_oauth() {
@@ -465,7 +465,7 @@ impl LlmProvider for OpenAIProvider {
             .base
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", auth_value.as_str()))
+            .bearer_auth(auth_value.as_str())
             .header("Content-Type", "application/json")
             .header("accept", "text/event-stream");
 

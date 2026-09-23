@@ -395,7 +395,10 @@ impl GeminiProvider {
             .header("Content-Type", "application/json");
 
         if let Some(ref auth) = prep.auth_header {
-            req_builder = req_builder.header("Authorization", auth.as_str());
+            req_builder = req_builder.header(
+                "Authorization",
+                super::auth::sensitive_header(auth.as_str())?,
+            );
         }
         if let Some(ref api_key) = prep.api_key {
             req_builder = req_builder.header("x-goog-api-key", api_key);
@@ -480,7 +483,11 @@ impl LlmProvider for GeminiProvider {
         let client = self.client.clone();
         let custom_headers =
             super::auth::resolve_headers(&self.custom_headers, self.secret_backend.as_deref())?;
-        let auth_header = prep.auth_header;
+        let auth_header = prep
+            .auth_header
+            .as_ref()
+            .map(|auth| super::auth::sensitive_header(auth.as_str()))
+            .transpose()?;
         let api_key = prep.api_key;
         let body = prep.body;
         let url = prep.url;
@@ -493,7 +500,7 @@ impl LlmProvider for GeminiProvider {
                         client.post(&url).header("Content-Type", "application/json");
 
                     if let Some(ref auth) = auth_header {
-                        req_builder = req_builder.header("Authorization", auth.as_str());
+                        req_builder = req_builder.header("Authorization", auth);
                     }
                     if let Some(ref api_key) = api_key {
                         req_builder = req_builder.header("x-goog-api-key", api_key);

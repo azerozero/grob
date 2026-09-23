@@ -158,9 +158,10 @@ impl AnthropicCompatibleProvider {
             .header("anthropic-beta", merge_beta_features(client_beta));
 
         if self.base.is_oauth() {
-            req_builder = req_builder.header("Authorization", format!("Bearer {}", auth_value));
+            req_builder = req_builder.bearer_auth(auth_value);
         } else {
-            req_builder = req_builder.header("x-api-key", auth_value);
+            req_builder =
+                req_builder.header("x-api-key", super::auth::sensitive_header(auth_value)?);
         }
 
         self.base.apply_headers(req_builder)
@@ -290,13 +291,13 @@ impl AnthropicCompatibleProvider {
     /// Common setup for both send_message and send_message_stream:
     /// builds URL, sanitizes request for Anthropic backends, resolves auth.
     ///
-    /// Returns a tuple of `(messages_url, auth_value, is_anthropic, id_map)`.
+    /// Returns a tuple of `(auth_value, is_anthropic, id_map)`.
     /// The `id_map` carries any rewrites applied by `sanitize_tool_use_ids`
     /// so callers can restore the originals on the response.
     async fn prepare_anthropic_request(
         &self,
         request: &mut CanonicalRequest,
-    ) -> Result<(&str, zeroize::Zeroizing<String>, bool, OriginalToolIdMap), ProviderError> {
+    ) -> Result<(zeroize::Zeroizing<String>, bool, OriginalToolIdMap), ProviderError> {
         let is_anthropic = self.base.base_url.contains(ANTHROPIC_DOMAIN);
         let mut id_map = OriginalToolIdMap::new();
         if is_anthropic {
@@ -305,7 +306,7 @@ impl AnthropicCompatibleProvider {
         }
         inject_anthropic_cache_control(request);
         let auth_value = self.base.resolve_auth(OAuthConfig::anthropic).await?;
-        Ok((&self.messages_url, auth_value, is_anthropic, id_map))
+        Ok((auth_value, is_anthropic, id_map))
     }
 }
 
@@ -351,7 +352,8 @@ impl LlmProvider for AnthropicCompatibleProvider {
         request: CanonicalRequest,
     ) -> Result<ProviderResponse, ProviderError> {
         let mut request = request;
-        let (url, auth_value, is_anthropic, id_map) =
+        let url = &self.messages_url;
+        let (auth_value, is_anthropic, id_map) =
             self.prepare_anthropic_request(&mut request).await?;
 
         let mut result = self.try_send_message(url, &auth_value, &request).await;
@@ -419,7 +421,8 @@ impl LlmProvider for AnthropicCompatibleProvider {
         use futures::stream::TryStreamExt;
 
         let mut request = request;
-        let (url, auth_value, is_anthropic, id_map) =
+        let url = &self.messages_url;
+        let (auth_value, is_anthropic, id_map) =
             self.prepare_anthropic_request(&mut request).await?;
 
         // Try request, fallback: strip all signed thinking blocks on signature error

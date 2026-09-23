@@ -1,6 +1,5 @@
 use crate::config::AppConfig;
 use crate::providers::ProviderRegistry;
-use crate::routing::classify::Router;
 use axum::{
     extract::State,
     response::{IntoResponse, Response},
@@ -10,7 +9,7 @@ use std::sync::Arc;
 use tracing::{error, info, warn};
 
 use super::config_guard::is_section_or_key_denied;
-use super::{AppState, ReloadableState, RequestError};
+use super::{AppState, RequestError};
 
 /// Get full configuration as JSON — API keys are redacted
 pub(crate) async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -197,66 +196,18 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
         }
     };
 
-    // 1b. Reject changes to config-derived subsystems that are initialized only
-    //     at startup. This guard applies equally to API writes and direct edits of
-    //     the config file followed by this endpoint.
-    if let Err(msg) = super::config_guard::ensure_config_reloadable(&state, &new_config) {
-        warn!("config reload rejected: {msg}");
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "status": "error",
-                "message": msg,
-            })),
-        )
-            .into_response();
-    }
-
-    // 2. Build new router (compiles regexes)
-    let new_router = Router::new(new_config.clone());
-
-    // 3. Build new provider registry (reuse existing token_store).
-    //    `from_configs_with_models` resolves `secret:<name>` and
-    //    `$ENV_VAR` placeholders internally via the supplied backend, so
-    //    a hot reload behaves the same as `grob start` and CLI `validate`.
-    let secret_backend =
-        crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
-    let new_registry = match ProviderRegistry::from_configs_with_models(
-        &new_config.providers,
-        secret_backend.clone(),
-        Some(state.token_store.clone()),
-        &new_config.models,
-        &new_config.server.timeouts,
-    ) {
-        Ok(r) => Arc::new(r),
+    let new_inner = match super::config_guard::prepare_state(&state, new_config) {
+        Ok(candidate) => candidate,
         Err(e) => {
-            error!("Failed to init providers: {}", e);
             return (
                 StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("Failed to init providers: {}", e),
-                })),
+                Json(serde_json::json!({"status":"error", "message":e.to_string()})),
             )
                 .into_response();
         }
     };
-
-    // 4. Create new reloadable state and atomically swap (write lock held for
-    //    microseconds). In-flight requests continue on the old snapshot because
-    //    they hold an `Arc<ReloadableState>` taken before the swap.
-    //
-    //    The candidate is already structurally valid here: `from_source`
-    //    re-parsed it and ran `AppConfig::validate()` (model→provider mappings,
-    //    provider auth, router regexes), and `from_configs_with_models`
-    //    confirmed the registry builds. We do NOT gate the swap on live
-    //    provider health — a momentarily unreachable provider must not block a
-    //    config reload.
-    let new_inner = Arc::new(ReloadableState::new(
-        new_config.clone(),
-        new_router,
-        new_registry.clone(),
-    ));
+    let probe_config = new_inner.config.clone();
+    let probe_registry = new_inner.provider_registry.clone();
 
     let active = state
         .active_requests
@@ -267,7 +218,7 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
     //    minimal request to each router mapping and logs warnings on unhealthy
     //    ones, mirroring the `validate_on_start` task in `server::init`. It runs
     //    after the swap and never blocks or reverts the reload.
-    spawn_health_probe(new_config, new_registry);
+    spawn_health_probe(probe_config, probe_registry);
 
     if active > 0 {
         info!(

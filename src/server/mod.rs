@@ -81,6 +81,8 @@ use tracing::{info, warn};
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
+    /// Universal tool layer for injection, aliasing, and capability gating.
+    pub tool_layer: Option<Arc<crate::features::tool_layer::ToolLayer>>,
     /// Active application configuration snapshot.
     pub config: AppConfig,
     /// Request routing engine for task-type classification.
@@ -141,7 +143,13 @@ impl ReloadableState {
         #[cfg(not(feature = "policies"))]
         let policy_revision = revision::compute::<[(); 0]>(&[]);
         static CACHE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let tool_layer = config.tool_layer.enabled.then(|| {
+            Arc::new(crate::features::tool_layer::ToolLayer::new(
+                config.tool_layer.clone(),
+            ))
+        });
         Self {
+            tool_layer,
             cache_epoch: CACHE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             config,
             router,
@@ -206,8 +214,6 @@ pub struct SecurityState {
     /// MCP tool matrix and JSON-RPC server state.
     #[cfg(feature = "mcp")]
     pub mcp: Option<Arc<crate::features::mcp::McpState>>,
-    /// Universal tool layer for injection, aliasing, and capability gating.
-    pub tool_layer: Option<Arc<crate::features::tool_layer::ToolLayer>>,
     /// Per-session tool-call spike anomaly detector (T-AD1).
     pub tool_spike_detector: Option<Arc<crate::security::ToolSpikeDetector>>,
 }
@@ -386,7 +392,6 @@ pub(crate) fn test_app_state_with_source(
             provider_scorer: None,
             #[cfg(feature = "mcp")]
             mcp: None,
-            tool_layer: None,
             tool_spike_detector: None,
         },
     })
@@ -419,19 +424,6 @@ pub async fn start_server(
 
     #[cfg(feature = "mcp")]
     let mcp_state = init_mcp(&config, &provider_registry);
-
-    let tool_layer = if config.tool_layer.enabled {
-        info!(
-            "🔧 Tool layer enabled ({} inject rules, {} aliases)",
-            config.tool_layer.inject.len(),
-            config.tool_layer.aliases.len(),
-        );
-        Some(Arc::new(crate::features::tool_layer::ToolLayer::new(
-            config.tool_layer.clone(),
-        )))
-    } else {
-        None
-    };
 
     let router = Router::new(config.clone());
     let reloadable = Arc::new(ReloadableState::new(
@@ -519,7 +511,6 @@ pub async fn start_server(
             provider_scorer,
             #[cfg(feature = "mcp")]
             mcp: mcp_state,
-            tool_layer,
             tool_spike_detector,
         },
     });

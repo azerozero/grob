@@ -117,6 +117,11 @@ same encrypted store whether the daemon is running or stopped; select the same
 
 ## Memory and disk protection
 
+Authenticated upstream requests require HTTPS outside loopback. Provider clients
+do not follow redirects, so a remote endpoint cannot redirect an API key or
+custom credential header to another server. Authentication header values are
+marked sensitive to keep them out of HTTP request debug formatting.
+
 The local backend uses the existing AES-256-GCM implementation, fresh nonces,
 authenticated ciphertext and atomic file replacement. Temporary files are private
 before data is written, synchronized before rename, and the parent directory is
