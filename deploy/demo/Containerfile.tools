@@ -15,7 +15,7 @@
 
 FROM ghcr.io/azerozero/grob:0.36 AS grobimg
 
-FROM docker.io/library/alpine:3.20
+FROM docker.io/library/alpine:3.24
 # coreutils non requis : sed/grep/sh de busybox suffisent. curl pour le seed.
 RUN apk add --no-cache curl
 # Binaire grob statique : fonctionne tel quel sur alpine.
