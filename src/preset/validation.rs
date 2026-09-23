@@ -82,7 +82,7 @@ pub fn build_registry(config: &AppConfig) -> Result<(Arc<ProviderRegistry>, Toke
     let registry = Arc::new(
         ProviderRegistry::from_configs_with_models(
             &config.providers,
-            secret_backend.as_ref(),
+            secret_backend.clone(),
             Some(token_store.clone()),
             &config.models,
             &config.server.timeouts,
@@ -496,11 +496,14 @@ mod tests {
         unsafe {
             std::env::remove_var("GROB_HOME");
         }
-        let _ = std::fs::remove_dir_all(&home);
-
         assert!(
             token_store.get("test-oauth-provider").is_some(),
             "build_registry must read tokens from the encrypted GrobStore, not the legacy JSON file"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(
+            token_store.get("test-oauth-provider").is_none(),
+            "removed credentials must not survive in a plaintext cache"
         );
     }
 

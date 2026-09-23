@@ -161,7 +161,7 @@ fn swap_state(
         crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
     let new_registry = ProviderRegistry::from_configs_with_models(
         &new_config.providers,
-        secret_backend.as_ref(),
+        secret_backend.clone(),
         Some(state.token_store.clone()),
         &new_config.models,
         &new_config.server.timeouts,

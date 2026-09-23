@@ -364,9 +364,7 @@ pub fn required_role(action: &Action) -> Role {
         | Action::Media(MediaAction::Verify { .. }) => Role::Observer,
 
         // Operational mutations
-        Action::Server(ServerAction::Reload)
-        | Action::Config(ConfigAction::Reload | ConfigAction::Diff | ConfigAction::Get { .. })
-        | Action::Hit(HitAction::Resolve { .. })
+        Action::Config(ConfigAction::Diff | ConfigAction::Get { .. })
         // Resolving a handle names a tenant, which is precisely what the
         // opaque identifier keeps out of the image.
         | Action::Media(MediaAction::Trace { .. } | MediaAction::Fingerprint { .. }) => {
@@ -375,7 +373,9 @@ pub fn required_role(action: &Action) -> Role {
 
         // Administrative mutations
         Action::Keys(_)
-        | Action::Config(ConfigAction::Set { .. })
+        | Action::Server(ServerAction::Reload)
+        | Action::Config(ConfigAction::Reload | ConfigAction::Set { .. })
+        | Action::Hit(HitAction::Resolve { .. })
         | Action::Tools(ToolsAction::Enable { .. } | ToolsAction::Disable { .. })
         | Action::Hit(HitAction::SetPolicy { .. })
         | Action::Pledge(PledgeAction::Set { .. } | PledgeAction::Clear) => Role::Admin,
@@ -677,14 +677,14 @@ mod tests {
     }
 
     #[test]
-    fn required_role_reload_is_operator() {
+    fn required_role_reload_is_admin() {
         assert_eq!(
             required_role(&Action::Server(ServerAction::Reload)),
-            Role::Operator
+            Role::Admin
         );
         assert_eq!(
             required_role(&Action::Config(ConfigAction::Reload)),
-            Role::Operator
+            Role::Admin
         );
     }
 

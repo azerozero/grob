@@ -8,6 +8,7 @@ fn provider(base_url: &str) -> GeminiProvider {
             base_url: Some(base_url.into()),
             models: vec![],
             oauth_provider: None,
+            secret_backend: None,
             token_store: None,
             api_timeout: Duration::from_secs(5),
             connect_timeout: Duration::from_secs(5),
@@ -41,7 +42,11 @@ async fn api_key_stays_out_of_urls_and_debug_output() {
             .prepare_request(&request(), streaming)
             .await
             .unwrap();
-        let outgoing = provider.build_http_request(&prepared).build().unwrap();
+        let outgoing = provider
+            .build_http_request(&prepared)
+            .unwrap()
+            .build()
+            .unwrap();
         assert!(!outgoing.url().as_str().contains("synthetic-key"));
         assert!(!outgoing.url().query_pairs().any(|(key, _)| key == "key"));
         assert_eq!(outgoing.headers()["x-goog-api-key"], "synthetic-key");

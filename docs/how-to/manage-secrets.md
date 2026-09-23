@@ -9,7 +9,7 @@ in your `config.toml`, your shell history, or your dotfiles.
 
 | Storage | Sensitivity | Reload-friendly | Backup-friendly |
 |---------|-------------|------------------|------------------|
-| `api_key = "secret:<name>"` (this guide) | ✅ encrypted at rest | yes — read on startup | yes — encrypted blob in `~/.grob/secrets/` |
+| `api_key = "secret:<name>"` (this guide) | ✅ encrypted at rest | yes — read on each request | yes — encrypted blob in `~/.grob/secrets/` |
 | `api_key = "$ENV_VAR"` | 🟡 visible to any process via `/proc/<pid>/environ`, shell history, dotfiles | yes (re-export + restart) | depends on env management |
 | `api_key = "sk-..."` plain string | ❌ cleartext on disk, in backups, in version control if `.grob/config.toml` is checked in | yes | dangerous |
 | OAuth via `grob connect` | ✅ encrypted at rest | yes | yes — refresh token blob |
@@ -54,18 +54,86 @@ api_key = "secret:minimax"
 models = ["MiniMax-M2.5"]
 ```
 
-On startup, grob resolves the placeholder by looking up `minimax` in the
-encrypted store and substitutes the cleartext into the in-memory provider
-config. The TOML on disk stays clean.
+Grob verifies the reference at startup and retains its name in the provider
+configuration. It decrypts the current value immediately before each upstream
+request. A missing primary secret disables the provider at startup. Deleting or
+corrupting a secret while running causes authentication resolution to fail; the
+literal `secret:` placeholder and old plaintext are never used as fallbacks.
 
-A log line confirms the resolution:
+## Replace credentials without changing the agent
 
+Give each agent a Grob virtual key. Keep the administrative credential separate:
+
+```toml
+[auth]
+mode = "api_key"
+api_key = "secret:grob-admin"
+adopt_from_system = false  # keep explicitly supplied OAuth credentials authoritative
 ```
-🔐 Resolved api_key for provider 'minimax' from grob secret 'minimax'
+
+```sh
+grob secrets add grob-admin
+grob key create --name coding-agent --allowed-providers minimax
 ```
 
-If the secret is missing the provider falls back to the unresolved
-placeholder (and the registry warns).
+Configure the agent once with the emitted `grob_...` key and the Grob endpoint.
+Grob authenticates that key, applies its restrictions, then supplies the upstream
+provider credential. It does not forward the agent's Authorization header.
+The administrative credential permits configuration, OAuth and key management;
+virtual keys and tenant JWTs do not. An explicit `auth.api_key` can also serve as
+the administrative credential when `auth.mode = "jwt"`.
+
+To replace the upstream credential, write a new value under the same name:
+
+```sh
+printf '%s' "$NEW_MINIMAX_KEY" | grob secrets add minimax
+```
+
+The next upstream dispatch reads the replacement. No agent update, config reload
+or daemon restart is needed. An already dispatched request continues with its
+captured credential; a streaming response is not interrupted. Replacing
+`grob-admin` similarly changes administrative access without changing agent keys.
+
+Named references also work in `providers.pool.keys` and custom header values:
+
+```toml
+[[providers]]
+name = "gateway"
+provider_type = "openai"
+base_url = "https://gateway.example.com/v1"
+api_key = "secret:gateway-primary"
+models = ["default"]
+headers = { X-Gateway-Key = "secret:gateway-header" }
+[providers.pool]
+keys = ["secret:gateway-secondary"]
+```
+
+An OAuth token saved through `grob connect` is visible to the running daemon on
+its next read. A late refresh result cannot overwrite a newer stored credential
+or recreate a deleted token. Virtual-key rotation preserves expiration, tenant,
+budget, rate limit, model and provider restrictions. CLI key operations use the
+same encrypted store whether the daemon is running or stopped; select the same
+`GROB_HOME` for both processes.
+
+## Memory and disk protection
+
+The local backend uses the existing AES-256-GCM implementation, fresh nonces,
+authenticated ciphertext and atomic file replacement. Temporary files are private
+before data is written, synchronized before rename, and the parent directory is
+synchronized on Unix. Concurrent first starts cannot overwrite the master key.
+
+Named provider credentials and stored OAuth tokens are not held in a persistent
+plaintext cache. Decrypted serialization buffers and transient token strings use
+zeroizing containers. Literal credentials in TOML and environment variables do
+not gain these properties: migrate them to named encrypted secrets and remove
+old copies from configuration backups and shell setup after verifying the change.
+
+An in-process RAM-encryption library would still need a decryption key in the
+same process. This implementation minimizes plaintext lifetime; it does not
+promise protection against process inspection, root access, core dumps, or every
+copy made by HTTP/TLS libraries. Filesystem snapshots, SSD wear levelling and old
+backups also prevent a guarantee of physical erasure. Replace or revoke the old
+credential with its issuer when retiring it.
 
 ## List
 
@@ -124,7 +192,7 @@ printf '%s' "$GEMINI_API_KEY"    | grob secrets add gemini
 # Then unset the env vars and remove them from your shell rc.
 ```
 
-Restart `grob` and confirm the resolution lines in the logs.
+Reload the provider configuration after changing references. Subsequent value replacements need no reload.
 
 ## Choose a backend (`[secrets]`)
 
@@ -182,10 +250,9 @@ backend = "file"
 path = "/vault/secrets"
 ```
 
-Vault Agent handles lease renewal, reload notifications, and rotation —
-grob never sees the Vault address, token, or AppRole. To pick up rotated
-secrets without restart, configure Vault Agent's `template.exec` to send
-SIGHUP (or wire a sidecar that re-issues `grob restart`).
+Vault Agent handles lease renewal and replaces the mounted files. Grob reads the
+current file on each request; no signal or restart is required. Publish file
+updates atomically so a request cannot observe a partially written credential.
 
 #### Kubernetes Secret directly
 
@@ -213,8 +280,9 @@ backend = "file"
 path = "/etc/grob/secrets"
 ```
 
-Trade-off: rotating the Kubernetes Secret needs a pod restart (or `kubectl
-rollout restart`). Use the Vault Agent path above for live rotation.
+Grob picks up replacement values once Kubernetes updates the mounted files.
+A `subPath` mount does not receive Secret updates; use the directory mount shown
+above. Environment-based injection still requires restarting the process.
 
 ## What is **not** here yet (tracked)
 
@@ -225,8 +293,8 @@ rollout restart`). Use the Vault Agent path above for live rotation.
 
 - The encrypted store is **single-user, single-host**. If you need
   multi-host or multi-user, prefer a real secret manager (Vault,
-  cloud KMS) and surface it via the upcoming File backend.
+  cloud KMS) and surface it via the File backend.
 - A compromised local user account can read both the master key
-  (chmod 600) and the encrypted blobs. The store protects against
-  *backups* and *casual disk inspection*, not against an attacker who
-  already has your shell.
+  (chmod 600) and the encrypted blobs. Keep the master key separate from ciphertext backups; a backup containing both
+  can be decrypted. Encryption does not protect against an attacker who already
+  has access to this account.

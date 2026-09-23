@@ -148,7 +148,7 @@ impl AnthropicCompatibleProvider {
         url: &str,
         auth_value: &str,
         client_beta: Option<&str>,
-    ) -> reqwest::RequestBuilder {
+    ) -> Result<reqwest::RequestBuilder, ProviderError> {
         let mut req_builder = self
             .base
             .client
@@ -185,7 +185,7 @@ impl AnthropicCompatibleProvider {
             );
         }
         let response = self
-            .build_anthropic_request(url, auth_value, request.extensions.client_beta.as_deref())
+            .build_anthropic_request(url, auth_value, request.extensions.client_beta.as_deref())?
             .timeout(self.base.api_timeout)
             .json(request)
             .send()
@@ -217,12 +217,12 @@ impl AnthropicCompatibleProvider {
                             "OAuth token for provider {} revoked. Run: grob connect --force-reauth",
                             provider_id
                         );
-                        if let Err(e) = store.mark_needs_reauth(provider_id) {
-                            tracing::warn!(
-                                provider = %provider_id,
-                                error = %e,
-                                "Failed to mark token as needs_reauth"
-                            );
+                        if let Some(current) = store.get(provider_id).filter(|token| {
+                            secrecy::ExposeSecret::expose_secret(&token.access_token) == auth_value
+                        }) {
+                            if let Err(e) = store.mark_needs_reauth_if_current(&current) {
+                                tracing::warn!(provider = %provider_id, error = %e, "Failed to mark token as needs_reauth");
+                            }
                         }
                     } else {
                         tracing::error!(
@@ -296,7 +296,7 @@ impl AnthropicCompatibleProvider {
     async fn prepare_anthropic_request(
         &self,
         request: &mut CanonicalRequest,
-    ) -> Result<(&str, String, bool, OriginalToolIdMap), ProviderError> {
+    ) -> Result<(&str, zeroize::Zeroizing<String>, bool, OriginalToolIdMap), ProviderError> {
         let is_anthropic = self.base.base_url.contains(ANTHROPIC_DOMAIN);
         let mut id_map = OriginalToolIdMap::new();
         if is_anthropic {
@@ -387,7 +387,7 @@ impl LlmProvider for AnthropicCompatibleProvider {
             let auth_value = self.base.resolve_auth(OAuthConfig::anthropic).await?;
 
             let response = self
-                .build_anthropic_request(&url, &auth_value, None)
+                .build_anthropic_request(&url, &auth_value, None)?
                 .timeout(self.base.api_timeout)
                 .json(&request)
                 .send()

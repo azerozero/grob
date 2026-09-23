@@ -7,7 +7,7 @@
 /// Provider-specific fields that travel alongside [`super::CanonicalRequest`].
 ///
 /// Skipped during JSON serialization — these are in-memory metadata only.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct RequestExtensions {
     // ── Anthropic ──
     /// Client-provided beta feature flags forwarded to Anthropic.

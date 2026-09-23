@@ -21,11 +21,35 @@ impl GrobStore {
     /// Returns an error if serialization, encryption, or the
     /// atomic file write fails.
     pub fn save_oauth_token(&self, token: &OAuthToken) -> Result<()> {
-        let plaintext = serde_json::to_vec(token)?;
+        let _lock = self.credential_lock()?;
+        self.write_oauth_token(token)
+    }
+
+    fn write_oauth_token(&self, token: &OAuthToken) -> Result<()> {
+        let plaintext = zeroize::Zeroizing::new(serde_json::to_vec(token)?);
         let encrypted = self.cipher.encrypt(&plaintext)?;
         let path = self.token_path(&token.provider_id);
         atomic::write_atomic(&path, &encrypted)?;
         Ok(())
+    }
+
+    /// Saves a refresh result only if no other writer replaced the input token.
+    pub(crate) fn replace_oauth_token(
+        &self,
+        expected: &OAuthToken,
+        replacement: &OAuthToken,
+    ) -> Result<bool> {
+        let _lock = self.credential_lock()?;
+        let Some(current) = self.get_oauth_token(&expected.provider_id) else {
+            return Ok(false);
+        };
+        let current = zeroize::Zeroizing::new(serde_json::to_vec(&current)?);
+        let expected = zeroize::Zeroizing::new(serde_json::to_vec(expected)?);
+        if current != expected {
+            return Ok(false);
+        }
+        self.write_oauth_token(replacement)?;
+        Ok(true)
     }
 
     /// Gets an OAuth token by provider ID (decrypts from AES-256-GCM).
@@ -36,7 +60,7 @@ impl GrobStore {
         let path = self.token_path(provider_id);
         let encrypted = std::fs::read(&path).ok()?;
         let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
-            Ok(d) => d,
+            Ok(d) => zeroize::Zeroizing::new(d),
             Err(e) => {
                 tracing::warn!(provider_id, error = %e, "failed to read OAuth token");
                 return None;
@@ -51,6 +75,7 @@ impl GrobStore {
     ///
     /// Returns an error if the file cannot be removed.
     pub fn delete_oauth_token(&self, provider_id: &str) -> Result<()> {
+        let _lock = self.credential_lock()?;
         let path = self.token_path(provider_id);
         if path.exists() {
             std::fs::remove_file(&path)

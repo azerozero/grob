@@ -258,7 +258,7 @@ pub(super) async fn try_rotate_and_retry(
     // Walk the remaining pooled keys. `rotate_key_pool` marks the current key
     // exhausted and advances to the next non-exhausted one, returning false once
     // the whole pool is spent — so this loop is bounded by the pool size.
-    while rotation_available(provider.rotate_key_pool()) {
+    while provider.rotate_key_pool() {
         info!(
             "Provider {} rate-limited, rotated to next pooled key — retrying",
             attempt.mapping.provider
@@ -428,24 +428,6 @@ fn should_clone_for_retry(retry: u32, max_retries: u32) -> bool {
 #[inline]
 fn try_rotation_on_rate_limit(rate_limited: bool, rotate: impl FnOnce() -> bool) -> bool {
     rate_limited && rotate()
-}
-
-/// Returns `true` when key-pool rotation was unavailable (`!rotated`).
-///
-/// Extracted so the early-return guard in [`try_rotate_and_retry`] is
-/// unit-testable without a [`DispatchContext`].
-#[inline]
-fn rotation_unavailable(rotated: bool) -> bool {
-    !rotated
-}
-
-/// Returns `true` while the key pool yielded a fresh key to retry with.
-///
-/// Sibling of [`rotation_unavailable`], extracted so the loop-guard `!` in
-/// [`try_rotate_and_retry`] is unit-testable without a [`DispatchContext`].
-#[inline]
-fn rotation_available(rotated: bool) -> bool {
-    !rotation_unavailable(rotated)
 }
 
 /// Handle the non-streaming path with retry for a single provider.
@@ -1102,23 +1084,6 @@ mod tests {
         assert!(rotated.get(), "rotate closure must run on 429");
         // Rotation attempted but unavailable → overall false.
         assert!(!try_rotation_on_rate_limit(true, || false));
-    }
-
-    #[test]
-    fn rotation_unavailable_inverts_rotated_flag() {
-        // `!rotated`: the "delete !" mutant would early-return when rotation
-        // actually succeeded (and proceed when it failed).
-        assert!(rotation_unavailable(false));
-        assert!(!rotation_unavailable(true));
-    }
-
-    #[test]
-    fn rotation_available_tracks_successful_rotation() {
-        // `!rotation_unavailable`: the `try_rotate_and_retry` loop continues
-        // while a fresh key was rotated in. The "delete !" mutant would loop
-        // only when rotation had already failed.
-        assert!(rotation_available(true));
-        assert!(!rotation_available(false));
     }
 
     // ── build_encrypted_content mode gate ──

@@ -43,9 +43,8 @@ pub(crate) async fn init_core_services(
             // NOTE: Daemon handle is leaked intentionally — it lives for the
             // process lifetime. Graceful shutdown is driven by the tokio runtime
             // cancelling outstanding tasks.
-            let _daemon =
-                crate::auth::refresh_daemon::spawn(ts.clone(), config.auth.adopt_from_system);
         }
+        let _daemon = crate::auth::refresh_daemon::spawn(ts.clone(), config.auth.adopt_from_system);
         ts
     };
     #[cfg(not(feature = "oauth"))]
@@ -58,7 +57,7 @@ pub(crate) async fn init_core_services(
     let provider_registry = Arc::new(
         ProviderRegistry::from_configs_with_models(
             &config.providers,
-            secret_backend.as_ref(),
+            secret_backend.clone(),
             Some(token_store.clone()),
             &config.models,
             &config.server.timeouts,

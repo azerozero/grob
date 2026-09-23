@@ -7,7 +7,6 @@
 #[cfg(feature = "mcp")]
 use crate::features::mcp::server::types::ConfigSection;
 
-use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
@@ -275,18 +274,27 @@ pub async fn persist_and_reload(
     // diverge even when a config mutation path misses its field-level deny-list.
     ensure_config_reloadable(state, config).map_err(super::RequestError::BadRequest)?;
 
-    // 1. Backup
+    config
+        .validate()
+        .map_err(|e| super::RequestError::BadRequest(e.to_string()))?;
+    let candidate = prepare_state(state, config.clone())?;
+
+    // 1. Publish a private, atomic backup before replacing the configuration.
     let backup_path = config_path.with_extension("toml.backup");
-    tokio::fs::copy(config_path, &backup_path)
-        .await
-        .map_err(|e| {
-            super::RequestError::Internal(anyhow::anyhow!("Failed to create backup: {e}"))
-        })?;
+    let previous = zeroize::Zeroizing::new(tokio::fs::read(config_path).await.map_err(|e| {
+        super::RequestError::Internal(anyhow::anyhow!("Failed to read config backup: {e}"))
+    })?);
+    tokio::task::spawn_blocking(move || {
+        crate::storage::atomic::write_atomic(&backup_path, &previous)
+    })
+    .await
+    .map_err(|e| super::RequestError::Internal(e.into()))?
+    .map_err(|e| super::RequestError::Internal(anyhow::anyhow!("Failed to create backup: {e}")))?;
 
     // 2. Serialise and write
-    let toml_str = toml::to_string_pretty(config).map_err(|e| {
+    let toml_str = zeroize::Zeroizing::new(toml::to_string_pretty(config).map_err(|e| {
         super::RequestError::Internal(anyhow::anyhow!("Failed to serialize config: {e}"))
-    })?;
+    })?);
 
     let config_path_for_write = config_path.to_path_buf();
     tokio::task::spawn_blocking(move || {
@@ -299,12 +307,12 @@ pub async fn persist_and_reload(
     .map_err(|e| super::RequestError::Internal(anyhow::anyhow!("Failed to write config: {e}")))?;
 
     // 3. Hot-reload: rebuild router + provider registry from the new config
-    reload_state(state, config.clone(), config_path)?;
+    *state.inner.write().unwrap_or_else(|e| e.into_inner()) = candidate;
 
     Ok(())
 }
 
-/// Rebuilds [`ReloadableState`] from a validated config and atomically swaps it.
+/// Prepares a candidate snapshot before any config is persisted.
 ///
 /// Resolves `secret:<name>` and `$ENV_VAR` placeholders in `[[providers]]
 /// api_key` before constructing the new registry. Without this step, a hot
@@ -312,11 +320,10 @@ pub async fn persist_and_reload(
 /// would push the literal placeholder back into the registry and every
 /// upstream call would fail with 401 until the daemon is fully restarted.
 /// Same code path as `server::init` and `preset::build_registry`.
-fn reload_state(
+fn prepare_state(
     state: &Arc<super::AppState>,
     config: crate::config::AppConfig,
-    _config_path: &Path,
-) -> Result<(), super::RequestError> {
+) -> Result<Arc<super::ReloadableState>, super::RequestError> {
     // NOTE: the `/metrics` token guard runs in `persist_and_reload` BEFORE any
     // write, so it is intentionally not repeated here (this is reached only after
     // that check has passed).
@@ -328,7 +335,7 @@ fn reload_state(
 
     let new_registry = crate::providers::ProviderRegistry::from_configs_with_models(
         &config.providers,
-        secret_backend.as_ref(),
+        secret_backend.clone(),
         Some(state.token_store.clone()),
         &config.models,
         &config.server.timeouts,
@@ -343,12 +350,7 @@ fn reload_state(
         Arc::new(new_registry),
     ));
 
-    // Atomic swap
-    *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner;
-
-    info!("Configuration persisted and hot-reloaded");
-
-    Ok(())
+    Ok(new_inner)
 }
 
 #[cfg(test)]

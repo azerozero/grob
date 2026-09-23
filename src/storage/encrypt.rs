@@ -47,25 +47,21 @@ impl StorageCipher {
     /// incorrect size, or the key directory is not writable.
     pub fn load_or_generate(db_path: &Path) -> Result<Self> {
         let key_path = Self::key_path(db_path);
-        let mut key_bytes = if key_path.exists() {
+        let key_bytes = zeroize::Zeroizing::new(if key_path.exists() {
             let data = std::fs::read(&key_path).with_context(|| {
                 format!("Failed to read encryption key: {}", key_path.display())
             })?;
-            if data.len() != KEY_LEN {
-                anyhow::bail!(
-                    "Encryption key file has wrong size ({} bytes, expected {}): {}",
-                    data.len(),
-                    KEY_LEN,
-                    key_path.display()
-                );
-            }
             data
         } else {
             Self::generate_key(&key_path)?
-        };
+        });
 
-        let cipher = Aes256Gcm::new_from_slice(&key_bytes).expect("validated 32-byte key");
-        key_bytes.zeroize();
+        anyhow::ensure!(
+            key_bytes.len() == KEY_LEN,
+            "Encryption key must contain 32 bytes"
+        );
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+            .map_err(|_| anyhow::anyhow!("Invalid encryption key"))?;
         Ok(Self { cipher })
     }
 
@@ -203,7 +199,7 @@ impl StorageCipher {
     ///
     /// Caller is responsible for zeroizing the returned `Vec<u8>` after use.
     fn generate_key(path: &Path) -> Result<Vec<u8>> {
-        let mut key = vec![0u8; KEY_LEN];
+        let mut key = zeroize::Zeroizing::new(vec![0u8; KEY_LEN]);
         getrandom::fill(&mut key).context("Failed to generate encryption key")?;
 
         // Ensure parent directory exists.
@@ -211,14 +207,29 @@ impl StorageCipher {
             std::fs::create_dir_all(parent)?;
         }
 
-        std::fs::write(path, &key)
-            .with_context(|| format!("Failed to write encryption key: {}", path.display()))?;
-
-        crate::auth::token_store::set_owner_only_permissions(path)
-            .with_context(|| format!("Failed to set permissions on: {}", path.display()))?;
+        use std::io::Write;
+        let parent = path.parent().context("Encryption key has no parent")?;
+        let mut file = tempfile::NamedTempFile::new_in(parent)?;
+        crate::auth::token_store::set_owner_only_permissions(file.path())?;
+        file.write_all(&key)?;
+        file.as_file().sync_all()?;
+        match file.persist_noclobber(path) {
+            Ok(_) => {}
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                key.zeroize();
+                return std::fs::read(path)
+                    .context("Failed to read concurrently created encryption key");
+            }
+            Err(error) => {
+                key.zeroize();
+                return Err(error.error.into());
+            }
+        }
+        #[cfg(unix)]
+        std::fs::File::open(parent)?.sync_all()?;
 
         tracing::info!("Generated new encryption key: {}", path.display());
-        Ok(key)
+        Ok(key.to_vec())
     }
 }
 

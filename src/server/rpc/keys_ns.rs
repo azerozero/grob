@@ -130,51 +130,13 @@ pub async fn rotate(
     let uuid = Uuid::parse_str(key_id)
         .map_err(|_| rpc_err(ERR_NOT_FOUND, format!("Invalid key ID: {key_id}")))?;
 
-    // Look up the existing key to preserve its name and settings.
-    let records = state.grob_store.list_virtual_keys();
-    let old = records
-        .iter()
-        .find(|r| r.id == uuid)
-        .ok_or_else(|| rpc_err(ERR_NOT_FOUND, format!("Key not found: {key_id}")))?;
-
-    let name = old.name.clone();
-    let tenant_id = old.tenant_id.clone();
-    let budget_usd = old.budget_usd;
-    let rate_limit_rps = old.rate_limit_rps;
-    let allowed_models = old.allowed_models.clone();
-    let allowed_providers = old.allowed_providers.clone();
-
-    // Revoke old key.
-    state
+    let (record, full_key) = state
         .grob_store
-        .revoke_virtual_key(&uuid)
-        .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to revoke old key: {e}")))?;
-
-    // Create replacement.
-    let (full_key, key_hash) = generate_key();
-    let prefix = full_key[..12].to_string();
-    let new_id = Uuid::new_v4();
-
-    let record = VirtualKeyRecord {
-        id: new_id,
-        name: name.clone(),
-        prefix: prefix.clone(),
-        key_hash,
-        tenant_id,
-        budget_usd,
-        rate_limit_rps,
-        allowed_models,
-        allowed_providers,
-        created_at: Utc::now(),
-        expires_at: None,
-        revoked: false,
-        last_used_at: None,
-    };
-
-    state
-        .grob_store
-        .store_virtual_key(&record)
-        .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to store rotated key: {e}")))?;
+        .rotate_virtual_key(&uuid)
+        .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to rotate key: {e}")))?;
+    let new_id = record.id;
+    let name = record.name;
+    let prefix = record.prefix;
 
     tracing::info!(
         caller_ip = %caller.ip,

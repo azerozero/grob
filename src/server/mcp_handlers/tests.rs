@@ -2,12 +2,10 @@
 
 use super::builtin_tools::inject_builtin_tools;
 use super::config::{apply_config_update, parse_section, read_config_section};
-use super::control_bridge::mcp_caller;
 use crate::features::mcp::server::types::{
     ConfigSection, ConfigureAction, ConfigureParams, JsonRpcResponse,
 };
 use crate::server::config_guard::is_key_denied;
-use crate::server::rpc::types::Role;
 
 fn test_app_config() -> crate::config::AppConfig {
     let toml_str = r#"
@@ -367,12 +365,4 @@ fn test_wizard_parse_section_router() {
 fn test_wizard_parse_section_invalid() {
     let v = serde_json::json!("nonsense");
     assert!(parse_section(Some(&v)).is_err());
-}
-
-#[test]
-fn test_mcp_caller_is_admin() {
-    let caller = mcp_caller();
-    assert_eq!(caller.role, Role::Admin);
-    assert_eq!(caller.ip, "127.0.0.1");
-    assert_eq!(caller.tenant_id, "mcp");
 }

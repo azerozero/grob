@@ -103,6 +103,8 @@ pub struct TokenStore {
     file_path: PathBuf,
     /// In-memory cache of tokens
     tokens: Arc<RwLock<HashMap<String, OAuthToken>>>,
+    /// Serializes in-process refresh attempts, shared by every clone.
+    refresh_lock: Arc<tokio::sync::Mutex<()>>,
     /// Optional GrobStore backend
     store: Option<std::sync::Arc<crate::storage::GrobStore>>,
 }
@@ -115,10 +117,11 @@ impl TokenStore {
     /// Returns an error if loading existing tokens from the
     /// database fails.
     pub fn with_store(store: std::sync::Arc<crate::storage::GrobStore>) -> Result<Self> {
-        let tokens = store.all_oauth_tokens();
+        let tokens = HashMap::new();
         Ok(Self {
             file_path: PathBuf::new(),
             tokens: Arc::new(RwLock::new(tokens)),
+            refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             store: Some(store),
         })
     }
@@ -129,6 +132,7 @@ impl TokenStore {
         Self {
             file_path: PathBuf::new(),
             tokens: Arc::new(RwLock::new(HashMap::new())),
+            refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             store: None,
         }
     }
@@ -141,7 +145,9 @@ impl TokenStore {
     /// or parsed as JSON.
     pub fn new(file_path: PathBuf) -> Result<Self> {
         let tokens = if file_path.exists() {
-            let content = fs::read_to_string(&file_path).context("Failed to read token file")?;
+            let content = zeroize::Zeroizing::new(
+                fs::read_to_string(&file_path).context("Failed to read token file")?,
+            );
             serde_json::from_str(&content).context("Failed to parse token file")?
         } else {
             HashMap::new()
@@ -150,6 +156,7 @@ impl TokenStore {
         Ok(Self {
             file_path,
             tokens: Arc::new(RwLock::new(tokens)),
+            refresh_lock: Arc::new(tokio::sync::Mutex::new(())),
             store: None,
         })
     }
@@ -164,7 +171,7 @@ impl TokenStore {
         let provider_id = token.provider_id.clone();
 
         if let Some(ref store) = self.store {
-            store.save_oauth_token(&token)?;
+            return store.save_oauth_token(&token);
         }
 
         {
@@ -179,8 +186,41 @@ impl TokenStore {
         Ok(())
     }
 
+    pub(crate) async fn lock_refresh(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.refresh_lock.lock().await
+    }
+
+    /// Keeps an explicit credential replacement authoritative over an older refresh.
+    pub(crate) fn replace_if_current(
+        &self,
+        expected: &OAuthToken,
+        replacement: OAuthToken,
+    ) -> Result<bool> {
+        if let Some(store) = &self.store {
+            return store.replace_oauth_token(expected, &replacement);
+        }
+        // Legacy stores are in-process only; serialize comparison with mutations.
+        let mut tokens = self.tokens.write().unwrap_or_else(|e| e.into_inner());
+        let Some(current) = tokens.get(&expected.provider_id) else {
+            return Ok(false);
+        };
+        if current.access_token.expose_secret() != expected.access_token.expose_secret()
+            || current.refresh_token.expose_secret() != expected.refresh_token.expose_secret()
+            || current.expires_at != expected.expires_at
+        {
+            return Ok(false);
+        }
+        tokens.insert(replacement.provider_id.clone(), replacement);
+        drop(tokens);
+        self.persist()?;
+        Ok(true)
+    }
+
     /// Get token for a provider
     pub fn get(&self, provider_id: &str) -> Option<OAuthToken> {
+        if let Some(store) = &self.store {
+            return store.get_oauth_token(provider_id);
+        }
         let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         tokens.get(provider_id).cloned()
     }
@@ -194,23 +234,16 @@ impl TokenStore {
     ///
     /// Returns an error if re-saving the updated token fails.
     pub fn mark_needs_reauth(&self, provider_id: &str) -> Result<bool> {
-        let updated = {
-            let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
-            match tokens.get(provider_id) {
-                Some(t) => {
-                    let mut cloned = t.clone();
-                    cloned.needs_reauth = Some(true);
-                    Some(cloned)
-                }
-                None => None,
-            }
-        };
-        if let Some(token) = updated {
-            self.save(token)?;
-            Ok(true)
-        } else {
-            Ok(false)
+        match self.get(provider_id) {
+            Some(token) => self.mark_needs_reauth_if_current(&token),
+            None => Ok(false),
         }
+    }
+
+    pub(crate) fn mark_needs_reauth_if_current(&self, token: &OAuthToken) -> Result<bool> {
+        let mut replacement = token.clone();
+        replacement.needs_reauth = Some(true);
+        self.replace_if_current(token, replacement)
     }
 
     /// Removes a token for a provider.
@@ -221,7 +254,7 @@ impl TokenStore {
     /// persistence fails.
     pub fn remove(&self, provider_id: &str) -> Result<()> {
         if let Some(ref store) = self.store {
-            store.delete_oauth_token(provider_id)?;
+            return store.delete_oauth_token(provider_id);
         }
 
         {
@@ -238,12 +271,18 @@ impl TokenStore {
 
     /// List all provider IDs that have tokens
     pub fn list_providers(&self) -> Vec<String> {
+        if let Some(store) = &self.store {
+            return store.list_oauth_providers();
+        }
         let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         tokens.keys().cloned().collect()
     }
 
     /// Get all tokens
     pub fn all(&self) -> HashMap<String, OAuthToken> {
+        if let Some(store) = &self.store {
+            return store.all_oauth_tokens();
+        }
         let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
         tokens.clone()
     }
@@ -285,9 +324,12 @@ impl TokenStore {
         };
 
         let tokens = self.tokens.read().unwrap_or_else(|e| e.into_inner());
-        let json = serde_json::to_string_pretty(&*tokens).context("Failed to serialize tokens")?;
+        let json = zeroize::Zeroizing::new(
+            serde_json::to_string_pretty(&*tokens).context("Failed to serialize tokens")?,
+        );
 
-        fs::write(&canonical_path, json).context("Failed to write token file")?;
+        crate::storage::atomic::write_atomic(&canonical_path, json.as_bytes())
+            .context("Failed to write token file")?;
 
         set_owner_only_permissions(&canonical_path)?;
 

@@ -123,8 +123,8 @@ impl ResponseCache {
 
     /// Compute a cache key directly from an CanonicalRequest.
     ///
-    /// Streams each request field (tenant, model, messages, system, tools, max_tokens)
-    /// through a SHA-256 hasher via `Sha256Writer`, separated by `|` delimiters.
+    /// Streams the complete canonical request, extensions, and tenant through
+    /// a SHA-256 hasher via `Sha256Writer`.
     /// This avoids allocating an intermediate String or serde_json::Value — the JSON
     /// bytes flow directly into the digest. Returns `None` for non-deterministic
     /// requests (temperature != 0).
@@ -132,29 +132,15 @@ impl ResponseCache {
         tenant_id: &str,
         request: &crate::models::CanonicalRequest,
     ) -> Option<String> {
-        use std::io::Write as _;
-
         // Only cache deterministic requests (temperature == 0 or absent)
         if request.temperature.map(|t| t != 0.0).unwrap_or(false) {
             return None;
         }
 
         let mut hasher = Sha256Writer(Sha256::new());
-        let _ = hasher.write_all(tenant_id.as_bytes());
-        let _ = hasher.write_all(b"|");
-        let _ = hasher.write_all(request.model.as_bytes());
-        let _ = hasher.write_all(b"|");
-        let _ = serde_json::to_writer(&mut hasher, &request.messages);
-        let _ = hasher.write_all(b"|");
-        if let Some(ref s) = request.system {
-            let _ = serde_json::to_writer(&mut hasher, s);
-        }
-        let _ = hasher.write_all(b"|");
-        if let Some(ref t) = request.tools {
-            let _ = serde_json::to_writer(&mut hasher, t);
-        }
-        let _ = hasher.write_all(b"|");
-        let _ = write!(hasher, "{}", request.max_tokens);
+        // Extensions are deliberately skipped by CanonicalRequest's wire serializer,
+        // but affect the answer just as much as its visible fields.
+        serde_json::to_writer(&mut hasher, &(tenant_id, request, &request.extensions)).ok()?;
 
         Some(hex::encode(hasher.0.finalize()))
     }
@@ -411,6 +397,41 @@ pub fn synthesize_openai_sse_from_cached(cached: &CachedResponse) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cache_identity_preserves_request_options_and_client_extensions() {
+        let request: crate::models::CanonicalRequest = serde_json::from_value(serde_json::json!({
+            "model":"test", "max_tokens":20, "messages":[{"role":"user","content":"same prompt"}]
+        }))
+        .unwrap();
+        let key = ResponseCache::compute_key_from_request("tenant", &request).unwrap();
+        let mut changed = request.clone();
+        changed.max_tokens = 21;
+        assert_ne!(
+            key,
+            ResponseCache::compute_key_from_request("tenant", &changed).unwrap()
+        );
+        changed = request.clone();
+        changed.extensions.response_format = Some(serde_json::json!({"type":"json_object"}));
+        assert_ne!(
+            key,
+            ResponseCache::compute_key_from_request("tenant", &changed).unwrap()
+        );
+        changed = request.clone();
+        changed.extensions.seed = Some(42);
+        assert_ne!(
+            key,
+            ResponseCache::compute_key_from_request("tenant", &changed).unwrap()
+        );
+        assert_ne!(
+            key,
+            ResponseCache::compute_key_from_request("other-tenant", &request).unwrap()
+        );
+        assert_eq!(
+            key,
+            ResponseCache::compute_key_from_request("tenant", &request).unwrap()
+        );
+    }
 
     #[tokio::test]
     async fn test_cache_put_get() {

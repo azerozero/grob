@@ -241,7 +241,7 @@ pub(crate) async fn refresh_one(
                     error = %msg,
                     "OAuth refresh failed permanently — marking token as needing re-authentication. Run: grob connect --force-reauth"
                 );
-                if let Err(store_err) = store.mark_needs_reauth(&token.provider_id) {
+                if let Err(store_err) = store.mark_needs_reauth_if_current(token) {
                     error!(
                         provider = %token.provider_id,
                         error = %store_err,

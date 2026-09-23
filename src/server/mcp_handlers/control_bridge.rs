@@ -2,24 +2,14 @@
 //!
 //! MCP tools like `grob_keys` and `grob_pledge` are thin wrappers that forward
 //! to the same JSON-RPC namespaces exposed via `POST /rpc`. The bridge
-//! materializes a privileged caller identity, builds the fully-qualified RPC
+//! uses the authenticated caller identity, builds the fully-qualified RPC
 //! method name from `namespace + params.action`, and delegates to
 //! [`crate::server::rpc::dispatch`].
 
 use crate::features::mcp::server::types::{JsonRpcError, JsonRpcResponse};
 use crate::server::rpc::auth::CallerIdentity;
-use crate::server::rpc::types::Role;
 use crate::server::AppState;
 use std::sync::Arc;
-
-/// Returns a privileged caller identity for MCP-originated control requests.
-pub(super) fn mcp_caller() -> CallerIdentity {
-    CallerIdentity {
-        role: Role::Admin,
-        ip: "127.0.0.1".into(),
-        tenant_id: "mcp".into(),
-    }
-}
 
 /// Bridges an MCP tool call to the RPC control plane.
 ///
@@ -32,6 +22,7 @@ pub(super) fn mcp_caller() -> CallerIdentity {
 /// the underlying RPC dispatch fails.
 pub(super) async fn handle_control_tool(
     state: &Arc<AppState>,
+    caller: &CallerIdentity,
     namespace: &str,
     params: serde_json::Value,
     id: serde_json::Value,
@@ -50,9 +41,8 @@ pub(super) async fn handle_control_tool(
     }
 
     let method = format!("{namespace}/{action}");
-    let caller = mcp_caller();
 
-    match crate::server::rpc::dispatch(state, &caller, &method, Some(&params)).await {
+    match crate::server::rpc::dispatch(state, caller, &method, Some(&params)).await {
         Ok(data) => {
             tracing::info!(
                 namespace,

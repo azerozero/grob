@@ -47,7 +47,7 @@ pub async fn reload_config(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
 ) -> Result<StatusResponse, ErrorObjectOwned> {
-    require_role(caller, Role::Operator)?;
+    require_role(caller, Role::Admin)?;
 
     use crate::config::AppConfig;
     use crate::providers::ProviderRegistry;
@@ -79,7 +79,7 @@ pub async fn reload_config(
 
     let new_registry = ProviderRegistry::from_configs_with_models(
         &new_config.providers,
-        secret_backend.as_ref(),
+        secret_backend.clone(),
         Some(state.token_store.clone()),
         &new_config.models,
         &new_config.server.timeouts,
@@ -150,9 +150,9 @@ actual_model = "alpha"
         )
     }
 
-    fn operator() -> CallerIdentity {
+    fn admin() -> CallerIdentity {
         CallerIdentity {
-            role: Role::Operator,
+            role: Role::Admin,
             ip: "127.0.0.1".to_string(),
             tenant_id: String::new(),
         }
@@ -187,7 +187,7 @@ actual_model = "alpha"
             ConfigSource::File(file.path().to_path_buf()),
         );
 
-        let err = reload_config(&state, &operator())
+        let err = reload_config(&state, &admin())
             .await
             .expect_err("RPC reload must reject a /metrics token change");
         assert!(
@@ -214,7 +214,7 @@ actual_model = "alpha"
             ConfigSource::File(file.path().to_path_buf()),
         );
 
-        reload_config(&state, &operator())
+        reload_config(&state, &admin())
             .await
             .expect("unchanged token must allow the RPC reload");
     }

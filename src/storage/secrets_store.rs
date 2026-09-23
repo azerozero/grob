@@ -43,13 +43,13 @@ impl GrobStore {
         let path = self.secret_path(name);
         let encrypted = std::fs::read(&path).ok()?;
         let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
-            Ok(d) => d,
+            Ok(d) => zeroize::Zeroizing::new(d),
             Err(e) => {
                 tracing::warn!(secret = name, error = %e, "failed to read secret");
                 return None;
             }
         };
-        let s = String::from_utf8(decrypted).ok()?;
+        let s = std::str::from_utf8(&decrypted).ok()?;
         Some(secrecy::SecretString::from(s))
     }
 

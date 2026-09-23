@@ -423,7 +423,13 @@ pub(crate) async fn dispatch(
         .as_ref()
         .and_then(|_cache| {
             crate::cache::ResponseCache::compute_key_from_request(
-                ctx.tenant_id.as_deref().unwrap_or("anon"),
+                &serde_json::to_string(&(
+                    ctx.tenant_id.as_deref().unwrap_or("anon"),
+                    ctx.inner.cache_epoch,
+                    &ctx.allowed_models,
+                    &ctx.allowed_providers,
+                ))
+                .ok()?,
                 request,
             )
         });

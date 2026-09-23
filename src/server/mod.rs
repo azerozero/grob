@@ -56,8 +56,8 @@ pub(crate) use init::{
 };
 pub(crate) use middleware::{
     apply_transparency_headers, audit_log_layer, auth_middleware, extract_api_credential,
-    extract_client_ip, rate_limit_check_middleware, request_id_middleware,
-    security_headers_response_middleware, should_apply_transparency, tenant_required_middleware,
+    rate_limit_check_middleware, request_id_middleware, security_headers_response_middleware,
+    should_apply_transparency, tenant_required_middleware,
 };
 pub use middleware::{
     capture_audit_input, emit_request_processed, AuditMiddlewareCapture, AuditedAlready, RequestId,
@@ -101,6 +101,8 @@ pub struct ReloadableState {
     /// [`ReloadableState::new`], so the revision cannot drift from the config it
     /// describes, and `/health` stays a cheap read.
     pub config_revision: revision::Revision,
+    /// Unique cache namespace per runtime snapshot, including credential/header changes.
+    pub(crate) cache_epoch: u64,
     /// Content hash of the policy set alone.
     ///
     /// Separate from `config_revision` because policies are the part an auditor
@@ -138,7 +140,9 @@ impl ReloadableState {
         // and implying a policy identity that does not exist.
         #[cfg(not(feature = "policies"))]
         let policy_revision = revision::compute::<[(); 0]>(&[]);
+        static CACHE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Self {
+            cache_epoch: CACHE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             config,
             router,
             provider_registry,
@@ -575,9 +579,8 @@ fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
     let app = app.route(
         "/rpc",
         post(
-            move |headers: axum::http::HeaderMap, body: axum::body::Bytes| {
-                handle_rpc(rpc_state, headers, body)
-            },
+            move |axum::Extension(caller): axum::Extension<rpc::auth::CallerIdentity>,
+                  body: axum::body::Bytes| { handle_rpc(rpc_state, caller, body) },
         ),
     );
 
@@ -831,7 +834,7 @@ async fn hit_approve_handler(
 /// Handles a JSON-RPC 2.0 request by resolving caller identity and dispatching.
 async fn handle_rpc(
     state: Arc<AppState>,
-    headers: axum::http::HeaderMap,
+    caller: rpc::auth::CallerIdentity,
     body: axum::body::Bytes,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
@@ -862,31 +865,6 @@ async fn handle_rpc(
         }
     };
     let params = req.get("params");
-
-    // Resolve caller identity
-    let client_ip = extract_client_ip(&headers);
-    let auth_header = extract_api_credential(&headers);
-    let auth_mode = {
-        let inner = state.snapshot();
-        inner.config.auth.mode.clone()
-    };
-
-    let caller = match rpc::auth::resolve_caller(
-        &client_ip,
-        auth_header,
-        &auth_mode,
-        state.security.jwt_validator.as_deref(),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            return axum::Json(serde_json::json!({
-                "jsonrpc": "2.0",
-                "error": { "code": e.code(), "message": e.message() },
-                "id": id
-            }))
-            .into_response();
-        }
-    };
 
     // Audit the RPC call
     #[cfg(feature = "compliance")]
@@ -1065,3 +1043,6 @@ actual_model = "alpha"
         );
     }
 }
+
+#[cfg(test)]
+mod credential_boundary_tests;

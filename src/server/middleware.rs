@@ -43,13 +43,12 @@ pub(crate) fn constant_time_eq_hashed(a: &str, b: &str) -> bool {
     a_digest.as_slice().ct_eq(b_digest.as_slice()).into()
 }
 
-/// Extract client IP from headers (X-Forwarded-For or fallback to "unknown").
-pub(crate) fn extract_client_ip(headers: &HeaderMap) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
+/// Reads the transport peer; forwarding headers are untrusted client input.
+fn client_ip(request: &Request<Body>) -> String {
+    request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|peer| peer.0.ip().to_string())
         .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -122,61 +121,80 @@ pub(crate) async fn auth_middleware(
 
     let inner = state.snapshot();
     let auth_mode = inner.config.auth.mode.as_str();
+    let mut caller = super::rpc::auth::CallerIdentity {
+        role: super::rpc::types::Role::Operator,
+        ip: client_ip(&request),
+        tenant_id: String::new(),
+    };
 
-    let effective_mode = if auth_mode == "none" {
-        // SAFETY: expose_secret() used only for emptiness check, value is never logged.
-        let legacy_key = inner
-            .config
-            .server
-            .api_key
-            .as_ref()
-            .map(secrecy::ExposeSecret::expose_secret)
-            .unwrap_or("");
-        if legacy_key.is_empty() {
-            "none"
-        } else {
-            "api_key"
-        }
+    let configured_key = inner
+        .config
+        .auth
+        .api_key
+        .as_ref()
+        .filter(|key| !secrecy::ExposeSecret::expose_secret(*key).is_empty())
+        .or(inner.config.server.api_key.as_ref());
+    let effective_mode = if auth_mode == "none"
+        && configured_key.is_some_and(|key| !secrecy::ExposeSecret::expose_secret(key).is_empty())
+    {
+        "api_key"
     } else {
         auth_mode
     };
 
-    match effective_mode {
-        "none" => next.run(request).await,
-        "api_key" => {
-            // SAFETY: expose_secret() used only for constant-time comparison,
-            // value is never logged or included in any tracing output.
-            let api_key = inner
-                .config
-                .auth
-                .api_key
-                .as_ref()
-                .map(secrecy::ExposeSecret::expose_secret)
-                .filter(|k| !k.is_empty())
-                .or_else(|| {
-                    inner
-                        .config
-                        .server
-                        .api_key
-                        .as_ref()
-                        .map(secrecy::ExposeSecret::expose_secret)
-                })
-                .unwrap_or("");
-
-            if api_key.is_empty() {
-                return next.run(request).await;
+    // An explicit administrative credential also permits management with JWT
+    // enabled. Network location and JWT tenant membership never grant admin.
+    if matches!(effective_mode, "api_key" | "jwt") {
+        if let (Some(reference), Some(presented)) =
+            (configured_key, extract_api_credential(request.headers()))
+        {
+            let backend = crate::storage::secrets::build_backend(
+                &inner.config.secrets,
+                state.grob_store.clone(),
+            );
+            if let Some(key) = crate::storage::secrets::resolve_reference(
+                secrecy::ExposeSecret::expose_secret(reference),
+                backend.as_ref(),
+            ) {
+                let key = secrecy::ExposeSecret::expose_secret(&key);
+                if !key.is_empty() && constant_time_eq(presented, key) {
+                    caller.role = super::rpc::types::Role::Admin;
+                    return run_authorized(request, next, caller).await;
+                }
             }
+        }
+    }
 
+    match effective_mode {
+        "none" => {
+            // Local, explicitly unauthenticated listeners trust local processes.
+            // A loopback reverse proxy to a wildcard listener grants no privilege.
+            let local_listener = inner
+                .config
+                .server
+                .host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback());
+            let local_peer = caller
+                .ip
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|ip| ip.is_loopback());
+            if local_listener && local_peer {
+                caller.role = super::rpc::types::Role::Admin;
+            }
+            run_authorized(request, next, caller).await
+        }
+        "api_key" => {
             let token = extract_api_credential(request.headers());
             match token {
-                Some(t) if constant_time_eq(t, api_key) => next.run(request).await,
                 Some(t) => {
-                    // Static key didn't match — try virtual key lookup.
+                    // Administrative key did not match; try an agent virtual key.
                     match resolve_virtual_key(&state, t) {
                         Some(vk_ctx) => {
                             debug!("Virtual key auth: tenant={}, key={}", vk_ctx.tenant_id, vk_ctx.name);
+                            caller.tenant_id = vk_ctx.tenant_id.clone();
                             request.extensions_mut().insert(vk_ctx);
-                            next.run(request).await
+                            run_authorized(request, next, caller).await
                         }
                         None => auth_error_response("Invalid or missing API key. Provide via Authorization: Bearer <key> or x-api-key header."),
                     }
@@ -204,8 +222,9 @@ pub(crate) async fn auth_middleware(
             match validator.validate(token) {
                 Ok(claims) => {
                     debug!("JWT auth: tenant_id={}", claims.tenant_id());
+                    caller.tenant_id = claims.tenant_id().to_string();
                     request.extensions_mut().insert(claims);
-                    next.run(request).await
+                    run_authorized(request, next, caller).await
                 }
                 Err(e) => auth_error_response(&format!("JWT validation failed: {}", e)),
             }
@@ -215,6 +234,26 @@ pub(crate) async fn auth_middleware(
             auth_error_response(&format!("Unknown auth mode: {}", other))
         }
     }
+}
+
+/// Shares the verified identity with RPC/MCP and protects HTTP administration.
+async fn run_authorized(
+    mut request: Request<Body>,
+    next: Next,
+    caller: super::rpc::auth::CallerIdentity,
+) -> Response {
+    let path = request.uri().path();
+    let administrative = path.starts_with("/api/oauth/")
+        || path == "/api/hit/approve"
+        || (request.method() != axum::http::Method::GET
+            && matches!(path, "/api/config" | "/api/config/reload"));
+    if administrative && !caller.role.has_at_least(super::rpc::types::Role::Admin) {
+        return (StatusCode::FORBIDDEN, Json(serde_json::json!({
+            "error": {"type": "permission_error", "message": "Administrative credential required"}
+        }))).into_response();
+    }
+    request.extensions_mut().insert(caller);
+    next.run(request).await
 }
 
 /// Resolves a bearer token as a virtual API key.
@@ -592,7 +631,7 @@ pub fn capture_audit_input(request: &Request<Body>) -> AuditMiddlewareCapture {
         path: request.uri().path().to_string(),
         request_id,
         tenant_id,
-        client_ip: extract_client_ip(request.headers()),
+        client_ip: client_ip(request),
         started_at: std::time::Instant::now(),
     }
 }
@@ -1097,23 +1136,16 @@ rate_limit_burst = 20
     }
 
     #[test]
-    fn test_extract_client_ip_from_forwarded() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-for", "1.2.3.4, 5.6.7.8".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers), "1.2.3.4");
-    }
-
-    #[test]
-    fn test_extract_client_ip_single() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-forwarded-for", "10.0.0.1".parse().unwrap());
-        assert_eq!(extract_client_ip(&headers), "10.0.0.1");
-    }
-
-    #[test]
-    fn test_extract_client_ip_missing() {
-        let headers = HeaderMap::new();
-        assert_eq!(extract_client_ip(&headers), "unknown");
+    fn forwarding_headers_do_not_identify_the_peer() {
+        let mut request = Request::builder()
+            .header("x-forwarded-for", "127.0.0.1")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(client_ip(&request), "unknown");
+        request.extensions_mut().insert(axum::extract::ConnectInfo(
+            "192.0.2.1:1234".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+        assert_eq!(client_ip(&request), "192.0.2.1");
     }
 
     #[test]

@@ -23,6 +23,7 @@ pub async fn get(
     let full = serde_json::to_value(&inner.config)
         .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to serialize config: {e}")))?;
 
+    let full = crate::config::redaction::redact(full);
     match key {
         Some(path) => {
             let value = resolve_dotted_path(&full, path);
@@ -63,7 +64,7 @@ pub async fn set(
 
     // Rebuild the reloadable state from the mutated config and swap atomically.
     // Mirrors the pattern in `server_ns::reload_config` and
-    // `config_guard::reload_state`. We deliberately do NOT call
+    // `config_guard::prepare_state`. We deliberately do NOT call
     // `config_guard::persist_and_reload`: persistence to disk is a non-goal
     // for #228 (in-memory mutation only).
     let new_router = Router::new(new_config.clone());
@@ -71,7 +72,7 @@ pub async fn set(
         crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
     let new_registry = ProviderRegistry::from_configs_with_models(
         &new_config.providers,
-        secret_backend.as_ref(),
+        secret_backend.clone(),
         Some(state.token_store.clone()),
         &new_config.models,
         &new_config.server.timeouts,
@@ -103,7 +104,7 @@ pub async fn reload(
     state: &Arc<AppState>,
     caller: &CallerIdentity,
 ) -> Result<StatusResponse, ErrorObjectOwned> {
-    require_role(caller, Role::Operator)?;
+    require_role(caller, Role::Admin)?;
 
     super::server_ns::reload_config(state, caller).await
 }
@@ -140,8 +141,8 @@ pub async fn diff(
 
     Ok(serde_json::json!({
         "identical": identical,
-        "running": running,
-        "disk": disk,
+        "running": crate::config::redaction::redact(running),
+        "disk": crate::config::redaction::redact(disk),
     }))
 }
 

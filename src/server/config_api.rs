@@ -12,59 +12,13 @@ use tracing::{error, info, warn};
 use super::config_guard::is_section_or_key_denied;
 use super::{AppState, ReloadableState, RequestError};
 
-/// Redact an API key for safe display (show first 4 + last 4 chars)
-pub(crate) fn redact_api_key(key: &str) -> String {
-    if key.starts_with('$') {
-        return key.to_string(); // Environment variable reference, safe to show
-    }
-    if key.len() <= 12 {
-        return "***".to_string();
-    }
-    format!("{}...{}", &key[..4], &key[key.len() - 4..])
-}
-
-/// Remove null values from JSON (TOML doesn't support null)
-fn remove_null_values(value: &mut serde_json::Value) {
-    match value {
-        serde_json::Value::Object(map) => {
-            map.retain(|_, v| !v.is_null());
-            for v in map.values_mut() {
-                remove_null_values(v);
-            }
-        }
-        serde_json::Value::Array(arr) => {
-            for item in arr.iter_mut() {
-                remove_null_values(item);
-            }
-        }
-        _ => {}
-    }
-}
-
 /// Get full configuration as JSON — API keys are redacted
 pub(crate) async fn get_config_json(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let inner = state.snapshot();
 
-    // Redact API keys before serializing.
-    // NOTE: serde serializes SecretString via expose_secret, so we must
-    // immediately redact to avoid leaking the full key in the JSON response.
-    let providers: Vec<serde_json::Value> = inner
-        .config
-        .providers
-        .iter()
-        .map(|p| {
-            let mut v = serde_json::to_value(p).unwrap_or_default();
-            if let Some(obj) = v.as_object_mut() {
-                if let Some(key) = obj.get("api_key").and_then(|k| k.as_str()) {
-                    obj.insert(
-                        "api_key".to_string(),
-                        serde_json::Value::String(redact_api_key(key)),
-                    );
-                }
-            }
-            v
-        })
-        .collect();
+    let providers = crate::config::redaction::redact(
+        serde_json::to_value(&inner.config.providers).unwrap_or_default(),
+    );
 
     Json(serde_json::json!({
         "server": {
@@ -88,11 +42,8 @@ pub(crate) async fn get_config_json(State(state): State<Arc<AppState>>) -> impl 
 /// Update configuration via JSON
 pub(crate) async fn update_config_json(
     State(state): State<Arc<AppState>>,
-    Json(mut new_config): Json<serde_json::Value>,
+    Json(new_config): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, RequestError> {
-    // Remove null values (TOML doesn't support null)
-    remove_null_values(&mut new_config);
-
     // Reject writes to denied sections or keys before touching disk.
     if let Some(obj) = new_config.as_object() {
         for (section, value) in obj {
@@ -137,56 +88,63 @@ pub(crate) async fn update_config_json(
     let mut config: toml::Value = toml::from_str(&config_str)
         .map_err(|e| RequestError::ParseError(format!("Failed to parse config: {e}")))?;
 
-    // Update providers section
-    if let Some(providers) = new_config.get("providers") {
-        let providers_toml: toml::Value = serde_json::from_str(&providers.to_string())
-            .map_err(|e| RequestError::ParseError(format!("Failed to convert providers: {e}")))?;
-
-        if let Some(table) = config.as_table_mut() {
-            table.insert("providers".to_string(), providers_toml);
-        }
-    }
-
-    // Update models section
-    if let Some(models) = new_config.get("models") {
-        let models_toml: toml::Value = serde_json::from_str(&models.to_string())
-            .map_err(|e| RequestError::ParseError(format!("Failed to convert models: {e}")))?;
-
-        if let Some(table) = config.as_table_mut() {
-            table.insert("models".to_string(), models_toml);
-        }
-    }
-
-    // Update router section if provided
-    if let Some(router) = new_config.get("router") {
-        if let Some(router_table) = config.get_mut("router").and_then(|v| v.as_table_mut()) {
-            let update_field = |table: &mut toml::map::Map<String, toml::Value>,
-                                key: &str,
-                                value: Option<&serde_json::Value>| {
-                if let Some(val) = value {
-                    if let Some(s) = val.as_str() {
-                        table.insert(key.to_string(), toml::Value::String(s.to_string()));
+    let updates = new_config
+        .as_object()
+        .ok_or_else(|| RequestError::BadRequest("Config patch must be an object".into()))?;
+    for (section, patch) in updates {
+        match section.as_str() {
+            "router" => {
+                let fields = patch
+                    .as_object()
+                    .ok_or_else(|| RequestError::BadRequest("router must be an object".into()))?;
+                let table = config
+                    .get_mut("router")
+                    .and_then(toml::Value::as_table_mut)
+                    .ok_or_else(|| RequestError::BadRequest("Missing router table".into()))?;
+                for (key, value) in fields {
+                    if !matches!(
+                        key.as_str(),
+                        "default"
+                            | "think"
+                            | "websearch"
+                            | "background"
+                            | "auto_map_regex"
+                            | "background_regex"
+                            | "prompt_rules"
+                    ) {
+                        return Err(RequestError::BadRequest(format!(
+                            "Unsupported router field: {key}"
+                        )));
                     }
-                } else {
-                    table.remove(key);
-                }
-            };
-
-            if let Some(default) = router.get("default") {
-                if let Some(s) = default.as_str() {
-                    router_table.insert("default".to_string(), toml::Value::String(s.to_string()));
+                    if value.is_null() {
+                        if key == "default" {
+                            return Err(RequestError::BadRequest(
+                                "router.default cannot be null".into(),
+                            ));
+                        }
+                        table.remove(key);
+                    } else {
+                        let value =
+                            serde_json::from_value::<toml::Value>(value.clone()).map_err(|e| {
+                                RequestError::BadRequest(format!("Invalid router.{key}: {e}"))
+                            })?;
+                        table.insert(key.clone(), value);
+                    }
                 }
             }
-
-            update_field(router_table, "think", router.get("think"));
-            update_field(router_table, "websearch", router.get("websearch"));
-            update_field(router_table, "background", router.get("background"));
-            update_field(router_table, "auto_map_regex", router.get("auto_map_regex"));
-            update_field(
-                router_table,
-                "background_regex",
-                router.get("background_regex"),
-            );
+            "models" => {
+                let models = serde_json::from_value::<toml::Value>(patch.clone())
+                    .map_err(|e| RequestError::BadRequest(format!("Invalid models: {e}")))?;
+                config
+                    .as_table_mut()
+                    .expect("parsed config is a table")
+                    .insert(section.clone(), models);
+            }
+            _ => {
+                return Err(RequestError::BadRequest(format!(
+                    "Unsupported config section: {section}"
+                )))
+            }
         }
     }
 
@@ -265,7 +223,7 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
         crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
     let new_registry = match ProviderRegistry::from_configs_with_models(
         &new_config.providers,
-        secret_backend.as_ref(),
+        secret_backend.clone(),
         Some(state.token_store.clone()),
         &new_config.models,
         &new_config.server.timeouts,

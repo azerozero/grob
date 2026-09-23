@@ -1,7 +1,7 @@
 //! Virtual-key persistence for [`crate::storage::GrobStore`] (AES-256-GCM at rest).
 //!
-//! Each record is stored twice: keyed by hash for O(1) auth lookup and by
-//! UUID for management operations.
+//! Hash-keyed records are authoritative for both authentication and management.
+//! Legacy UUID index files are ignored.
 
 use std::path::PathBuf;
 
@@ -17,30 +17,25 @@ impl GrobStore {
             .join(format!("{}.json.enc", sanitize_filename(key_hash)))
     }
 
-    fn vkey_id_path(&self, id: &uuid::Uuid) -> PathBuf {
-        self.base_dir
-            .join("vkeys")
-            .join(format!("id_{id}.json.enc"))
-    }
-
     /// Stores a virtual key record (encrypted with AES-256-GCM).
     ///
-    /// Creates two files: one keyed by hash (for O(1) auth lookup) and
-    /// one keyed by UUID (for management operations).
+    /// Uses one authoritative hash-keyed file; no secondary index can drift.
     ///
     /// # Errors
     ///
     /// Returns an error if serialization, encryption, or the
     /// atomic file write fails.
     pub fn store_virtual_key(&self, record: &VirtualKeyRecord) -> Result<()> {
-        let plaintext = serde_json::to_vec(record)?;
+        let _lock = self.credential_lock()?;
+        self.write_virtual_key(record)
+    }
+
+    fn write_virtual_key(&self, record: &VirtualKeyRecord) -> Result<()> {
+        let plaintext = zeroize::Zeroizing::new(serde_json::to_vec(record)?);
         let encrypted = self.cipher.encrypt(&plaintext)?;
 
         // Primary: by hash.
         atomic::write_atomic(&self.vkey_hash_path(&record.key_hash), &encrypted)?;
-        // Secondary: by UUID.
-        let encrypted2 = self.cipher.encrypt(&plaintext)?;
-        atomic::write_atomic(&self.vkey_id_path(&record.id), &encrypted2)?;
 
         Ok(())
     }
@@ -53,7 +48,7 @@ impl GrobStore {
         let path = self.vkey_hash_path(key_hash);
         let encrypted = std::fs::read(&path).ok()?;
         let decrypted = match self.cipher.decrypt_or_plaintext(&encrypted) {
-            Ok(d) => d,
+            Ok(d) => zeroize::Zeroizing::new(d),
             Err(e) => {
                 tracing::warn!(error = %e, "failed to read virtual key by hash");
                 return None;
@@ -84,7 +79,9 @@ impl GrobStore {
             if let Ok(data) = std::fs::read(entry.path()) {
                 match self.cipher.decrypt_or_plaintext(&data) {
                     Ok(decrypted) => {
-                        if let Ok(record) = serde_json::from_slice::<VirtualKeyRecord>(&decrypted) {
+                        if let Ok(record) = serde_json::from_slice::<VirtualKeyRecord>(
+                            &zeroize::Zeroizing::new(decrypted),
+                        ) {
                             records.push(record);
                         }
                     }
@@ -105,16 +102,56 @@ impl GrobStore {
     /// Returns an error if the record cannot be read, deserialized,
     /// or re-encrypted.
     pub fn revoke_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
-        let id_path = self.vkey_id_path(id);
-        let data = match std::fs::read(&id_path) {
-            Ok(d) => d,
-            Err(_) => return Ok(false),
+        let _lock = self.credential_lock()?;
+        let Some(mut record) = self
+            .list_virtual_keys()
+            .into_iter()
+            .find(|record| &record.id == id)
+        else {
+            return Ok(false);
         };
-        let decrypted = self.cipher.decrypt_or_plaintext(&data)?;
-        let mut record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
         record.revoked = true;
-        self.store_virtual_key(&record)?;
+        self.write_virtual_key(&record)?;
         Ok(true)
+    }
+
+    /// Replaces a live key, preserving all restrictions and its expiration.
+    ///
+    /// Serializes management across processes. The replacement is persisted before
+    /// revocation; its secret is only returned once the old key is revoked.
+    ///
+    /// # Errors
+    /// Returns an error for missing, revoked, expired, or unwritable keys.
+    pub fn rotate_virtual_key(&self, id: &uuid::Uuid) -> Result<(VirtualKeyRecord, String)> {
+        let _lock = self.credential_lock()?;
+        let mut old = self
+            .list_virtual_keys()
+            .into_iter()
+            .find(|record| &record.id == id)
+            .ok_or_else(|| anyhow::anyhow!("Key not found"))?;
+        anyhow::ensure!(
+            !old.revoked
+                && old
+                    .expires_at
+                    .is_none_or(|expiry| expiry > chrono::Utc::now()),
+            "Cannot rotate a revoked or expired key"
+        );
+        let (secret, key_hash) = crate::auth::virtual_keys::generate_key();
+        let replacement = VirtualKeyRecord {
+            id: uuid::Uuid::new_v4(),
+            prefix: secret[..12].to_owned(),
+            key_hash,
+            created_at: chrono::Utc::now(),
+            last_used_at: None,
+            ..old.clone()
+        };
+        self.write_virtual_key(&replacement)?;
+        old.revoked = true;
+        if let Err(error) = self.write_virtual_key(&old) {
+            std::fs::remove_file(self.vkey_hash_path(&replacement.key_hash))?;
+            return Err(error);
+        }
+        Ok((replacement, secret))
     }
 
     /// Deletes a virtual key by UUID (removes both hash and id files).
@@ -123,18 +160,24 @@ impl GrobStore {
     ///
     /// Returns an error if the files cannot be removed.
     pub fn delete_virtual_key(&self, id: &uuid::Uuid) -> Result<bool> {
-        let id_path = self.vkey_id_path(id);
-        let data = match std::fs::read(&id_path) {
-            Ok(d) => d,
-            Err(_) => return Ok(false),
+        let _lock = self.credential_lock()?;
+        let Some(record) = self
+            .list_virtual_keys()
+            .into_iter()
+            .find(|record| &record.id == id)
+        else {
+            return Ok(false);
         };
-        let decrypted = self.cipher.decrypt_or_plaintext(&data)?;
-        let record: VirtualKeyRecord = serde_json::from_slice(&decrypted)?;
-
-        // Remove both files.
-        let hash_path = self.vkey_hash_path(&record.key_hash);
-        let _ = std::fs::remove_file(&hash_path);
-        let _ = std::fs::remove_file(&id_path);
+        std::fs::remove_file(self.vkey_hash_path(&record.key_hash))?;
+        let legacy = self
+            .base_dir
+            .join("vkeys")
+            .join(format!("id_{id}.json.enc"));
+        match std::fs::remove_file(legacy) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
         Ok(true)
     }
 }

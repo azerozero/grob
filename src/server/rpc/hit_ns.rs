@@ -148,7 +148,7 @@ fn swap_state(
         crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
     let new_registry = ProviderRegistry::from_configs_with_models(
         &new_config.providers,
-        secret_backend.as_ref(),
+        secret_backend.clone(),
         Some(state.token_store.clone()),
         &new_config.models,
         &new_config.server.timeouts,
@@ -203,7 +203,7 @@ pub async fn resolve(
     caller: &CallerIdentity,
     context: &serde_json::Value,
 ) -> Result<serde_json::Value, ErrorObjectOwned> {
-    require_role(caller, Role::Operator)?;
+    require_role(caller, Role::Admin)?;
 
     let inner = state.snapshot();
 
@@ -392,9 +392,9 @@ tenant = "[invalid"
     }
 
     #[test]
-    fn require_role_allows_operator_for_resolve() {
+    fn require_role_requires_admin_for_resolve() {
         let operator = CallerIdentity {
-            role: Role::Operator,
+            role: Role::Admin,
             ip: "10.0.0.1".into(),
             tenant_id: String::new(),
         };

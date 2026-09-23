@@ -31,26 +31,6 @@
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// Keys whose values are redacted before hashing.
-///
-/// Matched case-insensitively against the JSON field name at any depth.
-const SECRET_KEYS: &[&str] = &[
-    "api_key",
-    "bearer_token",
-    "token",
-    "secret",
-    "password",
-    "client_secret",
-    "webhook_secret",
-    "signing_key",
-];
-
-/// Placeholder substituted for a redacted value.
-///
-/// A single constant for every secret means rotating a key does not move the
-/// revision: the deployed *policy* is unchanged, so the revision should be too.
-const REDACTED: &str = "<redacted>";
-
 /// Length of the short, human-comparable form of a revision.
 ///
 /// 12 hex chars is 48 bits: ample to spot "these two replicas differ" by eye,
@@ -112,7 +92,8 @@ pub fn compute<T: serde::Serialize>(value: &T) -> Revision {
             full: "sha256:unavailable".to_string(),
         };
     };
-    let redacted = redact(json);
+    let mut redacted = crate::config::redaction::redact(json);
+    remove_revision_assertion(&mut redacted);
     let canonical = canonical_bytes(&redacted);
     let digest = Sha256::digest(&canonical);
     Revision {
@@ -120,33 +101,15 @@ pub fn compute<T: serde::Serialize>(value: &T) -> Revision {
     }
 }
 
-/// Replaces every secret-looking value with [`REDACTED`], at any depth.
-fn redact(value: Value) -> Value {
+fn remove_revision_assertion(value: &mut Value) {
     match value {
-        Value::Object(map) => Value::Object(
-            map.into_iter()
-                .filter(|(k, _)| k != SELF_REFERENTIAL_KEY)
-                .map(|(k, v)| {
-                    if is_secret_key(&k) {
-                        (k, Value::String(REDACTED.to_string()))
-                    } else {
-                        (k, redact(v))
-                    }
-                })
-                .collect(),
-        ),
-        Value::Array(items) => Value::Array(items.into_iter().map(redact).collect()),
-        other => other,
+        Value::Object(map) => {
+            map.remove(SELF_REFERENTIAL_KEY);
+            map.values_mut().for_each(remove_revision_assertion);
+        }
+        Value::Array(values) => values.iter_mut().for_each(remove_revision_assertion),
+        _ => {}
     }
-}
-
-/// True when a JSON field name denotes a secret.
-///
-/// Substring rather than exact match so `anthropic_api_key` and
-/// `metrics_bearer_token` are covered without enumerating every spelling.
-fn is_secret_key(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    SECRET_KEYS.iter().any(|s| lower.contains(s))
 }
 
 /// Serializes `value` with every object's keys in sorted order.
@@ -269,11 +232,12 @@ mod tests {
             "metrics": { "bearer_token": "tok-secret" },
             "nested": { "deep": { "client_secret": "cs-secret" } }
         });
-        let canonical = String::from_utf8(canonical_bytes(&redact(v))).expect("utf8");
+        let canonical =
+            String::from_utf8(canonical_bytes(&crate::config::redaction::redact(v))).expect("utf8");
         assert!(!canonical.contains("sk-super-secret"));
         assert!(!canonical.contains("tok-secret"));
         assert!(!canonical.contains("cs-secret"));
-        assert!(canonical.contains(REDACTED));
+        assert!(canonical.contains("<redacted>"));
     }
 
     /// A changed *non-secret* value next to a secret must still move it.
