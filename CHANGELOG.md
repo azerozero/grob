@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.112](https://github.com/azerozero/grob/compare/v0.36.111...v0.36.112) - 2026-09-23
+
+### Fixed
+
+- unify runtime reloads and protect credential transport ([#602](https://github.com/azerozero/grob/pull/602))
+
 ## [0.36.111](https://github.com/azerozero/grob/compare/v0.36.110...v0.36.111) - 2026-09-23
 
 ### Fixed
