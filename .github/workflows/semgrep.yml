@@ -26,7 +26,7 @@ jobs:
       image: semgrep/semgrep:1.177.0
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run Semgrep
         run: semgrep scan --config auto --sarif --output semgrep-results.sarif src/
@@ -38,7 +38,7 @@ jobs:
 
       - name: Upload SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: semgrep-results.sarif
           category: semgrep
