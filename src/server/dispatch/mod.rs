@@ -378,24 +378,6 @@ fn salt_cache_key_with_grob_hint(
     Some(format!("{key}|grob_hint={hint}"))
 }
 
-/// Returns `true` when a configured tier name matches the request's tier.
-///
-/// Extracted so the tier-lookup equality in [`dispatch`] is unit-testable
-/// without constructing a full [`DispatchContext`].
-#[inline]
-fn tier_name_matches(tier_cfg_name: &str, request_tier_name: &str) -> bool {
-    tier_cfg_name == request_tier_name
-}
-
-/// Returns `true` when a model is configured for the fan-out strategy.
-///
-/// Extracted so the strategy comparison in [`dispatch`] is unit-testable
-/// without constructing a full [`DispatchContext`].
-#[inline]
-fn is_fan_out_strategy(strategy: &ModelStrategy) -> bool {
-    *strategy == ModelStrategy::FanOut
-}
-
 /// Run the full dispatch pipeline: DLP → cache → route → provider loop.
 ///
 /// Returns a `DispatchResult` that the handler transforms into the appropriate
@@ -476,40 +458,12 @@ pub(crate) async fn dispatch(
         &ctx.allowed_providers,
     )?;
 
-    let context_guard = match evaluate_context_guard(
+    let context_guard = enforce_context_guard(
         ctx.inner,
         request,
         &decision.model_name,
         sorted_mappings.first(),
-    ) {
-        ContextGuardDecision::Ok => None,
-        ContextGuardDecision::Warn(info) => {
-            tracing::warn!(
-                estimated_input_tokens = info.estimated_input_tokens,
-                context_window = info.context_window,
-                usage_ratio = info.usage_ratio,
-                model = %decision.model_name,
-                "request is approaching the configured context window; compact soon"
-            );
-            metrics::counter!("grob_context_guard_warnings_total",
-                "model" => decision.model_name.clone(),
-            )
-            .increment(1);
-            Some(info)
-        }
-        ContextGuardDecision::Block(info) => {
-            metrics::counter!("grob_context_guard_blocks_total",
-                "model" => decision.model_name.clone(),
-            )
-            .increment(1);
-            return Err(RequestError::ContextWindowExceeded {
-                message: context_window_exceeded_message(&info),
-                estimated_input_tokens: info.estimated_input_tokens,
-                context_window: info.context_window,
-                usage_ratio: info.usage_ratio,
-            });
-        }
-    };
+    )?;
 
     // ── Step 4.5: Tool layer (aliasing, injection, capability gating) ──
     if let Some(ref tool_layer) = ctx.inner.tool_layer {
@@ -532,55 +486,18 @@ pub(crate) async fn dispatch(
     // the point where the candidate is chosen. `dlp_triggered` is threaded down
     // for `dlp_triggered`-keyed policies.
 
-    // ── Step 5.5: Tier-based fan-out ──
-    // When the complexity scorer assigns a tier AND the matching [[tiers]]
-    // entry has fanout=true, dispatch to all tier providers in parallel.
-    if let Some(ref tier) = decision.complexity_tier {
-        let tier_name = tier.to_string();
-        if let Some(tier_cfg) = ctx
-            .inner
-            .config
-            .tiers
-            .iter()
-            .find(|t| tier_name_matches(&t.name, &tier_name))
-        {
-            if tier_cfg.fanout {
-                let fan_out_config = crate::cli::FanOutConfig {
-                    mode: crate::cli::FanOutMode::Fastest,
-                    judge_model: None,
-                    judge_criteria: None,
-                    count: None,
-                };
-                return dispatch_fan_out(
-                    ctx,
-                    request,
-                    &sorted_mappings,
-                    &fan_out_config,
-                    &decision,
-                    dlp_triggered,
-                    context_guard,
-                )
-                .await;
-            }
-        }
-    }
-
-    // ── Step 6: Fan-out strategy (model-level) ──
-    if let Some(model_config) = ctx.inner.find_model(&decision.model_name) {
-        if is_fan_out_strategy(&model_config.strategy) {
-            if let Some(ref fan_out_config) = model_config.fan_out {
-                return dispatch_fan_out(
-                    ctx,
-                    request,
-                    &sorted_mappings,
-                    fan_out_config,
-                    &decision,
-                    dlp_triggered,
-                    context_guard,
-                )
-                .await;
-            }
-        }
+    // Tier fan-out takes priority over model-level fan-out; both share dispatch.
+    if let Some(fan_out_config) = resolve_fan_out_config(ctx.inner, &decision) {
+        return dispatch_fan_out(
+            ctx,
+            request,
+            &sorted_mappings,
+            &fan_out_config,
+            &decision,
+            dlp_triggered,
+            context_guard,
+        )
+        .await;
     }
 
     // ── Step 7: Provider loop with fallback/retry ──
@@ -594,6 +511,72 @@ pub(crate) async fn dispatch(
         context_guard,
     )
     .await
+}
+
+/// Applies the context-window guard before cache access and provider dispatch.
+fn enforce_context_guard(
+    inner: &ReloadableState,
+    request: &CanonicalRequest,
+    model: &str,
+    first_mapping: Option<&crate::cli::ModelMapping>,
+) -> Result<Option<ContextGuardInfo>, RequestError> {
+    match evaluate_context_guard(inner, request, model, first_mapping) {
+        ContextGuardDecision::Ok => Ok(None),
+        ContextGuardDecision::Warn(info) => {
+            tracing::warn!(
+                estimated_input_tokens = info.estimated_input_tokens,
+                context_window = info.context_window,
+                usage_ratio = info.usage_ratio,
+                model = %model,
+                "request is approaching the configured context window; compact soon"
+            );
+            metrics::counter!("grob_context_guard_warnings_total",
+                "model" => model.to_string(),
+            )
+            .increment(1);
+            Ok(Some(info))
+        }
+        ContextGuardDecision::Block(info) => {
+            metrics::counter!("grob_context_guard_blocks_total",
+                "model" => model.to_string(),
+            )
+            .increment(1);
+            Err(RequestError::ContextWindowExceeded {
+                message: context_window_exceeded_message(&info),
+                estimated_input_tokens: info.estimated_input_tokens,
+                context_window: info.context_window,
+                usage_ratio: info.usage_ratio,
+            })
+        }
+    }
+}
+
+/// Resolves tier precedence independently from executing a fan-out request.
+fn resolve_fan_out_config<'a>(
+    inner: &'a ReloadableState,
+    decision: &crate::models::RouteDecision,
+) -> Option<std::borrow::Cow<'a, crate::cli::FanOutConfig>> {
+    let tier = decision.complexity_tier.as_ref().and_then(|tier| {
+        let name = tier.to_string();
+        inner
+            .config
+            .tiers
+            .iter()
+            .find(|configured| configured.name == name)
+    });
+    if tier.is_some_and(|tier| tier.fanout) {
+        return Some(std::borrow::Cow::Owned(crate::cli::FanOutConfig {
+            mode: crate::cli::FanOutMode::Fastest,
+            judge_model: None,
+            judge_criteria: None,
+            count: None,
+        }));
+    }
+    let model = inner.find_model(&decision.model_name)?;
+    if model.strategy != ModelStrategy::FanOut {
+        return None;
+    }
+    model.fan_out.as_ref().map(std::borrow::Cow::Borrowed)
 }
 
 fn context_window_exceeded_message(info: &ContextGuardInfo) -> String {
@@ -1025,17 +1008,112 @@ mod tests {
     // ── dispatch routing guards ──
 
     #[test]
-    fn tier_name_matches_is_equality() {
-        // `==`: the `==` → `!=` mutant inverts every comparison.
-        assert!(tier_name_matches("complex", "complex"));
-        assert!(!tier_name_matches("complex", "trivial"));
+    fn fan_out_selection_preserves_tier_priority_and_model_fallback() {
+        use crate::cli::{FanOutConfig, FanOutMode, TierConfig};
+        use crate::models::{RouteDecision, RouteType};
+        use crate::routing::classify::ComplexityTier;
+        for (hint, tier_fanout, strategy, expected) in [
+            (
+                Some(ComplexityTier::Complex),
+                true,
+                ModelStrategy::FanOut,
+                Some(FanOutMode::Fastest),
+            ),
+            (
+                Some(ComplexityTier::Complex),
+                false,
+                ModelStrategy::FanOut,
+                Some(FanOutMode::Weighted),
+            ),
+            (
+                Some(ComplexityTier::Medium),
+                true,
+                ModelStrategy::FanOut,
+                Some(FanOutMode::Weighted),
+            ),
+            (
+                None,
+                true,
+                ModelStrategy::FanOut,
+                Some(FanOutMode::Weighted),
+            ),
+            (
+                Some(ComplexityTier::Complex),
+                true,
+                ModelStrategy::Fallback,
+                Some(FanOutMode::Fastest),
+            ),
+            (None, true, ModelStrategy::Fallback, None),
+        ] {
+            let mut config = policy_config("default", "");
+            config.models[0].strategy = strategy;
+            config.models[0].fan_out = Some(FanOutConfig {
+                mode: FanOutMode::Weighted,
+                judge_model: None,
+                judge_criteria: None,
+                count: Some(2),
+            });
+            config.tiers = vec![TierConfig {
+                name: "complex".into(),
+                model: None,
+                providers: vec!["anthropic".into()],
+                fanout: tier_fanout,
+                match_conditions: None,
+            }];
+            let inner = ReloadableState::new(
+                config.clone(),
+                crate::routing::classify::Router::new(config),
+                Arc::new(crate::providers::ProviderRegistry::new()),
+            );
+            let decision = RouteDecision {
+                model_name: "alpha".into(),
+                route_type: RouteType::Default,
+                matched_prompt: None,
+                complexity_tier: hint,
+            };
+            let selected = resolve_fan_out_config(&inner, &decision);
+            assert_eq!(selected.as_ref().map(|c| c.mode.clone()), expected);
+            if expected == Some(FanOutMode::Weighted) {
+                assert_eq!(selected.unwrap().count, Some(2));
+            }
+        }
     }
 
     #[test]
-    fn is_fan_out_strategy_only_for_fan_out() {
-        // `== ModelStrategy::FanOut`: the `==` → `!=` mutant inverts selection.
-        assert!(is_fan_out_strategy(&ModelStrategy::FanOut));
-        assert!(!is_fan_out_strategy(&ModelStrategy::Fallback));
+    fn context_phase_distinguishes_safe_warning_and_blocked_requests() {
+        let request: CanonicalRequest = serde_json::from_value(serde_json::json!({
+            "model":"alpha", "max_tokens":20,
+            "messages":[{"role":"user", "content":"x".repeat(4000)}]
+        }))
+        .unwrap();
+        let tokens = super::super::estimate_input_tokens(&request);
+        for (window, expected) in [
+            (tokens * 2, "safe"),
+            (tokens * 100 / 85, "warn"),
+            (tokens, "block"),
+        ] {
+            let mut config = policy_config("default", "");
+            config.models[0].context_window_tokens = Some(window);
+            let inner = ReloadableState::new(
+                config.clone(),
+                crate::routing::classify::Router::new(config),
+                Arc::new(crate::providers::ProviderRegistry::new()),
+            );
+            match (
+                expected,
+                enforce_context_guard(&inner, &request, "alpha", None),
+            ) {
+                ("safe", Ok(None)) => {}
+                ("warn", Ok(Some(info))) => {
+                    assert_eq!(info.context_window, window);
+                    assert!(!info.should_compact);
+                }
+                ("block", Err(RequestError::ContextWindowExceeded { context_window, .. })) => {
+                    assert_eq!(context_window, window);
+                }
+                _ => panic!("incorrect context guard outcome for {expected}"),
+            }
+        }
     }
 
     #[cfg(feature = "mcp")]

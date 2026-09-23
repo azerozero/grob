@@ -1009,26 +1009,7 @@ pub(crate) fn transform_to_responses_request(
     let tools = transform_responses_tools(request)?;
     let tool_choice = transform_responses_tool_choice(request, tools.as_ref())?;
 
-    // Codex CLI requests carry their own authoritative Codex agent prompt as
-    // `instructions` (canonical `system`). Forward it verbatim as the
-    // top-level `instructions` so the backend stays in full agentic mode.
-    // Demoting it to a user item (the foreign-client path) makes the model emit
-    // a preamble and stop instead of calling the provided tools.
-    let codex_native = request.extensions.codex_native;
-
-    let instructions = if codex_native {
-        request
-            .system
-            .as_ref()
-            .map(|s| s.to_text())
-            .unwrap_or_else(|| codex_instructions.to_string())
-    } else if tools.is_some() {
-        // Forwarding tools and the full Codex CLI prompt at once makes a foreign
-        // client's model call non-existent built-in tools, so defer to a preamble.
-        CODEX_TOOL_INSTRUCTIONS.to_string()
-    } else {
-        codex_instructions.to_string()
-    };
+    let instructions = responses_instructions(request, codex_instructions, tools.is_some());
 
     // Derived before the items are built so it can double as the reasoning
     // store's conversation key; it only reads the reusable prefix.
@@ -1039,40 +1020,7 @@ pub(crate) fn transform_to_responses_request(
         conversation: &prompt_cache_key,
     });
 
-    let mut items = Vec::new();
-
-    // Codex has no separate system role; hoist the system prompt to a user item.
-    // Skip on the codex-native path: the system is already the top-level
-    // `instructions` above, so re-adding it here would duplicate it.
-    if !codex_native {
-        if let Some(ref system) = request.system {
-            items.push(OpenAIResponsesItem::Message {
-                role: "user".to_string(),
-                content: Some(responses_message_content("user", system.to_text())),
-            });
-        }
-    }
-
-    for msg in &request.messages {
-        // The ChatGPT Codex backend rejects `system`-role items ("System messages
-        // are not allowed") — system guidance belongs in `instructions`. Fold any
-        // system-role message (e.g. Claude Code `<system-reminder>` turns) into a
-        // user item so its content survives.
-        let role = if msg.role == "system" {
-            "user"
-        } else {
-            msg.role.as_str()
-        };
-        match &msg.content {
-            MessageContent::Text(text) => items.push(OpenAIResponsesItem::Message {
-                role: role.to_string(),
-                content: Some(responses_message_content(role, text.clone())),
-            }),
-            MessageContent::Blocks(blocks) => {
-                push_blocks_as_items(&mut items, role, blocks, replay.as_ref())?;
-            }
-        }
-    }
+    let items = responses_input_items(request, replay.as_ref())?;
 
     let reasoning = resolve_reasoning_effort(request, tuning)
         .map(|effort| serde_json::json!({ "effort": effort }));
@@ -1099,6 +1047,75 @@ pub(crate) fn transform_to_responses_request(
         prompt_cache_key: Some(prompt_cache_key),
         include,
     })
+}
+
+/// Selects the authoritative agent instructions for native and foreign clients.
+fn responses_instructions(
+    request: &CanonicalRequest,
+    codex_instructions: &str,
+    has_tools: bool,
+) -> String {
+    // Codex CLI requests carry their own authoritative Codex agent prompt as
+    // `instructions` (canonical `system`). Forward it verbatim as the
+    // top-level `instructions` so the backend stays in full agentic mode.
+    // Demoting it to a user item (the foreign-client path) makes the model emit
+    // a preamble and stop instead of calling the provided tools.
+    if request.extensions.codex_native {
+        request
+            .system
+            .as_ref()
+            .map(|s| s.to_text())
+            .unwrap_or_else(|| codex_instructions.to_string())
+    } else if has_tools {
+        // Forwarding tools and the full Codex CLI prompt at once makes a foreign
+        // client's model call non-existent built-in tools, so defer to a preamble.
+        CODEX_TOOL_INSTRUCTIONS.to_string()
+    } else {
+        codex_instructions.to_string()
+    }
+}
+
+/// Preserves conversation order while translating messages, tools and reasoning.
+fn responses_input_items(
+    request: &CanonicalRequest,
+    replay: Option<&ReasoningReplay<'_>>,
+) -> Result<Vec<OpenAIResponsesItem>, ProviderError> {
+    let mut items = Vec::new();
+
+    // Codex has no separate system role; hoist the system prompt to a user item.
+    // Skip on the codex-native path: the system is already the top-level
+    // `instructions` above, so re-adding it here would duplicate it.
+    if !request.extensions.codex_native {
+        if let Some(ref system) = request.system {
+            items.push(OpenAIResponsesItem::Message {
+                role: "user".to_string(),
+                content: Some(responses_message_content("user", system.to_text())),
+            });
+        }
+    }
+
+    for msg in &request.messages {
+        // The ChatGPT Codex backend rejects `system`-role items ("System messages
+        // are not allowed") — system guidance belongs in `instructions`. Fold any
+        // system-role message (e.g. Claude Code `<system-reminder>` turns) into a
+        // user item so its content survives.
+        let role = if msg.role == "system" {
+            "user"
+        } else {
+            msg.role.as_str()
+        };
+        match &msg.content {
+            MessageContent::Text(text) => items.push(OpenAIResponsesItem::Message {
+                role: role.to_string(),
+                content: Some(responses_message_content(role, text.clone())),
+            }),
+            MessageContent::Blocks(blocks) => {
+                push_blocks_as_items(&mut items, role, blocks, replay)?;
+            }
+        }
+    }
+
+    Ok(items)
 }
 
 /// Derives a stable `prompt_cache_key` from a request's reusable prefix.
