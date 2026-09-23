@@ -786,8 +786,10 @@ jobs:
 
           # Build per-arch images (static musl binary, no OS needed)
           for ARCH in amd64 arm64; do
-            mkdir -p "image-root-${ARCH}/usr/local/bin"
+            mkdir -p "image-root-${ARCH}/usr/local/bin" "image-root-${ARCH}/etc/ssl/certs"
             cp "bin/${ARCH}/${BINARY_NAME}" "image-root-${ARCH}/usr/local/bin/${BINARY_NAME}"
+            # reqwest 0.13 verifies TLS against the platform CA store.
+            cp /etc/ssl/certs/ca-certificates.crt "image-root-${ARCH}/etc/ssl/certs/"
             tar -cf "layer-${ARCH}.tar" -C "image-root-${ARCH}" .
 
             crane append -t "${IMAGE}:${VERSION#v}-${ARCH}" -f "layer-${ARCH}.tar"
