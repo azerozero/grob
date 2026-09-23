@@ -18,8 +18,15 @@ use grob::cli::args::{
 };
 use grob::commands;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    grob::security::memory::harden_from_env()?;
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> anyhow::Result<()> {
     // W-4 : intercept `grob -- <cmd>` before clap parses it, so the user
     // gets an actionable hint instead of a generic `unexpected argument`.
     let raw_args: Vec<String> = std::env::args().collect();

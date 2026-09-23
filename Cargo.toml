@@ -163,8 +163,8 @@ nix = { version = "0.31", features = ["signal"], optional = true }
 # NOTE: tikv-jemallocator and nix are in [dependencies] as optional; enabled
 # by default via the `jemalloc` and `unix-signals` features respectively.
 
-# TEE ioctl interface (Linux-only: /dev/sev-guest, /dev/arm-cca-guest)
-[target.'cfg(target_os = "linux")'.dependencies]
+# Process memory controls on Unix; TEE ioctl interfaces remain Linux-only.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
