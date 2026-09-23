@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.113](https://github.com/azerozero/grob/compare/v0.36.112...v0.36.113) - 2026-09-23
+
+### Fixed
+
+- *(security)* harden credential and streaming lifecycles ([#604](https://github.com/azerozero/grob/pull/604))
+
 ## [0.36.112](https://github.com/azerozero/grob/compare/v0.36.111...v0.36.112) - 2026-09-23
 
 ### Fixed
