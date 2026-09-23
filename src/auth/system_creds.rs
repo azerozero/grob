@@ -114,8 +114,8 @@ fn parse_codex_payload(provider_id: &str, raw: &str) -> Result<OAuthToken> {
     let expires_at = jwt_expiry(access).unwrap_or_else(|| Utc::now() + chrono::Duration::hours(1));
     Ok(OAuthToken {
         provider_id: provider_id.to_string(),
-        access_token: SecretString::new(access.to_string()),
-        refresh_token: SecretString::new(refresh.to_string()),
+        access_token: SecretString::from(access.to_string()),
+        refresh_token: SecretString::from(refresh.to_string()),
         expires_at,
         enterprise_url: None,
         project_id: None,
@@ -173,8 +173,8 @@ fn parse_claude_payload(provider_id: &str, raw: &str) -> Result<OAuthToken> {
         .unwrap_or_else(|| Utc::now() + chrono::Duration::hours(1));
     Ok(OAuthToken {
         provider_id: provider_id.to_string(),
-        access_token: SecretString::new(access.to_string()),
-        refresh_token: SecretString::new(refresh.to_string()),
+        access_token: SecretString::from(access.to_string()),
+        refresh_token: SecretString::from(refresh.to_string()),
         expires_at,
         enterprise_url: None,
         project_id: None,

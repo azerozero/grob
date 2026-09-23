@@ -130,7 +130,7 @@ pub(crate) async fn auth_middleware(
             .server
             .api_key
             .as_ref()
-            .map(|s| secrecy::ExposeSecret::expose_secret(s).as_str())
+            .map(secrecy::ExposeSecret::expose_secret)
             .unwrap_or("");
         if legacy_key.is_empty() {
             "none"
@@ -151,7 +151,7 @@ pub(crate) async fn auth_middleware(
                 .auth
                 .api_key
                 .as_ref()
-                .map(|s| secrecy::ExposeSecret::expose_secret(s).as_str())
+                .map(secrecy::ExposeSecret::expose_secret)
                 .filter(|k| !k.is_empty())
                 .or_else(|| {
                     inner
@@ -159,7 +159,7 @@ pub(crate) async fn auth_middleware(
                         .server
                         .api_key
                         .as_ref()
-                        .map(|s| secrecy::ExposeSecret::expose_secret(s).as_str())
+                        .map(secrecy::ExposeSecret::expose_secret)
                 })
                 .unwrap_or("");
 

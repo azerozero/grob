@@ -214,8 +214,8 @@ mod tests {
 
         let token = OAuthToken {
             provider_id: "test-provider".to_string(),
-            access_token: SecretString::new("access-123".to_string()),
-            refresh_token: SecretString::new("refresh-456".to_string()),
+            access_token: SecretString::from("access-123".to_string()),
+            refresh_token: SecretString::from("refresh-456".to_string()),
             expires_at: Utc::now() + chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,

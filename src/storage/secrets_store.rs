@@ -50,7 +50,7 @@ impl GrobStore {
             }
         };
         let s = String::from_utf8(decrypted).ok()?;
-        Some(secrecy::SecretString::new(s))
+        Some(secrecy::SecretString::from(s))
     }
 
     /// Lists secret names (no values).

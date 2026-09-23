@@ -4,7 +4,7 @@
 //! per-key budget, rate-limit, and model-allowlist enforcement.
 
 use chrono::{DateTime, Utc};
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -77,7 +77,7 @@ pub struct VirtualKeyContext {
 /// assert_eq!(hash.len(), 64);
 /// ```
 pub fn generate_key() -> (String, String) {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut hex_bytes = [0u8; 16];
     rng.fill(&mut hex_bytes);
     let hex_part = hex::encode(hex_bytes);
@@ -85,7 +85,7 @@ pub fn generate_key() -> (String, String) {
 
     let mut hasher = Sha256::new();
     hasher.update(full_key.as_bytes());
-    let hash_hex = format!("{:x}", hasher.finalize());
+    let hash_hex = hex::encode(hasher.finalize());
 
     (full_key, hash_hex)
 }
@@ -115,7 +115,7 @@ mod tests {
         let (key, hash) = generate_key();
         let mut hasher = Sha256::new();
         hasher.update(key.as_bytes());
-        let recomputed = format!("{:x}", hasher.finalize());
+        let recomputed = hex::encode(hasher.finalize());
         assert_eq!(hash, recomputed);
     }
 

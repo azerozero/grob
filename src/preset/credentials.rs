@@ -392,8 +392,8 @@ mod tests {
         store
             .save_oauth_token(&OAuthToken {
                 provider_id: "openai-codex".to_string(),
-                access_token: SecretString::new("a".to_string()),
-                refresh_token: SecretString::new("r".to_string()),
+                access_token: SecretString::from("a".to_string()),
+                refresh_token: SecretString::from("r".to_string()),
                 expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
                 enterprise_url: None,
                 project_id: None,

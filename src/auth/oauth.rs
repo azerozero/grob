@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::Utc;
-use rand::Rng;
+use rand::RngExt;
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -41,8 +41,8 @@ impl PKCEVerifier {
     /// Generate a new PKCE code verifier and challenge
     pub fn generate() -> Self {
         // Generate random verifier (43-128 characters)
-        let mut rng = rand::thread_rng();
-        let random_bytes: Vec<u8> = (0..32).map(|_| rng.gen::<u8>()).collect();
+        let mut rng = rand::rng();
+        let random_bytes: Vec<u8> = (0..32).map(|_| rng.random::<u8>()).collect();
         let verifier = URL_SAFE_NO_PAD.encode(&random_bytes);
 
         // Generate challenge (SHA256 of verifier)
@@ -264,9 +264,8 @@ impl OAuthClient {
         match self.config.provider_type() {
             OAuthProviderType::OpenAI => {
                 // OpenAI uses a separate random state (not the PKCE verifier)
-                use rand::Rng;
-                let random_bytes: Vec<u8> =
-                    (0..16).map(|_| rand::thread_rng().gen::<u8>()).collect();
+                use rand::RngExt;
+                let random_bytes: Vec<u8> = (0..16).map(|_| rand::rng().random::<u8>()).collect();
                 let state = random_bytes
                     .iter()
                     .map(|b| format!("{:02x}", b))
@@ -353,8 +352,8 @@ impl OAuthClient {
 
         let token = OAuthToken {
             provider_id: provider_id.to_string(),
-            access_token: SecretString::new(token_response.access_token),
-            refresh_token: SecretString::new(
+            access_token: SecretString::from(token_response.access_token),
+            refresh_token: SecretString::from(
                 token_response
                     .refresh_token
                     .ok_or_else(|| anyhow!("Initial OAuth exchange must return refresh_token"))?,
@@ -450,10 +449,10 @@ impl OAuthClient {
 
         let token = OAuthToken {
             provider_id: provider_id.to_string(),
-            access_token: SecretString::new(token_response.access_token),
+            access_token: SecretString::from(token_response.access_token),
             refresh_token: token_response
                 .refresh_token
-                .map(SecretString::new)
+                .map(SecretString::from)
                 .unwrap_or(existing_token.refresh_token),
             expires_at,
             enterprise_url: existing_token.enterprise_url,

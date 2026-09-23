@@ -4,7 +4,7 @@ fn provider(base_url: &str) -> GeminiProvider {
     GeminiProvider::new(
         super::super::ProviderParams {
             name: "gemini-test".into(),
-            api_key: SecretString::new("synthetic-key".into()),
+            api_key: SecretString::from("synthetic-key"),
             base_url: Some(base_url.into()),
             models: vec![],
             oauth_provider: None,

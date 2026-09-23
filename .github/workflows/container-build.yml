@@ -1,0 +1,43 @@
+name: Container build verification
+
+on:
+  pull_request:
+    paths:
+      - Containerfile
+      - deploy/demo/Containerfile
+      - .github/workflows/container-build.yml
+      - tests/fixtures/container-smoke.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.containerfile }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        containerfile: [Containerfile, deploy/demo/Containerfile]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build scratch image
+        env:
+          CONTAINERFILE: ${{ matrix.containerfile }}
+        run: docker build --file "$CONTAINERFILE" --tag grob:verify .
+      - name: Verify HTTPS from scratch image
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          docker run --rm grob:verify --version
+          # Download a synthetic config over HTTPS without invoking a provider.
+          docker run --rm grob:verify --config \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${SOURCE_SHA}/tests/fixtures/container-smoke.toml" env

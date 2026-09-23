@@ -329,8 +329,8 @@ mod tests {
     fn make_token(expires_in_minutes: i64, needs_reauth: Option<bool>) -> OAuthToken {
         OAuthToken {
             provider_id: "anthropic-max".to_string(),
-            access_token: SecretString::new("access".into()),
-            refresh_token: SecretString::new("refresh".into()),
+            access_token: SecretString::from("access"),
+            refresh_token: SecretString::from("refresh"),
             expires_at: Utc::now() + chrono::Duration::minutes(expires_in_minutes),
             enterprise_url: None,
             project_id: None,

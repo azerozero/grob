@@ -4,7 +4,7 @@
 //! The key file is created on first use with a random key and restricted
 //! to owner-only permissions (cross-platform via [`set_owner_only_permissions`]).
 
-use aes_gcm::aead::{Aead, KeyInit, OsRng};
+use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -64,8 +64,7 @@ impl StorageCipher {
             Self::generate_key(&key_path)?
         };
 
-        let key = aes_gcm::Key::<Aes256Gcm>::from_slice(&key_bytes);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes).expect("validated 32-byte key");
         key_bytes.zeroize();
         Ok(Self { cipher })
     }
@@ -79,14 +78,13 @@ impl StorageCipher {
     ///
     /// Returns an error if the AES-256-GCM encryption operation fails.
     pub fn encrypt(&self, plaintext: &[u8]) -> Result<Vec<u8>> {
-        use aes_gcm::aead::rand_core::RngCore;
         let mut nonce_bytes = [0u8; NONCE_LEN];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
+        getrandom::fill(&mut nonce_bytes).context("Failed to generate encryption nonce")?;
+        let nonce = Nonce::from(nonce_bytes);
 
         let ciphertext = self
             .cipher
-            .encrypt(nonce, plaintext)
+            .encrypt(&nonce, plaintext)
             .map_err(|e| anyhow::anyhow!("AES-GCM encryption failed: {}", e))?;
 
         let mut result = Vec::with_capacity(HEADER_LEN + NONCE_LEN + ciphertext.len());
@@ -122,10 +120,10 @@ impl StorageCipher {
         }
 
         let (nonce_bytes, ciphertext) = body.split_at(NONCE_LEN);
-        let nonce = Nonce::from_slice(nonce_bytes);
+        let nonce = Nonce::try_from(nonce_bytes).expect("validated 12-byte nonce");
 
         self.cipher
-            .decrypt(nonce, ciphertext)
+            .decrypt(&nonce, ciphertext)
             .map_err(|e| anyhow::anyhow!("AES-GCM decryption failed: {}", e))
     }
 
@@ -205,9 +203,8 @@ impl StorageCipher {
     ///
     /// Caller is responsible for zeroizing the returned `Vec<u8>` after use.
     fn generate_key(path: &Path) -> Result<Vec<u8>> {
-        use aes_gcm::aead::rand_core::RngCore;
         let mut key = vec![0u8; KEY_LEN];
-        OsRng.fill_bytes(&mut key);
+        getrandom::fill(&mut key).context("Failed to generate encryption key")?;
 
         // Ensure parent directory exists.
         if let Some(parent) = path.parent() {
@@ -228,6 +225,25 @@ impl StorageCipher {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Captured with aes-gcm 0.10 using a synthetic key and fixed nonce.
+    #[test]
+    fn decrypts_ciphertext_from_before_dependency_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("grob.db");
+        std::fs::write(StorageCipher::key_path(&db_path), [7u8; 32]).unwrap();
+        let cipher = StorageCipher::load_or_generate(&db_path).unwrap();
+        let mut legacy = vec![3u8; NONCE_LEN];
+        legacy.extend(hex::decode("428ccc617a4c3b321f2e27398534862c8055879dd5e1fd1f41fee1d89b9135cad475c85d4a877adc9e773802ed134fc486").unwrap());
+        let plaintext = b"grob dependency migration fixture";
+        assert_eq!(cipher.decrypt(&legacy).unwrap(), plaintext);
+        let mut envelope = MAGIC.to_vec();
+        envelope.push(VERSION);
+        envelope.extend(legacy);
+        assert_eq!(cipher.decrypt(&envelope).unwrap(), plaintext);
+        envelope[HEADER_LEN + NONCE_LEN] ^= 1;
+        assert!(cipher.decrypt_or_plaintext(&envelope).is_err());
+    }
 
     fn test_cipher() -> (tempfile::TempDir, StorageCipher) {
         let dir = tempfile::tempdir().unwrap();

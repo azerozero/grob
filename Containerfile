@@ -3,8 +3,8 @@
 # Multi-stage build with cargo-chef for fast rebuilds
 
 # Stage 1: Chef planner — compute dependency recipe
-FROM rust:1.83-alpine3.20 AS chef
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static && \
+FROM rust:1.98-alpine3.24 AS chef
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static make cmake && \
     cargo install cargo-chef --locked
 WORKDIR /usr/src/grob
 
@@ -17,7 +17,8 @@ RUN cargo chef prepare --recipe-path recipe.json
 # layer matches the final build's compilation flags. Otherwise the chef
 # cache is invalidated on every build.
 FROM chef AS builder
-ENV RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes"
+ENV RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=gcc
 COPY --from=planner /usr/src/grob/recipe.json recipe.json
 RUN cargo chef cook --release --locked --target x86_64-unknown-linux-musl --recipe-path recipe.json
 

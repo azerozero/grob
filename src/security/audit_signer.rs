@@ -5,6 +5,7 @@
 //! write pipeline.
 
 use anyhow::{Context, Result};
+use p256::elliptic_curve::Generate;
 use sha2::Sha256;
 use std::path::Path;
 use zeroize::{Zeroize, ZeroizeOnDrop};
@@ -45,14 +46,14 @@ impl EcdsaP256Signer {
                 bytes.zeroize();
                 key?
             } else {
-                let key = p256::ecdsa::SigningKey::random(&mut rand::thread_rng());
+                let key = p256::ecdsa::SigningKey::generate_from_rng(&mut rand::rng());
                 std::fs::write(p, key.to_bytes()).context("Failed to save ECDSA key")?;
                 set_key_permissions(p)?;
                 key
             }
         } else {
             tracing::warn!("Using ephemeral ECDSA key. Logs won't be verifiable across restarts.");
-            p256::ecdsa::SigningKey::random(&mut rand::thread_rng())
+            p256::ecdsa::SigningKey::generate_from_rng(&mut rand::rng())
         };
         let verifying_key = *signing_key.verifying_key();
         Ok(Self {
@@ -110,7 +111,7 @@ impl Ed25519Signer {
                 key_bytes.zeroize();
                 key
             } else {
-                let key = ed25519_dalek::SigningKey::generate(&mut rand::thread_rng());
+                let key = ed25519_dalek::SigningKey::generate(&mut rand::rng());
                 std::fs::write(p, key.to_bytes()).context("Failed to save Ed25519 key")?;
                 set_key_permissions(p)?;
                 key
@@ -119,7 +120,7 @@ impl Ed25519Signer {
             tracing::warn!(
                 "Using ephemeral Ed25519 key. Logs won't be verifiable across restarts."
             );
-            ed25519_dalek::SigningKey::generate(&mut rand::thread_rng())
+            ed25519_dalek::SigningKey::generate(&mut rand::rng())
         };
         let verifying_key = signing_key.verifying_key();
         Ok(Self {
@@ -179,7 +180,7 @@ impl HmacSha256Signer {
             key
         } else {
             let mut key = [0u8; 32]; // CodeQL: hard-coded-cryptographic-value — zero-initialized buffer, immediately overwritten with CSPRNG output.
-            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut key);
+            rand::Rng::fill_bytes(&mut rand::rng(), &mut key);
             std::fs::write(path, key).context("Failed to save HMAC key")?;
             set_key_permissions(path)?;
             tracing::info!("Generated new HMAC-SHA256 key at {}", path.display());
@@ -191,7 +192,7 @@ impl HmacSha256Signer {
 
 impl AuditSigner for HmacSha256Signer {
     fn sign(&self, data: &[u8]) -> Vec<u8> {
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.key)
             .expect("invariant: self.key is [u8; 32], always valid for HMAC-SHA256");
         mac.update(data);
@@ -203,7 +204,7 @@ impl AuditSigner for HmacSha256Signer {
     }
 
     fn verify(&self, data: &[u8], signature: &[u8]) -> bool {
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.key)
             .expect("invariant: self.key is [u8; 32], always valid for HMAC-SHA256");
         mac.update(data);
@@ -221,6 +222,26 @@ fn set_key_permissions(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Signatures captured with p256 0.13 and ed25519-dalek 2, respectively.
+    #[test]
+    fn verifies_signatures_from_before_dependency_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("synthetic.key");
+        std::fs::write(&key_path, [7u8; 32]).unwrap();
+        let message = b"grob dependency migration fixture";
+        let cases: [(Box<dyn AuditSigner>, &str); 2] = [
+            (Box::new(EcdsaP256Signer::load_or_generate(Some(&key_path)).unwrap()),
+             "f3afdd7a0a786ccdf92bb09afd43581cb54615452e5282e76b94d85444c7b3125b0df852411647d87fe7dc039d985ddc47dfecbcd4912400fda1cf73f76b4b32"),
+            (Box::new(Ed25519Signer::load_or_generate(Some(&key_path)).unwrap()),
+             "32ae9fdf7b0d06b220bfede5cf1d59c642a3d0b351975fdd43d3c8218c854050bddb15495b24148f4cbd596a2011147cb40ca510bca5c1b54e60db5709240d0b"),
+        ];
+        for (signer, signature) in cases {
+            let signature = hex::decode(signature).unwrap();
+            assert!(signer.verify(message, &signature), "{}", signer.algorithm());
+            assert!(!signer.verify(b"tampered", &signature));
+        }
+    }
 
     #[test]
     fn ecdsa_sign_verify() {

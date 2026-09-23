@@ -71,7 +71,7 @@ api_key = "my-secret-key"
                 .auth
                 .api_key
                 .as_ref()
-                .map(|s| secrecy::ExposeSecret::expose_secret(s).as_str()),
+                .map(secrecy::ExposeSecret::expose_secret),
             Some("my-secret-key")
         );
     }

@@ -173,14 +173,14 @@ impl MetricsConfig {
         if let Some(path) = self.bearer_token_file.as_deref().filter(|p| !p.is_empty()) {
             let raw = std::fs::read_to_string(path)?;
             let trimmed = raw.trim();
-            return Ok((!trimmed.is_empty()).then(|| SecretString::new(trimmed.to_string())));
+            return Ok((!trimmed.is_empty()).then(|| SecretString::from(trimmed.to_string())));
         }
         Ok(self
             .bearer_token
             .as_ref()
             .map(|s| s.expose_secret().to_string())
             .filter(|t| !t.is_empty())
-            .map(SecretString::new))
+            .map(SecretString::from))
     }
 
     /// Returns true when a token source is configured, even if it resolves empty.
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn metrics_inline_token_resolves() {
         let cfg = MetricsConfig {
-            bearer_token: Some(SecretString::new("inline-secret".to_string())),
+            bearer_token: Some(SecretString::from("inline-secret".to_string())),
             bearer_token_file: None,
         };
         let resolved = cfg.resolve_bearer_token().expect("resolves").expect("some");
@@ -225,7 +225,7 @@ mod tests {
         // Trailing newline + spaces must be trimmed (mounted Secrets often add one).
         writeln!(f, "  file-secret").expect("write");
         let cfg = MetricsConfig {
-            bearer_token: Some(SecretString::new("inline-loses".to_string())),
+            bearer_token: Some(SecretString::from("inline-loses".to_string())),
             bearer_token_file: Some(f.path().to_string_lossy().into_owned()),
         };
         let resolved = cfg.resolve_bearer_token().expect("resolves").expect("some");

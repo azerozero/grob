@@ -1,6 +1,6 @@
 use super::config::{NameAction, NameRule, NamesMode};
 use aho_corasick::AhoCorasick;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -361,7 +361,7 @@ impl NameAnonymizer {
                  Pseudonyms will differ across restarts. Set GROB_DLP_SECRET for stable pseudonyms."
             );
             let mut key = [0u8; 32];
-            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut key);
+            rand::Rng::fill_bytes(&mut rand::rng(), &mut key);
             key
         }
     }

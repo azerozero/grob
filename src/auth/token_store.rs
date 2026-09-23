@@ -21,7 +21,7 @@ where
     D: Deserializer<'de>,
 {
     let s = String::deserialize(deserializer)?;
-    Ok(SecretString::new(s))
+    Ok(SecretString::from(s))
 }
 
 /// Serializes an `Option<SecretString>` for storage.
@@ -46,7 +46,7 @@ where
     D: Deserializer<'de>,
 {
     let s: Option<String> = Option::deserialize(deserializer)?;
-    Ok(s.map(SecretString::new))
+    Ok(s.map(SecretString::from))
 }
 
 /// OAuth token information
@@ -470,8 +470,8 @@ mod tests {
 
         let token = OAuthToken {
             provider_id: "test-provider".to_string(),
-            access_token: SecretString::new("access-123".to_string()),
-            refresh_token: SecretString::new("refresh-456".to_string()),
+            access_token: SecretString::from("access-123".to_string()),
+            refresh_token: SecretString::from("refresh-456".to_string()),
             expires_at: Utc::now() + chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,
@@ -492,8 +492,8 @@ mod tests {
     fn test_token_expiration() {
         let expired_token = OAuthToken {
             provider_id: "test".to_string(),
-            access_token: SecretString::new("token".to_string()),
-            refresh_token: SecretString::new("refresh".to_string()),
+            access_token: SecretString::from("token".to_string()),
+            refresh_token: SecretString::from("refresh".to_string()),
             expires_at: Utc::now() - chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,
@@ -505,8 +505,8 @@ mod tests {
 
         let valid_token = OAuthToken {
             provider_id: "test".to_string(),
-            access_token: SecretString::new("token".to_string()),
-            refresh_token: SecretString::new("refresh".to_string()),
+            access_token: SecretString::from("token".to_string()),
+            refresh_token: SecretString::from("refresh".to_string()),
             expires_at: Utc::now() + chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,

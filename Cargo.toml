@@ -19,7 +19,7 @@ pkg-fmt = "tgz"
 
 [dependencies]
 # Web Framework
-axum = "0.7"
+axum = "0.8"
 
 # Async Runtime
 tokio = { version = "1", features = ["full"] }
@@ -31,7 +31,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 
 # HTTP Client
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls-webpki-roots", "http2"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "query", "form", "http2"] }
 bytes = "1"
 pin-project = "1"
 
@@ -40,13 +40,14 @@ clap = { version = "4", features = ["derive", "env"] }
 clap_complete = "4"
 
 # Configuration
-toml = "0.8"
+toml = "1"
 
 # Logging
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 # OpenTelemetry (optional, for distributed tracing export)
+# Keep the SDK/exporters on 0.32 until tracing-opentelemetry supports 0.33.
 opentelemetry = { version = "0.32", optional = true }
 opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"], optional = true }
 # default-features=false drops the `http-proto` + `reqwest-blocking-client`
@@ -59,43 +60,44 @@ opentelemetry-appender-tracing = { version = "0.32", optional = true }
 
 # Error Handling
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 
 # Utilities
 async-trait = "0.1"        # Async trait support (needed for dyn Provider dispatch)
 async-stream = "0.3"       # SSE event streaming for `grob watch`
-dirs = { version = "5", optional = true }  # User directories
+dirs = { version = "7", optional = true }  # User directories
 regex = "1"                # Regular expressions
 uuid = { version = "1.0", features = ["v4", "serde"] }  # UUID generation for streaming
 
 # Auth
-base64 = "0.22"            # Base64 encoding
-sha2 = "0.10"              # SHA-256 for PKCE
-rand = "0.8"               # Random generation for PKCE
+base64 = "0.23"            # Base64 encoding
+sha2 = "0.11"              # SHA-256 for PKCE
+rand = "0.10"              # Random generation for PKCE
 chrono = { version = "0.4", features = ["serde"] }  # Timestamps
 url = "2"                  # URL parsing
-secrecy = "0.8"            # Secure secret handling
+secrecy = "0.10"           # Secure secret handling
 zeroize = { version = "1", features = ["derive"] }  # Zero secrets in memory on drop
 
 # Metrics
 metrics = "0.24"
-metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
+metrics-exporter-prometheus = { version = "0.18", default-features = false, features = ["http-listener"] }
 # Fan-out layer: mirrors the single `metrics` recorder to Prometheus AND the
 # OTLP bridge from ONE instrumentation source (otel feature only). `FanoutBuilder`
 # lives in the always-available `layers` module, so no extra features are needed.
-metrics-util = { version = "0.19", default-features = false, optional = true }
+metrics-util = { version = "0.20", default-features = false, optional = true }
 subtle = "2.6.1"
 
 # DLP (Data Loss Prevention)
 aho-corasick = "1.1"
 memchr = "2"
-hmac = "0.12"
+hmac = "0.13"
 
 # Atomic file writes (storage layer)
 tempfile = "3"
 
 # Credential encryption at rest (AES-256-GCM)
-aes-gcm = "0.10"
+aes-gcm = "0.11"
+getrandom = "0.4"
 
 # Glob pattern matching (tier routing + policy engine)
 globset = "0.4"
@@ -115,19 +117,19 @@ moka = { version = "0.12", features = ["future", "sync"] }
 include_dir = "0.7"
 
 # JWT Auth
-jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
+jsonwebtoken = { version = "11", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 
 # Security controls for HDS/PCI/SecNumCloud-style audit evidence
-p256 = { version = "0.13", features = ["ecdsa"] }   # ECDSA P-256 for audit signing
-ecdsa = "0.16"                                       # ECDSA traits
-ed25519-dalek = { version = "2", features = ["rand_core"] }  # Ed25519 for audit signing
+p256 = { version = "0.14", features = ["ecdsa"] }   # ECDSA P-256 for audit signing
+ecdsa = "0.17"                                       # ECDSA traits
+ed25519-dalek = { version = "3", features = ["rand_core"] }  # Ed25519 for audit signing
 tower = "0.5"                                       # Rate limiting middleware
-tower-http = { version = "0.6", features = ["limit", "trace", "cors"] }
+tower-http = { version = "0.7", features = ["limit", "trace", "cors"] }
 unicode-normalization = "0.1"                       # Homoglyph attack prevention
 hex = { version = "0.4", features = ["serde"] }      # Hex encoding/decoding
 
 # JSON-RPC 2.0 Control Plane (types-only: ErrorObjectOwned for structured errors)
-jsonrpsee = { version = "0.25", default-features = false, features = ["server"] }
+jsonrpsee = { version = "0.26", default-features = false, features = ["server"] }
 
 # Security headers
 http = "1"
@@ -139,7 +141,7 @@ ratatui = { version = "0.30", optional = true }
 crossterm = { version = "0.29", optional = true }
 
 # Socket options (SO_REUSEPORT for zero-downtime restarts)
-socket2 = { version = "0.5", features = ["all"], optional = true }
+socket2 = { version = "0.6", features = ["all"], optional = true }
 
 # TLS (optional, for native HTTPS without reverse proxy)
 axum-server = { version = "0.8", features = ["tls-rustls"], optional = true }
@@ -150,12 +152,12 @@ rustls-acme = { version = "0.15", features = ["axum"], optional = true }
 regex-syntax = "0.8.10"
 
 # Trace log compression (zstd for rotated trace files)
-zstd = "0.13"
+zstd = "0.14"
 
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
-tikv-jemallocator = { version = "0.6", optional = true }
+tikv-jemallocator = { version = "0.7", optional = true }
 # Unix signals (SIGTERM, SIGUSR1) for graceful shutdown and hot restart
-nix = { version = "0.29", features = ["signal"], optional = true }
+nix = { version = "0.31", features = ["signal"], optional = true }
 
 # Allocator (jemalloc replaces musl's slow malloc for ~20% better throughput)
 # NOTE: tikv-jemallocator and nix are in [dependencies] as optional; enabled
@@ -169,24 +171,24 @@ libc = "0.2"
 # Testing
 tokio-test = "0.4"
 mockito = "1"
-criterion = { version = "0.5", features = ["async_tokio"] }  # Benchmarking
+criterion = { version = "0.8", features = ["async_tokio"] }  # Benchmarking
 tempfile = "3"             # Temporary directory testing
 insta = { version = "1", features = ["json", "yaml", "redactions"] }  # Snapshot testing
 tracing-test = "0.2"       # Capture tracing logs in tests
 
 # Property Testing
 proptest = "1"
-rcgen = "0.13"             # Self-signed certs for TLS benchmarks
+rcgen = "0.14"             # Self-signed certs for TLS benchmarks
 # RSA keygen for the JWKS validation tests. Already in the tree via
 # jsonwebtoken's aws_lc_rs backend; `ring-io` exposes the (n, e) accessors the
 # JWKS path needs. Dev-only, so the release binary is unaffected.
 aws-lc-rs = { version = "1", features = ["ring-io"] }
 
 # Cucumber BDD (E2E)
-cucumber = "0.21"
+cucumber = "0.23"
 # rustls (no default-features) to keep native-tls/openssl out of the tree — must
 # stay aligned with the main `reqwest` dependency above.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "query", "form"] }
 
 [[test]]
 name = "cucumber"

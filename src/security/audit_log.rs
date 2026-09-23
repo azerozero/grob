@@ -412,11 +412,18 @@ impl AuditLog {
 
     /// Hashes an entry for chaining (writes directly into hasher).
     fn hash_entry(entry: &AuditEntry) -> String {
-        use std::io::Write as _;
+        use std::fmt::Write as _;
+        struct HashWriter<'a>(&'a mut Sha256);
+        impl std::fmt::Write for HashWriter<'_> {
+            fn write_str(&mut self, value: &str) -> std::fmt::Result {
+                self.0.update(value.as_bytes());
+                Ok(())
+            }
+        }
         let mut hasher = Sha256::new();
         // Excludes signature, signature_algorithm, and batch metadata.
         let _ = write!(
-            hasher,
+            HashWriter(&mut hasher),
             "{}|{}|{}|{}|{:?}|{:?}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{:?}",
             entry.timestamp.to_rfc3339(),
             entry.event_id,
@@ -599,6 +606,17 @@ mod tests {
             merkle_proof: None,
             policy_revision: None,
         }
+    }
+
+    #[test]
+    fn hash_entry_preserves_existing_chain_format() {
+        let mut entry = make_entry(AuditEvent::Response);
+        entry.timestamp = "2026-09-23T00:00:00Z".parse().unwrap();
+        entry.event_id = "migration-fixture".into();
+        assert_eq!(
+            AuditLog::hash_entry(&entry),
+            "456e769bfe55079fd255d054e2c79bdccc22217c0d6f3c53e600c61d713baa26"
+        );
     }
 
     #[test]

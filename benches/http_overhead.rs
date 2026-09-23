@@ -9,7 +9,8 @@
 //!
 //! This spins up real axum servers on localhost and hits them with reqwest.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -24,8 +25,8 @@ static SERVER: OnceLock<ServerState> = OnceLock::new();
 
 fn get_server() -> &'static ServerState {
     SERVER.get_or_init(|| {
-        // Install rustls crypto provider (ring)
-        let _ = rustls::crypto::ring::default_provider().install_default();
+        // Match reqwest's rustls crypto provider (AWS-LC).
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
@@ -116,7 +117,7 @@ fn get_server() -> &'static ServerState {
 
             let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
             let cert_pem = cert.cert.pem();
-            let key_pem = cert.key_pair.serialize_pem();
+            let key_pem = cert.signing_key.serialize_pem();
 
             let tmp = tempfile::TempDir::new().unwrap();
             let cert_path = tmp.path().join("cert.pem");
