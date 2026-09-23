@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.110](https://github.com/azerozero/grob/compare/v0.36.109...v0.36.110) - 2026-09-23
+
+### Fixed
+
+- *(deps)* align OpenTelemetry 0.33 with its tracing bridge ([#596](https://github.com/azerozero/grob/pull/596))
+- *(deps)* migrate Rust dependencies and container toolchains ([#592](https://github.com/azerozero/grob/pull/592))
+
+### Other
+
+- *(deps)* update GitHub Actions and package TLS certificates ([#593](https://github.com/azerozero/grob/pull/593))
+- *(deps)* update ghcr.io/renovatebot/renovate docker tag to v44.108.2 ([#591](https://github.com/azerozero/grob/pull/591))
+- *(deps)* update docker.io/library/nginx docker tag to v1.31 ([#590](https://github.com/azerozero/grob/pull/590))
+- *(deps)* update docker.io/grafana/otel-lgtm docker tag to v0.33.1 ([#588](https://github.com/azerozero/grob/pull/588))
+- *(deps)* update docker.io/library/alpine docker tag to v3.24 ([#589](https://github.com/azerozero/grob/pull/589))
+- *(deps)* update docker.io/curlimages/curl docker tag to v8.22.0 ([#587](https://github.com/azerozero/grob/pull/587))
+
 ## [0.36.109](https://github.com/azerozero/grob/compare/v0.36.108...v0.36.109) - 2026-09-22
 
 ### Fixed
