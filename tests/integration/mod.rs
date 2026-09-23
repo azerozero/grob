@@ -5,6 +5,7 @@ mod compliance_test;
 mod conformance_test;
 mod dlp_test;
 mod e2e_test;
+#[cfg(feature = "policies")]
 mod hit_test;
 mod http_test;
 mod multi_tenant_isolation_test;

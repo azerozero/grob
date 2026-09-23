@@ -30,6 +30,25 @@ Restart Grob after changing the config:
 grob restart -d
 ```
 
+## Reload without restarting
+
+Routing, provider mappings, budgets, policies and the tool layer can be reloaded
+through `POST /api/config/reload` with an administrative credential. Existing
+requests finish on their original snapshot; subsequent requests use the new one.
+Invalid configuration, failed provider construction and changes to startup-only
+settings are rejected before the running snapshot changes. An API save rejected
+during validation or provider construction also leaves the config file unchanged.
+
+HTTP, JSON-RPC and MCP mutations share the same configuration validation and
+rebuild path. RPC `grob/config/set` changes are memory-only and revert on disk
+reload. Optional string fields accept a string or explicit `null`; other types
+are rejected. RPC `grob/tools/enable` and `grob/tools/disable` update the tool
+layer used by subsequent requests, without changing the file on disk.
+
+Changing listener, authentication mode, cache or DLP settings still requires a
+restart. For credential replacement without a reload, see
+[Manage Secrets](manage-secrets.md#replace-credentials-without-changing-the-agent).
+
 ## Add a fallback provider
 
 Add a second mapping with a higher priority number (lower priority = tried first):

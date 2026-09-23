@@ -410,3 +410,103 @@ async fn agent_key_stays_stable_while_upstream_credentials_change_for_every_prov
         no_leak.assert_async().await;
     }
 }
+
+#[tokio::test]
+async fn rpc_config_rejects_invalid_regex_and_optional_value_without_publication() {
+    let (home, state, app) = fixture();
+    let before = state.snapshot();
+    let disk = std::fs::read(home.path().join("config.toml")).unwrap();
+    for (key, value) in [
+        ("router.background_regex", json!("[")),
+        ("router.background", json!(42)),
+    ] {
+        let (_, response) = call(
+            &app,
+            "/rpc",
+            "synthetic-admin",
+            Some(rpc("grob/config/set", json!({"key":key, "value":value}))),
+            false,
+        )
+        .await;
+        assert!(response.get("error").is_some(), "{key}: {response}");
+        assert!(Arc::ptr_eq(&before, &state.snapshot()), "{key}");
+        assert_eq!(
+            std::fs::read(home.path().join("config.toml")).unwrap(),
+            disk
+        );
+    }
+}
+
+#[tokio::test]
+async fn failed_provider_rebuild_preserves_persisted_config_and_snapshot() {
+    let (home, state, _app) = fixture();
+    let before = state.snapshot();
+    let disk = std::fs::read(home.path().join("config.toml")).unwrap();
+    let mut candidate = before.config.clone();
+    candidate.providers[0].provider_type = "unknown-provider-type".into();
+    let error = super::config_guard::persist_and_reload(&state, &candidate)
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("Unknown provider type"));
+    assert!(Arc::ptr_eq(&before, &state.snapshot()));
+    assert_eq!(
+        std::fs::read(home.path().join("config.toml")).unwrap(),
+        disk
+    );
+    assert!(!home.path().join("config.toml.backup").exists());
+}
+
+#[tokio::test]
+async fn rpc_tool_changes_reach_the_next_provider_request() {
+    let mut backend = mockito::Server::new_async().await;
+    let (_home, state, app) = fixture();
+    let agent = agent(&app).await;
+    let mut config = state.snapshot().config.clone();
+    config.providers[0].base_url = Some(format!("{}/v1", backend.url()));
+    let secrets = crate::storage::secrets::build_backend(&config.secrets, state.grob_store.clone());
+    let registry = crate::providers::ProviderRegistry::from_configs_with_models(
+        &config.providers,
+        secrets,
+        Some(state.token_store.clone()),
+        &config.models,
+        &config.server.timeouts,
+    )
+    .unwrap();
+    *state.inner.write().unwrap() = Arc::new(ReloadableState::new(
+        config.clone(),
+        Router::new(config),
+        Arc::new(registry),
+    ));
+    for (action, expected_tools) in [("enable", true), ("disable", false)] {
+        let (_, response) = call(
+            &app,
+            "/rpc",
+            "synthetic-admin",
+            Some(rpc(
+                &format!("grob/tools/{action}"),
+                json!({"tool":"web_search"}),
+            )),
+            false,
+        )
+        .await;
+        assert!(response.get("error").is_none(), "{response}");
+        let mock = backend
+            .mock("POST", "/v1/chat/completions")
+            .match_request(move |request| {
+                let body: Value = serde_json::from_slice(request.body().unwrap()).unwrap();
+                let has_tool = body["tools"].as_array().is_some_and(|tools| {
+                    tools.iter().any(|tool| tool["function"]["name"] == "web_search")
+                });
+                has_tool == expected_tools
+            })
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(json!({"id":"mock", "object":"chat.completion", "model":"alpha", "choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}).to_string())
+            .expect(1)
+            .create_async()
+            .await;
+        let (status, body) = call(&app, "/v1/messages", &agent, Some(json!({"model":"alpha","max_tokens":20,"messages":[{"role":"user","content":"hello"}]})), false).await;
+        assert_eq!(status, StatusCode::OK, "{action}: {body}");
+        mock.assert_async().await;
+    }
+}

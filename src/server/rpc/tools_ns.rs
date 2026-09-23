@@ -3,9 +3,7 @@
 use super::auth::{require_role, CallerIdentity};
 use super::types::{rpc_err, Role, StatusResponse, ERR_INTERNAL};
 use crate::features::tool_layer::config::InjectRule;
-use crate::providers::ProviderRegistry;
-use crate::routing::classify::Router;
-use crate::server::{AppState, ReloadableState};
+use crate::server::AppState;
 use jsonrpsee::types::error::INVALID_PARAMS_CODE;
 use jsonrpsee::types::ErrorObjectOwned;
 use serde::{Deserialize, Serialize};
@@ -120,6 +118,7 @@ fn apply_enable(config: &mut crate::config::AppConfig, tool: &str) -> Result<(),
             format!("tool '{tool}' is already enabled"),
         ));
     }
+    config.tool_layer.enabled = true;
     config.tool_layer.inject.push(InjectRule {
         tool: tool.to_string(),
         if_absent: true,
@@ -156,20 +155,8 @@ fn swap_state(
     caller: &CallerIdentity,
     action: &str,
 ) -> Result<(), ErrorObjectOwned> {
-    let new_router = Router::new(new_config.clone());
-    let secret_backend =
-        crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
-    let new_registry = ProviderRegistry::from_configs_with_models(
-        &new_config.providers,
-        secret_backend.clone(),
-        Some(state.token_store.clone()),
-        &new_config.models,
-        &new_config.server.timeouts,
-    )
-    .map(Arc::new)
-    .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to rebuild providers: {e}")))?;
-
-    let new_inner = Arc::new(ReloadableState::new(new_config, new_router, new_registry));
+    let new_inner = crate::server::config_guard::prepare_state(state, new_config)
+        .map_err(|e| rpc_err(ERR_INTERNAL, e.to_string()))?;
     *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner;
 
     tracing::info!(

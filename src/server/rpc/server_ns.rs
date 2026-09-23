@@ -50,9 +50,6 @@ pub async fn reload_config(
     require_role(caller, Role::Admin)?;
 
     use crate::config::AppConfig;
-    use crate::providers::ProviderRegistry;
-    use crate::routing::classify::Router;
-    use crate::server::ReloadableState;
 
     tracing::info!(
         caller_ip = %caller.ip,
@@ -66,38 +63,10 @@ pub async fn reload_config(
     // rejected for a `server.host` the operator never wrote.
     crate::server::config_guard::preserve_startup_overrides(state, &mut new_config);
 
-    // Same shared fail-closed guard as the HTTP reload path.
-    crate::server::config_guard::ensure_config_reloadable(state, &new_config)
-        .map_err(|msg| rpc_err(ERR_INTERNAL, msg))?;
-
-    let new_router = Router::new(new_config.clone());
-
-    // `from_configs_with_models` resolves `secret:<name>` and `$ENV_VAR`
-    // placeholders internally via the supplied backend.
-    let secret_backend =
-        crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
-
-    let new_registry = ProviderRegistry::from_configs_with_models(
-        &new_config.providers,
-        secret_backend.clone(),
-        Some(state.token_store.clone()),
-        &new_config.models,
-        &new_config.server.timeouts,
-    )
-    .map(Arc::new)
-    .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to init providers: {e}")))?;
-
-    // The candidate is already structurally valid: `from_source` re-parsed it
-    // and ran `AppConfig::validate()`, and `from_configs_with_models` confirmed
-    // the registry builds. We do NOT gate the swap on live provider health — a
-    // momentarily unreachable provider must not block a config reload.
-    // In-flight requests continue on the old snapshot via their cached
-    // `Arc<ReloadableState>`.
-    let new_inner = Arc::new(ReloadableState::new(
-        new_config.clone(),
-        new_router,
-        new_registry.clone(),
-    ));
+    let new_inner = crate::server::config_guard::prepare_state(state, new_config)
+        .map_err(|e| rpc_err(ERR_INTERNAL, e.to_string()))?;
+    let probe_config = new_inner.config.clone();
+    let probe_registry = new_inner.provider_registry.clone();
 
     let active = state
         .active_requests
@@ -106,7 +75,7 @@ pub async fn reload_config(
 
     // Detached live-health probe as a signal only: logs warnings on unhealthy
     // router mappings after the swap, never blocking or reverting the reload.
-    crate::server::config_api::spawn_health_probe(new_config, new_registry);
+    crate::server::config_api::spawn_health_probe(probe_config, probe_registry);
 
     Ok(StatusResponse {
         status: "ok".into(),
@@ -119,6 +88,7 @@ pub async fn reload_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::ProviderRegistry;
     use std::io::Write;
 
     fn config_toml(metrics: &str) -> String {
@@ -164,7 +134,6 @@ actual_model = "alpha"
     #[tokio::test]
     async fn rpc_reload_rejects_metrics_token_change() {
         use crate::cli::{AppConfig, ConfigSource};
-        use crate::providers::ProviderRegistry;
 
         // On-disk config rotates the token to a different value.
         let mut file = tempfile::NamedTempFile::new().expect("temp file");
@@ -201,7 +170,6 @@ actual_model = "alpha"
     #[tokio::test]
     async fn rpc_reload_allows_unchanged_metrics_token() {
         use crate::cli::{AppConfig, ConfigSource};
-        use crate::providers::ProviderRegistry;
 
         let same = config_toml("\n[metrics]\nbearer_token = \"live\"\n");
         let mut file = tempfile::NamedTempFile::new().expect("temp file");

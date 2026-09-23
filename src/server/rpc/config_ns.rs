@@ -3,10 +3,8 @@
 use super::auth::{require_role, CallerIdentity};
 use super::types::{rpc_err, Role, StatusResponse, ERR_INTERNAL};
 use crate::config::AppConfig;
-use crate::providers::ProviderRegistry;
-use crate::routing::classify::Router;
-use crate::server::config_guard::{ensure_config_reloadable, is_section_or_key_denied};
-use crate::server::{AppState, ReloadableState};
+use crate::server::config_guard::is_section_or_key_denied;
+use crate::server::AppState;
 use jsonrpsee::types::error::INVALID_PARAMS_CODE;
 use jsonrpsee::types::ErrorObjectOwned;
 use std::sync::Arc;
@@ -59,28 +57,8 @@ pub async fn set(
     // Clone the active config so a validation failure leaves the snapshot intact.
     let mut new_config = state.snapshot().config.clone();
     apply_runtime_update(&mut new_config, key, value)?;
-    ensure_config_reloadable(state, &new_config)
-        .map_err(|message| rpc_err(INVALID_PARAMS_CODE, message))?;
-
-    // Rebuild the reloadable state from the mutated config and swap atomically.
-    // Mirrors the pattern in `server_ns::reload_config` and
-    // `config_guard::prepare_state`. We deliberately do NOT call
-    // `config_guard::persist_and_reload`: persistence to disk is a non-goal
-    // for #228 (in-memory mutation only).
-    let new_router = Router::new(new_config.clone());
-    let secret_backend =
-        crate::storage::secrets::build_backend(&new_config.secrets, state.grob_store.clone());
-    let new_registry = ProviderRegistry::from_configs_with_models(
-        &new_config.providers,
-        secret_backend.clone(),
-        Some(state.token_store.clone()),
-        &new_config.models,
-        &new_config.server.timeouts,
-    )
-    .map(Arc::new)
-    .map_err(|e| rpc_err(ERR_INTERNAL, format!("Failed to rebuild providers: {e}")))?;
-
-    let new_inner = Arc::new(ReloadableState::new(new_config, new_router, new_registry));
+    let new_inner = crate::server::config_guard::prepare_state(state, new_config)
+        .map_err(|e| rpc_err(INVALID_PARAMS_CODE, e.to_string()))?;
     *state.inner.write().unwrap_or_else(|e| e.into_inner()) = new_inner;
 
     tracing::info!(
@@ -158,6 +136,14 @@ fn resolve_dotted_path<'a>(
     Some(current)
 }
 
+fn optional_string(value: &serde_json::Value) -> Result<Option<String>, ErrorObjectOwned> {
+    match value {
+        serde_json::Value::Null => Ok(None),
+        serde_json::Value::String(text) => Ok(Some(text.clone())),
+        _ => Err(rpc_err(INVALID_PARAMS_CODE, "expected a string or null")),
+    }
+}
+
 /// Applies an in-memory mutation to `config` according to a dotted `key`.
 ///
 /// Splits `key` at the first `.` into `(section, sub_key)`, validates the
@@ -205,17 +191,17 @@ fn apply_runtime_update(
                     .ok_or_else(|| invalid("expected string for router.default".into()))?
                     .to_string();
             }
-            "background" => config.router.background = value.as_str().map(String::from),
-            "think" => config.router.think = value.as_str().map(String::from),
-            "websearch" => config.router.websearch = value.as_str().map(String::from),
-            "auto_map_regex" => config.router.auto_map_regex = value.as_str().map(String::from),
-            "background_regex" => config.router.background_regex = value.as_str().map(String::from),
+            "background" => config.router.background = optional_string(value)?,
+            "think" => config.router.think = optional_string(value)?,
+            "websearch" => config.router.websearch = optional_string(value)?,
+            "auto_map_regex" => config.router.auto_map_regex = optional_string(value)?,
+            "background_regex" => config.router.background_regex = optional_string(value)?,
             "gdpr" => {
                 config.router.gdpr = value
                     .as_bool()
                     .ok_or_else(|| invalid("expected bool for router.gdpr".into()))?;
             }
-            "region" => config.router.region = value.as_str().map(String::from),
+            "region" => config.router.region = optional_string(value)?,
             other => return Err(invalid(format!("unknown router key: {other}"))),
         },
         "budget" => match sub_key {

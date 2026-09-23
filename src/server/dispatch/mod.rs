@@ -512,7 +512,7 @@ pub(crate) async fn dispatch(
     };
 
     // ── Step 4.5: Tool layer (aliasing, injection, capability gating) ──
-    if let Some(ref tool_layer) = ctx.state.security.tool_layer {
+    if let Some(ref tool_layer) = ctx.inner.tool_layer {
         if let Some(primary) = sorted_mappings.first() {
             tool_layer.process(request, &primary.provider, &primary.actual_model);
         }

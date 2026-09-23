@@ -28,6 +28,7 @@ const RELOADABLE_SECTIONS: &[&str] = &[
     "user",
     "pledge",
     "tool_validation",
+    "tool_layer",
     "policies",
 ];
 
@@ -270,13 +271,6 @@ pub async fn persist_and_reload(
         }
     };
 
-    // Reject startup-only changes BEFORE persistence, so disk and runtime never
-    // diverge even when a config mutation path misses its field-level deny-list.
-    ensure_config_reloadable(state, config).map_err(super::RequestError::BadRequest)?;
-
-    config
-        .validate()
-        .map_err(|e| super::RequestError::BadRequest(e.to_string()))?;
     let candidate = prepare_state(state, config.clone())?;
 
     // 1. Publish a private, atomic backup before replacing the configuration.
@@ -306,27 +300,29 @@ pub async fn persist_and_reload(
     })?
     .map_err(|e| super::RequestError::Internal(anyhow::anyhow!("Failed to write config: {e}")))?;
 
-    // 3. Hot-reload: rebuild router + provider registry from the new config
+    // 3. Publish the already validated and built candidate
     *state.inner.write().unwrap_or_else(|e| e.into_inner()) = candidate;
 
     Ok(())
 }
 
-/// Prepares a candidate snapshot before any config is persisted.
+/// Validates and builds a complete reload candidate without publishing it.
 ///
-/// Resolves `secret:<name>` and `$ENV_VAR` placeholders in `[[providers]]
-/// api_key` before constructing the new registry. Without this step, a hot
-/// reload that touches a provider declared with `api_key = "secret:foo"`
-/// would push the literal placeholder back into the registry and every
-/// upstream call would fail with 401 until the daemon is fully restarted.
-/// Same code path as `server::init` and `preset::build_registry`.
-fn prepare_state(
+/// Every management surface uses this constructor. Callers retain control over
+/// persistence and post-swap validation probes. Provider background checkers are
+/// owned by the candidate. In-flight requests keep their old snapshot.
+///
+/// # Errors
+///
+/// Rejects startup-only changes, invalid configuration and provider build errors.
+pub(crate) fn prepare_state(
     state: &Arc<super::AppState>,
     config: crate::config::AppConfig,
 ) -> Result<Arc<super::ReloadableState>, super::RequestError> {
-    // NOTE: the `/metrics` token guard runs in `persist_and_reload` BEFORE any
-    // write, so it is intentionally not repeated here (this is reached only after
-    // that check has passed).
+    ensure_config_reloadable(state, &config).map_err(super::RequestError::BadRequest)?;
+    config
+        .validate()
+        .map_err(|e| super::RequestError::BadRequest(e.to_string()))?;
 
     let new_router = crate::routing::classify::Router::new(config.clone());
 
