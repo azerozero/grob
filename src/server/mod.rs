@@ -229,7 +229,7 @@ pub struct AppState {
     pub grob_store: Arc<crate::storage::GrobStore>,
     /// Identifies how the configuration was loaded (file, env, CLI).
     pub config_source: crate::cli::ConfigSource,
-    /// Counter of currently in-flight requests for graceful drain.
+    /// Counts active requests, streaming bodies and pending accounting for graceful drain.
     pub active_requests: std::sync::atomic::AtomicU64,
     /// Server start time (for health/upgrade coordination)
     pub started_at: chrono::DateTime<chrono::Utc>,
@@ -522,6 +522,7 @@ pub async fn start_server(
     lifecycle::spawn_oauth_callback(state.clone());
     lifecycle::bind_and_serve(&config, app, shutdown_signal).await?;
     lifecycle::drain_in_flight(&state).await;
+    state.grob_store.flush_spend();
     crate::shared::otel::shutdown_otel();
 
     Ok(())
@@ -1037,3 +1038,5 @@ actual_model = "alpha"
 
 #[cfg(test)]
 mod credential_boundary_tests;
+#[cfg(test)]
+mod credential_load_tests;

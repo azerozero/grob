@@ -247,7 +247,9 @@ pub(crate) async fn record_spend(
             let model = model_name.to_string();
             let tenant = tenant_id.map(str::to_string);
             let agent = agent_id.map(str::to_string);
+            let activity = super::handlers::ActiveRequestGuard::new(&state);
             tokio::spawn(async move {
+                let _activity = activity;
                 commit_spend(
                     &state,
                     &provider,

@@ -60,6 +60,8 @@ pub(crate) enum OAuthRefreshError {
     InvalidGrant,
     /// HTTP 401 without a specific OAuth error body — treat as terminal.
     Unauthorized,
+    /// A previous issuer request may have rotated the token before interruption.
+    OutcomeUnknown,
     /// Transient network error, rate limit, or 5xx from the authorization server.
     Transient,
 }
@@ -67,7 +69,10 @@ pub(crate) enum OAuthRefreshError {
 impl OAuthRefreshError {
     /// Returns `true` when the token must be marked `needs_reauth`.
     pub(crate) fn is_terminal(self) -> bool {
-        matches!(self, Self::InvalidGrant | Self::Unauthorized)
+        matches!(
+            self,
+            Self::InvalidGrant | Self::Unauthorized | Self::OutcomeUnknown
+        )
     }
 }
 
@@ -82,7 +87,9 @@ impl OAuthRefreshError {
 /// ```
 pub(crate) fn classify_refresh_error(msg: &str) -> OAuthRefreshError {
     let lower = msg.to_ascii_lowercase();
-    if lower.contains("invalid_grant")
+    if lower.contains("oauth refresh outcome is unknown") {
+        OAuthRefreshError::OutcomeUnknown
+    } else if lower.contains("invalid_grant")
         || lower.contains("invalid_token")
         || lower.contains("unauthorized_client")
     {

@@ -77,10 +77,8 @@ impl GrobStore {
     pub fn delete_oauth_token(&self, provider_id: &str) -> Result<()> {
         let _lock = self.credential_lock()?;
         let path = self.token_path(provider_id);
-        if path.exists() {
-            std::fs::remove_file(&path)
-                .with_context(|| format!("failed to delete token: {}", path.display()))?;
-        }
+        atomic::remove_durable(&path)
+            .with_context(|| format!("failed to delete token: {}", path.display()))?;
         Ok(())
     }
 

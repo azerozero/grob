@@ -82,7 +82,7 @@ impl GrobStore {
         if !path.exists() {
             return Ok(false);
         }
-        std::fs::remove_file(&path)
+        atomic::remove_durable(&path)
             .with_context(|| format!("failed to remove secret: {}", path.display()))?;
         Ok(true)
     }

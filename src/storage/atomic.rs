@@ -29,19 +29,39 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
 
     tmp.write_all(data)
         .context("atomic write: failed to write data")?;
+    #[cfg(test)]
+    super::process_tests::checkpoint("atomic-written");
     tmp.as_file()
         .sync_all()
         .context("atomic write: fsync failed")?;
+    #[cfg(test)]
+    super::process_tests::checkpoint("atomic-synced");
 
     tmp.persist(path)
         .map_err(|e| e.error)
         .with_context(|| format!("atomic write: rename to {} failed", path.display()))?;
+    #[cfg(test)]
+    super::process_tests::checkpoint("atomic-renamed");
 
     #[cfg(unix)]
     std::fs::File::open(parent)?
         .sync_all()
         .context("atomic write: parent fsync failed")?;
+    #[cfg(test)]
+    super::process_tests::checkpoint("atomic-published");
 
+    Ok(())
+}
+
+/// Removes a credential and syncs its directory before acknowledging deletion.
+pub(crate) fn remove_durable(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error).context("credential removal failed"),
+    }
+    #[cfg(unix)]
+    std::fs::File::open(path.parent().context("credential has no parent")?)?.sync_all()?;
     Ok(())
 }
 

@@ -86,7 +86,11 @@ impl SpendJournal {
             .context("journal file not open")?;
         let mut line = serde_json::to_vec(event)?;
         line.push(b'\n');
+        #[cfg(test)]
+        super::process_tests::checkpoint("journal-before-append");
         file.write_all(&line)?;
+        #[cfg(test)]
+        super::process_tests::checkpoint("journal-appended");
         Ok(())
     }
 

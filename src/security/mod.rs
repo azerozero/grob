@@ -7,6 +7,7 @@ pub mod cache;
 pub mod circuit_breaker;
 pub mod fips;
 pub mod headers;
+pub mod memory;
 pub mod merkle;
 pub mod provider_scorer;
 pub mod rate_limit;

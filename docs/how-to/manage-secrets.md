@@ -115,6 +115,21 @@ budget, rate limit, model and provider restrictions. CLI key operations use the
 same encrypted store whether the daemon is running or stopped; select the same
 `GROB_HOME` for both processes.
 
+Encrypted-store OAuth refreshes take a per-provider kernel file lock shared by
+all Grob processes. Waiting is limited to 30 seconds; the issuer request has a
+20-second deadline. Lock files remain in place and must not be deleted while
+Grob is running. Explicit credential replacement and deletion do not wait for
+the issuer request and remain authoritative over a late response.
+
+A durable refresh intent is written before contacting the issuer. If a process
+dies, is cancelled, or receives an ambiguous failure after the issuer may have
+rotated its token, Grob refuses to reuse that uncertain refresh token. Authenticate again
+with `grob connect --force-reauth`, or supply a new credential through the administrative OAuth
+flow. Do not delete the `.refresh.pending` file to force a retry. Supplying a new
+refresh token supersedes the old intent; editing expiration or reauthentication
+metadata does not. Legacy JSON stores only coordinate within one process; use
+the encrypted store when sharing credentials between processes.
+
 ## Memory and disk protection
 
 Authenticated upstream requests require HTTPS outside loopback. Provider clients
@@ -134,9 +149,13 @@ state is erased when the cipher is dropped. Literal credentials in TOML and
 environment variables do not gain these properties: migrate them to named encrypted secrets and remove
 old copies from configuration backups and shell setup after verifying the change.
 
+Use [process memory hardening](harden-memory.md) to disable dumps and, on Linux,
+optionally lock process memory against swap. These controls are opt-in and fail
+startup if a requested protection cannot be enabled. They do not encrypt RAM.
+
 An in-process RAM-encryption library would still need a decryption key in the
 same process. This implementation minimizes plaintext lifetime; it does not
-promise protection against process inspection, root access, core dumps, or every
+promise protection against a compromised process, root access, or every
 copy made by HTTP/TLS libraries. Filesystem snapshots, SSD wear levelling and old
 backups also prevent a guarantee of physical erasure. Replace or revoke the old
 credential with its issuer when retiring it.
