@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.111](https://github.com/azerozero/grob/compare/v0.36.110...v0.36.111) - 2026-09-23
+
+### Fixed
+
+- *(auth)* isolate agent access and support live credential replacement ([#600](https://github.com/azerozero/grob/pull/600))
+
+### Other
+
+- *(deps)* update Renovate to 44.109.1 ([#599](https://github.com/azerozero/grob/pull/599))
+- *(deps)* update ghcr.io/renovatebot/renovate docker tag to v44.109.0 ([#598](https://github.com/azerozero/grob/pull/598))
+
 ## [0.36.110](https://github.com/azerozero/grob/compare/v0.36.109...v0.36.110) - 2026-09-23
 
 ### Fixed
