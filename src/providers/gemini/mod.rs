@@ -30,6 +30,7 @@ use types::*;
 /// 3. Vertex AI (Google Cloud) - Uses Vertex AI API
 pub struct GeminiProvider {
     api_key: Option<SecretString>,
+    secret_backend: Option<Arc<dyn crate::storage::secrets::SecretBackend>>,
     base_url: String,
     models: Vec<String>,
     client: Client,
@@ -54,7 +55,7 @@ const GEMINI_RATE_LIMIT_RETRIES: u32 = 3;
 struct PreparedRequest {
     url: String,
     body: serde_json::Value,
-    auth_header: Option<String>,
+    auth_header: Option<zeroize::Zeroizing<String>>,
     api_key: Option<reqwest::header::HeaderValue>,
     is_oauth: bool,
 }
@@ -93,6 +94,7 @@ impl GeminiProvider {
                 .expect("Failed to build Gemini HTTP client");
         let key_pool = params.key_pool;
         Self {
+            secret_backend: params.secret_backend,
             api_key,
             base_url,
             models: params.models,
@@ -124,7 +126,7 @@ impl GeminiProvider {
         !model.contains("lite") && !model.contains("flash-lite")
     }
 
-    async fn auth_header(&self) -> Result<Option<String>, ProviderError> {
+    async fn auth_header(&self) -> Result<Option<zeroize::Zeroizing<String>>, ProviderError> {
         if self.oauth_provider.is_some() {
             let token = super::auth::resolve_access_token(
                 self.oauth_provider.as_deref(),
@@ -133,7 +135,10 @@ impl GeminiProvider {
                 "",
             )
             .await?;
-            Ok(Some(format!("Bearer {}", token)))
+            Ok(Some(zeroize::Zeroizing::new(format!(
+                "Bearer {}",
+                token.as_str()
+            ))))
         } else {
             Ok(None)
         }
@@ -319,24 +324,21 @@ impl GeminiProvider {
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
         // Use key pool if available, otherwise fall back to static api_key.
-        let pool_key_holder: Option<String> = self.key_pool.as_ref().map(|pool| {
+        let reference = if let Some(pool) = &self.key_pool {
             if *pool.strategy() == crate::cli::PoolStrategy::RoundRobin {
                 pool.advance();
             }
-            pool.current_key().expose_secret().to_string()
-        });
-        let key_str: String = match pool_key_holder {
-            Some(k) => k,
-            None => {
-                let key = self.api_key.as_ref().ok_or_else(|| {
-                    ProviderError::ConfigError(
-                        "Gemini provider requires either api_key, OAuth, or Vertex AI configuration"
-                            .to_string(),
-                    )
-                })?;
-                key.expose_secret().to_string()
-            }
+            pool.current_key()
+        } else {
+            self.api_key.as_ref().ok_or_else(|| {
+                ProviderError::ConfigError("Gemini requires an API credential".into())
+            })?
         };
+        let key = super::auth::resolve_api_key(
+            reference.expose_secret(),
+            self.secret_backend.as_deref(),
+        )?;
+        let key_str = key.expose_secret();
 
         let (action, alt_sse) = Self::url_parts(streaming);
         let url = format!(
@@ -348,7 +350,7 @@ impl GeminiProvider {
             tracing::debug!("📡 Using Gemini API (streaming): {}", url);
         }
 
-        let mut api_key = reqwest::header::HeaderValue::from_str(&key_str)
+        let mut api_key = reqwest::header::HeaderValue::from_str(key_str)
             .map_err(|_| ProviderError::ConfigError("Invalid Gemini API key header".to_string()))?;
         api_key.set_sensitive(true);
         let mut prepared = Self::serialize_gemini_body(url, gemini_request)?;
@@ -383,24 +385,28 @@ impl GeminiProvider {
     }
 
     /// Build an HTTP request from prepared data (used for non-retry paths).
-    fn build_http_request(&self, prep: &PreparedRequest) -> reqwest::RequestBuilder {
+    fn build_http_request(
+        &self,
+        prep: &PreparedRequest,
+    ) -> Result<reqwest::RequestBuilder, ProviderError> {
         let mut req_builder = self
             .client
             .post(&prep.url)
             .header("Content-Type", "application/json");
 
         if let Some(ref auth) = prep.auth_header {
-            req_builder = req_builder.header("Authorization", auth);
+            req_builder = req_builder.header("Authorization", auth.as_str());
         }
         if let Some(ref api_key) = prep.api_key {
             req_builder = req_builder.header("x-goog-api-key", api_key);
         }
 
-        for (key, value) in &self.custom_headers {
-            req_builder = req_builder.header(key, value);
-        }
-
-        req_builder.timeout(self.api_timeout).json(&prep.body)
+        let headers =
+            super::auth::resolve_headers(&self.custom_headers, self.secret_backend.as_deref())?;
+        Ok(req_builder
+            .headers(headers)
+            .timeout(self.api_timeout)
+            .json(&prep.body))
     }
 
     /// Checks response status and returns a structured [`ProviderError`] on failure.
@@ -472,7 +478,8 @@ impl LlmProvider for GeminiProvider {
 
         // Clone data for the retry closure
         let client = self.client.clone();
-        let custom_headers = self.custom_headers.clone();
+        let custom_headers =
+            super::auth::resolve_headers(&self.custom_headers, self.secret_backend.as_deref())?;
         let auth_header = prep.auth_header;
         let api_key = prep.api_key;
         let body = prep.body;
@@ -486,7 +493,7 @@ impl LlmProvider for GeminiProvider {
                         client.post(&url).header("Content-Type", "application/json");
 
                     if let Some(ref auth) = auth_header {
-                        req_builder = req_builder.header("Authorization", auth);
+                        req_builder = req_builder.header("Authorization", auth.as_str());
                     }
                     if let Some(ref api_key) = api_key {
                         req_builder = req_builder.header("x-goog-api-key", api_key);
@@ -523,7 +530,7 @@ impl LlmProvider for GeminiProvider {
         let prep = self.prepare_request(&request, true).await?;
         let is_oauth = prep.is_oauth;
 
-        let response = self.build_http_request(&prep).send().await?;
+        let response = self.build_http_request(&prep)?.send().await?;
 
         let response = Self::check_response(response, &model, is_oauth).await?;
 

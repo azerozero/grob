@@ -6,23 +6,12 @@ use crate::storage::GrobStore;
 use chrono::{Duration, Utc};
 use uuid::Uuid;
 
-/// Returns the RPC base URL if the server is running, `None` otherwise.
-async fn live_base_url(config: &cli::AppConfig) -> Option<String> {
-    let host = &config.server.host;
-    let port = config.server.port.value();
-    if crate::shared::instance::is_instance_running(host, port).await {
-        Some(cli::format_base_url(host, port))
-    } else {
-        None
-    }
-}
-
-/// Creates a new virtual API key via RPC or local store.
+/// Creates a new virtual API key in the shared encrypted store.
 // CLI command entry point: the parameter list mirrors the `key create` flags
 // (name, tenant, budget, rate_limit, allowed_models, allowed_providers, expiry).
 #[allow(clippy::too_many_arguments)]
 pub async fn cmd_key_create(
-    config: &cli::AppConfig,
+    _config: &cli::AppConfig,
     name: &str,
     tenant: &str,
     budget: Option<f64>,
@@ -31,145 +20,29 @@ pub async fn cmd_key_create(
     allowed_providers: Vec<String>,
     expires_in_days: Option<u64>,
 ) {
-    if let Some(base_url) = live_base_url(config).await {
-        create_via_rpc(&base_url, name, &allowed_providers).await;
-    } else {
-        create_local(
-            name,
-            tenant,
-            budget,
-            rate_limit,
-            allowed_models,
-            allowed_providers,
-            expires_in_days,
-        );
-    }
+    create_local(
+        name,
+        tenant,
+        budget,
+        rate_limit,
+        allowed_models,
+        allowed_providers,
+        expires_in_days,
+    );
 }
 
-/// Lists all virtual API keys via RPC or local store.
-pub async fn cmd_key_list(config: &cli::AppConfig, json: bool) {
-    if let Some(base_url) = live_base_url(config).await {
-        list_via_rpc(&base_url, json).await;
-    } else {
-        list_local(json);
-    }
+/// Lists all virtual API keys in the shared encrypted store.
+pub async fn cmd_key_list(_config: &cli::AppConfig, json: bool) {
+    list_local(json);
 }
 
-/// Revokes a virtual key via RPC or local store.
-pub async fn cmd_key_revoke(config: &cli::AppConfig, id_or_prefix: &str) {
-    if let Some(base_url) = live_base_url(config).await {
-        revoke_via_rpc(&base_url, id_or_prefix).await;
-    } else {
-        revoke_local(id_or_prefix);
-    }
+/// Revokes a virtual key in the shared encrypted store.
+pub async fn cmd_key_revoke(_config: &cli::AppConfig, id_or_prefix: &str) {
+    revoke_local(id_or_prefix);
 }
 
-// ── RPC path ──
-
-async fn create_via_rpc(base_url: &str, name: &str, allowed_providers: &[String]) {
-    use super::rpc_client::rpc_call;
-
-    let params = serde_json::json!({
-        "name": name,
-        "allowed_providers": allowed_providers,
-    });
-    match rpc_call(base_url, "grob/keys/create", Some(params)).await {
-        Ok(result) => {
-            println!("Virtual key created successfully.\n");
-            if let Some(id) = result["key_id"].as_str() {
-                println!("  ID:       {}", id);
-            }
-            if let Some(n) = result["name"].as_str() {
-                println!("  Name:     {}", n);
-            }
-            if let Some(p) = result["prefix"].as_str() {
-                println!("  Prefix:   {}", p);
-            }
-            if let Some(s) = result["secret"].as_str() {
-                println!("\n  Key: {}\n", s);
-                println!("  Save this key now -- it will not be shown again.");
-            }
-        }
-        Err(e) => {
-            eprintln!("Failed to create key via RPC: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-async fn list_via_rpc(base_url: &str, json: bool) {
-    use super::rpc_client::rpc_call;
-
-    match rpc_call(base_url, "grob/keys/list", None).await {
-        Ok(result) => {
-            if json {
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&result).unwrap_or_default()
-                );
-                return;
-            }
-
-            let keys = match result.as_array() {
-                Some(arr) => arr,
-                None => {
-                    println!("No virtual keys found.");
-                    return;
-                }
-            };
-
-            if keys.is_empty() {
-                println!("No virtual keys found.");
-                return;
-            }
-
-            println!(
-                "{:<36}  {:<16}  {:<14}  {:<8}  CREATED",
-                "ID", "NAME", "PREFIX", "REVOKED"
-            );
-            println!("{}", "-".repeat(90));
-
-            for k in keys {
-                println!(
-                    "{:<36}  {:<16}  {:<14}  {:<8}  {}",
-                    k["id"].as_str().unwrap_or("?"),
-                    truncate(k["name"].as_str().unwrap_or("?"), 16),
-                    k["prefix"].as_str().unwrap_or("?"),
-                    if k["revoked"].as_bool().unwrap_or(false) {
-                        "yes"
-                    } else {
-                        "no"
-                    },
-                    k["created_at"].as_str().unwrap_or("?"),
-                );
-            }
-
-            println!("\n{} key(s) total.", keys.len());
-        }
-        Err(e) => {
-            eprintln!("Failed to list keys via RPC: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-async fn revoke_via_rpc(base_url: &str, id_or_prefix: &str) {
-    use super::rpc_client::rpc_call;
-
-    let params = serde_json::json!({ "key_id": id_or_prefix });
-    match rpc_call(base_url, "grob/keys/revoke", Some(params)).await {
-        Ok(result) => {
-            let msg = result["message"].as_str().unwrap_or("Key revoked");
-            println!("{msg}");
-        }
-        Err(e) => {
-            eprintln!("Failed to revoke key via RPC: {e}");
-            std::process::exit(1);
-        }
-    }
-}
-
-// ── Local path (server not running) ──
+// The daemon reads virtual keys from the same encrypted store on each request.
+// Direct management keeps all CLI constraints identical while online or offline.
 
 fn create_local(
     name: &str,
@@ -192,7 +65,24 @@ fn create_local(
     let prefix = full_key[..12].to_string();
     let now = Utc::now();
 
-    let expires_at = expires_in_days.map(|days| now + Duration::days(days as i64));
+    let expires_at = match expires_in_days {
+        Some(days) => match i64::try_from(days)
+            .ok()
+            .and_then(Duration::try_days)
+            .and_then(|duration| now.checked_add_signed(duration))
+        {
+            Some(expiry) => Some(expiry),
+            None => {
+                eprintln!("Invalid key expiration duration");
+                std::process::exit(1);
+            }
+        },
+        None => None,
+    };
+    if budget.is_some_and(|value| !value.is_finite() || value < 0.0) {
+        eprintln!("Budget must be a finite nonnegative value");
+        std::process::exit(1);
+    }
 
     let record = VirtualKeyRecord {
         id: Uuid::new_v4(),

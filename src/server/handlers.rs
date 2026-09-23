@@ -18,8 +18,8 @@ use tracing::{debug, error};
 
 use super::middleware::AuditedAlready;
 use super::{
-    apply_transparency_headers, dispatch, extract_api_credential, extract_client_ip, openai_compat,
-    responses_compat, should_apply_transparency, AppState, RequestError, RequestId,
+    apply_transparency_headers, dispatch, extract_api_credential, openai_compat, responses_compat,
+    should_apply_transparency, AppState, RequestError, RequestId,
 };
 
 /// Extracts tenant_id with this priority:
@@ -378,6 +378,7 @@ fn prepare_dispatch(
     vk_ctx: &Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     headers: &HeaderMap,
     requested_model: &str,
+    peer_ip: &str,
 ) -> Result<DispatchPrelude, RequestError> {
     // Fail fast before any provider work: reject a scoped key on the inbound
     // model up front. The resolved model is re-checked post-routing in dispatch.
@@ -393,7 +394,6 @@ fn prepare_dispatch(
         .unwrap_or_default();
 
     let tenant_id = extract_tenant_id(vk_ctx, claims, headers);
-    let peer_ip = extract_client_ip(headers);
     let inner = state.snapshot();
     let session_key = tenant_id
         .as_deref()
@@ -410,7 +410,7 @@ fn prepare_dispatch(
         tenant_id,
         allowed_models,
         allowed_providers,
-        peer_ip,
+        peer_ip: peer_ip.to_string(),
         transparency_enabled,
         audited: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
@@ -651,6 +651,7 @@ pub(crate) async fn handle_openai_chat_completions(
     claims: Option<axum::Extension<crate::auth::GrobClaims>>,
     vk_ctx: Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     axum::Extension(request_id): axum::Extension<RequestId>,
+    axum::Extension(caller): axum::Extension<super::rpc::auth::CallerIdentity>,
     headers: HeaderMap,
     Json(openai_request): Json<openai_compat::OpenAIRequest>,
 ) -> Result<Response, RequestError> {
@@ -658,7 +659,7 @@ pub(crate) async fn handle_openai_chat_completions(
     let model = openai_request.model.clone();
     let is_streaming = openai_request.stream == Some(true);
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model, &caller.ip)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // Transform OpenAI → Anthropic format
@@ -745,6 +746,7 @@ pub(crate) async fn handle_responses(
     claims: Option<axum::Extension<crate::auth::GrobClaims>>,
     vk_ctx: Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     axum::Extension(request_id): axum::Extension<RequestId>,
+    axum::Extension(caller): axum::Extension<super::rpc::auth::CallerIdentity>,
     headers: HeaderMap,
     body_bytes: axum::body::Bytes,
 ) -> Result<Response, RequestError> {
@@ -774,7 +776,7 @@ pub(crate) async fn handle_responses(
         is_streaming,
     );
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model, &caller.ip)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // Transform Responses → canonical format
@@ -891,6 +893,7 @@ pub(crate) async fn handle_messages(
     claims: Option<axum::Extension<crate::auth::GrobClaims>>,
     vk_ctx: Option<axum::Extension<crate::auth::virtual_keys::VirtualKeyContext>>,
     axum::Extension(request_id): axum::Extension<RequestId>,
+    axum::Extension(caller): axum::Extension<super::rpc::auth::CallerIdentity>,
     headers: HeaderMap,
     Json(request_json): Json<serde_json::Value>,
 ) -> Result<Response, RequestError> {
@@ -902,7 +905,7 @@ pub(crate) async fn handle_messages(
         .unwrap_or("unknown")
         .to_string();
 
-    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model)?;
+    let prelude = prepare_dispatch(&state, &claims, &vk_ctx, &headers, &model, &caller.ip)?;
     let trace_id = state.observability.message_tracer.new_trace_id();
 
     // DEBUG: Log request body for debugging (gate serialization on log level)

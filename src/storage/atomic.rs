@@ -25,6 +25,8 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
         )
     })?;
 
+    crate::auth::token_store::set_owner_only_permissions(tmp.path())?;
+
     tmp.write_all(data)
         .context("atomic write: failed to write data")?;
     tmp.as_file()
@@ -34,6 +36,11 @@ pub(crate) fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     tmp.persist(path)
         .map_err(|e| e.error)
         .with_context(|| format!("atomic write: rename to {} failed", path.display()))?;
+
+    #[cfg(unix)]
+    std::fs::File::open(parent)?
+        .sync_all()
+        .context("atomic write: parent fsync failed")?;
 
     Ok(())
 }

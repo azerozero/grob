@@ -40,6 +40,7 @@ const REPO_URL: &str = "https://github.com/azerozero/grob";
 
 /// Shared context for building providers (timeout + auth settings).
 struct ProviderBuildContext {
+    secret_backend: Arc<dyn crate::storage::secrets::SecretBackend>,
     token_store: Option<TokenStore>,
     api_timeout: Duration,
     connect_timeout: Duration,
@@ -187,6 +188,7 @@ impl ProviderRegistry {
         ProviderParams {
             name: config.name.clone(),
             api_key,
+            secret_backend: Some(build_ctx.secret_backend.clone()),
             base_url: Some(base_url),
             models: config.models.clone(),
             oauth_provider: config.oauth_provider.clone(),
@@ -255,7 +257,15 @@ impl ProviderRegistry {
             "anthropic" => {
                 let params =
                     Self::build_params(config, api_key, "https://api.anthropic.com", build_ctx);
-                Ok(Box::new(AnthropicCompatibleProvider::new(params)))
+                Ok(Box::new(AnthropicCompatibleProvider::with_headers(
+                    params,
+                    config
+                        .headers
+                        .clone()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect(),
+                )))
             }
 
             "z.ai" | "minimax" | "zenmux" | "kimi-coding" => {
@@ -267,10 +277,14 @@ impl ProviderRegistry {
                     _ => unreachable!(),
                 };
                 let params = Self::build_params(config, api_key, base_url, build_ctx);
-                Ok(Box::new(AnthropicCompatibleProvider::named(
-                    &config.provider_type,
-                    base_url,
+                Ok(Box::new(AnthropicCompatibleProvider::with_headers(
                     params,
+                    config
+                        .headers
+                        .clone()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect(),
                 )))
             }
 
@@ -285,7 +299,7 @@ impl ProviderRegistry {
                 params.base_url = config.base_url.clone();
                 Ok(Box::new(GeminiProvider::new(
                     params,
-                    HashMap::new(),
+                    config.headers.clone().unwrap_or_default(),
                     None,
                     None,
                 )))
@@ -298,7 +312,7 @@ impl ProviderRegistry {
                 params.oauth_provider = None;
                 Ok(Box::new(GeminiProvider::new(
                     params,
-                    HashMap::new(),
+                    config.headers.clone().unwrap_or_default(),
                     config.project_id.clone(),
                     config.location.clone(),
                 )))
@@ -325,10 +339,14 @@ impl ProviderRegistry {
                     .as_deref()
                     .unwrap_or("https://api.anthropic.com");
                 let params = Self::build_params(config, api_key, base, build_ctx);
-                Ok(Box::new(AnthropicCompatibleProvider::named(
-                    "anthropic_compatible",
-                    base,
+                Ok(Box::new(AnthropicCompatibleProvider::with_headers(
                     params,
+                    config
+                        .headers
+                        .clone()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .collect(),
                 )))
             }
 
@@ -360,16 +378,29 @@ impl ProviderRegistry {
     /// `oauth_provider` reference.
     pub fn from_configs_with_models(
         configs: &[ProviderConfig],
-        secret_backend: &dyn crate::storage::secrets::SecretBackend,
+        secret_backend: Arc<dyn crate::storage::secrets::SecretBackend>,
         token_store: Option<TokenStore>,
         models: &[ModelConfig],
         timeouts: &TimeoutConfig,
     ) -> Result<Self, ProviderError> {
-        let resolved = crate::storage::secrets::resolve_provider_secrets(configs, secret_backend);
+        let mut resolved =
+            crate::storage::secrets::resolve_provider_secrets(configs, secret_backend.as_ref());
+        // Keep references, never a long-lived plaintext copy of named secrets.
+        // Startup resolution above still disables missing credentials gracefully.
+        for (source, target) in configs.iter().zip(&mut resolved) {
+            if source
+                .api_key
+                .as_ref()
+                .is_some_and(|key| secrecy::ExposeSecret::expose_secret(key).starts_with("secret:"))
+            {
+                target.api_key = source.api_key.clone();
+            }
+        }
         let configs = &resolved;
 
         let mut registry = Self::new();
         let build_ctx = ProviderBuildContext {
+            secret_backend,
             token_store,
             api_timeout: Duration::from_millis(timeouts.api_timeout_ms),
             connect_timeout: Duration::from_millis(timeouts.connect_timeout_ms),
@@ -840,7 +871,7 @@ mod tests {
 
         let registry = ProviderRegistry::from_configs_with_models(
             &providers,
-            &crate::storage::secrets::EnvBackend,
+            Arc::new(crate::storage::secrets::EnvBackend),
             None,
             &models,
             &TimeoutConfig::default(),
@@ -948,10 +979,10 @@ mod tests {
         // Test fixtures use literal API keys (no `secret:` / `$` prefix),
         // so any backend is a no-op here. Use `EnvBackend` because it is
         // stateless and avoids creating a temporary `GrobStore`.
-        let backend = crate::storage::secrets::EnvBackend;
+        let backend = Arc::new(crate::storage::secrets::EnvBackend);
         let registry = ProviderRegistry::from_configs_with_models(
             &providers,
-            &backend,
+            backend.clone(),
             None, // token_store
             &models,
             &TimeoutConfig::default(),
@@ -970,7 +1001,7 @@ mod tests {
         // this refactor. Three reload paths previously bypassed the secret
         // resolution step and shipped the literal `secret:openrouter` as
         // the upstream bearer token. Now `from_configs_with_models`
-        // requires a `&dyn SecretBackend` and applies resolution
+        // retains an `Arc<dyn SecretBackend>` and applies resolution
         // internally — any future caller that compiles also resolves.
         //
         // The `LlmProvider` trait does not expose the resolved api_key for
@@ -1000,9 +1031,9 @@ mod tests {
             }
         }
 
-        let backend = CountingBackend {
+        let backend = Arc::new(CountingBackend {
             calls: AtomicUsize::new(0),
-        };
+        });
         let providers = vec![ProviderConfig {
             name: "openrouter".to_string(),
             provider_type: "openrouter".to_string(),
@@ -1032,7 +1063,7 @@ mod tests {
 
         let registry = ProviderRegistry::from_configs_with_models(
             &providers,
-            &backend,
+            backend.clone(),
             None,
             &[],
             &TimeoutConfig::default(),

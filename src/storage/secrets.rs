@@ -33,6 +33,17 @@ pub trait SecretBackend: Send + Sync {
     fn label(&self) -> &'static str;
 }
 
+/// Resolves a literal credential or a live named reference without caching plaintext.
+pub(crate) fn resolve_reference(
+    reference: &str,
+    backend: &dyn SecretBackend,
+) -> Option<SecretString> {
+    match reference.strip_prefix("secret:") {
+        Some(name) => backend.get(DEFAULT_TENANT, name),
+        None => Some(SecretString::from(reference)),
+    }
+}
+
 /// AES-256-GCM encrypted store under `~/.grob/secrets/<tenant>/<name>.enc`.
 ///
 /// Falls back to the legacy flat layout (`~/.grob/secrets/<name>.enc`) for
@@ -129,10 +140,11 @@ impl FileBackend {
     }
 
     fn read_one(path: &std::path::Path) -> Option<SecretString> {
-        let bytes = std::fs::read(path).ok()?;
-        let value = String::from_utf8(bytes).ok()?;
-        let trimmed = value.strip_suffix('\n').unwrap_or(&value).to_string();
-        Some(SecretString::from(trimmed))
+        let bytes = zeroize::Zeroizing::new(std::fs::read(path).ok()?);
+        let value = std::str::from_utf8(&bytes).ok()?;
+        Some(SecretString::from(
+            value.strip_suffix('\n').unwrap_or(value),
+        ))
     }
 }
 

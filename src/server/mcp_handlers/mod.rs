@@ -41,6 +41,7 @@ pub use wizard::{handle_wizard_get_config, handle_wizard_run_doctor, handle_wiza
 /// Handles `POST /mcp` — dispatches on JSON-RPC `method` field.
 pub async fn handle_mcp_rpc(
     State(state): State<Arc<AppState>>,
+    axum::Extension(caller): axum::Extension<crate::server::rpc::auth::CallerIdentity>,
     Json(req): Json<JsonRpcRequest>,
 ) -> impl IntoResponse {
     let mcp = match state.security.mcp.as_ref() {
@@ -53,6 +54,25 @@ pub async fn handle_mcp_rpc(
         }
     };
 
+    let read_only = matches!(
+        req.method.as_str(),
+        "tool_matrix/query"
+            | "tool_matrix/report"
+            | "tools/list"
+            | "wizard_get_config"
+            | "wizard_run_doctor"
+    );
+    if !read_only
+        && !caller
+            .role
+            .has_at_least(crate::server::rpc::types::Role::Admin)
+    {
+        return Json(to_json_value(Err(JsonRpcError::forbidden(
+            req.id,
+            "Administrative credential required",
+        ))));
+    }
+
     let result = match req.method.as_str() {
         "tool_matrix/query" => methods::handle_query(mcp, req.params, req.id.clone()).await,
         "tool_matrix/bench" => methods::handle_bench(mcp, req.params, req.id.clone()).await,
@@ -62,20 +82,44 @@ pub async fn handle_mcp_rpc(
         "grob_autotune" => handle_autotune(&state, req.params, req.id.clone()).await,
         "grob_hint" => hint::handle_hint(&state, req.params, req.id.clone()).await,
         "grob_keys" => {
-            control_bridge::handle_control_tool(&state, "grob/keys", req.params, req.id.clone())
-                .await
+            control_bridge::handle_control_tool(
+                &state,
+                &caller,
+                "grob/keys",
+                req.params,
+                req.id.clone(),
+            )
+            .await
         }
         "grob_tools" => {
-            control_bridge::handle_control_tool(&state, "grob/tools", req.params, req.id.clone())
-                .await
+            control_bridge::handle_control_tool(
+                &state,
+                &caller,
+                "grob/tools",
+                req.params,
+                req.id.clone(),
+            )
+            .await
         }
         "grob_hit" => {
-            control_bridge::handle_control_tool(&state, "grob/hit", req.params, req.id.clone())
-                .await
+            control_bridge::handle_control_tool(
+                &state,
+                &caller,
+                "grob/hit",
+                req.params,
+                req.id.clone(),
+            )
+            .await
         }
         "grob_pledge" => {
-            control_bridge::handle_control_tool(&state, "grob/pledge", req.params, req.id.clone())
-                .await
+            control_bridge::handle_control_tool(
+                &state,
+                &caller,
+                "grob/pledge",
+                req.params,
+                req.id.clone(),
+            )
+            .await
         }
         "wizard_get_config" => handle_wizard_get_config(&state, req.params, req.id.clone()).await,
         "wizard_set_section" => handle_wizard_set_section(&state, req.params, req.id.clone()).await,

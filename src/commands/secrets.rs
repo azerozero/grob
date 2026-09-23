@@ -6,7 +6,7 @@
 //!
 //! Three modes for `[[providers]] api_key`:
 //!
-//! - `secret:<name>`     → looked up in this store at startup
+//! - `secret:<name>`     → looked up in this store for each request
 //! - `$ENV_VAR`          → resolved from process env at startup
 //! - `<plain string>`    → used as-is (least secure, accepted for dev)
 
@@ -40,7 +40,7 @@ pub fn cmd_secrets_add(name: &str) {
     print!("Enter value for '{name}' (one line, will be encrypted): ");
     let _ = io::stdout().flush();
 
-    let mut value = String::new();
+    let mut value = zeroize::Zeroizing::new(String::new());
     if io::stdin().lock().read_line(&mut value).is_err() {
         eprintln!("error: failed to read value from stdin");
         std::process::exit(1);

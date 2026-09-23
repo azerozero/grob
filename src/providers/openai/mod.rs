@@ -258,7 +258,7 @@ impl OpenAIProvider {
             req_builder = Self::apply_oauth_headers(req_builder, auth_value, true, &self.base.name);
         }
 
-        req_builder = self.base.apply_headers(req_builder);
+        req_builder = self.base.apply_headers(req_builder)?;
 
         // SAFETY: auth_value is sent only in the Authorization header to the upstream API.
         // It is never logged or exposed in tracing output.
@@ -326,7 +326,7 @@ impl OpenAIProvider {
                 Self::apply_oauth_headers(req_builder, auth_value, false, &self.base.name);
         }
 
-        req_builder = self.base.apply_headers(req_builder);
+        req_builder = self.base.apply_headers(req_builder)?;
 
         // SAFETY: auth_value is sent only in the Authorization header to the upstream API.
         // It is never logged or exposed in tracing output.
@@ -465,7 +465,7 @@ impl LlmProvider for OpenAIProvider {
             .base
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", auth_value))
+            .header("Authorization", format!("Bearer {}", auth_value.as_str()))
             .header("Content-Type", "application/json")
             .header("accept", "text/event-stream");
 
@@ -474,7 +474,7 @@ impl LlmProvider for OpenAIProvider {
                 Self::apply_oauth_headers(req_builder, &auth_value, use_responses, &self.base.name);
         }
 
-        req_builder = self.base.apply_headers(req_builder);
+        req_builder = self.base.apply_headers(req_builder)?;
 
         // SAFETY: auth_value is sent only in the Authorization header to the upstream API.
         // It is never logged or exposed in tracing output.

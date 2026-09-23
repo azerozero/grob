@@ -1,51 +1,13 @@
-use grob::server::rpc::auth::{method_required_role, require_role, resolve_caller, CallerIdentity};
+use grob::control::engine::{parse_method, required_role};
+use grob::server::rpc::auth::{require_role, CallerIdentity};
 use grob::server::rpc::types::{
-    BudgetCurrent, Role, SpendBreakdown, StatusResponse, ERR_FORBIDDEN, ERR_UNAUTHORIZED,
+    BudgetCurrent, Role, SpendBreakdown, StatusResponse, ERR_FORBIDDEN,
 };
 
-// ── AuthN tests ──
-
-#[test]
-fn test_localhost_ipv4_is_superadmin() {
-    let caller = resolve_caller("127.0.0.1", None, "api_key", None).unwrap();
-    assert_eq!(caller.role, Role::Superadmin);
-    assert_eq!(caller.ip, "127.0.0.1");
-}
-
-#[test]
-fn test_localhost_ipv6_is_superadmin() {
-    let caller = resolve_caller("::1", None, "jwt", None).unwrap();
-    assert_eq!(caller.role, Role::Superadmin);
-}
-
-#[test]
-fn test_remote_no_token_api_key_mode_rejected() {
-    let err = resolve_caller("10.0.0.1", None, "api_key", None).unwrap_err();
-    assert_eq!(err.code(), ERR_UNAUTHORIZED);
-}
-
-#[test]
-fn test_remote_with_virtual_key_is_operator() {
-    let caller = resolve_caller(
-        "192.168.1.100",
-        Some("grob_abcdef1234567890"),
-        "api_key",
-        None,
-    )
-    .unwrap();
-    assert_eq!(caller.role, Role::Operator);
-}
-
-#[test]
-fn test_auth_mode_none_grants_operator() {
-    let caller = resolve_caller("8.8.8.8", None, "none", None).unwrap();
-    assert_eq!(caller.role, Role::Operator);
-}
-
-#[test]
-fn test_jwt_token_is_operator() {
-    let caller = resolve_caller("10.0.0.1", Some("eyJhbGciOiJSUzI1NiJ9.xxx"), "jwt", None).unwrap();
-    assert_eq!(caller.role, Role::Operator);
+// Authentication is exercised through the actual HTTP/RPC/MCP router in
+// server::credential_boundary_tests; peer addresses never manufacture a role.
+fn method_required_role(method: &str) -> Option<Role> {
+    parse_method(method, None).map(|action| required_role(&action))
 }
 
 // ── AuthZ RBAC tests ──
@@ -88,13 +50,13 @@ fn test_require_role_observer_cannot_reload() {
 }
 
 #[test]
-fn test_require_role_operator_can_reload() {
+fn test_require_role_operator_cannot_reload() {
     let caller = CallerIdentity {
         role: Role::Operator,
         ip: "10.0.0.1".into(),
         tenant_id: String::new(),
     };
-    assert!(require_role(&caller, Role::Operator).is_ok());
+    assert!(require_role(&caller, Role::Admin).is_err());
 }
 
 #[test]
@@ -123,29 +85,29 @@ fn test_read_methods_are_observer() {
     for method in &read_methods {
         assert_eq!(
             method_required_role(method),
-            Role::Observer,
+            Some(Role::Observer),
             "{method} should require Observer"
         );
     }
 }
 
 #[test]
-fn test_reload_config_requires_operator() {
+fn test_reload_config_requires_admin() {
     assert_eq!(
         method_required_role("grob/server/reload_config"),
-        Role::Operator
+        Some(Role::Admin)
     );
 }
 
 #[test]
 fn test_config_methods_require_admin() {
-    assert_eq!(method_required_role("grob/config/update"), Role::Admin);
-    assert_eq!(method_required_role("grob/keys/create"), Role::Admin);
+    assert_eq!(method_required_role("grob/config/set"), Some(Role::Admin));
+    assert_eq!(method_required_role("grob/keys/create"), Some(Role::Admin));
 }
 
 #[test]
-fn test_unknown_methods_require_superadmin() {
-    assert_eq!(method_required_role("grob/unknown/foo"), Role::Superadmin);
+fn test_unknown_methods_are_rejected() {
+    assert_eq!(method_required_role("grob/unknown/foo"), None);
 }
 
 // ── JSON-RPC serialization tests ──

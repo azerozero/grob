@@ -17,6 +17,7 @@ use std::time::Duration;
 pub(crate) struct ProviderBase {
     pub name: String,
     pub api_key: SecretString,
+    pub secret_backend: Option<Arc<dyn crate::storage::secrets::SecretBackend>>,
     pub base_url: String,
     pub client: Client,
     pub models: Vec<String>,
@@ -39,6 +40,7 @@ impl ProviderBase {
         Self {
             name: params.name,
             api_key: params.api_key,
+            secret_backend: params.secret_backend,
             base_url: params.base_url.unwrap_or_default(),
             client,
             models: params.models,
@@ -69,32 +71,42 @@ impl ProviderBase {
     pub async fn resolve_auth(
         &self,
         config_fn: fn() -> OAuthConfig,
-    ) -> Result<String, ProviderError> {
+    ) -> Result<zeroize::Zeroizing<String>, ProviderError> {
         // When a key pool is configured, use its current key instead of the
         // static api_key field. Round-robin pools advance on every call.
-        let effective_key: String = if let Some(ref pool) = self.key_pool {
+        let reference = if let Some(ref pool) = self.key_pool {
             if *pool.strategy() == crate::cli::PoolStrategy::RoundRobin {
                 pool.advance();
             }
-            pool.current_key().expose_secret().to_string()
+            pool.current_key()
         } else {
-            self.api_key.expose_secret().to_string()
+            &self.api_key
         };
+        let effective_key = super::auth::resolve_api_key(
+            reference.expose_secret(),
+            self.secret_backend.as_deref(),
+        )?;
 
         super::auth::resolve_access_token(
             self.oauth_provider.as_deref(),
             self.token_store.as_ref(),
             config_fn,
-            &effective_key,
+            effective_key.expose_secret(),
         )
         .await
     }
 
     /// Appends custom headers to a request builder.
-    pub fn apply_headers(&self, mut builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        for (key, value) in &self.custom_headers {
-            builder = builder.header(key, value);
-        }
-        builder
+    pub fn apply_headers(
+        &self,
+        builder: reqwest::RequestBuilder,
+    ) -> Result<reqwest::RequestBuilder, ProviderError> {
+        let headers = super::auth::resolve_headers(
+            self.custom_headers
+                .iter()
+                .map(|(name, value)| (name, value)),
+            self.secret_backend.as_deref(),
+        )?;
+        Ok(builder.headers(headers))
     }
 }

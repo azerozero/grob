@@ -83,6 +83,21 @@ impl std::fmt::Debug for GrobStore {
 }
 
 impl GrobStore {
+    /// Serializes credential mutations between daemon and CLI processes.
+    pub(crate) fn credential_lock(&self) -> anyhow::Result<std::fs::File> {
+        let path = self.base_dir.join(".credentials.lock");
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let lock = options.open(path)?;
+        lock.lock()?;
+        Ok(lock)
+    }
+
     /// Opens or creates the storage directory.
     ///
     /// Replays the current-month spend journal into memory.
@@ -463,3 +478,6 @@ mod tests {
         assert_eq!(store.get_secret("rotating").unwrap().expose_secret(), "v2");
     }
 }
+
+#[cfg(test)]
+mod credential_tests;

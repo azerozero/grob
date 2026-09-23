@@ -251,6 +251,8 @@ pub struct ProviderParams {
     pub name: String,
     /// API key for authenticating requests (wrapped to prevent accidental logging).
     pub api_key: SecretString,
+    /// Backend retained for resolving named credentials on every request.
+    pub secret_backend: Option<std::sync::Arc<dyn crate::storage::secrets::SecretBackend>>,
     /// Custom base URL override for the provider endpoint.
     pub base_url: Option<String>,
     /// List of model identifiers this provider serves.

@@ -413,10 +413,20 @@ impl OAuthClient {
     /// request to the token endpoint fails, or the provider rejects
     /// the refresh request.
     pub async fn refresh_token(&self, provider_id: &str) -> Result<OAuthToken> {
-        let existing_token = self
+        let before = self
             .token_store
             .get(provider_id)
             .context("No token found for provider")?;
+        let _refresh = self.token_store.lock_refresh().await;
+        let existing_token = self
+            .token_store
+            .get(provider_id)
+            .context("Token removed before refresh")?;
+        if before.access_token.expose_secret() != existing_token.access_token.expose_secret()
+            || before.refresh_token.expose_secret() != existing_token.refresh_token.expose_secret()
+        {
+            return Ok(existing_token);
+        }
 
         #[derive(Deserialize)]
         struct TokenResponse {
@@ -428,15 +438,26 @@ impl OAuthClient {
         let response = self.do_refresh(&existing_token).await?;
 
         if !response.status().is_success() {
+            if let Some(current) = self.token_store.get(provider_id) {
+                if current.access_token.expose_secret()
+                    != existing_token.access_token.expose_secret()
+                    || current.refresh_token.expose_secret()
+                        != existing_token.refresh_token.expose_secret()
+                {
+                    return Ok(current);
+                }
+            }
+
             let status = response.status();
-            let body = response.text().await.unwrap_or_default();
-            return Err(anyhow!("Token refresh failed: {} - {}", status, body));
+            return Err(anyhow!("Token refresh failed: {}", status));
         }
 
-        let response_text = response
-            .text()
-            .await
-            .context("Failed to read response body")?;
+        let response_text = zeroize::Zeroizing::new(
+            response
+                .text()
+                .await
+                .context("Failed to read response body")?,
+        );
         tracing::debug!(
             "🔍 Token refresh response received ({} bytes)",
             response_text.len()
@@ -453,15 +474,23 @@ impl OAuthClient {
             refresh_token: token_response
                 .refresh_token
                 .map(SecretString::from)
-                .unwrap_or(existing_token.refresh_token),
+                .unwrap_or_else(|| existing_token.refresh_token.clone()),
             expires_at,
-            enterprise_url: existing_token.enterprise_url,
-            project_id: existing_token.project_id,
+            enterprise_url: existing_token.enterprise_url.clone(),
+            project_id: existing_token.project_id.clone(),
             needs_reauth: None,
         };
 
-        self.token_store.save(token.clone())?;
-        Ok(token)
+        if self
+            .token_store
+            .replace_if_current(&existing_token, token.clone())?
+        {
+            Ok(token)
+        } else {
+            self.token_store
+                .get(provider_id)
+                .context("Token removed during refresh")
+        }
     }
 
     /// Send the provider-specific token refresh request.

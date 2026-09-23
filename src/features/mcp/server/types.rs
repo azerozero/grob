@@ -83,6 +83,18 @@ impl JsonRpcResponse {
 }
 
 impl JsonRpcError {
+    /// Creates an authorization error without reporting it as a server failure.
+    pub(crate) fn forbidden(id: serde_json::Value, message: &str) -> Self {
+        Self {
+            jsonrpc: JSONRPC_VERSION,
+            error: RpcError {
+                code: -32002,
+                message: message.into(),
+            },
+            id,
+        }
+    }
+
     /// Creates a method-not-found error.
     pub fn method_not_found(id: serde_json::Value, method: &str) -> Self {
         Self {

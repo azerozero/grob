@@ -13,6 +13,7 @@
 //! remain in `crate::cli::config` and are re-imported here.
 
 use anyhow::{Context, Result};
+pub(crate) mod redaction;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

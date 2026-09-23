@@ -42,6 +42,7 @@ dependencies = [
  "cipher 0.5.2",
  "cpubits",
  "cpufeatures 0.3.1",
+ "zeroize",
 ]
 
 [[package]]
@@ -70,6 +71,7 @@ dependencies = [
  "ctr 0.10.1",
  "ctutils",
  "ghash 0.6.0",
+ "zeroize",
 ]
 
 [[package]]
@@ -2026,6 +2028,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2eecf2d5dc9b66b732b97707a0210906b1d30523eb773193ab777c0c84b3e8d5"
 dependencies = [
  "polyval 0.7.3",
+ "zeroize",
 ]
 
 [[package]]
@@ -4006,6 +4009,7 @@ dependencies = [
  "cpubits",
  "cpufeatures 0.3.1",
  "universal-hash 0.6.1",
+ "zeroize",
 ]
 
 [[package]]
