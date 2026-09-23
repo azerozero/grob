@@ -6,8 +6,8 @@ Multi-provider LLM routing proxy that sits between AI coding assistants and LLM 
 
 - **Language**: Rust 2021 edition (~67K LOC, ~800 public items, 100% doc coverage)
 - **Runtime**: Tokio async
-- **HTTP framework**: Axum 0.7 with Tower middleware
-- **HTTP client**: reqwest 0.12 (HTTP/2, rustls)
+- **HTTP framework**: Axum 0.8 with Tower middleware
+- **HTTP client**: reqwest 0.13 (HTTP/2, rustls, platform CA store)
 - **Config**: TOML (serde)
 - **Storage**: Atomic files + append-only JSONL journals (tokens in `~/.grob/tokens/*.json.enc`, spend in `~/.grob/spend/YYYY-MM.jsonl`)
 - **CLI**: clap 4 (derive mode)
