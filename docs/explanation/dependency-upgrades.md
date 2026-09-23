@@ -19,14 +19,13 @@ CA bundle copied from the build image. OAuth form bodies and URL query encoding
 are explicitly enabled. Credential-bearing clients still reject insecure
 remote endpoints and disable redirects.
 
-## OpenTelemetry compatibility hold
+## OpenTelemetry compatibility
 
-The latest published tracing-opentelemetry 0.33 requires opentelemetry 0.32.
-Moving the SDK and exporters to 0.33 alone creates incompatible Context and
-Tracer types, so the complete OpenTelemetry stack stays on 0.32 for now.
-Renovate groups these libraries separately and requests dashboard approval;
-updates remain visible instead of being excluded by a version filter.
+The SDK and exporters use OpenTelemetry 0.33 together with
+tracing-opentelemetry 0.34, released on 23 September 2026. The previous bridge
+release (0.33) required SDK 0.32, so upgrading only the SDK produced incompatible
+Context and Tracer types. The coordinated upgrade preserves all three signals:
+traces, logs and metrics.
 
-Approve that group when a released tracing-opentelemetry supports the proposed
-SDK version, then run the all-features tests and Clippy, including the OTLP
-trace, log and metrics paths.
+Renovate groups the SDK, exporters and tracing bridge together for review.
+Validate this group with all-features tests and Clippy before merging.
