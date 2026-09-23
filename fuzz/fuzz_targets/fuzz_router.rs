@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 
-use grob::cli::{AppConfig, RouterConfig, PromptRule, ServerConfig};
+use grob::cli::{AppConfig, PromptRule, RouterConfig, ServerConfig};
 use grob::models::{CanonicalRequest, Message, MessageContent};
 use grob::routing::classify::Router;
 
@@ -67,6 +67,15 @@ fn make_config() -> AppConfig {
         pledge: Default::default(),
         policies: vec![],
         tool_layer: Default::default(),
+        tiers: Default::default(),
+        classifier: Default::default(),
+        pricing: Default::default(),
+        secrets: Default::default(),
+        mcp: Default::default(),
+        metrics: Default::default(),
+        tool_validation: Default::default(),
+        tee: Default::default(),
+        fips: Default::default(),
     }
 }
 
