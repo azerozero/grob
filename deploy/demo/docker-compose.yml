@@ -56,7 +56,7 @@ services:
 
   # --- Stack d'observabilité tout-en-un ---------------------------------------
   lgtm:
-    image: docker.io/grafana/otel-lgtm:0.11.10
+    image: docker.io/grafana/otel-lgtm:0.33.1
     environment:
       # Coupe l'accès anonyme Admin par défaut de l'image ; admin/admin suffit.
       # (Laisser à true rendrait le tableau de bord visible sans login — au
