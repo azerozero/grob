@@ -92,7 +92,7 @@ services:
 
   # --- Trafic déterministe 24/7 -----------------------------------------------
   seed:
-    image: docker.io/curlimages/curl:8.11.1
+    image: docker.io/curlimages/curl:8.22.0
     entrypoint: ["sh", "/seed.sh"]
     environment:
       - GROB_URL=http://grob:8080
