@@ -17,7 +17,8 @@ RUN cargo chef prepare --recipe-path recipe.json
 # layer matches the final build's compilation flags. Otherwise the chef
 # cache is invalidated on every build.
 FROM chef AS builder
-ENV RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes"
+ENV RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes" \
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=gcc
 COPY --from=planner /usr/src/grob/recipe.json recipe.json
 RUN cargo chef cook --release --locked --target x86_64-unknown-linux-musl --recipe-path recipe.json
 
