@@ -53,7 +53,7 @@ jobs:
         with:
           configurationFile: .github/renovate-config.json
           token: ${{ steps.app-token.outputs.token }}
-          renovate-version: 44.107.3
+          renovate-version: 44.108.2
         env:
           # Use the read-only workflow token for public dependency changelogs.
           RENOVATE_GITHUB_COM_TOKEN: ${{ github.token }}
