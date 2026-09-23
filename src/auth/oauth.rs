@@ -246,6 +246,7 @@ impl OAuthClient {
             config,
             token_store,
             http_client: credential_transport::client_builder()
+                .timeout(std::time::Duration::from_secs(20))
                 .build()
                 .expect("Failed to build OAuth HTTP client"),
         }
@@ -417,13 +418,15 @@ impl OAuthClient {
             .token_store
             .get(provider_id)
             .context("No token found for provider")?;
-        let _refresh = self.token_store.lock_refresh().await;
+        let _refresh = self.token_store.lock_refresh(provider_id).await?;
         let existing_token = self
             .token_store
             .get(provider_id)
             .context("Token removed before refresh")?;
         if before.access_token.expose_secret() != existing_token.access_token.expose_secret()
             || before.refresh_token.expose_secret() != existing_token.refresh_token.expose_secret()
+            || before.expires_at != existing_token.expires_at
+            || before.needs_reauth != existing_token.needs_reauth
         {
             return Ok(existing_token);
         }
@@ -435,9 +438,15 @@ impl OAuthClient {
             expires_in: i64,
         }
 
+        self.token_store.begin_refresh(&existing_token)?;
         let response = self.do_refresh(&existing_token).await?;
 
         if !response.status().is_success() {
+            // A server/transport failure can occur after rotation. Only explicit
+            // authentication rejection proves that this attempt issued no token.
+            if matches!(response.status().as_u16(), 400 | 401 | 403) {
+                self.token_store.finish_refresh(provider_id)?;
+            }
             if let Some(current) = self.token_store.get(provider_id) {
                 if current.access_token.expose_secret()
                     != existing_token.access_token.expose_secret()
@@ -481,10 +490,14 @@ impl OAuthClient {
             needs_reauth: None,
         };
 
+        #[cfg(test)]
+        crate::storage::process_tests::checkpoint("refresh-received");
+
         if self
             .token_store
             .replace_if_current(&existing_token, token.clone())?
         {
+            self.token_store.finish_refresh(provider_id)?;
             Ok(token)
         } else {
             self.token_store

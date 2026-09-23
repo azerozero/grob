@@ -16,7 +16,7 @@ fn token(value: &str) -> OAuthToken {
     }
 }
 
-fn key() -> VirtualKeyRecord {
+pub(super) fn key() -> VirtualKeyRecord {
     let (secret, key_hash) = crate::auth::virtual_keys::generate_key();
     VirtualKeyRecord {
         id: uuid::Uuid::new_v4(),

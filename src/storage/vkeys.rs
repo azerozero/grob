@@ -146,11 +146,15 @@ impl GrobStore {
             ..old.clone()
         };
         self.write_virtual_key(&replacement)?;
+        #[cfg(test)]
+        super::process_tests::checkpoint("rotation-replacement");
         old.revoked = true;
         if let Err(error) = self.write_virtual_key(&old) {
-            std::fs::remove_file(self.vkey_hash_path(&replacement.key_hash))?;
+            atomic::remove_durable(&self.vkey_hash_path(&replacement.key_hash))?;
             return Err(error);
         }
+        #[cfg(test)]
+        super::process_tests::checkpoint("rotation-revoked");
         Ok((replacement, secret))
     }
 
@@ -168,16 +172,12 @@ impl GrobStore {
         else {
             return Ok(false);
         };
-        std::fs::remove_file(self.vkey_hash_path(&record.key_hash))?;
+        atomic::remove_durable(&self.vkey_hash_path(&record.key_hash))?;
         let legacy = self
             .base_dir
             .join("vkeys")
             .join(format!("id_{id}.json.enc"));
-        match std::fs::remove_file(legacy) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error.into()),
-        }
+        atomic::remove_durable(&legacy)?;
         Ok(true)
     }
 }

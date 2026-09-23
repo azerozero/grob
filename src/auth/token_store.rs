@@ -109,6 +109,12 @@ pub struct TokenStore {
     store: Option<std::sync::Arc<crate::storage::GrobStore>>,
 }
 
+/// Releases the refresh lease on cancellation, completion, or process exit.
+pub(crate) struct RefreshGuard<'a> {
+    _file: Option<std::fs::File>,
+    _memory: Option<tokio::sync::MutexGuard<'a, ()>>,
+}
+
 impl TokenStore {
     /// Creates a new token store backed by [`GrobStore`](crate::storage::GrobStore).
     ///
@@ -186,8 +192,31 @@ impl TokenStore {
         Ok(())
     }
 
-    pub(crate) async fn lock_refresh(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.refresh_lock.lock().await
+    pub(crate) async fn lock_refresh(&self, provider_id: &str) -> Result<RefreshGuard<'_>> {
+        if let Some(store) = &self.store {
+            return Ok(RefreshGuard {
+                _file: Some(store.lock_oauth_refresh(provider_id).await?),
+                _memory: None,
+            });
+        }
+        Ok(RefreshGuard {
+            _file: None,
+            _memory: Some(self.refresh_lock.lock().await),
+        })
+    }
+
+    pub(crate) fn begin_refresh(&self, token: &OAuthToken) -> Result<()> {
+        if let Some(store) = &self.store {
+            store.begin_oauth_refresh(token)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish_refresh(&self, provider_id: &str) -> Result<()> {
+        if let Some(store) = &self.store {
+            store.finish_oauth_refresh(provider_id)?;
+        }
+        Ok(())
     }
 
     /// Keeps an explicit credential replacement authoritative over an older refresh.

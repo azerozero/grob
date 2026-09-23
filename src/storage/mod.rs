@@ -24,6 +24,9 @@ pub(crate) mod journal;
 pub mod migrate;
 /// OAuth-token persistence (`impl GrobStore`).
 mod oauth;
+#[cfg(test)]
+pub(crate) mod process_tests;
+mod refresh;
 /// Pluggable secret backends (local encrypted, env, file).
 pub mod secrets;
 /// Named-secret persistence (`impl GrobStore`).
@@ -50,8 +53,8 @@ pub const DEFAULT_TENANT: &str = "_default";
 /// Unified storage backend using atomic files and append-only journals.
 ///
 /// Stores spend data as JSONL journals, OAuth tokens and virtual keys
-/// as individually encrypted JSON files. All writes are crash-safe:
-/// journals use `O_APPEND`, other files use atomic rename.
+/// as individually encrypted JSON files using atomic replacement. Spend journals
+/// use `O_APPEND` with batched fsync; damaged journals prevent startup.
 pub struct GrobStore {
     /// Root directory (e.g. `~/.grob`).
     base_dir: PathBuf,
