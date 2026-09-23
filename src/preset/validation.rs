@@ -459,8 +459,8 @@ mod tests {
         store
             .save_oauth_token(&OAuthToken {
                 provider_id: "test-oauth-provider".to_string(),
-                access_token: SecretString::new("access".to_string()),
-                refresh_token: SecretString::new("refresh".to_string()),
+                access_token: SecretString::from("access".to_string()),
+                refresh_token: SecretString::from("refresh".to_string()),
                 expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
                 enterprise_url: None,
                 project_id: None,

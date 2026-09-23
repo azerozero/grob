@@ -266,7 +266,7 @@ impl AppConfig {
         // Resolve server API key
         if let Some(ref key) = self.server.api_key {
             if let Some(env_var) = key.expose_secret().strip_prefix('$') {
-                self.server.api_key = std::env::var(env_var).ok().map(SecretString::new);
+                self.server.api_key = std::env::var(env_var).ok().map(SecretString::from);
             }
         }
 
@@ -282,9 +282,9 @@ impl AppConfig {
             if let Some(ref api_key) = provider.api_key {
                 if let Some(env_var) = api_key.expose_secret().strip_prefix('$') {
                     if let Ok(value) = std::env::var(env_var) {
-                        provider.api_key = Some(SecretString::new(value));
+                        provider.api_key = Some(SecretString::from(value));
                     } else if std::env::var("GROB_MOCK_BACKEND").is_ok() {
-                        provider.api_key = Some(SecretString::new("mock-key".to_string()));
+                        provider.api_key = Some(SecretString::from("mock-key".to_string()));
                     } else {
                         // Gracefully disable instead of crashing.
                         disabled_for_missing.push((provider.name.clone(), env_var.to_string()));

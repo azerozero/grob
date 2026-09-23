@@ -178,7 +178,7 @@ impl ProviderRegistry {
                     raw.clone()
                 };
                 if !resolved.is_empty() {
-                    all_keys.push(SecretString::new(resolved));
+                    all_keys.push(SecretString::from(resolved));
                 }
             }
             Arc::new(KeyPool::new(all_keys, pool_cfg.strategy.clone()))
@@ -212,7 +212,7 @@ impl ProviderRegistry {
                     config.name
                 ))
             }),
-            super::AuthType::OAuth => Ok(SecretString::new(
+            super::AuthType::OAuth => Ok(SecretString::from(
                 config
                     .oauth_provider
                     .clone()
@@ -278,7 +278,7 @@ impl ProviderRegistry {
                 let gemini_api_key = if config.auth_type == super::AuthType::ApiKey {
                     api_key
                 } else {
-                    SecretString::new(String::new())
+                    SecretString::from(String::new())
                 };
                 let mut params = Self::build_params(config, gemini_api_key, "", build_ctx);
                 // build_params sets base_url to Some("") — override with config's value
@@ -293,7 +293,7 @@ impl ProviderRegistry {
 
             "vertex-ai" => {
                 let mut params =
-                    Self::build_params(config, SecretString::new(String::new()), "", build_ctx);
+                    Self::build_params(config, SecretString::from(String::new()), "", build_ctx);
                 params.base_url = config.base_url.clone();
                 params.oauth_provider = None;
                 Ok(Box::new(GeminiProvider::new(
@@ -801,7 +801,7 @@ mod tests {
             name: "openai".to_string(),
             provider_type: "openai".to_string(),
             auth_type: AuthType::ApiKey,
-            api_key: Some(SecretString::new("test-key".to_string())),
+            api_key: Some(SecretString::from("test-key".to_string())),
             base_url: None,
             models: vec![],
             enabled: Some(true),
@@ -862,7 +862,7 @@ mod tests {
                 name: "provider-a".to_string(),
                 provider_type: "anthropic".to_string(),
                 auth_type: AuthType::ApiKey,
-                api_key: Some(SecretString::new("test-key-1".to_string())),
+                api_key: Some(SecretString::from("test-key-1".to_string())),
                 base_url: None,
                 models: vec![],
                 enabled: Some(true),
@@ -889,7 +889,7 @@ mod tests {
                 name: "provider-b".to_string(),
                 provider_type: "anthropic".to_string(),
                 auth_type: AuthType::ApiKey,
-                api_key: Some(SecretString::new("test-key-2".to_string())),
+                api_key: Some(SecretString::from("test-key-2".to_string())),
                 base_url: None,
                 models: vec![],
                 enabled: Some(true),
@@ -990,7 +990,7 @@ mod tests {
             fn get(&self, _tenant: &str, name: &str) -> Option<SecretString> {
                 self.calls.fetch_add(1, Ordering::SeqCst);
                 if name == "openrouter" {
-                    Some(SecretString::new("sk-resolved-real-key".into()))
+                    Some(SecretString::from("sk-resolved-real-key"))
                 } else {
                     None
                 }
@@ -1007,7 +1007,7 @@ mod tests {
             name: "openrouter".to_string(),
             provider_type: "openrouter".to_string(),
             auth_type: AuthType::ApiKey,
-            api_key: Some(SecretString::new("secret:openrouter".to_string())),
+            api_key: Some(SecretString::from("secret:openrouter".to_string())),
             base_url: None,
             models: vec![],
             enabled: Some(true),

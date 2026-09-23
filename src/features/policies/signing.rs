@@ -13,7 +13,7 @@
 //! generated: tokens stay unforgeable within a run but do not survive a
 //! restart, and a warning is logged.
 
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use sha2::Sha256;
 use std::sync::OnceLock;
 use subtle::ConstantTimeEq;
@@ -60,7 +60,7 @@ fn derive_key() -> [u8; 32] {
                  Set GROB_POLICY_SECRET to a shared secret for stable, cross-process tokens."
             );
             let mut key = [0u8; 32]; // CodeQL: hard-coded-cryptographic-value — zero-initialized buffer, immediately overwritten with CSPRNG output.
-            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut key);
+            rand::Rng::fill_bytes(&mut rand::rng(), &mut key);
             key
         }
     }

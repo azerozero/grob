@@ -4,9 +4,10 @@
 //! goal stated in the routing intelligence design). Measures three
 //! representative request shapes.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use grob::models::{CanonicalRequest, Message, MessageContent, SystemPrompt, Tool};
 use grob::routing::classify::{classify_complexity, ScoringConfig};
+use std::hint::black_box;
 
 fn make_request(text: &str, max_tokens: u32) -> CanonicalRequest {
     CanonicalRequest {

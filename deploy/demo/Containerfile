@@ -9,13 +9,11 @@
 # Native arch: built inside the podman VM, so it matches the host triple
 # (aarch64-unknown-linux-musl on Apple Silicon, x86_64 on amd64). No
 # cross-target is forced, unlike the production Containerfile.
-# Rust 1.93+ is required: a dependency declares edition 2024 (needs ≥1.85) and
-# grob itself uses str::floor/ceil_char_boundary (stabilised in 1.93). Pin 1.95
-# to match the host toolchain. The production Containerfile's 1.83 is stale (the
-# release pipeline cross-builds with a current host toolchain, not via that file).
-FROM rust:1.95-alpine AS builder
+# Keep the build toolchain aligned with the production Containerfile.
+# Rust 1.93+ is required by str::floor/ceil_char_boundary in grob.
+FROM rust:1.98-alpine3.24 AS builder
 # musl-dev + openssl for the crates; make builds the bundled jemalloc (C).
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static make
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static make cmake
 WORKDIR /usr/src/grob
 
 # Demo build: disable fat LTO and the single codegen-unit so the image builds

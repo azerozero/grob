@@ -1,4 +1,4 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use grob::cli::{AppConfig, RouterConfig, ServerConfig};
 use grob::features::dlp::builtins::builtin_rules;
 use grob::features::dlp::config::*;
@@ -7,6 +7,7 @@ use grob::features::dlp::pii::PiiScanner;
 use grob::features::dlp::DlpEngine;
 use grob::models::*;
 use grob::routing::classify::Router;
+use std::hint::black_box;
 
 // ── Router Benchmarks ────────────────────────────────────────
 

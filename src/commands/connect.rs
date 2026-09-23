@@ -325,8 +325,8 @@ mod tests {
     fn make_token(provider_id: &str) -> OAuthToken {
         OAuthToken {
             provider_id: provider_id.to_string(),
-            access_token: SecretString::new("access".into()),
-            refresh_token: SecretString::new("refresh".into()),
+            access_token: SecretString::from("access"),
+            refresh_token: SecretString::from("refresh"),
             expires_at: Utc::now() + chrono::Duration::hours(1),
             enterprise_url: None,
             project_id: None,

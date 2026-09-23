@@ -141,7 +141,7 @@ impl DlpSessionManager {
     fn hash_key(api_key: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(api_key.as_bytes());
-        format!("{:x}", hasher.finalize())
+        hex::encode(hasher.finalize())
     }
 
     /// Build a new DLP engine with session-specific anonymizer and canary generator.

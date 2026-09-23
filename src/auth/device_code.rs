@@ -205,8 +205,8 @@ impl DeviceCodeClient {
             let expires = raw.expires_in.unwrap_or(3600);
             let token = OAuthToken {
                 provider_id: provider_id.to_string(),
-                access_token: SecretString::new(access),
-                refresh_token: SecretString::new(refresh),
+                access_token: SecretString::from(access),
+                refresh_token: SecretString::from(refresh),
                 expires_at: Utc::now() + chrono::Duration::seconds(expires),
                 enterprise_url: None,
                 project_id: None,

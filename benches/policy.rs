@@ -1,7 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use grob::features::policies::config::{MatchRules, PolicyConfig};
 use grob::features::policies::context::RequestContext;
 use grob::features::policies::matcher::PolicyMatcher;
+use std::hint::black_box;
 
 // ── Policy bench helpers ─────────────────────────────────────────────────────
 

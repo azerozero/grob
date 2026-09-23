@@ -91,17 +91,17 @@ impl SecretBackend for EnvBackend {
         // Per-tenant override wins.
         let tenant_var = format!("GROB_SECRET_{upper_tenant}_{upper_name}");
         if let Ok(v) = std::env::var(&tenant_var) {
-            return Some(SecretString::new(v));
+            return Some(SecretString::from(v));
         }
         // Global tenant-prefixed (preserves the explicit GROB_SECRET_ shape
         // for callers that want to opt out of legacy compat).
         let global_prefixed = format!("GROB_SECRET_{upper_name}");
         if let Ok(v) = std::env::var(&global_prefixed) {
-            return Some(SecretString::new(v));
+            return Some(SecretString::from(v));
         }
         // Legacy compat: bare uppercased name, used by deployments that
         // already export e.g. `OPENAI_API_KEY` directly.
-        std::env::var(&upper_name).ok().map(SecretString::new)
+        std::env::var(&upper_name).ok().map(SecretString::from)
     }
     fn label(&self) -> &'static str {
         "env"
@@ -132,7 +132,7 @@ impl FileBackend {
         let bytes = std::fs::read(path).ok()?;
         let value = String::from_utf8(bytes).ok()?;
         let trimmed = value.strip_suffix('\n').unwrap_or(&value).to_string();
-        Some(SecretString::new(trimmed))
+        Some(SecretString::from(trimmed))
     }
 }
 
@@ -232,7 +232,7 @@ pub fn resolve_provider_secrets_for_tenant(
                 } else if let Some(var) = raw.strip_prefix('$') {
                     match std::env::var(var) {
                         Ok(v) => {
-                            p.api_key = Some(SecretString::new(v));
+                            p.api_key = Some(SecretString::from(v));
                             tracing::info!(
                                 "🔓 Resolved api_key for provider '{}' from env var ${}",
                                 p.name,
@@ -279,7 +279,7 @@ mod tests {
     impl SecretBackend for StubBackend {
         fn get(&self, _tenant: &str, name: &str) -> Option<SecretString> {
             if name == self.name {
-                Some(SecretString::new(self.value.into()))
+                Some(SecretString::from(self.value))
             } else {
                 None
             }
@@ -294,7 +294,7 @@ mod tests {
             name: name.into(),
             provider_type: "openai".into(),
             auth_type: crate::cli::AuthType::ApiKey,
-            api_key: api_key.map(|s| SecretString::new(s.into())),
+            api_key: api_key.map(SecretString::from),
             oauth_provider: None,
             project_id: None,
             location: None,

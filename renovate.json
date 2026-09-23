@@ -47,6 +47,14 @@
       "matchUpdateTypes": ["minor", "patch", "digest"],
       "groupName": "GitHub Actions updates",
       "automerge": true
+    },
+    {
+      "description": "Keep the OpenTelemetry SDK, exporters and tracing bridge compatible; approve when the bridge supports the new SDK",
+      "matchManagers": ["cargo"],
+      "matchPackageNames": ["opentelemetry", "opentelemetry_sdk", "opentelemetry-otlp", "opentelemetry-appender-tracing", "tracing-opentelemetry"],
+      "groupName": "OpenTelemetry stack",
+      "dependencyDashboardApproval": true,
+      "automerge": false
     }
   ],
   "cargo": {

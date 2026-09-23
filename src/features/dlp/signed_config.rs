@@ -279,7 +279,7 @@ async fn reload_once(
     }
 
     // Hash check — skip if unchanged
-    let hash = format!("{:x}", Sha256::digest(&content));
+    let hash = hex::encode(Sha256::digest(&content));
     {
         let current = hot_config.read().unwrap_or_else(|e| e.into_inner());
         if current.source_hash == hash {
@@ -356,9 +356,10 @@ custom_patterns = ["(?i)valid", "[invalid"]
     #[test]
     fn test_signature_verification() {
         use p256::ecdsa::{signature::Signer, SigningKey};
+        use p256::elliptic_curve::Generate;
 
         // Generate a test keypair
-        let signing_key = SigningKey::random(&mut rand::thread_rng());
+        let signing_key = SigningKey::generate_from_rng(&mut rand::rng());
         let verifying_key = *signing_key.verifying_key();
 
         let content = b"test content for signing";
@@ -372,7 +373,7 @@ custom_patterns = ["(?i)valid", "[invalid"]
         assert!(verify_signature(&verifying_key, b"tampered content", &sig_hex).is_err());
 
         // Wrong key should fail
-        let wrong_key = SigningKey::random(&mut rand::thread_rng());
+        let wrong_key = SigningKey::generate_from_rng(&mut rand::rng());
         let wrong_vk = *wrong_key.verifying_key();
         assert!(verify_signature(&wrong_vk, content, &sig_hex).is_err());
     }

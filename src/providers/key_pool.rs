@@ -109,7 +109,7 @@ mod tests {
 
     fn make_keys(n: usize) -> Vec<SecretString> {
         (0..n)
-            .map(|i| SecretString::new(format!("key-{}", i)))
+            .map(|i| SecretString::from(format!("key-{}", i)))
             .collect()
     }
 

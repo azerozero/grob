@@ -4,7 +4,7 @@
 //! This measures each stage of the request pipeline individually so you can see
 //! exactly where wall-clock time is spent.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
 use grob::cache::ResponseCache;
 use grob::features::dlp::sprt::SprtDetector;
 use grob::features::token_pricing::{pricing, PricingTable};
@@ -12,8 +12,18 @@ use grob::models::*;
 use grob::providers::streaming::parse_sse_events;
 use grob::security::audit_signer::{AuditSigner, EcdsaP256Signer, Ed25519Signer, HmacSha256Signer};
 use grob::security::merkle::MerkleTree;
+use std::hint::black_box;
 
 // ── Helpers ────────────────────────────────────────────────────
+
+struct HashWriter<'a>(&'a mut sha2::Sha256);
+impl std::fmt::Write for HashWriter<'_> {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        use sha2::Digest;
+        self.0.update(value.as_bytes());
+        Ok(())
+    }
+}
 
 fn make_request(model: &str, n_messages: usize) -> CanonicalRequest {
     let messages: Vec<Message> = (0..n_messages)
@@ -373,10 +383,10 @@ fn bench_audit_hash(c: &mut Criterion) {
     // New way: write! directly into hasher
     group.bench_function("hash_entry_write_into_hasher", |b| {
         b.iter(|| {
-            use std::io::Write;
+            use std::fmt::Write;
             let mut hasher = Sha256::new();
             let _ = write!(
-                hasher,
+                HashWriter(&mut hasher),
                 "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
                 fields.0,
                 fields.1,
@@ -476,7 +486,7 @@ fn bench_audit_signing(c: &mut Criterion) {
     // Audit entry hash (SHA-256 chain hash via write! into hasher).
     group.bench_function("audit_hash_entry", |b| {
         use sha2::{Digest, Sha256};
-        use std::io::Write;
+        use std::fmt::Write;
 
         let fields = (
             "2026-02-27T10:00:00+00:00",
@@ -500,7 +510,7 @@ fn bench_audit_signing(c: &mut Criterion) {
         b.iter(|| {
             let mut hasher = Sha256::new();
             let _ = write!(
-                hasher,
+                HashWriter(&mut hasher),
                 "{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
                 fields.0,
                 fields.1,

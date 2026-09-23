@@ -159,7 +159,7 @@ impl JwtValidator {
         use sha2::{Digest, Sha256};
 
         // Hash token for cache key (never store raw JWT in cache)
-        let token_hash = format!("{:x}", Sha256::digest(token.as_bytes()));
+        let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
 
         // Cache hit → return cached claims
         if let Some(entry) = self.validation_cache.get(&token_hash) {

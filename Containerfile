@@ -3,8 +3,8 @@
 # Multi-stage build with cargo-chef for fast rebuilds
 
 # Stage 1: Chef planner — compute dependency recipe
-FROM rust:1.83-alpine3.20 AS chef
-RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static && \
+FROM rust:1.98-alpine3.24 AS chef
+RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static make cmake && \
     cargo install cargo-chef --locked
 WORKDIR /usr/src/grob
 

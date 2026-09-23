@@ -108,7 +108,7 @@ pub fn base_provider_config(name: &str) -> grob::providers::ProviderConfig {
         name: name.to_string(),
         provider_type: "anthropic".to_string(),
         auth_type: grob::providers::AuthType::ApiKey,
-        api_key: Some(SecretString::new("sk-test".to_string())),
+        api_key: Some(SecretString::from("sk-test".to_string())),
         base_url: None,
         models: vec![],
         enabled: Some(true),

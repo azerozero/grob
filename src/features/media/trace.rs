@@ -47,8 +47,8 @@ impl TraceId {
     /// collecting marked images.
     #[must_use]
     pub fn generate() -> Self {
-        use rand::Rng as _;
-        Self(rand::thread_rng().gen::<u64>() & TRACE_ID_MASK)
+        use rand::RngExt as _;
+        Self(rand::rng().random::<u64>() & TRACE_ID_MASK)
     }
 
     /// Builds an identifier from raw bits, discarding any above the 61st.
