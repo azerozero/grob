@@ -10,6 +10,7 @@ name = "smoke"
 provider_type = "openai"
 api_key = "synthetic-container-smoke"
 base_url = "http://127.0.0.1:1"
+models = []
 
 [[models]]
 name = "smoke"
