@@ -30,8 +30,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: hardening-linux
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.event.pull_request.head.repo.full_name == github.repository }}
+          cache-on-failure: true
       - name: Build production binary and guest probe
+        id: build
         run: |
           cargo build --locked --release
           cargo test --locked --lib --no-run --message-format=json > "$RUNNER_TEMP/probes.jsonl"
@@ -46,6 +48,8 @@ jobs:
             --binary target/release/grob --uid "$(id -u)" --gid "$(id -g)" \
             --memlock-mib "$MEMLOCK_MIB" --output "$RUNNER_TEMP/hardening/memory"
       - name: Install disposable guest tools
+        id: guest_tools
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 linux-image-virtual busybox-static cpio kmod zstd
@@ -55,6 +59,7 @@ jobs:
           sudo chmod 644 "$destination"
           echo "GROB_VM_KERNEL=$destination" >> "$GITHUB_ENV"
       - name: Cut VM power at storage boundaries and verify recovery
+        if: ${{ !cancelled() && steps.guest_tools.outcome == 'success' }}
         run: |
           python3 scripts/ci/crash-vm.py --probe "$GROB_VM_PROBE" \
             --kernel "$GROB_VM_KERNEL" --output "$RUNNER_TEMP/hardening/recovery"

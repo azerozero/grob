@@ -120,6 +120,7 @@ enabled = false
 [[providers]]
 name = "mock"
 provider_type = "openai"
+models = ["alpha"]
 api_key = "synthetic-provider"
 base_url = "http://127.0.0.1:{backend.server_port}/v1"
 [[models]]
