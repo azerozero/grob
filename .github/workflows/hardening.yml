@@ -44,6 +44,7 @@ jobs:
         env:
           MEMLOCK_MIB: ${{ inputs.memlock_mib || '512' }}
         run: |
+          mkdir -p "$RUNNER_TEMP/hardening/memory" "$RUNNER_TEMP/hardening/recovery"
           sudo python3 scripts/ci/locked-memory.py \
             --binary target/release/grob --uid "$(id -u)" --gid "$(id -g)" \
             --memlock-mib "$MEMLOCK_MIB" --output "$RUNNER_TEMP/hardening/memory"
@@ -53,7 +54,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-system-x86 linux-image-virtual busybox-static cpio kmod zstd
-          kernel=$(printf '%s\n' /boot/vmlinuz-* | sort -V | tail -1)
+          kernel=$(printf '%s\n' /boot/vmlinuz-*-generic | sort -V | tail -1)
           destination="$RUNNER_TEMP/$(basename "$kernel")"
           sudo cp "$kernel" "$destination"
           sudo chmod 644 "$destination"
