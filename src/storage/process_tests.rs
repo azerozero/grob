@@ -12,6 +12,12 @@ pub(crate) fn checkpoint(point: &str) {
     }
     let signal = std::path::PathBuf::from(std::env::var_os("GROB_TEST_SIGNAL").unwrap());
     std::fs::write(&signal, point).unwrap();
+    if std::env::var("GROB_TEST_VM_CUT").as_deref() == Ok("1") {
+        // The host kills the whole guest here, including its kernel page cache.
+        use std::io::Write;
+        println!("GROB_VM_CUT_READY:{point}");
+        std::io::stdout().flush().unwrap();
+    }
     let deadline = std::time::Instant::now() + Duration::from_secs(20);
     while !signal.with_extension("continue").exists() {
         assert!(std::time::Instant::now() < deadline, "checkpoint timed out");

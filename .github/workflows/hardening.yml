@@ -1,0 +1,68 @@
+name: Memory and VM recovery
+
+on:
+  workflow_call:
+  workflow_dispatch:
+    inputs:
+      memlock_mib:
+        description: Finite memlock limit in MiB (64-1024)
+        default: '512'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: Linux memory and VM recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: hardening-linux
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build production binary and guest probe
+        run: |
+          cargo build --locked --release
+          cargo test --locked --lib --no-run --message-format=json > "$RUNNER_TEMP/probes.jsonl"
+          probe=$(jq -r 'select(.reason == "compiler-artifact" and .profile.test and .target.name == "grob" and .executable != null) | .executable' "$RUNNER_TEMP/probes.jsonl")
+          test -f "$probe"
+          echo "GROB_VM_PROBE=$probe" >> "$GITHUB_ENV"
+      - name: Verify memory locking under HTTP load
+        env:
+          MEMLOCK_MIB: ${{ inputs.memlock_mib || '512' }}
+        run: |
+          sudo python3 scripts/ci/locked-memory.py \
+            --binary target/release/grob --uid "$(id -u)" --gid "$(id -g)" \
+            --memlock-mib "$MEMLOCK_MIB" --output "$RUNNER_TEMP/hardening/memory"
+      - name: Install disposable guest tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 linux-image-virtual busybox-static cpio kmod zstd
+          kernel=$(printf '%s\n' /boot/vmlinuz-* | sort -V | tail -1)
+          destination="$RUNNER_TEMP/$(basename "$kernel")"
+          sudo cp "$kernel" "$destination"
+          sudo chmod 644 "$destination"
+          echo "GROB_VM_KERNEL=$destination" >> "$GITHUB_ENV"
+      - name: Cut VM power at storage boundaries and verify recovery
+        run: |
+          python3 scripts/ci/crash-vm.py --probe "$GROB_VM_PROBE" \
+            --kernel "$GROB_VM_KERNEL" --output "$RUNNER_TEMP/hardening/recovery"
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hardening-${{ github.sha }}
+          path: ${{ runner.temp }}/hardening/
+          if-no-files-found: warn
+          retention-days: 30
