@@ -35,6 +35,8 @@ mod secrets_store;
 mod spend;
 /// Virtual-key persistence (`impl GrobStore`).
 mod vkeys;
+#[cfg(test)]
+mod vm_crash_tests;
 
 use crate::features::token_pricing::spend::SpendData;
 use anyhow::{Context, Result};

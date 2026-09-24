@@ -84,6 +84,7 @@ jobs:
               - 'tests/e2e/**'
             ci:
               - '.github/**'
+              - 'scripts/ci/**'
             docs:
               - 'docs/**'
               - '**.md'
@@ -1097,6 +1098,14 @@ jobs:
   # =========================================================================
   # Stage 9.2: Required — merge queue gate (aggregates all required checks)
   # =========================================================================
+  hardening:
+    name: Hardening
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    uses: ./.github/workflows/hardening.yml
+    permissions:
+      contents: read
+
   required:
     name: Required checks
     if: always()
@@ -1110,11 +1119,18 @@ jobs:
       - test-ubuntu
       - test-other
       - validate-yaml
+      - hardening
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check required jobs
         run: |
+          # Hardening must execute successfully whenever its paths are selected.
+          hardening="${{ needs.hardening.result }}"
+          if [[ "$hardening" != "success" && "$hardening" != "skipped" ]]; then
+            echo "::error::Memory and VM recovery qualification: $hardening"
+            exit 1
+          fi
           # This is the ONLY job referenced in the GitHub ruleset "Protect main".
           # Do NOT add individual job names (Clippy, Rustfmt, etc.) to the ruleset —
           # path pruning skips them on non-Rust changes, causing eternal "pending".

@@ -121,3 +121,44 @@ queue delay, at 100, 500 and 1,000 offered requests per second. It also replaces
 upstream secret under load and checks that no old credential is used after
 in-flight requests drain. Set `GROB_LOAD_REPORT` to save its JSON results. This
 local probe is not a capacity guarantee for remote providers or a confidential VM.
+
+## Run Linux qualification in CI
+
+The `Memory and VM recovery` workflow runs on an ephemeral Ubuntu 24.04 runner.
+The main CI calls it for Rust, dependency, workflow and `scripts/ci/` changes;
+`Required checks` blocks merging if qualification fails or is cancelled.
+Documentation-only changes skip it. It can also be launched manually with a
+`memlock_mib` limit between 64 and 1,024 MiB.
+
+The memory test builds the release binary with the normal allocator, drops root
+privileges before execution, and starts Grob with `GROB_MEMORY_HARDENING=locked`.
+It checks startup rejection at zero allowance, then runs 3,000 real HTTP requests
+with 64 KiB inputs and concurrency 1, 16 and 64. The default memlock limit is
+512 MiB; address space is capped at 2 GiB. Samples of `/proc/<pid>/status` must show
+locked pages, no swap, the expected unprivileged UID and no effective capabilities.
+Any HTTP failure or failed graceful shutdown fails the job. This is a bounded
+functional stress test, not a throughput or latency SLO.
+
+The recovery test boots a separate Linux kernel with an ext4 scratch disk in QEMU.
+At each credential-write, rotation, deletion, refresh-intent or journal checkpoint,
+the runner kills **QEMU itself** with SIGKILL. It restarts a new guest against the
+same disk and checks authenticated credentials, revocation, durable spend and
+refusal to open corrupt accounting. The test binary contains the pause hooks;
+the shipped Grob binary does not. No real credentials or host block devices are used.
+
+QEMU uses `cache=writeback`, with flushes enabled; `cache=unsafe` and `-snapshot`
+would weaken the test. See the [QEMU cache documentation](https://www.qemu.org/docs/master/system/invocation.html).
+This loses guest RAM and the guest kernel's page cache, including state that a
+process-only kill would preserve. The host cache and physical disk remain powered.
+It does **not** validate drive firmware, volatile controller caches, power-loss
+protection or the physical server's storage stack.
+
+Download the `hardening-<commit>` artifact for `memory.json`, actual process limits,
+Grob logs, guest serial logs and `recovery.json`. A missing checkpoint, VM boot
+failure, timeout or failed recovery assertion fails qualification; there is no
+silent fallback to a process-only test. Reproduce a failure on a disposable runner
+using the same commit, kernel, limit and filesystem before changing the assertions.
+
+To qualify a deployment, repeat with its kernel, allocator, service limits,
+filesystem and peak workload. Hosted CI supplies a repeatable Linux reference
+environment; it does not establish equivalence to an unspecified target server.
