@@ -1,4 +1,4 @@
-name: Memory and VM recovery
+name: Memory and crash recovery
 
 on:
   workflow_call:
@@ -13,6 +13,40 @@ permissions:
   contents: read
 
 jobs:
+  container:
+    name: Container crash recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v4.4.1
+      - name: Build production scratch image from this commit
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          file: Containerfile
+          load: true
+          tags: grob:crash-test
+          cache-from: type=gha,scope=container-hardening
+          cache-to: type=gha,mode=max,scope=container-hardening
+      - name: Kill and recreate containers on the same volume
+        run: |
+          python3 scripts/ci/container-recovery.py --engine docker \
+            --image grob:crash-test --output "$RUNNER_TEMP/container-recovery"
+      - name: Preserve container recovery evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-recovery-${{ github.sha }}
+          path: ${{ runner.temp }}/container-recovery/
+          if-no-files-found: warn
+          retention-days: 30
+
   qualify:
     name: Linux memory and VM recovery
     runs-on: ubuntu-24.04

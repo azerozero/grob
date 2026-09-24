@@ -85,6 +85,9 @@ jobs:
             ci:
               - '.github/**'
               - 'scripts/ci/**'
+              - 'Containerfile'
+              - '.containerignore'
+              - '.dockerignore'
             docs:
               - 'docs/**'
               - '**.md'
@@ -1128,7 +1131,7 @@ jobs:
           # Hardening must execute successfully whenever its paths are selected.
           hardening="${{ needs.hardening.result }}"
           if [[ "$hardening" != "success" && "$hardening" != "skipped" ]]; then
-            echo "::error::Memory and VM recovery qualification: $hardening"
+            echo "::error::Memory, VM and container recovery qualification: $hardening"
             exit 1
           fi
           # This is the ONLY job referenced in the GitHub ruleset "Protect main".

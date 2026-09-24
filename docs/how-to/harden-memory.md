@@ -124,8 +124,8 @@ local probe is not a capacity guarantee for remote providers or a confidential V
 
 ## Run Linux qualification in CI
 
-The `Memory and VM recovery` workflow runs on an ephemeral Ubuntu 24.04 runner.
-The main CI calls it for Rust, dependency, workflow and `scripts/ci/` changes;
+The `Memory and crash recovery` workflow runs on ephemeral Ubuntu 24.04 runners.
+The main CI calls it for Rust, dependency, workflow, `scripts/ci/` and container-build changes;
 `Required checks` blocks merging if qualification fails or is cancelled.
 Documentation-only changes skip it. It can also be launched manually with a
 `memlock_mib` limit between 64 and 1,024 MiB.
@@ -162,3 +162,49 @@ using the same commit, kernel, limit and filesystem before changing the assertio
 To qualify a deployment, repeat with its kernel, allocator, service limits,
 filesystem and peak workload. Hosted CI supplies a repeatable Linux reference
 environment; it does not establish equivalence to an unspecified target server.
+
+## Crash and recreate the production container
+
+The same required workflow builds the root `Containerfile` from the commit under
+test and runs `scripts/ci/container-recovery.py`. The Python standard-library driver
+uses Docker in CI and also supports Podman; it requires no Go toolchain or Python
+packages. To reproduce locally:
+
+```sh
+podman build --platform linux/amd64 -f Containerfile -t localhost/grob:crash-test .
+python3 scripts/ci/container-recovery.py --engine podman \
+  --image localhost/grob:crash-test --output /tmp/grob-container-recovery
+```
+
+The root build targets Linux amd64. Use an amd64 builder or configured emulation
+when building from another architecture. The driver can also test a matching
+released image, but CI always builds the source revision being reviewed.
+
+Grob runs as UID/GID 65534 with a read-only root filesystem, no capabilities,
+`no-new-privileges`, a 512 MiB memory limit, a 64-process limit, zero core allowance
+and `GROB_MEMORY_HARDENING=no-dump`. A named volume contains `GROB_HOME`; `/tmp`
+is a bounded tmpfs. The synthetic provider initializes that disposable volume,
+drops root before serving, and verifies the upstream credential. Only ephemeral
+loopback ports are published. The two containers share a network namespace so
+synthetic HTTP stays on loopback without relaxing Grob's HTTPS credential policy.
+No host credential directory is mounted.
+
+Each of three cycles completes 128 concurrent HTTP requests, creates and rotates
+virtual keys, and revokes another key. Eight more requests are held inside the mock
+provider before any usage is returned. The driver sends
+[`SIGKILL`](https://docs.docker.com/reference/cli/docker/container/kill/), requires
+exit 137 without OOM, removes the container and starts a new one on the same volume.
+It checks exact spend and request-count recovery, unchanged key records, active-key
+authentication, revoked-key rejection and interruption of all held requests.
+A separate SIGTERM/recreate check validates graceful shutdown. Finally a partial
+journal record is injected while Grob is stopped: startup must fail with the
+unreadable-journal diagnostic instead of resetting the budget.
+
+Download `container-recovery-<commit>` for the JSON report, per-container logs and
+inspection records. Cleanup removes only the test's UUID-named containers, volume
+and network, including after failures. All credentials are synthetic. Interrupted
+requests have no reported usage; this does not assert that a real provider would
+waive charges for work already performed.
+
+A container kill preserves the host kernel and its page cache. This complements
+the whole-VM cut test above; neither test simulates loss of power to a physical SSD.
