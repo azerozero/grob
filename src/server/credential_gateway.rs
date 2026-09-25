@@ -40,8 +40,8 @@ pub(super) async fn dispatch(
         .ok_or(CredentialError::Denied)?;
     let url = authorize(binding, &uri, &request)?;
     let vk = request.extensions().get::<crate::auth::VirtualKeyContext>();
-    if let Err(response) = enforce_limits(&state, &inner, binding, vk).await {
-        return Ok(response);
+    if let Err(limit) = enforce_limits(&state, &inner, binding, vk).await {
+        return Ok(limit.into_response());
     }
     let client = crate::credentials::transport::client(&url, &binding.allowed_ips)?;
     let method = request.method().clone();
@@ -119,19 +119,38 @@ fn authorize(
     Ok(url)
 }
 
+enum LimitExceeded {
+    Budget,
+    Rate,
+}
+
+impl IntoResponse for LimitExceeded {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Budget => (StatusCode::PAYMENT_REQUIRED, "budget exceeded").into_response(),
+            Self::Rate => (
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "1")],
+                "agent rate limit exceeded",
+            )
+                .into_response(),
+        }
+    }
+}
+
 async fn enforce_limits(
     state: &Arc<AppState>,
     inner: &Arc<super::ReloadableState>,
     binding: &crate::credentials::config::ServiceBinding,
     vk: Option<&crate::auth::VirtualKeyContext>,
-) -> Result<(), Response> {
+) -> Result<(), LimitExceeded> {
     let service = &binding.id;
     let tenant = binding.tenant.as_str();
     if super::check_budget_for_tenant(state, inner, "credential_gateway", service, Some(tenant))
         .await
         .is_err()
     {
-        return Err((StatusCode::PAYMENT_REQUIRED, "budget exceeded").into_response());
+        return Err(LimitExceeded::Budget);
     }
     if let Some(limit) = vk.and_then(|v| v.budget_usd) {
         let budget = &inner.config.budget;
@@ -149,7 +168,7 @@ async fn enforce_limits(
             )
             .is_err()
         {
-            return Err((StatusCode::PAYMENT_REQUIRED, "budget exceeded").into_response());
+            return Err(LimitExceeded::Budget);
         }
     }
     if let Some(key) = vk.filter(|v| v.rate_limit_rps.is_some_and(|rps| rps > 0)) {
@@ -162,7 +181,7 @@ async fn enforce_limits(
         let bucket =
             crate::security::RateLimitKey::Tenant(format!("credential-key:{}", key.key_id));
         if !state
-            .policy_rate_limiter
+            .scoped_rate_limiter
             .check_with_config(
                 &bucket,
                 crate::security::RateLimitConfig {
@@ -173,12 +192,7 @@ async fn enforce_limits(
             .await
             .0
         {
-            return Err((
-                StatusCode::TOO_MANY_REQUESTS,
-                [("retry-after", "1")],
-                "agent rate limit exceeded",
-            )
-                .into_response());
+            return Err(LimitExceeded::Rate);
         }
     }
     Ok(())

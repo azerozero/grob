@@ -612,7 +612,7 @@ fn context_window_exceeded_message(info: &ContextGuardInfo) -> String {
 ///    any upstream call.
 /// 3. The `rate_limit` override is a SECOND limiter check: the pre-handler
 ///    rate-limit middleware ran before any policy was evaluated, so it cannot see
-///    a policy override. A dedicated [`AppState::policy_rate_limiter`] keeps these
+///    a policy override. A dedicated [`AppState::scoped_rate_limiter`] keeps these
 ///    custom-rps buckets off the middleware's default-rate buckets.
 ///
 /// `routing` and `log_export` overrides are intentionally NOT applied in this
@@ -726,7 +726,7 @@ async fn enforce_post_route_policy(
             );
             let (allowed, _, _) = ctx
                 .state
-                .policy_rate_limiter
+                .scoped_rate_limiter
                 .check_with_rps(&key, rps)
                 .await;
             if !allowed {
