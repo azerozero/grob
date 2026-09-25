@@ -137,6 +137,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | [0027](decisions/0027-adopt-system-oauth-credentials.md) | Adopt OAuth Credentials from Co-installed CLIs (proposed) |
 | [0028](decisions/0028-open-core-boundary.md) | Open-Core Boundary — AGPL Core vs Commercial Modules (superseded) |
 | [0029](decisions/0029-relicense-core-apache.md) | Relicense Grob Core to Apache-2.0 |
+| [0031](decisions/0031-optional-vault-credential-routing.md) | Credential routing with optional Vault and local recovery (design accepted; implementation pending) |
 
 ### Examples
 
