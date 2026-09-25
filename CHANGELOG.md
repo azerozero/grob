@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.114](https://github.com/azerozero/grob/compare/v0.36.113...v0.36.114) - 2026-09-25
+
+### Added
+
+- add credential gateway with optional Vault recovery ([#609](https://github.com/azerozero/grob/pull/609))
+
+### Other
+
+- plan credential routing with optional Vault ([#608](https://github.com/azerozero/grob/pull/608))
+- verify container crash recovery with persistent volumes ([#607](https://github.com/azerozero/grob/pull/607))
+- qualify locked memory and VM crash recovery in CI ([#606](https://github.com/azerozero/grob/pull/606))
+
 ## [0.36.113](https://github.com/azerozero/grob/compare/v0.36.112...v0.36.113) - 2026-09-23
 
 ### Fixed
