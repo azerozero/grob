@@ -16,6 +16,8 @@ pub mod config_rollback;
 pub mod connect;
 /// Best-effort API key validation via lightweight provider calls.
 pub mod credential_check;
+/// Scoped service credential provisioning, rotation and revocation.
+pub mod credentials;
 /// Diagnoses configuration, connectivity, and provider health.
 pub mod doctor;
 /// Displays resolved environment variables and config paths.

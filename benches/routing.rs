@@ -38,6 +38,7 @@ fn make_router() -> Router {
         security: Default::default(),
         cache: Default::default(),
         secrets: Default::default(),
+        credential_services: Default::default(),
         compliance: Default::default(),
         tool_layer: Default::default(),
         #[cfg(feature = "mcp")]

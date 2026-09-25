@@ -54,6 +54,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Call Grob from Python | [Python SDK Examples](examples/sdk-python.md) |
 | Call Grob from Node.js | [Node SDK Examples](examples/sdk-node.md) |
 | Manage upstream secrets | [Manage Secrets](how-to/manage-secrets.md) |
+| Inject service credentials with optional Vault | [Route service credentials](how-to/route-service-credentials.md) |
 | Tune routing from traces | [Auto-tune Routing](how-to/auto-tune-routing.md) |
 | Set up the fuzzy response cache | [Configure the SimHash Cache](how-to/configure-simhash-cache.md) |
 | Override complexity per call | [Use grob_hint](how-to/use-grob-hint.md) |
@@ -137,7 +138,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | [0027](decisions/0027-adopt-system-oauth-credentials.md) | Adopt OAuth Credentials from Co-installed CLIs (proposed) |
 | [0028](decisions/0028-open-core-boundary.md) | Open-Core Boundary — AGPL Core vs Commercial Modules (superseded) |
 | [0029](decisions/0029-relicense-core-apache.md) | Relicense Grob Core to Apache-2.0 |
-| [0031](decisions/0031-optional-vault-credential-routing.md) | Credential routing with optional Vault and local recovery (design accepted; implementation pending) |
+| [0031](decisions/0031-optional-vault-credential-routing.md) | Credential routing with optional Vault and local recovery |
 
 ### Examples
 

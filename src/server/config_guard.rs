@@ -24,6 +24,7 @@ const RELOADABLE_SECTIONS: &[&str] = &[
     "classifier",
     "budget",
     "secrets",
+    "credential_services",
     "compliance",
     "user",
     "pledge",

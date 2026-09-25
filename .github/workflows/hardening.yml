@@ -82,6 +82,10 @@ jobs:
           sudo python3 scripts/ci/locked-memory.py \
             --binary target/release/grob --uid "$(id -u)" --gid "$(id -g)" \
             --memlock-mib "$MEMLOCK_MIB" --output "$RUNNER_TEMP/hardening/memory"
+      - name: Qualify local credentials and OpenBao outage recovery
+        run: |
+          python3 scripts/ci/credential-recovery.py --binary target/release/grob \
+            --engine docker --output "$RUNNER_TEMP/hardening/credentials"
       - name: Install disposable guest tools
         id: guest_tools
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}

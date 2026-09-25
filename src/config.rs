@@ -83,6 +83,9 @@ pub struct AppConfig {
     /// Secrets backend selection (local_encrypted | env | file)
     #[serde(default)]
     pub secrets: crate::cli::SecretsConfig,
+    /// Explicit services authorized for credential injection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub credential_services: Vec<crate::credentials::config::ServiceBinding>,
     /// EU AI Act compliance configuration
     #[serde(default)]
     pub compliance: ComplianceConfig,
@@ -498,6 +501,17 @@ default = "placeholder-model"
         Self::validate_fan_out(&self.models, &model_names)?;
         Self::validate_tiers(&self.tiers, &provider_names, &model_names)?;
         Self::validate_pledge_profiles(&self.pledge)?;
+
+        let mut services = HashSet::new();
+        for service in &self.credential_services {
+            service.validate()?;
+            anyhow::ensure!(
+                services.insert(&service.id),
+                "duplicate credential service id"
+            );
+        }
+        #[cfg(feature = "policies")]
+        anyhow::ensure!(self.credential_services.is_empty() || self.policies.is_empty(), "credential services cannot yet evaluate LLM policies; use a dedicated gateway configuration");
 
         Ok(())
     }

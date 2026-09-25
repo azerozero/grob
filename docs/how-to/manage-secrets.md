@@ -252,9 +252,10 @@ the running daemon and agent do not need to restart. Provision all references
 before deliberately changing the backend of an existing deployment.
 
 This is supported standalone operation for the current LLM-provider path.
-Automatic Vault-to-local recovery and general HTTP credential routing are planned
-in [ADR-0031](../decisions/0031-optional-vault-credential-routing.md). That design
-requires equal routing, injection and rotation functions with local storage, plus
+The separate [HTTP service gateway](route-service-credentials.md) supports
+Vault/OpenBao KV v2 and bounded local recovery, following
+[ADR-0031](../decisions/0031-optional-vault-credential-routing.md). Its shared pipeline
+provides equal routing, injection and rotation functions with local storage, plus
 opt-in bounded recovery for Vault outages. It does not make expired, revoked or
 unreadable secrets usable, and an offline copy cannot detect a new remote
 revocation until communication resumes. The current file backend has no lease or
@@ -336,7 +337,7 @@ above. Environment-based injection still requires restarting the process.
 ## What is **not** here yet (tracked)
 
 - **Master key backup/restore CLI**: `grob secrets export-key --to <file> --password <prompt>` and `import-key`. Today the master key is a raw file — back it up manually.
-- **Native Vault backend and bounded offline recovery**: planned in [ADR-0031](../decisions/0031-optional-vault-credential-routing.md). File injection via Vault Agent is available today; it does not implement that recovery policy.
+- **Native Vault and bounded offline recovery**: available through the [HTTP service gateway](route-service-credentials.md). Provider `secret:<name>` references still use the backends described above; plain Vault Agent file injection does not implement that recovery policy.
 
 ## Trade-offs
 
