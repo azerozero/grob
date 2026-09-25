@@ -288,6 +288,7 @@ async fn run() -> anyhow::Result<()> {
                 commands::key::cmd_key_revoke(&config, &id_or_prefix).await
             }
         },
+        Commands::Credentials { action } => commands::credentials::run(&config, action)?,
         Commands::Secrets { action } => match action {
             SecretsAction::Add { name } => commands::secrets::cmd_secrets_add(&name),
             SecretsAction::List { json } => commands::secrets::cmd_secrets_list(json),

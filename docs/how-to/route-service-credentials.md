@@ -1,0 +1,205 @@
+# Route service credentials with or without Vault
+
+Use the HTTP service gateway when an agent should keep a stable Grob identity
+while an administrator rotates an upstream token or username/password pair.
+Local encrypted storage supports the same injection path as Vault/OpenBao KV v2.
+The existing LLM `secret:<name>` references remain separate and compatible.
+
+## Create a dedicated agent identity
+
+Keep the administrator credential separate from agent credentials:
+
+```toml
+[auth]
+mode = "api_key"
+api_key = "secret:grob-admin"
+adopt_from_system = false
+```
+
+```sh
+grob secrets add grob-admin
+grob key create --name service-agent --tenant operations
+```
+
+Store the returned key in the agent and use its returned UUID in the binding
+below. Gateway bindings require an explicit tenant. Keys restricted to LLM models
+or providers are rejected by this endpoint; provision a dedicated service key.
+With JWT authentication, use `jwt:<subject>` instead of `key:<uuid>` and match the
+verified tenant claim. Forwarded identity headers never grant access.
+
+## Configure an exact service destination
+
+Add this binding to `config.toml`, replacing the example UUID, origin and IP with
+your own approved values:
+
+```toml
+[[credential_services]]
+id = "tickets"
+tenant = "operations"
+agents = ["key:00000000-0000-4000-8000-000000000001"]
+origin = "https://tickets.example.com"
+allowed_ips = ["203.0.113.10"]
+paths = ["/api/tickets", "/api/status"]
+methods = ["GET", "POST"]
+
+[credential_services.injection]
+type = "bearer"
+```
+
+Connections use only `allowed_ips`, with DNS resolution and environment HTTP
+proxies disabled. TLS still verifies the configured hostname. Include a port in
+the origin when the service uses a nondefault port. HTTPS is required, except for
+explicitly pinned loopback HTTP used by local services and tests. Update the IP
+list when the upstream changes addresses.
+
+Paths match exactly. Query strings, percent-encoded paths, dot segments, duplicate
+slashes and redirects are rejected. The agent supplies a service identifier and
+path; it cannot supply an upstream origin or secret reference. Arbitrary custom
+request headers and cookies are not forwarded. Supported content types are JSON,
+plain text, event streams, form data and opaque bytes. Request bodies are limited
+to 2 MiB and upstream exchanges to 60 seconds.
+
+Reload the server after editing configuration. Any binding change requires
+explicit credential publication against that new configuration; an earlier
+credential does not silently acquire new destinations or permissions.
+
+## Provision or rotate local credentials
+
+Supply a complete JSON bundle through stdin, without putting literal secret
+values in command arguments or shell history. For example, a secret manager can
+pipe a bundle into:
+
+```sh
+grob credentials local tickets
+```
+
+The stdin shape for Bearer or an API key header is:
+
+```json
+{"token":"<upstream-token>"}
+```
+
+For an API key header, configure:
+
+```toml
+[credential_services.injection]
+type = "header"
+name = "x-api-key"
+```
+
+For HTTP Basic, configure `type = "basic"` and provide one coherent bundle:
+
+```json
+{"username":"<upstream-user>","password":"<upstream-password>"}
+```
+
+Run the same `credentials local` command to rotate or explicitly switch from
+Vault to local authority. New dispatches read the new encrypted record; already
+dispatched requests can finish. The agent key and service URL remain unchanged.
+Use `--expires-at <unix-seconds>` to impose a credential deadline, and optionally
+set `expires_at` on the service binding to bound the policy itself.
+When rotating without `--expires-at`, the existing credential deadline is
+preserved. Extending an expired deadline requires an explicit new timestamp.
+
+Call `https://<grob-host>/v1/services/tickets/api/tickets` with the agent's Grob
+Bearer key. Grob authenticates the agent, checks the binding and applicable
+existing spend limits, then injects the upstream credential. Local mode does not
+contact Vault and needs no Vault installation.
+
+## Add optional Vault or OpenBao
+
+Store the same JSON bundle in a KV v2 entry. Give a dedicated Vault token only
+`read` access to its data path. Have Vault Agent auto-auth maintain the token in
+an owner-readable file; Grob rereads that file on each authoritative refresh.
+Grob does not issue or renew the Vault authentication token itself.
+
+Add the following table inside the service binding, after its injection table:
+
+```toml
+[credential_services.vault]
+endpoint = "https://vault.example.com:8200/v1/secret/data/tickets"
+allowed_ips = ["10.0.0.12"]
+token_file = "/run/grob/vault-token"
+refresh_secs = 5
+max_offline_secs = 60
+```
+
+`refresh_secs` must be 1–300 seconds. `max_offline_secs` defaults to zero, which
+disables outage recovery; the largest permitted value is one day. These intervals
+also bound rotation/revocation visibility. Reads within the refresh interval use
+the last verified generation. Concurrent refreshes are coalesced per service per
+process; stale results cannot overwrite a newer administrative publication.
+
+After reloading configuration, explicitly activate Vault authority:
+
+```sh
+grob credentials vault tickets
+```
+
+The first call must successfully read Vault. A fresh installation cannot recover
+an unknown secret. Recovery snapshots are encrypted separately from legacy
+provider secrets, and cannot be provisioned as if they were local credentials.
+
+During a classified connection failure, timeout, or HTTP 502/504, a previously
+verified snapshot may be used within the configured offline age. Policy expiry
+and KV deletion deadlines can shorten this window. Cache reads, failures and
+restarts do not extend it. Clock rollback rejects access. A process without Vault
+connectivity cannot discover a new remote revocation; choose zero offline age if
+that uncertainty is unacceptable.
+
+Permission denial, deletion, a lower KV version, malformed data, TLS validation
+failure, or HTTP 503 (which may indicate a sealed Vault) disable the binding and
+durably discard its snapshot. Fix the cause and explicitly run `credentials vault`
+again to clear the denial. A new token file alone cannot resurrect a revoked
+binding. Vault returning online never replaces an explicit local override.
+
+The adapter supports KV v2 static bundles. Dynamic secret issuance and lease
+renewal, Vault namespaces, browser login forms, MFA and transparent HTTPS tunnel
+interception are outside this implementation.
+
+## Inspect, revoke and recover
+
+```sh
+grob credentials status tickets
+grob credentials revoke tickets
+```
+
+The authenticated administrative endpoint `GET /api/credentials/status` reports
+`local`, `remote`, `verification_due`, `recovery` or `unavailable`, along with
+generation and validity metadata. It never returns bundle values. Revocation
+survives process restarts. Only explicit local or Vault publication clears it.
+Unrelated local bindings continue working during a Vault outage.
+
+Persist `GROB_HOME/credentials/` and the associated encryption key across container
+recreation. Bundles and ownership/validity metadata share one authenticated
+AES-256-GCM envelope, published by atomic replacement with durable directory
+updates. The plaintext buffers owned by the broker are erased on drop; this does
+not encrypt all RAM or protect a compromised host.
+
+Outbound credentials and their configured authentication representation are
+filtered from literal response echoes, including across stream chunks. Responses
+are never cached; only a sanitized content type is forwarded. A suffix up to the
+longest credential representation is held back during streaming. The approved
+upstream still receives the secret and remains trusted: arbitrary transformations
+or encodings by a malicious upstream cannot be reliably redacted.
+
+This gateway has its own service policy and does not run LLM classification,
+prompt DLP, tool policy or token-based billing. Configurations with `[[policies]]`
+are rejected when credential services are present, preventing those policies from
+being silently bypassed. Use a dedicated gateway configuration for this case.
+
+## Run fault qualification
+
+```sh
+cargo build --release
+python3 scripts/ci/credential-recovery.py --binary target/release/grob \
+  --engine docker --output /tmp/grob-credential-recovery
+```
+
+Use `--engine podman` with Podman. The test creates its own OpenBao container,
+synthetic service and temporary encrypted store. It checks local and remote
+rotation, concurrent dispatch, outages, offline expiry, explicit source changes,
+revocation, a sealed Vault and Grob process SIGKILL/restart. It removes only its
+own resources. The same qualification runs in the existing hardening CI job.
+See [ADR-0031](../decisions/0031-optional-vault-credential-routing.md) for the design
+and [memory qualification](harden-memory.md) for broader crash-test limitations.

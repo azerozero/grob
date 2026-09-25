@@ -16,6 +16,7 @@
 
 /// Atomic file write (write → fsync → rename).
 pub(crate) mod atomic;
+mod credentials;
 /// AES-256-GCM encryption for credential storage at rest.
 pub(crate) mod encrypt;
 /// Append-only JSONL spend journal.

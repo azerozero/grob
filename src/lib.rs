@@ -112,6 +112,8 @@ pub mod commands;
 pub mod config;
 /// Generic control engine for unified CLI / MCP / UI dispatch.
 pub mod control;
+/// Scoped HTTP credential gateway and optional Vault recovery.
+pub mod credentials;
 /// Optional features: DLP, MCP, TAP, token pricing.
 pub mod features;
 /// Shared data models (requests, responses, routing).

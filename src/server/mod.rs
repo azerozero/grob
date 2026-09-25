@@ -7,6 +7,7 @@ mod config_api;
 /// Centralized deny-list for configuration updates.
 pub(crate) mod config_guard;
 mod context_guard;
+mod credential_gateway;
 /// Core dispatch pipeline: DLP, cache, route, provider loop.
 pub(crate) mod dispatch;
 mod endpoints;
@@ -81,6 +82,9 @@ use tracing::{info, warn};
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
+    /// Per-service refresh gates scoped to the active authorizing configuration.
+    pub(crate) credential_brokers:
+        std::collections::HashMap<String, Arc<crate::credentials::broker::Broker>>,
     /// Universal tool layer for injection, aliasing, and capability gating.
     pub tool_layer: Option<Arc<crate::features::tool_layer::ToolLayer>>,
     /// Active application configuration snapshot.
@@ -149,6 +153,16 @@ impl ReloadableState {
             ))
         });
         Self {
+            credential_brokers: config
+                .credential_services
+                .iter()
+                .map(|s| {
+                    (
+                        s.id.clone(),
+                        Arc::new(crate::credentials::broker::Broker::default()),
+                    )
+                })
+                .collect(),
             tool_layer,
             cache_epoch: CACHE_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             config,
@@ -260,11 +274,10 @@ pub struct AppState {
     /// Pending HIT approval channels keyed by `"{request_id}:{tool_name}"`.
     #[cfg(feature = "policies")]
     pub hit_pending: Arc<crate::features::policies::stream::HitPendingApprovals>,
-    /// Dedicated limiter for per-policy `rate_limit` overrides. Separate from
-    /// [`SecurityState::rate_limiter`] so policy buckets (custom rps) never
+    /// Limiter for policy overrides and credential gateway agent quotas. Separate from
+    /// [`SecurityState::rate_limiter`] so scoped buckets (custom rps) never
     /// collide with the pre-handler middleware's default-rate buckets.
-    #[cfg(feature = "policies")]
-    pub policy_rate_limiter: Arc<RateLimiter>,
+    pub scoped_rate_limiter: Arc<RateLimiter>,
 }
 
 impl AppState {
@@ -347,8 +360,7 @@ pub(crate) fn test_app_state_with_source(
         grob_hint: std::sync::Mutex::new(None),
         #[cfg(feature = "policies")]
         hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        #[cfg(feature = "policies")]
-        policy_rate_limiter: Arc::new(crate::security::RateLimiter::new(
+        scoped_rate_limiter: Arc::new(crate::security::RateLimiter::new(
             crate::security::RateLimitConfig {
                 requests_per_second: 1,
                 burst: 1,
@@ -488,8 +500,7 @@ pub async fn start_server(
         grob_hint: std::sync::Mutex::new(None),
         #[cfg(feature = "policies")]
         hit_pending: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
-        #[cfg(feature = "policies")]
-        policy_rate_limiter: Arc::new(RateLimiter::new(crate::security::RateLimitConfig {
+        scoped_rate_limiter: Arc::new(RateLimiter::new(crate::security::RateLimitConfig {
             requests_per_second: 1,
             burst: 1,
         })),
@@ -530,6 +541,15 @@ pub async fn start_server(
 
 fn build_app_router(config: &AppConfig, state: Arc<AppState>) -> axum::Router {
     let app = AxumRouter::new()
+        .route(
+            "/v1/services/{service}",
+            axum::routing::any(credential_gateway::dispatch),
+        )
+        .route(
+            "/v1/services/{service}/{*path}",
+            axum::routing::any(credential_gateway::dispatch),
+        )
+        .route("/api/credentials/status", get(credential_gateway::status))
         .route("/v1/messages", post(handlers::handle_messages))
         .route(
             "/v1/messages/count_tokens",

@@ -29,6 +29,7 @@ const KNOWN_SUBCOMMANDS: &[&str] = &[
     "completions",
     "config-diff",
     "connect",
+    "credentials",
     "doctor",
     "env",
     "exec",
@@ -270,6 +271,12 @@ pub enum Commands {
         /// Secrets management subcommand
         #[command(subcommand)]
         action: SecretsAction,
+    },
+    /// Manage scoped HTTP gateway credentials and their authority.
+    Credentials {
+        /// Administrative operation, with secret values read only from stdin.
+        #[command(subcommand)]
+        action: crate::commands::credentials::CredentialAction,
     },
     /// Manage trace logs (decrypt encrypted traces)
     Logs {

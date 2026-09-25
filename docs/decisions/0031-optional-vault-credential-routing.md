@@ -10,14 +10,18 @@ related: [0013-storage-files-no-redb, 0029-relicense-core-apache, 0030-fail-clos
 ## Scope and implementation status
 
 This decision defines the credential-routing extension and its operation without
-Vault. It accepts the requirement and architecture; it does not implement a native
-Vault connector, general HTTP gateway or automatic backend failover.
+Vault. The explicit HTTP service gateway now implements local encrypted authority,
+Vault/OpenBao KV v2 reads, bounded encrypted recovery, hot rotation and durable
+revocation. See [Route service credentials](../how-to/route-service-credentials.md)
+for supported configuration, commands and qualification. Dynamic secret engines
+and lease renewal are not implemented; Vault Agent manages authentication tokens.
 
 The shipped LLM-provider path already has stable virtual agent keys, live
 `secret:<name>` references, encrypted local storage and file-based injection from
 Vault Agent. See [Manage Secrets](../how-to/manage-secrets.md). The additional
-rules and recovery behavior below are implementation requirements, not current
-configuration options.
+rules below describe the contract. The implementation uses exact path matching
+and pinned connection addresses, and rejects configurations combining this gateway
+with LLM policies until those policies can be evaluated for opaque HTTP traffic.
 
 ## Context and problem statement
 
@@ -61,7 +65,8 @@ flowchart LR
 
 ### Modes and feature parity
 
-These are design names, not TOML values supported by the current parser.
+These are design names. Authority is explicitly selected by `grob credentials
+local` or `grob credentials vault`; recovery is configured per binding.
 
 | Mode | Credential authority | If Vault is absent or unavailable |
 |---|---|---|
