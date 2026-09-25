@@ -68,10 +68,7 @@ pub fn run(config: &AppConfig, action: CredentialAction) -> anyhow::Result<()> {
             let bundle: Bundle = serde_json::from_slice(&clear)
                 .map_err(|_| anyhow::anyhow!("invalid credential bundle JSON"))?;
             bundle.validate(&binding.injection)?;
-            store.credential_publish(
-                CredentialRecord::provision(binding, Authority::Local, Some(bundle), expires_at),
-                None,
-            )?;
+            store.credential_set_local(binding, bundle, expires_at)?;
             println!("Local authority published; new requests use this version.");
         }
         CredentialAction::Vault { .. } => {

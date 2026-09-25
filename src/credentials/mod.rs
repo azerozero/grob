@@ -9,6 +9,9 @@ pub(crate) mod transport;
 /// Reports failures without including credentials, upstream bodies or URLs.
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialError {
+    /// Reports an absent scope without permitting fallback to another credential.
+    #[error("credential record missing")]
+    Missing,
     /// Rejects an unauthorized service, destination or credential state.
     #[error("credential access denied")]
     Denied,

@@ -255,3 +255,57 @@ async fn config_reload_requires_explicit_republication_and_status_never_exposes_
     );
     no_calls.assert_async().await;
 }
+
+#[tokio::test]
+async fn agent_rate_and_budget_restrictions_apply_before_credential_dispatch() {
+    let mut upstream = mockito::Server::new_async().await;
+    let (_home, state, app, key, binding) = fixture(&upstream.url(), Injection::Bearer).await;
+    state
+        .grob_store
+        .credential_set_local(
+            &binding,
+            Bundle {
+                token: "synthetic-scoped".into(),
+                username: String::new(),
+                password: String::new(),
+            },
+            None,
+        )
+        .unwrap();
+    let mut agent = state.grob_store.list_virtual_keys().remove(0);
+    agent.rate_limit_rps = Some(1);
+    state.grob_store.store_virtual_key(&agent).unwrap();
+    let mock = upstream
+        .mock("POST", "/test")
+        .with_body("ok")
+        .expect(1)
+        .create_async()
+        .await;
+    assert_eq!(
+        call(&app, &key, "/v1/services/service/test", "POST")
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        call(&app, &key, "/v1/services/service/test", "POST")
+            .await
+            .0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    agent.budget_usd = Some(0.5);
+    state.grob_store.store_virtual_key(&agent).unwrap();
+    state.grob_store.record_spend(
+        Some(&binding.tenant),
+        1.0,
+        "credential_gateway",
+        &binding.id,
+    );
+    assert_eq!(
+        call(&app, &key, "/v1/services/service/test", "POST")
+            .await
+            .0,
+        StatusCode::PAYMENT_REQUIRED
+    );
+    mock.assert_async().await;
+}

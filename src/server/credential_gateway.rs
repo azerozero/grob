@@ -38,6 +38,45 @@ pub(super) async fn dispatch(
         .iter()
         .find(|b| &b.id == service)
         .ok_or(CredentialError::Denied)?;
+    let url = authorize(binding, &uri, &request)?;
+    let vk = request.extensions().get::<crate::auth::VirtualKeyContext>();
+    if let Err(response) = enforce_limits(&state, &inner, binding, vk).await {
+        return Ok(response);
+    }
+    let client = crate::credentials::transport::client(&url, &binding.allowed_ips)?;
+    let method = request.method().clone();
+    let content_type = safe_content_type(request.headers());
+    let body = axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024)
+        .await
+        .map_err(|_| CredentialError::Denied)?;
+    let broker = inner
+        .credential_brokers
+        .get(service)
+        .ok_or(CredentialError::Denied)?;
+    let record = broker.resolve(state.grob_store.clone(), binding).await?;
+    let bundle = record.bundle.as_ref().ok_or(CredentialError::Unavailable)?;
+    let (header_name, header, filter) = authentication(bundle, &binding.injection)?;
+    tracing::info!(service = %binding.id, tenant = %binding.tenant, authority = ?record.authority, generation = %record.generation, recovery = record.recovery, "credential dispatch");
+    let guard = super::handlers::ActiveRequestGuard::new(&state);
+    // Only selected media headers survive; caller auth, cookies, forwarding and framing do not.
+    let response = client
+        .request(method, url)
+        .header("content-type", content_type)
+        .header("accept-encoding", "identity")
+        .header(header_name, header)
+        .body(body)
+        .send()
+        .await
+        .map_err(|_| CredentialError::Unavailable)?;
+    filter_response(response, filter, guard)
+}
+
+fn authorize(
+    binding: &crate::credentials::config::ServiceBinding,
+    uri: &axum::http::Uri,
+    request: &Request<Body>,
+) -> Result<reqwest::Url, CredentialError> {
+    let service = &binding.id;
     let vk = request.extensions().get::<crate::auth::VirtualKeyContext>();
     let jwt = request.extensions().get::<crate::auth::GrobClaims>();
     let (tenant, identity) = if let Some(vk) = vk {
@@ -75,13 +114,29 @@ pub(super) async fn dispatch(
     {
         return Err(CredentialError::Denied);
     }
-    if super::check_budget_for_tenant(&state, &inner, "credential_gateway", service, Some(tenant))
+    let mut url = crate::credentials::transport::endpoint(&binding.origin, &binding.allowed_ips)?;
+    url.set_path(path);
+    Ok(url)
+}
+
+async fn enforce_limits(
+    state: &Arc<AppState>,
+    inner: &Arc<super::ReloadableState>,
+    binding: &crate::credentials::config::ServiceBinding,
+    vk: Option<&crate::auth::VirtualKeyContext>,
+) -> Result<(), Response> {
+    let service = &binding.id;
+    let tenant = binding.tenant.as_str();
+    if super::check_budget_for_tenant(state, inner, "credential_gateway", service, Some(tenant))
         .await
         .is_err()
     {
-        return Ok((StatusCode::PAYMENT_REQUIRED, "budget exceeded").into_response());
+        return Err((StatusCode::PAYMENT_REQUIRED, "budget exceeded").into_response());
     }
     if let Some(limit) = vk.and_then(|v| v.budget_usd) {
+        let budget = &inner.config.budget;
+        let limit =
+            crate::security::replica_budget_share(limit, budget.replicas, budget.margin_percent);
         let tracker = state.observability.spend_tracker.lock().await;
         if tracker
             .check_tenant_budget(
@@ -94,24 +149,46 @@ pub(super) async fn dispatch(
             )
             .is_err()
         {
-            return Ok((StatusCode::PAYMENT_REQUIRED, "budget exceeded").into_response());
+            return Err((StatusCode::PAYMENT_REQUIRED, "budget exceeded").into_response());
         }
     }
-    let mut url = crate::credentials::transport::endpoint(&binding.origin, &binding.allowed_ips)?;
-    url.set_path(path);
-    let client = crate::credentials::transport::client(&url, &binding.allowed_ips)?;
-    let method = request.method().clone();
-    let content_type = safe_content_type(request.headers());
-    let body = axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024)
-        .await
-        .map_err(|_| CredentialError::Denied)?;
-    let broker = inner
-        .credential_brokers
-        .get(service)
-        .ok_or(CredentialError::Denied)?;
-    let record = broker.resolve(state.grob_store.clone(), binding).await?;
-    let bundle = record.bundle.as_ref().ok_or(CredentialError::Unavailable)?;
-    let (header_name, header_value) = match &binding.injection {
+    if let Some(key) = vk.filter(|v| v.rate_limit_rps.is_some_and(|rps| rps > 0)) {
+        let security = &inner.config.security;
+        let rps = crate::security::replica_share(
+            key.rate_limit_rps.unwrap_or(0),
+            security.rate_limit_replicas,
+            security.rate_limit_margin_percent,
+        );
+        let bucket =
+            crate::security::RateLimitKey::Tenant(format!("credential-key:{}", key.key_id));
+        if !state
+            .policy_rate_limiter
+            .check_with_config(
+                &bucket,
+                crate::security::RateLimitConfig {
+                    requests_per_second: rps,
+                    burst: rps,
+                },
+            )
+            .await
+            .0
+        {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", "1")],
+                "agent rate limit exceeded",
+            )
+                .into_response());
+        }
+    }
+    Ok(())
+}
+
+fn authentication(
+    bundle: &crate::credentials::record::Bundle,
+    injection: &Injection,
+) -> Result<(String, reqwest::header::HeaderValue, EchoFilter), CredentialError> {
+    let (header_name, header_value) = match injection {
         Injection::Bearer => (
             "authorization".to_owned(),
             format!("Bearer {}", bundle.token),
@@ -138,23 +215,18 @@ pub(super) async fn dispatch(
         bundle.password.clone(),
         header_value.to_string(),
     ];
-    if matches!(binding.injection, Injection::Basic) {
+    if matches!(injection, Injection::Basic) {
         values.push(header_value.trim_start_matches("Basic ").to_owned());
         values.push(format!("{}:{}", bundle.username, bundle.password));
     }
-    let mut filter = EchoFilter::new(values);
-    tracing::info!(service = %binding.id, tenant = %binding.tenant, authority = ?record.authority, generation = %record.generation, recovery = record.recovery, "credential dispatch");
-    let guard = super::handlers::ActiveRequestGuard::new(&state);
-    // Only selected media headers survive; caller auth, cookies, forwarding and framing do not.
-    let response = client
-        .request(method, url)
-        .header("content-type", content_type)
-        .header("accept-encoding", "identity")
-        .header(header_name, header)
-        .body(body)
-        .send()
-        .await
-        .map_err(|_| CredentialError::Unavailable)?;
+    Ok((header_name, header, EchoFilter::new(values)))
+}
+
+fn filter_response(
+    response: reqwest::Response,
+    mut filter: EchoFilter,
+    guard: super::handlers::ActiveRequestGuard,
+) -> Result<Response, CredentialError> {
     if response.status().is_redirection()
         || response
             .headers()

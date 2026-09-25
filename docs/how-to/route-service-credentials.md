@@ -98,6 +98,8 @@ Vault to local authority. New dispatches read the new encrypted record; already
 dispatched requests can finish. The agent key and service URL remain unchanged.
 Use `--expires-at <unix-seconds>` to impose a credential deadline, and optionally
 set `expires_at` on the service binding to bound the policy itself.
+When rotating without `--expires-at`, the existing credential deadline is
+preserved. Extending an expired deadline requires an explicit new timestamp.
 
 Call `https://<grob-host>/v1/services/tickets/api/tickets` with the agent's Grob
 Bearer key. Grob authenticates the agent, checks the binding and applicable

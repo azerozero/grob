@@ -1,7 +1,11 @@
 //! Strict credential records; legacy global fallback and plaintext reads are deliberately absent.
 
 use super::{atomic, GrobStore};
-use crate::credentials::{record::CredentialRecord, CredentialError, Result};
+use crate::credentials::{
+    config::ServiceBinding,
+    record::{Authority, Bundle, CredentialRecord},
+    CredentialError, Result,
+};
 use sha2::{Digest, Sha256};
 
 impl GrobStore {
@@ -13,8 +17,13 @@ impl GrobStore {
     }
 
     fn read_credential(&self, tenant: &str, service: &str) -> Result<CredentialRecord> {
-        let data = std::fs::read(self.credential_path(tenant, service))
-            .map_err(|_| CredentialError::Storage)?;
+        let data = std::fs::read(self.credential_path(tenant, service)).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                CredentialError::Missing
+            } else {
+                CredentialError::Storage
+            }
+        })?;
         let clear = zeroize::Zeroizing::new(
             self.cipher
                 .decrypt(&data)
@@ -90,6 +99,36 @@ impl GrobStore {
         self.write_credential(&record)?;
         tracing::info!(tenant = %record.tenant, service = %record.service, authority = ?record.authority, generation = %record.generation, revoked = record.revoked, administrative = expected.is_none(), "credential publication");
         Ok(record.generation)
+    }
+
+    /// Rotates local credentials while preserving expiry unless an administrator supplies a new deadline.
+    ///
+    /// # Errors
+    /// Rejects invalid bundles, corrupt existing records, expired deadlines and failed durable writes.
+    pub fn credential_set_local(
+        &self,
+        binding: &ServiceBinding,
+        bundle: Bundle,
+        expires_at: Option<i64>,
+    ) -> Result<()> {
+        bundle.validate(&binding.injection)?;
+        let _lock = self
+            .credential_lock()
+            .map_err(|_| CredentialError::Storage)?;
+        let existing_expiry = match self.read_credential(&binding.tenant, &binding.id) {
+            Ok(record) => record.expires_at,
+            Err(CredentialError::Missing) => None,
+            Err(error) => return Err(error),
+        };
+        let expires_at = expires_at.or(existing_expiry);
+        if expires_at.is_some_and(|e| e <= crate::credentials::now()) {
+            return Err(CredentialError::Denied);
+        }
+        let record =
+            CredentialRecord::provision(binding, Authority::Local, Some(bundle), expires_at);
+        self.write_credential(&record)?;
+        tracing::info!(tenant = %record.tenant, service = %record.service, generation = %record.generation, expires_at = ?record.expires_at, "local credential publication");
+        Ok(())
     }
 
     /// Durably revokes every source for one existing credential binding.

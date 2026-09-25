@@ -332,3 +332,49 @@ fn concurrent_bundle_rotation_never_mixes_fields_between_independent_handles() {
         }
     });
 }
+
+#[test]
+fn local_rotation_preserves_expiry_until_explicitly_changed() {
+    let (_dir, store, binding) = fixture();
+    let token = || Bundle {
+        token: "synthetic-rotation".into(),
+        username: String::new(),
+        password: String::new(),
+    };
+    let deadline = now() + 600;
+    store
+        .credential_set_local(&binding, token(), Some(deadline))
+        .unwrap();
+    store.credential_set_local(&binding, token(), None).unwrap();
+    assert_eq!(
+        store
+            .credential_read(&binding.tenant, &binding.id)
+            .unwrap()
+            .expires_at,
+        Some(deadline)
+    );
+    store
+        .credential_revoke(&binding.tenant, &binding.id)
+        .unwrap();
+    store.credential_set_local(&binding, token(), None).unwrap();
+    assert_eq!(
+        store
+            .credential_read(&binding.tenant, &binding.id)
+            .unwrap()
+            .expires_at,
+        Some(deadline)
+    );
+    store
+        .credential_set_local(&binding, token(), Some(deadline + 600))
+        .unwrap();
+    assert_eq!(
+        store
+            .credential_read(&binding.tenant, &binding.id)
+            .unwrap()
+            .expires_at,
+        Some(deadline + 600)
+    );
+    assert!(store
+        .credential_set_local(&binding, token(), Some(now() - 1))
+        .is_err());
+}
