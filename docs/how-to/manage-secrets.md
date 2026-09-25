@@ -236,6 +236,30 @@ path = "/etc/grob/secrets"     # only read when backend = "file"
 Whatever the backend, the placeholder syntax in `[[providers]]` stays the
 same: `api_key = "secret:<name>"`. Only the resolution layer changes.
 
+### Operate without Vault
+
+The local encrypted backend is the default and requires no Vault service:
+
+```toml
+[secrets]
+backend = "local_encrypted"
+```
+
+Provision the named credentials with `grob secrets add <name>` and keep the
+provider's `api_key = "secret:<name>"` reference. The agent retains its virtual
+Grob key. Replacing the local value takes effect on the next upstream dispatch;
+the running daemon and agent do not need to restart. Provision all references
+before deliberately changing the backend of an existing deployment.
+
+This is supported standalone operation for the current LLM-provider path.
+Automatic Vault-to-local recovery and general HTTP credential routing are planned
+in [ADR-0031](../decisions/0031-optional-vault-credential-routing.md). That design
+requires equal routing, injection and rotation functions with local storage, plus
+opt-in bounded recovery for Vault outages. It does not make expired, revoked or
+unreadable secrets usable, and an offline copy cannot detect a new remote
+revocation until communication resumes. The current file backend has no lease or
+freshness enforcement; do not treat a stale Vault Agent file as validated recovery.
+
 ### `env` backend
 
 `secret:minimax-api-key` resolves to `std::env::var("MINIMAX_API_KEY")`.
@@ -312,7 +336,7 @@ above. Environment-based injection still requires restarting the process.
 ## What is **not** here yet (tracked)
 
 - **Master key backup/restore CLI**: `grob secrets export-key --to <file> --password <prompt>` and `import-key`. Today the master key is a raw file — back it up manually.
-- **Native Vault backend** (direct API calls, dynamic refresh without restart). The File backend covers 95 % of cases via Vault Agent — open an issue if you need the native path.
+- **Native Vault backend and bounded offline recovery**: planned in [ADR-0031](../decisions/0031-optional-vault-credential-routing.md). File injection via Vault Agent is available today; it does not implement that recovery policy.
 
 ## Trade-offs
 
