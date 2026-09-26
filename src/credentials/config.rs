@@ -52,8 +52,12 @@ pub struct VaultConfig {
     pub endpoint: String,
     /// Explicit network addresses permitted for Vault.
     pub allowed_ips: Vec<IpAddr>,
-    /// Local token file, typically maintained by Vault Agent auto-auth.
+    /// Local token file, typically maintained by Vault Agent auto-auth; omitted for a Unix proxy.
+    #[serde(default, skip_serializing_if = "empty_path")]
     pub token_file: std::path::PathBuf,
+    /// Protected Unix socket of a same-user auto-auth proxy with secret caching disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_socket: Option<std::path::PathBuf>,
     /// Maximum time between successful authoritative reads, in seconds (1–300).
     pub refresh_secs: u64,
     /// Maximum offline age since verification; zero disables outage recovery.
@@ -128,10 +132,20 @@ impl ServiceBinding {
                 (1..=300).contains(&vault.refresh_secs) && vault.max_offline_secs <= 86400,
                 "invalid Vault freshness bounds"
             );
-            anyhow::ensure!(
-                vault.token_file.is_absolute(),
-                "Vault token_file must be absolute"
-            );
+            if let Some(socket) = &vault.proxy_socket {
+                anyhow::ensure!(cfg!(unix), "Vault Unix proxy requires Unix");
+                anyhow::ensure!(
+                    socket.is_absolute() && vault.token_file.as_os_str().is_empty(),
+                    "Vault proxy_socket must be absolute and cannot be combined with token_file"
+                );
+                let url = reqwest::Url::parse(&vault.endpoint)?;
+                anyhow::ensure!(url.scheme() == "http" && url.host_str() == Some("localhost") && vault.allowed_ips.iter().all(|ip| ip.is_loopback()), "Vault Unix proxy requires an http://localhost endpoint and loopback address pins");
+            } else {
+                anyhow::ensure!(
+                    vault.token_file.is_absolute(),
+                    "Vault token_file must be absolute"
+                );
+            }
         }
         Ok(())
     }
@@ -152,4 +166,8 @@ pub(crate) fn canonical_path(path: &str) -> bool {
         && path
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"/-_.~".contains(&b))
+}
+
+fn empty_path(path: &std::path::Path) -> bool {
+    path.as_os_str().is_empty()
 }

@@ -32,6 +32,11 @@ pub enum CredentialAction {
         /// Configured service identifier.
         service: String,
     },
+    /// Checks policy, key custody, expiry and source readiness without making upstream calls.
+    Check {
+        /// Configured service identifier.
+        service: String,
+    },
 }
 
 /// Applies an explicit local administrative operation to a configured service.
@@ -44,7 +49,8 @@ pub fn run(config: &AppConfig, action: CredentialAction) -> anyhow::Result<()> {
         CredentialAction::Local { service, .. }
         | CredentialAction::Vault { service }
         | CredentialAction::Revoke { service }
-        | CredentialAction::Status { service } => service,
+        | CredentialAction::Status { service }
+        | CredentialAction::Check { service } => service,
     };
     let binding = config
         .credential_services
@@ -93,6 +99,95 @@ pub fn run(config: &AppConfig, action: CredentialAction) -> anyhow::Result<()> {
                 serde_json::json!({"service": binding.id, "authority": record.authority, "generation": record.generation, "revoked": record.revoked, "verified_at": record.verified_at, "expires_at": record.expires_at, "recovery": record.recovery, "policy_current": record.policy == binding.revision()})
             );
         }
+        CredentialAction::Check { .. } => {
+            let report = diagnose(&store, binding);
+            println!("{report}");
+            anyhow::ensure!(
+                report["ready"] == true,
+                "credential service is not ready; see diagnostic metadata"
+            );
+        }
     }
     Ok(())
+}
+
+fn diagnose(
+    store: &GrobStore,
+    binding: &crate::credentials::config::ServiceBinding,
+) -> serde_json::Value {
+    let mut warnings = Vec::new();
+    if !store.uses_external_encryption_key() {
+        warnings.push("storage_key_colocated_with_data");
+    } else if store.path().join("encryption.key").exists() {
+        warnings.push("local_key_copy_still_present");
+    }
+    let record = store.credential_read(&binding.tenant, &binding.id);
+    let transport = crate::credentials::broker::Broker::new(binding).is_ok();
+    let mut ready = false;
+    let mut state = "unavailable";
+    if let Ok(record) = &record {
+        state = record.state(binding, crate::credentials::now());
+        if record.expires_at.is_none() && binding.expires_at.is_none() {
+            warnings.push("credential_has_no_expiry");
+        }
+        let valid = record.check(binding, crate::credentials::now()).is_ok();
+        ready = valid
+            && match record.authority {
+                Authority::Local => record
+                    .bundle
+                    .as_ref()
+                    .is_some_and(|b| b.validate(&binding.injection).is_ok()),
+                Authority::Vault => binding.vault.as_ref().is_some_and(|v| {
+                    warnings.push("remote_authority_not_probed");
+                    if let Some(socket) = &v.proxy_socket {
+                        warnings.push("companion_secret_cache_must_be_disabled");
+                        crate::credentials::transport::check_proxy_socket(socket).is_ok()
+                    } else {
+                        crate::shared::secret_file::read(&v.token_file, 16384).is_ok_and(|bytes| {
+                            crate::credentials::broker::vault_token_header(&bytes).is_ok()
+                        })
+                    }
+                }),
+            };
+    }
+    serde_json::json!({"service": binding.id, "ready": ready && transport, "state": state,
+        "external_storage_key": store.uses_external_encryption_key(), "warnings": warnings})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn diagnostic_reports_lifecycle_without_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = GrobStore::open(&dir.path().join("grob.db")).unwrap();
+        let binding: crate::credentials::config::ServiceBinding = serde_json::from_value(serde_json::json!({
+            "id":"test", "tenant":"test", "agents":["jwt:test"], "origin":"https://example.com",
+            "allowed_ips":["203.0.113.1"], "paths":["/"], "methods":["GET"], "injection":{"type":"bearer"}
+        })).unwrap();
+        assert_eq!(diagnose(&store, &binding)["ready"], false);
+        store
+            .credential_set_local(
+                &binding,
+                Bundle {
+                    token: "synthetic-private-token".into(),
+                    username: String::new(),
+                    password: String::new(),
+                },
+                None,
+            )
+            .unwrap();
+        let report = diagnose(&store, &binding);
+        assert_eq!(report["ready"], true);
+        assert!(!report.to_string().contains("synthetic-private-token"));
+        assert!(report["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w == "credential_has_no_expiry"));
+        store
+            .credential_revoke(&binding.tenant, &binding.id)
+            .unwrap();
+        assert_eq!(diagnose(&store, &binding)["ready"], false);
+    }
 }

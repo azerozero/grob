@@ -136,7 +136,7 @@ impl GrobStore {
         std::fs::create_dir_all(&vkeys_dir)?;
 
         // Initialize encryption cipher.
-        let cipher = encrypt::StorageCipher::load_or_generate(path)
+        let cipher = encrypt::StorageCipher::load_for_store(path)
             .context("failed to initialize storage encryption")?;
 
         // Open spend journal and replay current month.
@@ -172,6 +172,11 @@ impl GrobStore {
         crate::grob_home()
             .unwrap_or_else(|| PathBuf::from(".grob"))
             .join("grob.db")
+    }
+
+    /// Reports whether the storage key was supplied outside the data directory.
+    pub fn uses_external_encryption_key(&self) -> bool {
+        self.cipher.is_external()
     }
 
     /// Gets the storage base directory path (for diagnostics).

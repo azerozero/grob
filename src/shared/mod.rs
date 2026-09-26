@@ -33,3 +33,5 @@ pub mod otel_metrics;
 
 /// PID file management for daemon mode.
 pub mod pid;
+
+pub(crate) mod secret_file;

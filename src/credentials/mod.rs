@@ -4,6 +4,7 @@ pub(crate) mod broker;
 pub mod config;
 pub(crate) mod filter;
 pub mod record;
+pub(crate) mod response;
 pub(crate) mod transport;
 
 /// Reports failures without including credentials, upstream bodies or URLs.

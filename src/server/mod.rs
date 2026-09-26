@@ -82,7 +82,7 @@ use tracing::{info, warn};
 
 /// Reloadable components - rebuilt on config reload
 pub struct ReloadableState {
-    /// Per-service refresh gates scoped to the active authorizing configuration.
+    /// Validated service bindings, connection pools and refresh gates for this snapshot.
     pub(crate) credential_brokers:
         std::collections::HashMap<String, Arc<crate::credentials::broker::Broker>>,
     /// Universal tool layer for injection, aliasing, and capability gating.
@@ -156,11 +156,12 @@ impl ReloadableState {
             credential_brokers: config
                 .credential_services
                 .iter()
-                .map(|s| {
-                    (
-                        s.id.clone(),
-                        Arc::new(crate::credentials::broker::Broker::default()),
-                    )
+                .filter_map(|s| match crate::credentials::broker::Broker::new(s) {
+                    Ok(broker) => Some((s.id.clone(), Arc::new(broker))),
+                    Err(_) => {
+                        tracing::error!(service = %s.id, "credential transport initialization failed; service disabled");
+                        None
+                    }
                 })
                 .collect(),
             tool_layer,
