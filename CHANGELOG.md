@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.115](https://github.com/azerozero/grob/compare/v0.36.114...v0.36.115) - 2026-09-26
+
+### Added
+
+- *(credentials)* harden injection and storage key custody ([#611](https://github.com/azerozero/grob/pull/611))
+
 ## [0.36.114](https://github.com/azerozero/grob/compare/v0.36.113...v0.36.114) - 2026-09-25
 
 ### Added
