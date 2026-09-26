@@ -19,12 +19,15 @@ provider supports it. Use `grob secrets` for everything else.
 
 ## Where the data lives
 
-- Master key: `~/.grob/encryption.key` (32 random bytes, chmod 600)
+- Master key: `GROB_ENCRYPTION_KEY_FILE` (protected external 32-byte file), or the compatible `~/.grob/encryption.key` (chmod 600)
+- Key association: `~/.grob/encryption.check` (authenticated, retained with the data)
 - Encrypted secrets: `~/.grob/secrets/<name>.enc`
 
-The master key is generated automatically the first time `grob` opens
-its storage. Back it up — losing the file means every encrypted blob
-(OAuth tokens, virtual keys, secrets) becomes unreadable.
+In compatible local mode, the master key is generated when Grob first creates an
+empty store. External keys must be provisioned separately. Back up the key
+independently from the encrypted data: losing it makes OAuth tokens, virtual keys
+and secrets unreadable. See [key custody and recovery](protect-credential-storage.md)
+for systemd credentials, container mounts and migration steps.
 
 ## Add a secret
 
@@ -336,7 +339,7 @@ above. Environment-based injection still requires restarting the process.
 
 ## What is **not** here yet (tracked)
 
-- **Master key backup/restore CLI**: `grob secrets export-key --to <file> --password <prompt>` and `import-key`. Today the master key is a raw file — back it up manually.
+- **Master key backup/restore CLI**: `grob secrets export-key --to <file> --password <prompt>` and `import-key`. There is no built-in key export or re-encryption command; use the external custody and recovery procedure linked above.
 - **Native Vault and bounded offline recovery**: available through the [HTTP service gateway](route-service-credentials.md). Provider `secret:<name>` references still use the backends described above; plain Vault Agent file injection does not implement that recovery policy.
 
 ## Trade-offs

@@ -56,8 +56,9 @@ Paths match exactly. Query strings, percent-encoded paths, dot segments, duplica
 slashes and redirects are rejected. The agent supplies a service identifier and
 path; it cannot supply an upstream origin or secret reference. Arbitrary custom
 request headers and cookies are not forwarded. Supported content types are JSON,
-plain text, event streams, form data and opaque bytes. Request bodies are limited
-to 2 MiB and upstream exchanges to 60 seconds.
+plain text, event streams and form data. Binary response types are rejected.
+Request bodies are limited to 2 MiB. Upstream exchanges have a **60-second total
+deadline**, including the response stream; this is not an idle timeout.
 
 Reload the server after editing configuration. Any binding change requires
 explicit credential publication against that new configuration; an earlier
@@ -110,7 +111,7 @@ contact Vault and needs no Vault installation.
 
 Store the same JSON bundle in a KV v2 entry. Give a dedicated Vault token only
 `read` access to its data path. Have Vault Agent auto-auth maintain the token in
-an owner-readable file; Grob rereads that file on each authoritative refresh.
+an owner-only regular file (0400/0600 on Unix, not a symlink); Grob rereads that file on each authoritative refresh.
 Grob does not issue or renew the Vault authentication token itself.
 
 Add the following table inside the service binding, after its injection table:
@@ -161,6 +162,7 @@ interception are outside this implementation.
 
 ```sh
 grob credentials status tickets
+grob credentials check tickets
 grob credentials revoke tickets
 ```
 
@@ -170,18 +172,27 @@ generation and validity metadata. It never returns bundle values. Revocation
 survives process restarts. Only explicit local or Vault publication clears it.
 Unrelated local bindings continue working during a Vault outage.
 
-Persist `GROB_HOME/credentials/` and the associated encryption key across container
-recreation. Bundles and ownership/validity metadata share one authenticated
+Persist `GROB_HOME/credentials/` and `GROB_HOME/encryption.check` across container
+recreation, and retain the associated encryption key in a separate protected
+location. See [key custody and lifecycle](protect-credential-storage.md). Bundles and ownership/validity metadata share one authenticated
 AES-256-GCM envelope, published by atomic replacement with durable directory
 updates. The plaintext buffers owned by the broker are erased on drop; this does
 not encrypt all RAM or protect a compromised host.
 
-Outbound credentials and their configured authentication representation are
-filtered from literal response echoes, including across stream chunks. Responses
-are never cached; only a sanitized content type is forwarded. A suffix up to the
-longest credential representation is held back during streaming. The approved
-upstream still receives the secret and remains trusted: arbitrary transformations
-or encodings by a malicious upstream cannot be reliably redacted.
+Response filtering decodes JSON strings and form values before removing echoes.
+A matching scalar is replaced as a whole; a matching object/form key rejects the
+response because renaming keys could merge fields. JSON syntax characters are
+not credential values. JSON and form documents are buffered up to 2 MiB; malformed
+JSON is rejected. SSE is processed one complete event at a time, limited to 64 KiB,
+including multiline data and CR/LF boundaries. JSON event data is decoded before
+masking. A completed event does not wait for the next event or stream completion.
+Plain text keeps only a suffix that could still match a literal credential.
+
+Unsupported or compressed response types are rejected. A rejection after response
+headers have been sent terminates the response body; consumers must handle body
+errors. Responses are never cached; only a sanitized content type is forwarded.
+The approved upstream still receives the secret and remains trusted: arbitrary
+transformations or encodings by a malicious upstream cannot be reliably redacted.
 
 This gateway has its own service policy and does not run LLM classification,
 prompt DLP, tool policy or token-based billing. Configurations with `[[policies]]`
@@ -201,5 +212,11 @@ synthetic service and temporary encrypted store. It checks local and remote
 rotation, concurrent dispatch, outages, offline expiry, explicit source changes,
 revocation, a sealed Vault and Grob process SIGKILL/restart. It removes only its
 own resources. The same qualification runs in the existing hardening CI job.
+Connection/stream regression tests run with `cargo test --lib credential`.
+TLS hostname validation and HTTP/2 reuse are exercised with
+`cargo test --lib --features tls credentials::transport::tls_tests`.
+CI qualifies OpenBao 2.5.5 and 2.7.0 separately; this is not a claim of blanket
+compatibility with all Vault/OpenBao releases.
+
 See [ADR-0031](../decisions/0031-optional-vault-credential-routing.md) for the design
 and [memory qualification](harden-memory.md) for broader crash-test limitations.
