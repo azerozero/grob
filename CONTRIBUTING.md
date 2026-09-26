@@ -124,6 +124,24 @@ example `feat(routing):` or `fix(openai-compat):`).
 
 ### What CI checks
 
+The required `Documentation examples` job checks documentation and source changes.
+It loads the TOML files in `docs/examples/`, verifies selected Markdown examples
+against the configuration schema and their expected settings, and syntax-checks
+the Python, Node.js and shell snippets in the SDK/setup/provider guides.
+It does not call providers or execute installation and deployment commands.
+Run the same checks locally with Python 3.8+, Node.js, Bash and cargo-nextest installed:
+
+```bash
+python3 scripts/ci/doc-examples.py
+cargo nextest run --locked --test lib --no-tests=fail doc_examples_test
+cargo nextest run --locked --test lib --no-tests=fail example_configs_test
+```
+
+When changing a checked heading, example or intended setting, update its contract
+in `tests/integration/doc_examples_test.rs` in the same PR. The existing Docs Lint
+workflow checks Markdown style and links separately. A missing test suite, failed
+example, or cancellation of the selected job blocks the required gate.
+
 Pull requests select jobs from `.github/workflows/ci.yml` according to changed
 files. See the [CI flow](docs/diagrams/ci-cd-pert.md) for triggers and required gates:
 

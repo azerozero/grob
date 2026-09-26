@@ -91,6 +91,12 @@ jobs:
             docs:
               - 'docs/**'
               - '**.md'
+              - 'tests/integration/doc_examples_test.rs'
+              - 'tests/integration/mod.rs'
+              - 'tests/unit/example_configs_test.rs'
+              - 'tests/unit/mod.rs'
+              - 'tests/lib.rs'
+              - '.config/nextest.toml'
 
   # ---------------------------------------------------------------------------
   # Stage 0: Extract version from Cargo.toml (used by later jobs)
@@ -180,6 +186,30 @@ jobs:
             echo "::error::A prek hook modified files. Run 'prek run --all-files' locally and commit the result."
             exit 1
           fi
+
+  doc-examples:
+    name: Documentation examples
+    needs: [changes]
+    if: needs.changes.outputs.docs == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: step-security/harden-runner@v2
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check SDK and shell syntax without executing examples
+        run: python3 scripts/ci/doc-examples.py
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: doc-examples
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@nextest
+      - name: Check documented configuration contracts
+        run: |
+          cargo nextest run --locked --test lib --no-tests=fail doc_examples_test
+          cargo nextest run --locked --test lib --no-tests=fail example_configs_test
 
   clippy:
     name: Clippy (${{ matrix.os }})
@@ -1123,11 +1153,21 @@ jobs:
       - test-other
       - validate-yaml
       - hardening
+      - doc-examples
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check required jobs
         run: |
+          # A selected docs check must pass; cancellation or a skipped job is not evidence.
+          if [[ "${{ needs.changes.outputs.docs }}" == "true" || \
+                "${{ needs.changes.outputs.rust }}" == "true" || \
+                "${{ needs.changes.outputs.ci }}" == "true" ]]; then
+            if [[ "${{ needs.doc-examples.result }}" != "success" ]]; then
+              echo "::error::Documentation examples: ${{ needs.doc-examples.result }}"
+              exit 1
+            fi
+          fi
           # Hardening must execute successfully whenever its paths are selected.
           hardening="${{ needs.hardening.result }}"
           if [[ "$hardening" != "success" && "$hardening" != "skipped" ]]; then

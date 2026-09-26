@@ -24,12 +24,14 @@ flowchart TB
     quality --> tests["Ubuntu shards, macOS and Windows tests<br/>plus Rust doctests"]
     clippy --> tests
     changes --> other["Gitleaks, coverage and feature combinations"]
+    changes --> examples["Documentation examples:<br/>configuration contracts and snippet syntax"]
     changes --> hardening["Linux memory, VM recovery<br/>and container crash recovery"]
     pr --> yaml["Validate CI YAML"]
     quality --> required["Required checks aggregate"]
     clippy --> required
     tests --> required
     other --> required
+    examples --> required
     hardening --> required
     yaml --> required
     tests -.-> mutations["Mutation testing on the PR diff"]
@@ -40,7 +42,9 @@ The `required` job in `ci.yml` lists the checks aggregated for branch protection
 Other workflows, including CodeQL and Semgrep, also report results. A green
 aggregate does not mean every optional or path-filtered job ran. The aggregate
 currently accepts skipped jobs and most cancelled jobs; hardening cancellation
-is blocking when that job runs.
+is blocking when that job runs. The documentation-example job must succeed when
+documentation, implementation or CI paths select it; a skipped or cancelled
+selected job blocks the aggregate. Its Rust test filters also fail when empty.
 
 The main container E2E job is not a pull request gate: its event condition
 selects pushes or eligible manual runs. Container crash recovery is a separate
