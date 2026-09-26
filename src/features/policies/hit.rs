@@ -138,7 +138,27 @@ fn matches_tool_pattern(pattern: &str, tool_name: &str, tool_input: &str) -> boo
         // fall back to substring match otherwise.
         #[cfg(feature = "policies")]
         if let Ok(glob) = globset::Glob::new(arg_pattern) {
-            return glob.compile_matcher().is_match(tool_input);
+            let matcher = glob.compile_matcher();
+            if matcher.is_match(tool_input) {
+                return true;
+            }
+            // Tools execute decoded JSON values, not their wire encoding.
+            // Match string arguments too, so escaping cannot hide a command.
+            fn matches_value(value: &serde_json::Value, matcher: &globset::GlobMatcher) -> bool {
+                match value {
+                    serde_json::Value::String(text) => matcher.is_match(text),
+                    serde_json::Value::Array(values) => {
+                        values.iter().any(|v| matches_value(v, matcher))
+                    }
+                    serde_json::Value::Object(values) => {
+                        values.values().any(|v| matches_value(v, matcher))
+                    }
+                    _ => false,
+                }
+            }
+            return serde_json::from_str(tool_input)
+                .ok()
+                .is_some_and(|value| matches_value(&value, &matcher));
         }
         tool_input.contains(arg_pattern)
     } else {

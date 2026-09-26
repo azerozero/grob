@@ -161,8 +161,15 @@ impl JwtValidator {
         // Hash token for cache key (never store raw JWT in cache)
         let token_hash = hex::encode(Sha256::digest(token.as_bytes()));
 
-        // Cache hit → return cached claims
+        // Cache only the signature result: time-based validity must still be
+        // checked on every request, using the same leeway as a cache miss.
         if let Some(entry) = self.validation_cache.get(&token_hash) {
+            if entry.claims.exp
+                < jsonwebtoken::get_current_timestamp().saturating_sub(self.hmac_validation.leeway)
+            {
+                self.validation_cache.invalidate(&token_hash);
+                return Err(AuthError::Expired);
+            }
             return Ok(entry.claims.clone());
         }
 
@@ -399,6 +406,41 @@ mod tests {
             &EncodingKey::from_secret(secret.as_bytes()),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn cached_signature_does_not_extend_token_expiration() {
+        use sha2::{Digest, Sha256};
+
+        let secret = "synthetic-jwt-cache-expiry-test";
+        let validator = JwtValidator::from_config(&JwtConfig {
+            hmac_secret: secret.into(),
+            ..Default::default()
+        })
+        .unwrap();
+        let claims = GrobClaims {
+            sub: "cache-test".into(),
+            exp: jsonwebtoken::get_current_timestamp() - validator.hmac_validation.leeway - 10,
+            ..Default::default()
+        };
+        let token = make_token(&claims, secret);
+        assert!(matches!(
+            validator.validate(&token),
+            Err(AuthError::Expired)
+        ));
+
+        // Represents a signature verified before expiry, still within the
+        // cache TTL. No sleeps or wall-clock boundary races are needed.
+        let hash = hex::encode(Sha256::digest(token.as_bytes()));
+        validator.validation_cache.insert(
+            hash.clone(),
+            crate::security::cache::JwtCacheEntry { claims },
+        );
+        assert!(matches!(
+            validator.validate(&token),
+            Err(AuthError::Expired)
+        ));
+        assert!(validator.validation_cache.get(&hash).is_none());
     }
 
     #[test]

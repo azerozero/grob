@@ -12,6 +12,7 @@ pub mod constants;
 pub mod error;
 /// Google Gemini provider implementation.
 pub mod gemini;
+pub(crate) mod guarded_stream;
 /// Shared helper functions for request/response transformation.
 pub mod helpers;
 /// Multi-account API key pooling for provider key rotation.

@@ -812,31 +812,22 @@ impl DlpEngine {
         report
     }
 
-    /// Run async SPRT entropy scan on completed response text.
-    /// Spawns a tokio task, never blocks.
+    /// Records entropy alerts without logging potentially sensitive text.
+    pub(crate) fn scan_entropy(&self, text: &str) {
+        if let Some(ref sprt) = self.sprt {
+            for alert in sprt.scan(text) {
+                tracing::warn!(entropy = alert.entropy, "DLP entropy alert");
+                metrics::counter!("grob_dlp_detections_total", "type" => "entropy", "rule" => "sprt", "action" => "log").increment(1);
+            }
+        }
+    }
+
+    /// Runs an asynchronous entropy scan for non-streaming responses.
     pub fn scan_entropy_async(self: &Arc<Self>, full_text: String) {
         if self.sprt.is_some() {
             let engine = Arc::clone(self);
             tokio::spawn(async move {
-                if let Some(ref sprt) = engine.sprt {
-                    let alerts = sprt.scan(&full_text);
-                    for alert in &alerts {
-                        tracing::warn!(
-                            "DLP entropy alert: entropy={:.2} at [{}-{}]: {}",
-                            alert.entropy,
-                            alert.start,
-                            alert.end,
-                            alert.text_snippet
-                        );
-                        metrics::counter!(
-                            "grob_dlp_detections_total",
-                            "type" => "entropy",
-                            "rule" => "sprt",
-                            "action" => "log"
-                        )
-                        .increment(1);
-                    }
-                }
+                engine.scan_entropy(&full_text);
             });
         }
     }

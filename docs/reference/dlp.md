@@ -96,7 +96,7 @@ Uses a Sequential Probability Ratio Test (SPRT) on Shannon entropy. Thresholds:
 - Random: ~7.5-8.0 bits/byte
 - Detection threshold: 5.5 bits/byte
 
-Runs asynchronously after stream completion. Never blocks the response path.
+For streaming responses, runs on each completed text block before delivery; only entropy scores are logged, never text snippets. Non-streaming response scans can run asynchronously.
 
 ### URL exfiltration detection
 
@@ -268,14 +268,14 @@ flowchart TB
 
 ### Streaming path
 
-SSE stream chunks are intercepted by the `DlpStream` adapter:
+The `DlpStream` adapter reassembles SSE events before making security decisions:
 
-- **Zero-copy passthrough**: Chunks without `content_block_delta` events are forwarded unchanged (SIMD-accelerated `memchr::memmem` check).
-- **Token-length EMA pre-filter**: An exponential moving average of per-delta text lengths skips DFA scanning when tokens are long (normal prose). Short BPE fragments trigger scanning.
-- **Canary circuit breaker**: After 20 secret detections in one stream, canary generation switches to `[REDACTED]` to prevent canary flooding.
-- **Cross-chunk detection**: The full response is accumulated and scanned at end-of-stream to catch secrets split across SSE deltas.
-- **SPRT buffer**: Bounded at 4 KB; accumulated per-stream. The SPRT scanner operates token-by-token (whitespace-split) rather than a raw byte sliding window.
-- **URL exfil block**: If a block-action URL exfiltration is detected, the stream is terminated with an `event: error` SSE event.
+- **Preventive checks**: Initial text and all text deltas of a block are retained until its `content_block_stop`. The complete text is checked and sanitized before any of it is delivered. Regex matches therefore do not depend on JSON whitespace, network chunks or token boundaries.
+- **Delivery latency**: With `scan_output = true`, text arrives at block completion, not token by token. A fixed suffix cannot safely handle arbitrary regular expressions. Request scanning is independent of this setting.
+- **Memory limits**: Each incoming transport chunk, SSE event, retained group of events and transformed output has a 1 MiB limit. At most 4,096 events are retained per group. Decoded text, parsing structures and temporary replacement allocations add overhead; these limits do not promise a 1 MiB ceiling on allocations or total process RSS. No full-response history is accumulated.
+- **Failure behavior**: Malformed, incomplete or oversized protected blocks terminate the stream without releasing their pending text. URL and injection blocking run before and after sanitization.
+- **Scope**: Checks cover each `text` block independently. Matches across separate content blocks, tool arguments and thinking blocks are outside this adapter's text-scanning scope.
+- **Canary circuit breaker**: After 20 blocks containing detected secrets, subsequent secret matches use `[REDACTED]`. Other response checks still apply.
 
 ## Performance
 
@@ -293,8 +293,8 @@ All metrics use the `grob_dlp_` prefix:
 |--------|------|--------|-------------|
 | `grob_dlp_rules_loaded` | gauge | `type` | Number of loaded rules by type (`secret`, `name`) |
 | `grob_dlp_detections_total` | counter | `type`, `rule`, `action` | Detection events |
-| `grob_dlp_cross_chunk_total` | counter | `rule` | Cross-chunk detections at end-of-stream |
-| `grob_dlp_stream_blocked_total` | counter | — | Streams terminated by URL exfil block |
+| `grob_dlp_cross_chunk_total` | counter | `rule` | Legacy end-of-stream helper; not emitted by the preventive streaming adapter |
+| `grob_dlp_stream_blocked_total` | counter | — | Streams terminated by output DLP checks |
 | `grob_dlp_circuit_breaker_total` | counter | — | Canary circuit breaker activations |
 | `grob_dlp_hot_reload_total` | counter | `status` | Hot-reload outcomes (`success`, `unchanged`, `failed`, `sig_failed`) |
 | `grob_dlp_signature_verified_total` | counter | `result` | Signature verification results |

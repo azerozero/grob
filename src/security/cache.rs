@@ -3,7 +3,7 @@
 //! Provides TTL-based caching for:
 //! - JWT token validation results
 //!
-//! Conforms to HDS/SecNumCloud requirements with automatic expiration.
+//! Cache lifetime bounds signature reuse; the caller also checks JWT expiration.
 
 use moka::sync::Cache;
 use std::time::Duration;

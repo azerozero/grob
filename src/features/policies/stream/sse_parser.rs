@@ -1,79 +1,44 @@
-//! SSE chunk parsing utilities for the HIT stream.
-//!
-//! Fast substring-based parsers for Anthropic SSE events.
-//! All functions operate on raw `&[u8]` and avoid full JSON deserialization
-//! to stay on the zero-allocation fast path for non-tool-use chunks.
+//! Structural accessors for complete SSE events. Transport framing is upstream.
 
-use memchr::memmem;
+pub(super) fn event_json(bytes: &[u8]) -> Option<serde_json::Value> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let data = text
+        .lines()
+        .filter_map(|line| {
+            line.strip_prefix("data:")
+                .map(|v| v.strip_prefix(' ').unwrap_or(v))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    serde_json::from_str(&data).ok()
+}
 
-/// Extracts the tool name from a `content_block_start` SSE chunk.
-///
-/// Uses `memchr::memmem` for SIMD-accelerated substring search.
-/// Returns `None` if the chunk does not contain a `tool_use` content block.
+/// Extracts a tool name from a complete content-block-start event.
 pub fn extract_tool_name(bytes: &[u8]) -> Option<String> {
-    memmem::find(bytes, b"\"tool_use\"")?;
-    let chunk = std::str::from_utf8(bytes).ok()?;
-    let marker = "\"name\":\"";
-    let start = chunk.find(marker)?;
-    let value_start = start + marker.len();
-    let remaining = &chunk[value_start..];
-    let end = remaining.find('"')?;
-    Some(remaining[..end].to_string())
-}
-
-/// Extracts the block index from a `content_block_start` or `content_block_stop` chunk.
-///
-/// Returns `None` if no `"index":` field is found or the value is not a valid `u32`.
-pub fn extract_block_index(bytes: &[u8]) -> Option<u32> {
-    let chunk = std::str::from_utf8(bytes).ok()?;
-    let marker = "\"index\":";
-    let start = chunk.find(marker)?;
-    let value_start = start + marker.len();
-    let remaining = &chunk[value_start..];
-    let end = remaining
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(remaining.len());
-    remaining[..end].parse().ok()
-}
-
-/// Extracts the `partial_json` value from an `input_json_delta` SSE chunk.
-///
-/// Validates that the chunk's block index matches `target_index` before extracting.
-/// Returns `None` if the chunk is not an `input_json_delta` for `target_index`,
-/// or if the `partial_json` value is empty.
-pub fn extract_partial_json(bytes: &[u8], target_index: u32) -> Option<String> {
-    memmem::find(bytes, b"input_json_delta")?;
-    if extract_block_index(bytes)? != target_index {
+    let value = event_json(bytes)?;
+    if value["type"] != "content_block_start" || value["content_block"]["type"] != "tool_use" {
         return None;
     }
-    let chunk = std::str::from_utf8(bytes).ok()?;
-    let marker = "\"partial_json\":\"";
-    let start = chunk.find(marker)?;
-    let after = &chunk[start + marker.len()..];
-    let mut raw = String::new();
-    let mut chars = after.chars();
-    loop {
-        match chars.next()? {
-            '"' => break,
-            '\\' => match chars.next()? {
-                '"' => raw.push('"'),
-                '\\' => raw.push('\\'),
-                'n' => raw.push('\n'),
-                'r' => raw.push('\r'),
-                't' => raw.push('\t'),
-                c => {
-                    raw.push('\\');
-                    raw.push(c);
-                }
-            },
-            c => raw.push(c),
-        }
+    value["content_block"]["name"].as_str().map(str::to_owned)
+}
+
+/// Extracts a content-block index without depending on JSON formatting.
+pub fn extract_block_index(bytes: &[u8]) -> Option<u32> {
+    event_json(bytes)?["index"].as_u64()?.try_into().ok()
+}
+
+/// Extracts and JSON-decodes input fragments for the selected block.
+pub fn extract_partial_json(bytes: &[u8], target_index: u32) -> Option<String> {
+    let value = event_json(bytes)?;
+    if value["index"].as_u64()? != u64::from(target_index)
+        || value["delta"]["type"] != "input_json_delta"
+    {
+        return None;
     }
-    if raw.is_empty() {
-        None
-    } else {
-        Some(raw)
-    }
+    value["delta"]["partial_json"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 #[cfg(test)]

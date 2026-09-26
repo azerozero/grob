@@ -1,5 +1,5 @@
 //! Rate limiting per tenant/API key for Grob
-//! Conforms to HDS/SecNumCloud/NIS2 requirements
+//! Local token buckets with explicit per-replica quota allocation.
 //!
 //! Implements token bucket algorithm with per-tenant tracking
 

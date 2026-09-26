@@ -4,6 +4,115 @@ use crate::features::policies::hit_auth::AuthMethod;
 use bytes::Bytes;
 use futures::StreamExt;
 
+#[tokio::test]
+async fn arguments_cannot_fake_a_stop_or_hide_denied_commands_in_json_escapes() {
+    let mut policy = simple_policy();
+    policy.auto_approve.push("Bash".into());
+    policy.deny.push("Bash(rm -rf*)".into());
+    for command in [
+        r#""command":"rm -rf /tmp/synthetic"}"#,
+        r#""command":"\u0072m -rf /tmp/synthetic"}"#,
+    ] {
+        let input = [r#"{"note":"content_block_stop","#, command];
+        let mut chunks = vec![Ok(sse_tool_use_start("Bash", 0))];
+        for part in input {
+            chunks.push(Ok(crate::providers::guarded_stream::Event::from_value(serde_json::json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":part}})).bytes));
+        }
+        chunks.push(Ok(sse_content_block_stop(0)));
+        let result = HitStream::new(
+            futures::stream::iter(chunks),
+            policy.clone(),
+            "arguments".into(),
+            None,
+            None,
+            None,
+        )
+        .collect::<Vec<_>>()
+        .await;
+        assert!(result.is_empty(), "denied command escaped: {result:?}");
+    }
+    let chunks = vec![
+        Ok(sse_tool_use_start("Bash", 0)),
+        Ok(sse_tool_use_delta(0, "{}")),
+        Ok(sse_content_block_stop(0)),
+    ];
+    let result = HitStream::new(
+        futures::stream::iter(chunks),
+        policy,
+        "benign".into(),
+        None,
+        None,
+        None,
+    )
+    .collect::<Vec<_>>()
+    .await;
+    assert_eq!(result.len(), 3);
+    assert!(result.iter().all(Result::is_ok));
+}
+
+#[tokio::test]
+async fn denial_is_independent_of_json_spacing_escapes_and_transport_splits() {
+    let mut policy = simple_policy();
+    policy.deny.push("Bash".into());
+    let payload = concat!(
+        "event: content_block_start\r\ndata: {\"type\": \"content_block_start\", \"index\": 0, \"content_block\": {\"type\": \"tool_use\", \"name\": \"Ba\\u0073h\", \"input\": {}}}\r\n\r\n",
+        "event: content_block_stop\r\ndata: {\"type\": \"content_block_stop\", \"index\": 0}\r\n\r\n"
+    ).as_bytes();
+    for split in 0..=payload.len() {
+        let chunks = vec![
+            Ok(Bytes::copy_from_slice(&payload[..split])),
+            Ok(Bytes::copy_from_slice(&payload[split..])),
+        ];
+        let result = HitStream::new(
+            futures::stream::iter(chunks),
+            policy.clone(),
+            "fragmented".into(),
+            None,
+            None,
+            None,
+        )
+        .collect::<Vec<_>>()
+        .await;
+        assert!(
+            result.is_empty(),
+            "denied tool escaped at split {split}: {result:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn parallel_tools_are_each_authorized_with_initial_input() {
+    let mut policy = simple_policy();
+    policy.deny.push("Bash(rm -rf*)".into());
+    policy.auto_approve.push("Bash".into());
+    let mut bash: serde_json::Value = serde_json::from_str(r#"{"type":"content_block_start","index":2,"content_block":{"type":"tool_use","name":"Bash","input":{"command":"rm -rf /tmp/synthetic"}}}"#).unwrap();
+    bash["content_block"]["id"] = "b".into();
+    let chunks = vec![
+        Ok(sse_tool_use_start("Read", 1)),
+        Ok(crate::providers::guarded_stream::Event::from_value(bash).bytes),
+        Ok(sse_content_block_stop(1)),
+        Ok(sse_content_block_stop(2)),
+    ];
+    let result = HitStream::new(
+        futures::stream::iter(chunks),
+        policy,
+        "parallel".into(),
+        None,
+        None,
+        None,
+    )
+    .collect::<Vec<_>>()
+    .await;
+    assert!(result.iter().all(Result::is_ok));
+    let output: Vec<u8> = result
+        .into_iter()
+        .flat_map(|r| r.unwrap().to_vec())
+        .collect();
+    let output = String::from_utf8(output).unwrap();
+    assert!(output.contains("Read"));
+    assert!(!output.contains("Bash"));
+}
+
 fn sse_text_chunk(text: &str) -> Bytes {
     Bytes::from(format!(
         "event: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{{\"type\":\"text_delta\",\"text\":\"{text}\"}}}}\n\n"

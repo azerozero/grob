@@ -122,7 +122,7 @@ This tenant ID is used for rate limiting, spend tracking, and audit logging.
 
 ### Validation cache
 
-Validated tokens are cached in memory by `SHA-256(token)` for up to 5 minutes, with a capacity of 10,000 entries. Cache hits reuse stored claims without repeating signature validation or rechecking `exp`. Do not rely on this cache for immediate token expiration or revocation. JWKS key removal also does not immediately invalidate cached claims.
+Validated signatures are cached in memory by `SHA-256(token)` for up to 5 minutes, with a capacity of 10,000 entries. Every request rechecks `exp`, including cache hits, with the validator's 60-second clock-skew tolerance. Expired entries are rejected and removed. This cache does not provide immediate revocation: JWKS key removal does not immediately invalidate cached signatures.
 
 ### JWKS key rotation
 
