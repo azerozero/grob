@@ -28,7 +28,7 @@ futures = "0.3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 
 # HTTP Client
 reqwest = { version = "0.13", default-features = false, features = ["json", "stream", "rustls", "query", "form", "http2"] }
@@ -195,6 +195,10 @@ name = "cucumber"
 path = "tests/cucumber/main.rs"
 harness = false
 test = false  # Only run via: cargo test --test cucumber
+
+[[bench]]
+name = "credential_store"
+harness = false
 
 [[bench]]
 name = "routing"

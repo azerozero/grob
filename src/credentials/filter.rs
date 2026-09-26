@@ -5,7 +5,6 @@ use zeroize::{Zeroize, Zeroizing};
 pub(crate) struct EchoFilter {
     patterns: Vec<Zeroizing<Vec<u8>>>,
     pending: Zeroizing<Vec<u8>>,
-    max_len: usize,
     replacement: Vec<u8>,
 }
 
@@ -17,7 +16,6 @@ impl EchoFilter {
             .map(|v| Zeroizing::new(v.into_bytes()))
             .collect();
         patterns.sort_by_key(|v| std::cmp::Reverse(v.len()));
-        let max_len = patterns.iter().map(|v| v.len()).max().unwrap_or(1);
         let mut replacement = b"[redacted]".to_vec();
         if patterns
             .iter()
@@ -32,7 +30,6 @@ impl EchoFilter {
         Self {
             patterns,
             pending: Zeroizing::new(Vec::new()),
-            max_len,
             replacement,
         }
     }
@@ -41,7 +38,18 @@ impl EchoFilter {
         self.pending.extend_from_slice(bytes);
         let mut out = Vec::new();
         let mut pos = 0;
-        while pos < self.pending.len() && (finish || self.pending.len() - pos >= self.max_len) {
+        while pos < self.pending.len() {
+            let remaining = &self.pending[pos..];
+            // Only retain a suffix that could actually become a credential. A long
+            // token must not delay unrelated SSE events or ordinary text.
+            if !finish
+                && self
+                    .patterns
+                    .iter()
+                    .any(|p| p.len() > remaining.len() && p.starts_with(remaining))
+            {
+                break;
+            }
             if let Some(pattern) = self
                 .patterns
                 .iter()
@@ -58,6 +66,24 @@ impl EchoFilter {
         self.pending.zeroize();
         *self.pending = rest;
         out
+    }
+
+    pub(super) fn contains(&self, value: &[u8]) -> bool {
+        self.patterns
+            .iter()
+            .any(|p| value.windows(p.len()).any(|w| w == p.as_slice()))
+    }
+
+    pub(super) fn max_len(&self) -> usize {
+        self.patterns.iter().map(|p| p.len()).max().unwrap_or(1)
+    }
+
+    pub(super) fn scalar(&self, value: &str) -> String {
+        if self.contains(value.as_bytes()) {
+            String::from_utf8(self.replacement.clone()).expect("ASCII replacement")
+        } else {
+            value.to_owned()
+        }
     }
 }
 

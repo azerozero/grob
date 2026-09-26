@@ -57,6 +57,7 @@ def eventually(check, timeout=30):
 
 class Upstream(BaseHTTPRequestHandler):
     expected = {"/remote": "synthetic-remote-1", "/local": "synthetic-local-1"}
+    protocol_version = "HTTP/1.1"
     calls = 0
     lock = threading.Lock()
 
@@ -298,7 +299,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--engine", choices=("docker", "podman"), default="docker")
-    parser.add_argument("--vault-image", default="ghcr.io/openbao/openbao:2.5.5")
+    parser.add_argument("--vault-image", default="ghcr.io/openbao/openbao:2.7.0")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     args.binary = args.binary.resolve()

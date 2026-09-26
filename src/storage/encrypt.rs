@@ -1,13 +1,14 @@
 //! AES-256-GCM encryption for credential storage at rest.
 //!
-//! Derives a 256-bit key from a local key file (`~/.grob/encryption.key`).
-//! The key file is created on first use with a random key and restricted
-//! to owner-only permissions (cross-platform via [`set_owner_only_permissions`]).
+//! Loads a 256-bit key from a protected external file or a compatible local file.
+//! Local keys are generated once with owner-only permissions. An authenticated
+//! check binds the selected key to the store before accepting new writes.
 
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 /// Nonce length for AES-256-GCM (96 bits / 12 bytes).
@@ -34,6 +35,7 @@ const HEADER_LEN: usize = MAGIC.len() + 1;
 /// Manages AES-256-GCM encryption with a file-backed key.
 pub(crate) struct StorageCipher {
     cipher: Aes256Gcm,
+    external: bool,
 }
 
 impl StorageCipher {
@@ -46,15 +48,48 @@ impl StorageCipher {
     /// Returns an error if the key file cannot be read, has an
     /// incorrect size, or the key directory is not writable.
     pub fn load_or_generate(db_path: &Path) -> Result<Self> {
+        Self::load_key(db_path, None)
+    }
+
+    /// Loads a store key from an explicitly mounted file, or the compatible local source.
+    pub(crate) fn load_for_store(db_path: &Path) -> Result<Self> {
+        let source = std::env::var_os("GROB_ENCRYPTION_KEY_FILE").map(PathBuf::from);
+        Self::load_key(db_path, source.as_deref())
+    }
+
+    pub(crate) fn is_external(&self) -> bool {
+        self.external
+    }
+
+    fn load_key(db_path: &Path, external: Option<&Path>) -> Result<Self> {
         let key_path = Self::key_path(db_path);
-        let key_bytes = zeroize::Zeroizing::new(if key_path.exists() {
-            let data = std::fs::read(&key_path).with_context(|| {
-                format!("Failed to read encryption key: {}", key_path.display())
-            })?;
-            data
+        let base = key_path.parent().context("Encryption key has no parent")?;
+        let check = base.join("encryption.check");
+        let key_bytes = if let Some(source) = external {
+            anyhow::ensure!(
+                source.is_absolute(),
+                "external encryption key path must be absolute"
+            );
+            let canonical = source
+                .canonicalize()
+                .context("external encryption key unavailable")?;
+            anyhow::ensure!(
+                !canonical.starts_with(base.canonicalize()?),
+                "external encryption key must be outside the data directory"
+            );
+            // Read the original path to retain final-component symlink rejection.
+            let key = crate::shared::secret_file::read(source, KEY_LEN)?;
+            if key_path.exists() {
+                let previous = crate::shared::secret_file::read(&key_path, KEY_LEN)?;
+                anyhow::ensure!(bool::from(previous.as_slice().ct_eq(key.as_slice())), "external key conflicts with the local encryption key; migrate the existing key first");
+            }
+            key
+        } else if key_path.exists() {
+            crate::shared::secret_file::read(&key_path, KEY_LEN)?
         } else {
+            anyhow::ensure!(!check.exists() && !has_encrypted_records(base)?, "encryption key missing for existing data; restore it instead of generating a replacement");
             Self::generate_key(&key_path)?
-        });
+        };
 
         anyhow::ensure!(
             key_bytes.len() == KEY_LEN,
@@ -62,7 +97,59 @@ impl StorageCipher {
         );
         let cipher = Aes256Gcm::new_from_slice(&key_bytes)
             .map_err(|_| anyhow::anyhow!("Invalid encryption key"))?;
-        Ok(Self { cipher })
+        let cipher = Self {
+            cipher,
+            external: external.is_some(),
+        };
+        // Establish the data/key association before any credential publication. For a
+        // pre-check-file store, authenticate all encrypted records during migration.
+        if external.is_some() && !check.exists() {
+            cipher.verify_existing(base)?;
+        }
+        cipher.check_key(&check)?;
+        Ok(cipher)
+    }
+
+    fn verify_existing(&self, base: &Path) -> Result<()> {
+        for directory in ["tokens", "vkeys", "secrets", "credentials"] {
+            visit_encrypted(&base.join(directory), &mut |path| {
+                let bytes = std::fs::read(path)?;
+                let clear = zeroize::Zeroizing::new(
+                    self.decrypt(&bytes)
+                        .context("existing encrypted record does not match the selected key")?,
+                );
+                drop(clear);
+                Ok(())
+            })?;
+        }
+        Ok(())
+    }
+
+    fn check_key(&self, path: &Path) -> Result<()> {
+        const CHECK: &[u8] = b"grob-storage-key-check-v1";
+        if !path.exists() {
+            use std::io::Write;
+            let parent = path.parent().context("key check has no parent")?;
+            let mut file = tempfile::NamedTempFile::new_in(parent)?;
+            crate::auth::token_store::set_owner_only_permissions(file.path())?;
+            file.write_all(&self.encrypt(CHECK)?)?;
+            file.as_file().sync_all()?;
+            match file.persist_noclobber(path) {
+                Ok(_) => {}
+                Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.error.into()),
+            }
+            #[cfg(unix)]
+            std::fs::File::open(parent)?.sync_all()?;
+        }
+        let bytes = crate::shared::secret_file::read(path, 256)?;
+        anyhow::ensure!(
+            self.decrypt(&bytes)
+                .context("storage encryption key check failed")?
+                == CHECK,
+            "storage encryption key check failed"
+        );
+        Ok(())
     }
 
     /// Encrypts plaintext bytes. Returns `MAGIC || VERSION || nonce || ciphertext`.
@@ -197,8 +284,8 @@ impl StorageCipher {
 
     /// Generates a random 256-bit key and saves it with owner-only permissions.
     ///
-    /// Caller is responsible for zeroizing the returned `Vec<u8>` after use.
-    fn generate_key(path: &Path) -> Result<Vec<u8>> {
+    /// The returned buffer is zeroized on drop.
+    fn generate_key(path: &Path) -> Result<zeroize::Zeroizing<Vec<u8>>> {
         let mut key = zeroize::Zeroizing::new(vec![0u8; KEY_LEN]);
         getrandom::fill(&mut key).context("Failed to generate encryption key")?;
 
@@ -217,7 +304,7 @@ impl StorageCipher {
             Ok(_) => {}
             Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
                 key.zeroize();
-                return std::fs::read(path)
+                return crate::shared::secret_file::read(path, KEY_LEN)
                     .context("Failed to read concurrently created encryption key");
             }
             Err(error) => {
@@ -229,13 +316,96 @@ impl StorageCipher {
         std::fs::File::open(parent)?.sync_all()?;
 
         tracing::info!("Generated new encryption key: {}", path.display());
-        Ok(key.to_vec())
+        Ok(key)
     }
+}
+
+fn visit_encrypted(path: &Path, visit: &mut impl FnMut(&Path) -> Result<()>) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        !path.symlink_metadata()?.file_type().is_symlink(),
+        "encrypted storage directory must not be a symlink"
+    );
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        anyhow::ensure!(
+            !kind.is_symlink(),
+            "encrypted storage must not contain symlinks"
+        );
+        if kind.is_dir() {
+            visit_encrypted(&entry.path(), visit)?;
+        } else if entry.path().extension().is_some_and(|ext| ext == "enc") {
+            visit(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn has_encrypted_records(base: &Path) -> Result<bool> {
+    let mut found = false;
+    for directory in ["tokens", "vkeys", "secrets", "credentials"] {
+        visit_encrypted(&base.join(directory), &mut |_| {
+            found = true;
+            Ok(())
+        })?;
+    }
+    Ok(found)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key_file(path: &Path, value: u8) {
+        std::fs::write(path, [value; KEY_LEN]).unwrap();
+        crate::auth::token_store::set_owner_only_permissions(path).unwrap();
+    }
+
+    #[test]
+    fn external_key_migration_reopen_and_wrong_key_fail_closed() {
+        let data = tempfile::tempdir().unwrap();
+        let keys = tempfile::tempdir().unwrap();
+        let db = data.path().join("grob.db");
+        let local = StorageCipher::load_key(&db, None).unwrap();
+        let encrypted = local.encrypt(b"synthetic").unwrap();
+        let external = keys.path().join("key");
+        std::fs::copy(StorageCipher::key_path(&db), &external).unwrap();
+        crate::auth::token_store::set_owner_only_permissions(&external).unwrap();
+        let migrated = StorageCipher::load_key(&db, Some(&external)).unwrap();
+        assert!(migrated.is_external());
+        assert_eq!(migrated.decrypt(&encrypted).unwrap(), b"synthetic");
+        std::fs::remove_file(StorageCipher::key_path(&db)).unwrap();
+        assert!(StorageCipher::load_key(&db, None).is_err());
+        assert!(StorageCipher::load_key(&db, Some(&external)).is_ok());
+        key_file(&external, 42);
+        assert!(StorageCipher::load_key(&db, Some(&external)).is_err());
+        std::fs::remove_file(&external).unwrap();
+        assert!(StorageCipher::load_key(&db, Some(&external)).is_err());
+        assert!(!StorageCipher::key_path(&db).exists());
+    }
+
+    #[test]
+    fn external_key_rejects_colocation_conflict_and_unverified_old_records() {
+        let data = tempfile::tempdir().unwrap();
+        let keys = tempfile::tempdir().unwrap();
+        let db = data.path().join("grob.db");
+        let local_path = StorageCipher::key_path(&db);
+        key_file(&local_path, 7);
+        assert!(StorageCipher::load_key(&db, Some(&local_path)).is_err());
+        let external = keys.path().join("key");
+        key_file(&external, 8);
+        assert!(StorageCipher::load_key(&db, Some(&external)).is_err());
+        std::fs::remove_file(&local_path).unwrap();
+        std::fs::create_dir(data.path().join("credentials")).unwrap();
+        std::fs::write(data.path().join("credentials/old.enc"), b"invalid").unwrap();
+        assert!(StorageCipher::load_key(&db, Some(&external)).is_err());
+        assert!(StorageCipher::load_key(&db, None).is_err());
+        assert!(!local_path.exists());
+        assert!(!data.path().join("encryption.check").exists());
+    }
 
     // Captured with aes-gcm 0.10 using a synthetic key and fixed nonce.
     #[test]
@@ -243,6 +413,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("grob.db");
         std::fs::write(StorageCipher::key_path(&db_path), [7u8; 32]).unwrap();
+        crate::auth::token_store::set_owner_only_permissions(&StorageCipher::key_path(&db_path))
+            .unwrap();
         let cipher = StorageCipher::load_or_generate(&db_path).unwrap();
         let mut legacy = vec![3u8; NONCE_LEN];
         legacy.extend(hex::decode("428ccc617a4c3b321f2e27398534862c8055879dd5e1fd1f41fee1d89b9135cad475c85d4a877adc9e773802ed134fc486").unwrap());

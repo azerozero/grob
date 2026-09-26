@@ -14,27 +14,41 @@ use std::{
 
 /// Bounds concurrency and detects wall-clock regression within one configuration snapshot.
 pub(crate) struct Broker {
+    pub(crate) binding: ServiceBinding,
+    pub(crate) origin: reqwest::Url,
+    pub(crate) client: reqwest::Client,
+    vault_client: Option<reqwest::Client>,
     gate: tokio::sync::Mutex<()>,
     started: Instant,
     wall: i64,
 }
 
-impl Default for Broker {
-    fn default() -> Self {
-        Self {
+impl Broker {
+    pub(crate) fn new(binding: &ServiceBinding) -> Result<Self> {
+        binding.validate().map_err(|_| CredentialError::Denied)?;
+        let origin = super::transport::endpoint(&binding.origin, &binding.allowed_ips)?;
+        let client = super::transport::client(&origin, &binding.allowed_ips)?;
+        let vault_client = binding
+            .vault
+            .as_ref()
+            .map(|v| {
+                let url = super::transport::endpoint(&v.endpoint, &v.allowed_ips)?;
+                super::transport::vault_client(v, &url)
+            })
+            .transpose()?;
+        Ok(Self {
+            binding: binding.clone(),
+            origin,
+            client,
+            vault_client,
             gate: tokio::sync::Mutex::new(()),
             started: Instant::now(),
             wall: super::now(),
-        }
+        })
     }
-}
 
-impl Broker {
-    pub(crate) async fn resolve(
-        &self,
-        store: Arc<GrobStore>,
-        binding: &ServiceBinding,
-    ) -> Result<CredentialRecord> {
+    pub(crate) async fn resolve(&self, store: Arc<GrobStore>) -> Result<CredentialRecord> {
+        let binding = &self.binding;
         let _gate = tokio::time::timeout(Duration::from_secs(6), self.gate.lock())
             .await
             .map_err(|_| CredentialError::Unavailable)?;
@@ -68,7 +82,14 @@ impl Broker {
             };
         }
         let expected = record.generation;
-        let remote = tokio::time::timeout(Duration::from_secs(5), read_vault(vault)).await;
+        let remote = tokio::time::timeout(
+            Duration::from_secs(5),
+            read_vault(
+                vault,
+                self.vault_client.as_ref().ok_or(CredentialError::Denied)?,
+            ),
+        )
+        .await;
         match remote {
             Ok(Ok(remote))
                 if remote.version >= record.remote_version
@@ -161,39 +182,33 @@ struct Remote {
     expires_at: Option<i64>,
 }
 
-async fn read_vault(config: &super::config::VaultConfig) -> Result<Remote> {
+async fn read_vault(
+    config: &super::config::VaultConfig,
+    client: &reqwest::Client,
+) -> Result<Remote> {
     use futures::StreamExt;
     let url = super::transport::endpoint(&config.endpoint, &config.allowed_ips)?;
-    let token = zeroize::Zeroizing::new(
-        tokio::fs::read(&config.token_file)
-            .await
-            .map_err(|_| CredentialError::Denied)?,
-    );
-    if token.len() > 16384 {
-        return Err(CredentialError::Denied);
-    }
-    let token = std::str::from_utf8(&token)
-        .map_err(|_| CredentialError::Denied)?
-        .trim_end_matches(['\r', '\n']);
-    if token.is_empty() {
-        return Err(CredentialError::Denied);
-    }
-    let mut header =
-        reqwest::header::HeaderValue::from_str(token).map_err(|_| CredentialError::Denied)?;
-    header.set_sensitive(true);
-    let response = super::transport::client(&url, &config.allowed_ips)?
+    let mut request = client
         .get(url)
-        .header("X-Vault-Token", header)
-        .header("accept-encoding", "identity")
-        .send()
-        .await
-        .map_err(|e| {
-            if super::transport::unavailable(&e) {
-                CredentialError::Unavailable
-            } else {
-                CredentialError::Denied
-            }
-        })?;
+        .header("X-Vault-Request", "true")
+        .header("accept-encoding", "identity");
+    if config.proxy_socket.is_none() {
+        request = request.header("X-Vault-Token", vault_token(config).await?);
+    } else {
+        super::transport::check_proxy_socket(
+            config
+                .proxy_socket
+                .as_deref()
+                .ok_or(CredentialError::Denied)?,
+        )?;
+    }
+    let response = request.send().await.map_err(|e| {
+        if super::transport::unavailable(&e) {
+            CredentialError::Unavailable
+        } else {
+            CredentialError::Denied
+        }
+    })?;
     // 503 can mean sealed. Never convert it (or an opaque 500) into offline permission.
     if matches!(response.status().as_u16(), 502 | 504) {
         return Err(CredentialError::Unavailable);
@@ -232,4 +247,27 @@ async fn read_vault(config: &super::config::VaultConfig) -> Result<Remote> {
         version: metadata.version,
         expires_at,
     })
+}
+
+async fn vault_token(config: &super::config::VaultConfig) -> Result<reqwest::header::HeaderValue> {
+    let token_file = config.token_file.clone();
+    let token =
+        tokio::task::spawn_blocking(move || crate::shared::secret_file::read(&token_file, 16384))
+            .await
+            .map_err(|_| CredentialError::Denied)?
+            .map_err(|_| CredentialError::Denied)?;
+    vault_token_header(&token)
+}
+
+pub(crate) fn vault_token_header(bytes: &[u8]) -> Result<reqwest::header::HeaderValue> {
+    let token = std::str::from_utf8(bytes)
+        .map_err(|_| CredentialError::Denied)?
+        .trim_end_matches(['\r', '\n']);
+    if token.is_empty() {
+        return Err(CredentialError::Denied);
+    }
+    let mut header =
+        reqwest::header::HeaderValue::from_str(token).map_err(|_| CredentialError::Denied)?;
+    header.set_sensitive(true);
+    Ok(header)
 }

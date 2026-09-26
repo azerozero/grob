@@ -92,6 +92,8 @@ pub enum AuditEvent {
     RequestProcessed,
     /// Tool-call spike anomaly blocked (T-AD1).
     ToolSpikeBlocked,
+    /// Authorized credential version selected for an upstream dispatch, without secret values.
+    CredentialUse,
 }
 
 /// Immutable audit log entry.

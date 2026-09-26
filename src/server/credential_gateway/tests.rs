@@ -6,6 +6,165 @@ use crate::credentials::{
 use axum::{body::to_bytes, http::Request};
 use tower::ServiceExt;
 
+fn publish_token(state: &AppState, binding: &ServiceBinding, token: &str) {
+    state
+        .grob_store
+        .credential_set_local(
+            binding,
+            Bundle {
+                token: token.into(),
+                username: String::new(),
+                password: String::new(),
+            },
+            None,
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn first_sse_event_arrives_before_upstream_finishes_with_long_token() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let upstream = axum::Router::new().route("/test", axum::routing::post(|| async {
+        let body = async_stream::stream! {
+            yield Ok::<_, std::io::Error>(axum::body::Bytes::from_static(b"data: {\"ok\":true}\n\n"));
+            std::future::pending::<()>().await;
+        };
+        Response::builder().header("content-type", "text/event-stream").body(Body::from_stream(body)).unwrap()
+    }));
+    let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+    let (_home, state, app, key, binding) = fixture(&origin, Injection::Bearer).await;
+    publish_token(&state, &binding, &"z".repeat(4096));
+    let request = Request::builder()
+        .uri("/v1/services/service/test")
+        .method("POST")
+        .header("authorization", format!("Bearer {key}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut data = response.into_body().into_data_stream();
+    let first = tokio::time::timeout(std::time::Duration::from_secs(2), data.next())
+        .await
+        .expect("a complete event must not wait for the next event or EOF")
+        .unwrap()
+        .unwrap();
+    assert_eq!(first, b"data: {\"ok\":true}\n\n".as_slice());
+    drop(data);
+    server.abort();
+}
+
+#[tokio::test]
+async fn snapshot_reuses_connections_with_current_auth_and_rebuilds_on_reload() {
+    use axum::extract::ConnectInfo;
+    use std::{collections::HashSet, net::SocketAddr, sync::Mutex};
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let capture = seen.clone();
+    let upstream = axum::Router::new().route(
+        "/test",
+        axum::routing::post(
+            move |ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: axum::http::HeaderMap| {
+                let capture = capture.clone();
+                async move {
+                    capture
+                        .lock()
+                        .unwrap()
+                        .push((peer, headers["authorization"].to_str().unwrap().to_owned()));
+                    Json(serde_json::json!({"ok":true}))
+                }
+            },
+        ),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(
+            listener,
+            upstream.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    let (_home, state, app, key, binding) = fixture(&origin, Injection::Bearer).await;
+    for token in ["synthetic-one", "synthetic-two"] {
+        publish_token(&state, &binding, token);
+        assert_eq!(
+            call(&app, &key, "/v1/services/service/test", "POST")
+                .await
+                .0,
+            StatusCode::OK
+        );
+    }
+    assert_eq!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .map(|x| x.0)
+            .collect::<HashSet<_>>()
+            .len(),
+        1
+    );
+    assert_eq!(seen.lock().unwrap()[1].1, "Bearer synthetic-two");
+    let config = state.snapshot().config.clone();
+    *state.inner.write().unwrap() = Arc::new(crate::server::ReloadableState::new(
+        config.clone(),
+        crate::server::Router::new(config),
+        Arc::new(crate::providers::ProviderRegistry::new()),
+    ));
+    assert_eq!(
+        call(&app, &key, "/v1/services/service/test", "POST")
+            .await
+            .0,
+        StatusCode::OK
+    );
+    assert_eq!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .map(|x| x.0)
+            .collect::<HashSet<_>>()
+            .len(),
+        2
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn binary_responses_are_rejected_before_emitting_modified_bytes() {
+    let mut upstream = mockito::Server::new_async().await;
+    let (_home, state, app, key, binding) = fixture(&upstream.url(), Injection::Bearer).await;
+    publish_token(&state, &binding, "synthetic");
+    let mock = upstream
+        .mock("POST", "/test")
+        .with_header("content-type", "image/png")
+        .with_body(b"\x89PNG\r\nsynthetic")
+        .create_async()
+        .await;
+    assert_eq!(
+        call(&app, &key, "/v1/services/service/test", "POST")
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+    mock.assert_async().await;
+}
+
+#[tokio::test]
+async fn no_content_response_needs_no_content_type_or_filter_buffer() {
+    let mut upstream = mockito::Server::new_async().await;
+    let (_home, state, app, key, binding) = fixture(&upstream.url(), Injection::Bearer).await;
+    publish_token(&state, &binding, "synthetic");
+    let mock = upstream
+        .mock("POST", "/test")
+        .with_status(204)
+        .create_async()
+        .await;
+    let (status, body) = call(&app, &key, "/v1/services/service/test", "POST").await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(body.is_empty());
+    mock.assert_async().await;
+}
+
 async fn fixture(
     origin: &str,
     injection: Injection,
@@ -90,6 +249,7 @@ async fn local_gateway_rotates_without_changing_agent_and_filters_echoes() {
             .match_header("x-forwarded-for", mockito::Matcher::Missing)
             .match_header("x-tenant-id", mockito::Matcher::Missing)
             .with_header("set-cookie", token)
+            .with_header("content-type", "text/plain")
             .with_body(format!("echo Bearer {token} then {token}"))
             .create_async()
             .await;
@@ -205,6 +365,7 @@ async fn basic_auth_uses_coherent_bundle_and_removes_encoded_echo() {
     let mock = upstream
         .mock("POST", "/test")
         .match_header("authorization", format!("Basic {encoded}").as_str())
+        .with_header("content-type", "text/plain")
         .with_body(format!(
             "Basic {encoded} {encoded} synthetic-user synthetic-password"
         ))
@@ -277,6 +438,7 @@ async fn agent_rate_and_budget_restrictions_apply_before_credential_dispatch() {
     state.grob_store.store_virtual_key(&agent).unwrap();
     let mock = upstream
         .mock("POST", "/test")
+        .with_header("content-type", "text/plain")
         .with_body("ok")
         .expect(1)
         .create_async()

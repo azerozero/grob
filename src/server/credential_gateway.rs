@@ -32,34 +32,51 @@ pub(super) async fn dispatch(
 ) -> Result<Response, CredentialError> {
     let inner = state.snapshot();
     let service = params.get("service").ok_or(CredentialError::Denied)?;
-    let binding = inner
-        .config
-        .credential_services
-        .iter()
-        .find(|b| &b.id == service)
-        .ok_or(CredentialError::Denied)?;
-    let url = authorize(binding, &uri, &request)?;
-    let vk = request.extensions().get::<crate::auth::VirtualKeyContext>();
-    if let Err(limit) = enforce_limits(&state, &inner, binding, vk).await {
-        return Ok(limit.into_response());
-    }
-    let client = crate::credentials::transport::client(&url, &binding.allowed_ips)?;
-    let method = request.method().clone();
-    let content_type = safe_content_type(request.headers());
-    let body = axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024)
-        .await
-        .map_err(|_| CredentialError::Denied)?;
     let broker = inner
         .credential_brokers
         .get(service)
         .ok_or(CredentialError::Denied)?;
-    let record = broker.resolve(state.grob_store.clone(), binding).await?;
+    let binding = &broker.binding;
+    let url = authorize(binding, &broker.origin, &uri, &request)?;
+    let vk = request.extensions().get::<crate::auth::VirtualKeyContext>();
+    let actor = vk.map(|v| format!("key:{}", v.key_id)).or_else(|| {
+        request
+            .extensions()
+            .get::<crate::auth::GrobClaims>()
+            .map(|v| format!("jwt:{}", v.sub))
+    });
+    if let Err(limit) = enforce_limits(&state, &inner, binding, vk).await {
+        return Ok(limit.into_response());
+    }
+    let method = request.method().clone();
+    let head = method == axum::http::Method::HEAD;
+    let content_type = safe_content_type(request.headers());
+    let body = axum::body::to_bytes(request.into_body(), 2 * 1024 * 1024)
+        .await
+        .map_err(|_| CredentialError::Denied)?;
+    let record = broker.resolve(state.grob_store.clone()).await?;
     let bundle = record.bundle.as_ref().ok_or(CredentialError::Unavailable)?;
     let (header_name, header, filter) = authentication(bundle, &binding.injection)?;
-    tracing::info!(service = %binding.id, tenant = %binding.tenant, authority = ?record.authority, generation = %record.generation, recovery = record.recovery, "credential dispatch");
+    tracing::info!(service = %binding.id, tenant = %binding.tenant, actor = ?actor, authority = ?record.authority, generation = %record.generation, recovery = record.recovery, "credential dispatch");
+    if let Some(audit) = &state.security.audit_log {
+        let mut entry = super::audit::AuditEntryBuilder::new(
+            &binding.tenant,
+            crate::security::audit_log::AuditEvent::CredentialUse,
+            &binding.id,
+            "",
+            0,
+        )
+        .policy_revision(record.policy.clone())
+        .build();
+        entry.user_id = actor;
+        audit
+            .write(entry)
+            .map_err(|_| CredentialError::Unavailable)?;
+    }
     let guard = super::handlers::ActiveRequestGuard::new(&state);
     // Only selected media headers survive; caller auth, cookies, forwarding and framing do not.
-    let response = client
+    let response = broker
+        .client
         .request(method, url)
         .header("content-type", content_type)
         .header("accept-encoding", "identity")
@@ -68,11 +85,12 @@ pub(super) async fn dispatch(
         .send()
         .await
         .map_err(|_| CredentialError::Unavailable)?;
-    filter_response(response, filter, guard)
+    filter_response(response, filter, guard, head)
 }
 
 fn authorize(
     binding: &crate::credentials::config::ServiceBinding,
+    origin: &reqwest::Url,
     uri: &axum::http::Uri,
     request: &Request<Body>,
 ) -> Result<reqwest::Url, CredentialError> {
@@ -114,7 +132,7 @@ fn authorize(
     {
         return Err(CredentialError::Denied);
     }
-    let mut url = crate::credentials::transport::endpoint(&binding.origin, &binding.allowed_ips)?;
+    let mut url = origin.clone();
     url.set_path(path);
     Ok(url)
 }
@@ -238,8 +256,9 @@ fn authentication(
 
 fn filter_response(
     response: reqwest::Response,
-    mut filter: EchoFilter,
+    filter: EchoFilter,
     guard: super::handlers::ActiveRequestGuard,
+    head: bool,
 ) -> Result<Response, CredentialError> {
     if response.status().is_redirection()
         || response
@@ -251,17 +270,25 @@ fn filter_response(
     }
     let status = response.status();
     let content_type = safe_content_type(response.headers());
+    if head || matches!(status, StatusCode::NO_CONTENT | StatusCode::RESET_CONTENT) {
+        return Response::builder()
+            .status(status)
+            .header("cache-control", "no-store")
+            .body(Body::empty())
+            .map_err(|_| CredentialError::Unavailable);
+    }
+    let mut filter = crate::credentials::response::ResponseFilter::new(content_type, filter)?;
     let mut stream = response.bytes_stream();
     let filtered = async_stream::try_stream! {
         let _guard = guard;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|_| std::io::Error::other("upstream stream failed"))?;
             for part in chunk.chunks(16384) {
-                let clean = filter.push(part, false);
+                let clean = filter.push(part, false).map_err(|_| std::io::Error::other("upstream response rejected"))?;
                 if !clean.is_empty() { yield axum::body::Bytes::from(clean); }
             }
         }
-        let clean = filter.push(&[], true);
+        let clean = filter.push(&[], true).map_err(|_| std::io::Error::other("upstream response rejected"))?;
         if !clean.is_empty() { yield axum::body::Bytes::from(clean); }
     };
     let filtered: std::pin::Pin<

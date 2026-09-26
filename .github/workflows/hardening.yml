@@ -84,8 +84,13 @@ jobs:
             --memlock-mib "$MEMLOCK_MIB" --output "$RUNNER_TEMP/hardening/memory"
       - name: Qualify local credentials and OpenBao outage recovery
         run: |
-          python3 scripts/ci/credential-recovery.py --binary target/release/grob \
-            --engine docker --output "$RUNNER_TEMP/hardening/credentials"
+          for version in 2.5.5 2.7.0; do
+            python3 scripts/ci/credential-recovery.py --binary target/release/grob \
+              --vault-image "ghcr.io/openbao/openbao:$version" --engine docker \
+              --output "$RUNNER_TEMP/hardening/credentials/$version"
+          done
+      - name: Verify pinned TLS and HTTP2 credential connection reuse
+        run: cargo test --locked --lib --features tls credentials::transport::tls_tests
       - name: Install disposable guest tools
         id: guest_tools
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
