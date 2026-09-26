@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.117](https://github.com/azerozero/grob/compare/v0.36.116...v0.36.117) - 2026-09-26
+
+### Fixed
+
+- *(security)* enforce stream guards and align runtime contracts ([#617](https://github.com/azerozero/grob/pull/617))
+
 ## [0.36.116](https://github.com/azerozero/grob/compare/v0.36.115...v0.36.116) - 2026-09-26
 
 ### Fixed
