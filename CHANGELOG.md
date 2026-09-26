@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.116](https://github.com/azerozero/grob/compare/v0.36.115...v0.36.116) - 2026-09-26
+
+### Fixed
+
+- *(credentials)* correct expiry, HTTP parsing and stale docs ([#613](https://github.com/azerozero/grob/pull/613))
+
+### Other
+
+- correct setup guides and validate examples in CI ([#616](https://github.com/azerozero/grob/pull/616))
+- *(routing)* clarify optional supervisor improvement modes ([#615](https://github.com/azerozero/grob/pull/615))
+
 ## [0.36.115](https://github.com/azerozero/grob/compare/v0.36.114...v0.36.115) - 2026-09-26
 
 ### Added
