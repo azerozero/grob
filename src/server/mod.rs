@@ -104,7 +104,7 @@ pub struct ReloadableState {
     /// Content hash of `config`, stamped when this snapshot was built.
     ///
     /// Computed once here rather than on demand: every reload path goes through
-    /// [`ReloadableState::new`], so the revision cannot drift from the config it
+    /// the snapshot constructor, so the revision cannot drift from the config it
     /// describes, and `/health` stays a cheap read.
     pub config_revision: revision::Revision,
     /// Unique cache namespace per runtime snapshot, including credential/header changes.
