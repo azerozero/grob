@@ -1,322 +1,181 @@
 # Feature Matrix
 
-Exhaustive list of grob capabilities, extracted from the codebase. The current version is in [`Cargo.toml`](../../Cargo.toml).
+Use this page to find a capability and its setup guide. Features can require
+configuration or an optional build flag; their presence does not mean they are
+active in your deployment. The current source version is in
+[`Cargo.toml`](../../Cargo.toml).
 
 ## Core Proxy
 
-| Feature | Description | Config |
-|---------|-------------|--------|
-| Multi-provider failover | Priority-based provider chains with exponential backoff | `[[models.mappings]]` priority |
-| Circuit breakers | Auto-disable unhealthy providers (Closed/Open/HalfOpen) | `[security] circuit_breaker = true` |
-| Adaptive provider scoring | EWMA latency + rolling success rate ranks providers dynamically | `[security] adaptive_scoring = true` |
-| Task classification routing | Intent-based: think, websearch, background, regex, default | `[router]` think/background/websearch |
-| Prompt-based routing | Regex rules with capture groups route specific prompts | `[[router.prompt_rules]]` |
-| Auto-mapping | Regex model name transformation (e.g., `^claude-` → default) | `[router] auto_map_regex` |
-| Fan-out racing | Parallel dispatch: fastest, best_quality, or weighted selection | `strategy = "fan_out"` |
-| Context-window guard | Warn at 80% and block at 95% before provider dispatch, with compact hints | `context_window_tokens` |
-| Response caching | Dedup temperature=0 requests (moka LRU, configurable TTL) | `[cache] enabled = true` |
-| Streaming SSE | Full SSE streaming for all endpoints and providers | Built-in |
-| Tool calling | Function calling support across all providers | Built-in |
-| GDPR routing | Region-based provider filtering (EU-only) | `[router] gdpr = true` |
+| Capability | What it does | Setup and limits |
+|------------|--------------|------------------|
+| Routing | Select a logical model using configured rules and complexity tiers | [Routing order](routing.md) |
+| Provider fallback | Try the model's configured providers in priority order | [Add a fallback](../how-to/configure.md#add-a-fallback-provider) |
+| Circuit breakers | Temporarily skip a provider after repeated failures | [Security reference](security.md) |
+| Adaptive scoring | Rank providers using observed latency and success | [Scoring configuration](configuration.md#security); opt-in, scores are not persisted |
+| Context-window guard | Estimate request size before dispatch and return compact hints | [Error reference](errors.md#context_length_exceeded-400) |
+| Response cache | Reuse eligible non-streaming responses | [Caching conditions](caching.md) |
+| Fan-out | Send to several providers and select a response | [Selection and accounting limits](fan-out.md) |
+| Region filtering | Filter provider mappings by configured region labels | [GDPR mode](routing.md#gdpr-region-filtering); `global` is an exception, labels do not prove residency |
 
 ## API Compatibility
 
-| Endpoint | Format | Streaming | Tool Calling |
-|----------|--------|-----------|-------------|
-| `/v1/messages` | Anthropic native | Yes | Yes |
-| `/v1/chat/completions` | OpenAI compatible | Yes | Yes |
-| `/v1/responses` | OpenAI Responses API (Codex CLI) | Yes | Yes |
-| `/v1/models` | OpenAI model listing | N/A | N/A |
-| `/v1/messages/count_tokens` | Token counting | N/A | N/A |
+| Client format | Endpoint | Details |
+|---------------|----------|---------|
+| Anthropic Messages | `/v1/messages` | [Compatibility](api-compatibility.md) |
+| OpenAI Chat Completions | `/v1/chat/completions` | [Compatibility](api-compatibility.md) |
+| OpenAI Responses | `/v1/responses` | [Compatibility](api-compatibility.md) |
 
-## Providers (14+)
+Streaming and tool support depend on the provider and translated fields. Read the
+[protocol fidelity matrix](protocol-fidelity.md) for preserved, translated and
+unsupported behavior, and [conformance](conformance.md) for tested combinations.
+Other HTTP endpoints are described in the [OpenAPI spec](../openapi.yaml).
 
-| Provider | Type | Auth Methods |
-|----------|------|-------------|
-| Anthropic | `anthropic` | API key, OAuth PKCE (Max/Pro) |
-| OpenAI | `openai` | API key |
-| Gemini | `gemini` | API key, OAuth PKCE (Pro) |
-| Vertex AI | `vertex-ai` | Application Default Credentials |
-| OpenRouter | `openrouter` | API key (200+ models) |
-| Mistral | `openai` | API key (custom base_url) |
-| Ollama | `openai` | None (local) |
-| Groq | `openai` | API key |
-| DeepSeek | `openai` | API key |
-| Together | `openai` | API key |
-| z.ai | `z.ai` | API key |
-| MiniMax | `minimax` | API key |
-| Kimi Coding | `kimi-coding` | API key |
-| Zenmux | `zenmux` | API key |
-| Any OpenAI-compatible | `openai` | API key + custom `base_url` |
+## Providers
+
+Anthropic, OpenAI, Gemini, Vertex AI, OpenRouter and other backends have
+[setup recipes](../how-to/providers.md). An OpenAI-compatible service can use a
+custom `base_url`. Provider credentials, supported models and account access
+remain provider-specific; Grob does not grant a subscription or model entitlement.
 
 ## DLP (Data Loss Prevention)
 
-| Scan Type | Description | Actions | Direction |
-|-----------|-------------|---------|-----------|
-| Secret scanning | API keys, tokens, PEM blocks, credentials (25 built-in rules + custom) | redact, block, warn | Request + Response |
-| PII detection | Email, phone, credit card (Luhn), IBAN/BIC | redact, block, warn | Request + Response |
-| Name pseudonymization | Reversible mapping (real names → consistent pseudonyms) | pseudonymize | Request (anonymize) / Response (de-anonymize) |
-| Prompt injection | Pattern-based detection (custom + built-in), including indirect response/tool_result scans | block, warn | Request + Response |
-| URL exfiltration | Anti-EchoLeak: domain whitelist/blacklist filtering | block, warn | Response |
-| Canary tokens | Watermark redacted secrets for leak traceability | inject | Request |
-| Streaming DLP | Per-chunk SSE scanning with SPRT cross-boundary detection | redact, block | Streaming responses |
-| Entropy detection | SPRT-based high-entropy content identification | flag | Streaming |
+| Protection | Scope | Guide |
+|------------|-------|-------|
+| Secret rules | Built-in and custom credential patterns | [Secret scanning](../how-to/dlp.md#how-to-enable-basic-secret-scanning) |
+| Financial identifiers | Credit cards, IBAN and BIC detection | [PII configuration](../how-to/dlp.md#how-to-detect-pii-in-financial-data) |
+| Configured names | Replace listed names with reversible pseudonyms | [Name rules](../how-to/dlp.md#how-to-anonymize-names) |
+| Prompt injection | Pattern detection on configured input/output paths | [Injection controls](dlp-indirect-injection.md) |
+| URL filtering | Detect response URLs outside the configured domain policy | [URL exfiltration](../how-to/dlp.md#how-to-prevent-url-exfiltration) |
+| Canary tokens | Replace selected secrets with traceable fake values | [Custom rules](../how-to/dlp.md#how-to-add-custom-secret-rules) |
+| Streaming scanning | Inspect response chunks with cross-chunk state | [DLP reference](dlp.md) |
 
-Additional DLP features:
-- Per-session context (multi-turn conversation tracking)
-- Hot-reloadable domain lists and rules
-- Signed config verification (Merkle tree integrity)
-- Homoglyph attack prevention (Unicode normalization)
-- External rules files (TOML, hot-reloadable)
+DLP must be enabled. It detects supported patterns; it is not a guarantee that
+all personal data, secrets or injection attempts are removed. Generic email and
+phone detection is not provided by the financial-identifier scanner.
 
 ## Policy Engine
 
-| Feature | Description | Config |
-|---------|-------------|--------|
-| Policy engine | Unified per-tenant/zone/compliance policy evaluation with glob matching | `[[policies]]` |
-| HIT Gateway | Per-action human authorization for tool_use blocks (auto-approve, require-approval, deny) | `[policies.hit]` |
-| Encrypted audit export | Age envelope encryption with per-policy auditor matrix | `[policies.log_export] content = "encrypted"` |
+[Policies](../explanation/policies.md) apply configured rules to tenants, tools
+and providers. The human-in-the-loop (HIT) gateway can require approval or deny
+matched tool actions. Audit exports can use recipient-based encryption.
+These controls need explicit policies and working dependencies; see the
+[configuration reference](configuration.md#policies).
 
 ## Security
 
-| Feature | Description | Config |
-|---------|-------------|--------|
-| Rate limiting | Per-tenant token bucket (RPS + burst) | `[security] rate_limit_rps` |
-| Circuit breakers | Per-provider failure tracking (Closed/Open/HalfOpen) | `[security] circuit_breaker` |
-| OWASP security headers | HSTS, CSP, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy | `[security] security_headers` |
-| Constant-time auth | Timing-attack-safe API key comparison (subtle crate) | Built-in |
-| Credentials encryption | AES-256-GCM at rest for OAuth tokens and virtual keys | Automatic |
-| Cross-platform permissions | Owner-only file permissions (Unix 0o600 + Windows DACL) | Automatic |
-| SecretString wrapping | API keys wrapped in `secrecy::SecretString` — impossible to log accidentally | Built-in |
-| CodeQL analysis | Automated security scanning (CI + local) | `.github/workflows/codeql.yml` |
+| Control | Configuration and boundary |
+|---------|----------------------------|
+| Client authentication | [Authentication reference](authentication.md); separate from provider OAuth |
+| Virtual access keys | Per-identity permissions and limits; [key commands](cli.md#grob-key) |
+| Rate limits | [Disabled by default](security.md#rate-limiting); configure rates and burst together |
+| Stored credentials | [Encryption and key custody](../how-to/protect-credential-storage.md); not all stored data is encrypted |
+| Memory protection | [Locking and deployment limits](../how-to/harden-memory.md) |
+| Service credential replacement | [HTTP gateway with local or Vault authority](../how-to/route-service-credentials.md) |
+| Security headers and request limits | [Security reference](security.md) |
+| CI analysis | CodeQL, Semgrep, dependency and secret checks; results apply to the checked revision |
+
+Secret wrappers reduce accidental exposure. Explicit access to a secret, process
+compromise, traces and operator configuration still matter. See the
+[threat model](../explanation/security.md).
 
 ## Regulatory Compliance
 
-Grob maps its features to specific regulatory requirements. The table below shows which grob capability satisfies which article/control.
+The following are technical capabilities that may contribute evidence to your
+organization's review. They do not establish compliance, certification, data
+residency or a right-to-erasure process.
 
 ### EU AI Act
 
-Regulation (EU) 2024/1689. Grob is a component, not an AI system placed on the
-market: it produces technical evidence for a deployer or provider, it does not
-make anyone compliant. Article numbers below are those of the final regulation.
-
-| Article | Requirement | Grob Feature | Config |
-|---------|-------------|--------------|--------|
-| **Art. 12** | Record-keeping (logging of AI system usage) | Signed audit log with model name, token counts, timestamps, hash chain | `[compliance] audit_model_name = true`, `audit_token_counts = true` |
-| **Art. 14** | Human oversight (risk classification) | Per-request risk scoring with escalation webhook | `[compliance] risk_classification = true`, `escalation_webhook` |
-| **Art. 15** | Accuracy, robustness, cybersecurity | Prompt injection detection, DLP, circuit breakers | `[dlp] injection = "block"` |
-| **Art. 19** | Log retention (at least 6 months) | The audit log is strictly append-only: `current.jsonl` is never rotated or purged by grob | `[security] audit_dir` on durable, backed-up storage |
-| **Art. 50** | Transparency obligations | `X-AI-Provider`, `X-AI-Model`, `X-AI-Generated` response headers | `[compliance] transparency_headers = true` |
-
-**Preset**: `grob preset apply eu-ai-act` enables everything in one command.
-
-**What grob does not do for the AI Act**
-
-| Duty | Why it stays with you |
-|------|-----------------------|
-| Art. 4, AI literacy of staff | An organizational and training duty. |
-| Art. 11 and Annex IV, technical documentation | Grob documents itself, not your AI system. |
-| Art. 27, fundamental rights impact assessment | A legal assessment, not a proxy feature. |
-| Art. 6 and Annex III, risk classification of *your* use case | Grob's `risk_classification` scores individual requests for security risk. It is not the regulation's high-risk categorisation. |
-| Log deletion on schedule | Grob never deletes. If your retention policy caps at N months, purge `audit_dir` yourself. Note this also breaks the hash chain from that point. |
+Grob can add provider/model headers, enrich audit records and emit risk signals.
+See [compliance configuration](configuration.md#compliance-eu-ai-act). Request
+risk scores are not a legal classification of your AI system.
 
 ### GDPR / RGPD
 
-| Requirement | Grob Feature | Config |
-|-------------|--------------|--------|
-| Data minimization (Art. 5) | DLP redacts PII before it reaches the LLM provider | `[dlp] pii = "redact"` |
-| Data residency (Art. 44-49) | GDPR routing mode restricts to EU-only providers | `[router] gdpr = true, region = "eu"` |
-| Pseudonymization (Art. 4) | Name pseudonymization with reversible mapping | `[dlp] names = "pseudonymize"` |
-| Right to erasure (Art. 17) | No PII stored — redacted before leaving the proxy | `[dlp] pii = "redact"` |
-| Data breach notification (Art. 33) | Canary tokens detect data leaks | `[dlp] canary = true` |
-| Audit trail (Art. 30) | Signed audit log with hash chain | `[security] audit_dir` |
-
-**Preset**: `grob preset apply gdpr` enables EU-only routing + DLP.
+DLP, configured-name pseudonyms and region filtering can support data controls.
+Traces or log exports may still contain personal data; operators must define
+retention, access and deletion procedures. Region labels alone do not establish
+where a provider processes data.
 
 ### HDS / PCI DSS / SecNumCloud
 
-| Control | Grob Feature | Code Reference |
-|---------|--------------|----------------|
-| Audit trail integrity | Hash-chained entries with ECDSA-P256 / Ed25519 / HMAC-SHA256 signatures | `src/security/audit_log.rs` |
-| Merkle tree batch signing | Inclusion proofs for batch verification | `src/security/merkle.rs` |
-| Access control | Per-tenant virtual keys with budget + rate limit + model allowlist | `src/auth/virtual_keys.rs` |
-| Circuit breaker (PCA/PRA) | Provider availability with failure thresholds and auto-recovery | `src/security/circuit_breaker.rs` |
-| Rate limiting | Per-tenant token bucket (NIS2 DoS protection) | `src/security/rate_limit.rs` |
-| Data classification | Audit entry classification levels: NC, C1, C2, C3 | `src/security/audit_log.rs` |
-| Credentials at rest | AES-256-GCM encryption for all stored secrets | `src/storage/encrypt.rs` |
-| Key management | File-based key with owner-only permissions (cross-platform) | `src/auth/token_store.rs` |
-| Security headers | OWASP-aligned HTTP response headers | `src/security/headers.rs` |
+Signed audit records, access control and encrypted credential storage can support
+a security review. Their presence does not qualify Grob or the hosting environment.
 
 ### SOC 2 / ISO 27001 / HIPAA
 
-| Control area | Grob Feature | Status |
-|-------------|--------------|--------|
-| Access control | Virtual keys, JWT auth, rate limiting | Implemented |
-| Audit logging | Signed, hash-chained, tamper-evident audit log | Implemented |
-| Data protection | DLP (secrets, PII, injection), encryption at rest | Implemented |
-| Availability | Circuit breakers, multi-provider failover, zero-downtime upgrades | Implemented |
-| Monitoring | Prometheus, OpenTelemetry, live TUI, log export | Implemented |
-| Incident response | Canary tokens, escalation webhooks, risk classification | Implemented |
-| **Certification** | SOC 2 / ISO 27001 / HIPAA formal audits | **Not certified** (features are present, certification requires third-party audit) |
+Grob supplies technical controls, not an organizational audit or certification.
+Review deployment, policies and evidence with the responsible specialists.
 
 ### NIS2 / DORA
 
-NIS2 is transposed in France by the 2025 *résilience des infrastructures critiques
-et cybersécurité* law, with ANSSI as the supervisory authority. Grob is a component
-inside your information system, not the regulated entity. It supplies technical
-measures for Art. 21; the reporting duties and governance duties stay with you.
-
-| Art. 21 measure | Grob feature | Coverage |
-|-----------------|--------------|----------|
-| Business continuity, crisis management | Circuit breakers, multi-provider failover, zero-downtime upgrades, connection warmup | Covered |
-| Risk analysis, ICT risk management | Adaptive provider scoring, spend budgets, rate limits | Covered |
-| Cryptography and encryption | AES-256-GCM credentials at rest, TLS to providers, signed audit entries | Covered |
-| Logging and detection | Hash-chained signed audit log, DLP, canary tokens | Covered |
-| Supply-chain security | SPDX SBOM published on every GitHub release, cosign-signed container images, `cargo-audit` + `cargo-deny` in CI | Covered |
-| Access control | Virtual keys, JWT, per-tenant allowlists | Partial: no MFA/SSO, put grob behind an IdP-aware gateway |
-| Incident handling | Escalation webhook on risk classification | Partial: generic JSON payload, no ANSSI report template |
-
-**What grob does not do for NIS2**
-
-| Duty | Why it stays with you |
-|------|-----------------------|
-| ANSSI incident notification (24 h early warning, 72 h notification, 1 month final report) | The escalation webhook is a signal, not a filing. Wire it into your own incident process. |
-| Registration as an essential/important entity | An organizational duty, not a technical one. |
-| Management-body accountability and training | Out of scope for a proxy. |
-| Supplier due diligence on the LLM providers themselves | Grob routes to them; it cannot audit them. |
+Fallback, monitoring, audit records and escalation webhooks can support incident
+handling. A webhook is not an incident notification to an authority. Reporting,
+governance and supplier review remain organizational responsibilities.
 
 ### Compliance presets
 
-| Preset | What it enables |
-|--------|-----------------|
-| `grob preset apply gdpr` | EU-only routing + DLP (PII redaction, pseudonymization) |
-| `grob preset apply eu-ai-act` | GDPR + signed audit log + transparency headers + risk classification |
+`gdpr` and `eu-ai-act` are starting configurations. Inspect the selected providers,
+DLP settings and audit destinations before applying a preset. See
+[preset operations](operations.md#presets) and the [routing limits](routing.md#gdpr-region-filtering).
 
-### What grob does NOT provide
+### What Grob does not provide
 
-| Item | Why |
-|------|-----|
-| SOC 2 / ISO 27001 / HIPAA certification | Requires third-party audit ($30-100k). Features are present, certification is a business process. |
-| ANSSI qualification (SecNumCloud) | Requires dedicated infrastructure and audit. Grob can be deployed in a qualified environment. |
-| Data residency guarantees | Grob filters providers by region tag, but does not control where providers process data. |
-| End-to-end encryption | TLS to providers is standard HTTPS. Grob does not encrypt the LLM payload itself (the provider must see it to respond). |
+Grob does not certify your organization, verify a provider's residency, encrypt
+model input from the provider that must process it, or remove all personal data
+from every storage destination.
 
-### Implementation verification (audited 2026-03-18)
+<a id="implementation-verification-audited-2026-03-18"></a>
 
-Every compliance claim was verified against the actual codebase:
+### Implementation verification
 
-| # | Feature | Status | Code Evidence |
-|---|---------|--------|---------------|
-| 1 | EU AI Act Art. 12 — record-keeping | Implemented | `audit_log.rs:122-130` model_name + tokens in signed entries |
-| 2 | EU AI Act Art. 14 — risk scoring | Implemented | `risk.rs:20-30` scoring: injection=critical, blocked+PII=high |
-| 3 | EU AI Act Art. 14 — escalation webhook | Implemented | `risk.rs:49-87` async POST to configured URL |
-| 4 | EU AI Act Art. 15 — injection detection | Implemented | `prompt_injection.rs` 28 languages + anti-obfuscation |
-| 5 | EU AI Act Art. 50 — transparency headers | Implemented | `middleware.rs:36-52` X-AI-Provider/Model/Generated |
-| 6 | GDPR — region routing | Implemented | `helpers.rs` filters providers by region when `gdpr=true` |
-| 7 | GDPR — PII redaction | Implemented | `pii.rs` credit cards (Luhn), IBANs (mod97), BICs |
-| 8 | GDPR — name pseudonymization | Implemented | `names.rs` reversible HMAC-SHA256 mapping |
-| 9 | GDPR — canary tokens | Implemented | `canary.rs` + `dfa.rs` canary injected on redaction |
-| 10 | HDS/PCI — audit hash chain | Implemented | `audit_log.rs:344-374` SHA-256 chaining |
-| 11 | HDS/PCI — classification NC/C1/C2/C3 | Implemented | `audit.rs` dynamic: injection=C3, PII=C2, DLP=C1, none=Nc |
-| 12 | HDS/PCI — Merkle batch signing | Implemented | `merkle.rs` + `audit_log.rs:419-453` inclusion proofs |
-| 13 | HDS/PCI — signing algorithms | Implemented | `audit_signer.rs` ECDSA-P256, Ed25519, HMAC-SHA256 |
-| 14 | NIS2/DORA — escalation webhook | Implemented | Same as #3 |
+The older dated implementation table was a source-review snapshot, not continuous
+assurance. Use the linked behavior references, tests and CI results for the
+revision you deploy. A successful check does not establish regulatory compliance.
 
 ## Authentication
 
-| Method | Description | Config |
-|--------|-------------|--------|
-| None | No authentication (default) | `[auth] mode = "none"` |
-| API key | Static key (Bearer or x-api-key header) | `[auth] mode = "api_key"` |
-| JWT | RS256/HS256 with tenant extraction and JWKS refresh | `[auth] mode = "jwt"` |
-| Virtual keys | Per-tenant keys with budget, rate limit, and model allowlist | `grob key create` |
-| OAuth PKCE | Browser-based login for Anthropic Max, OpenAI, Gemini Pro | `auth_type = "oauth"` |
+Choose [incoming-client authentication](authentication.md) separately from
+[provider credentials](../how-to/manage-secrets.md). API keys issued by Grob do
+not replace provider credentials by themselves; the configured proxy supplies
+those when dispatching requests.
 
 ## Multi-Tenant Virtual Keys
 
-| Feature | Description |
-|---------|-------------|
-| Key generation | `grob_` prefix + 32 hex chars, SHA-256 hashed at rest |
-| Per-key budget | Monthly USD cap per virtual key |
-| Per-key rate limit | RPS override per key |
-| Model allowlist | Restrict accessible models per key |
-| Key expiration | TTL in days |
-| Revocation | Instant via `grob key revoke` |
-| Tenant isolation | Spend tracking and rate limiting per tenant_id |
+Virtual keys attach an identity, permitted models/providers and optional limits
+to client requests. See [authentication](authentication.md#4-virtual-keys) for the
+lifecycle and [replica consistency](../how-to/multi-replica-consistency.md) for
+which limits and state are shared across processes.
 
 ## Observability
 
-| Feature | Description | Config |
-|---------|-------------|--------|
-| Prometheus metrics | `/metrics` endpoint (request count, latency, spend, cache stats) | Built-in |
-| OpenTelemetry | OTLP trace export (gRPC) | `[otel] enabled = true` (feature `otel`) |
-| Log export | Structured request logs to stdout, JSONL file, or HTTP webhook | `[log_export] enabled = true` |
-| Live TUI | `grob watch` — real-time traffic inspector with DLP/fallback events | `grob watch` (feature `watch`) |
-| SSE event stream | `GET /api/events` for programmatic monitoring | Built-in |
-| Message tracing | Per-request trace IDs with structured logging | `[server.tracing] enabled = true` |
-| Spend tracking | Persistent monthly spend per provider/model/tenant (JSONL journals) | Built-in |
-| Budget alerts | Warning at configurable threshold (default 80%) | `[budget] warn_at_percent` |
+[Observability](observability.md) covers metrics, live traffic, tracing and log
+export. OpenTelemetry requires the `otel` build feature. Protect monitoring
+access and decide which request content, if any, may be retained.
 
 ## Operations
 
-| Feature | Description |
-|---------|-------------|
-| Single binary | 6 MB container (`FROM scratch`), TLS bundled via rustls |
-| Zero-downtime upgrades | SO_REUSEPORT + SIGUSR1 graceful drain |
-| Native TLS + ACME | Built-in HTTPS with Let's Encrypt auto-certificates |
-| Presets | One-command configuration (perf, medium, cheap, local, gdpr, eu-ai-act) |
-| Setup wizard | Interactive first-run: tool selection, auth, compliance, budget |
-| Config hot-reload | `POST /api/config/reload` — atomic swap without restart |
-| Connection warmup | Pre-TLS handshake on startup for all providers |
-| Record & replay | Capture live traffic → replay through mock backend |
-| Health endpoints | `/health`, `/live`, `/ready` (Kubernetes-compatible) |
-| Diagnostics | `grob doctor` — config, providers, storage, service checks |
+[Operations](operations.md) covers presets, reloads, upgrades and timeouts.
+[Deployment](../how-to/deploy.md) covers containers, authentication and persistent
+state. A standalone binary or scratch container does not require a separate
+database; image size and native TLS support depend on the build.
 
 ## CLI Commands
 
-| Command | Description |
-|---------|-------------|
-| `grob setup` | Interactive first-run wizard |
-| `grob start [-d]` | Start server (foreground or detached) |
-| `grob stop` | Stop server |
-| `grob restart [-d]` | Restart server |
-| `grob exec -- <cmd>` | Run command behind proxy (auto start/stop) |
-| `grob watch` | Live TUI traffic inspector |
-| `grob status` | Service status + spend summary |
-| `grob spend` | Monthly spend breakdown by provider/model |
-| `grob key create/list/revoke` | Virtual API key management |
-| `grob validate` | Test all providers with real API calls |
-| `grob doctor` | Diagnostic health checks |
-| `grob preset list/apply/export` | Preset management |
-| `grob connect [provider]` | Interactive credential setup |
-| `grob env` | Environment variable status |
-| `grob model` | Model and routing info |
-| `grob init` | Create `.grob.toml` project config |
-| `grob config-diff [target]` | Compare config vs preset |
-| `grob upgrade` | Zero-downtime binary upgrade |
-| `grob run` | Container mode (0.0.0.0, JSON logs, no PID) |
-| `grob completions <shell>` | Generate shell completions |
+Use `grob --help` for your installed binary and the [CLI reference](cli.md) for
+command details. `grob doctor` checks local setup; `grob validate` makes real
+provider calls and can consume quota.
 
 ## Feature Flags
 
-| Flag | Default | Purpose |
-|------|---------|---------|
-| `dlp` | Yes | Data Loss Prevention |
-| `oauth` | Yes | OAuth PKCE flows |
-| `tap` | Yes | Webhook event emission |
-| `compliance` | Yes | Signed audit logging |
-| `mcp` | Yes | MCP tool matrix |
-| `watch` | Yes | Live TUI dashboard |
-| `tls` | No | TLS with rustls |
-| `acme` | No | Let's Encrypt auto-certs |
-| `otel` | No | OpenTelemetry export |
-| `harness` | No | Record & replay testing |
+The authoritative defaults are in [`Cargo.toml`](../../Cargo.toml), under `[features]`.
+Optional `tls`, `acme`, `otel` and `harness` features require a build that includes
+them. Compile-time availability and runtime activation are separate.
 
 ## Architecture
 
-- **Language**: Rust (tokio async runtime, axum HTTP framework)
-- **Storage**: Atomic files + JSONL journals (no PostgreSQL, no Redis, no embedded DB)
-- **Allocator**: jemalloc (non-MSVC) for ~20% throughput improvement
-- **Container**: 6 MB `FROM scratch`, rustls TLS bundled
-- **Codebase**: ~66K lines of Rust, 1193 tests
-- **Traits**: `LlmProvider` for provider backends, plus `Tracer` and `ProviderAvailability` where dispatch is genuinely polymorphic
+See the [architecture overview](../explanation/architecture.md) for request flow
+and component responsibilities. Proposed designs, including the
+[optional supervisor](../decisions/0033-advisory-model-supervisor.md), are not
+current configuration options.

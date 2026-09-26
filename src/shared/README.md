@@ -48,8 +48,11 @@ not duplicate plumbing or accidentally re-implement OS-level primitives.
 ## Tests
 
 - Unit tests for `pid` and `net` are colocated in their respective files.
-- `message_tracing` is exercised end-to-end in `tests/integration_tracing.rs` (rotation, compression, encryption round-trip).
-- `instance` and `otel` are covered indirectly by `tests/server_lifecycle.rs`.
+- [Message-tracing unit tests](message_tracing/mod.rs) cover file rotation,
+  zstd compression and cache-usage fields.
+- [Instance unit tests](instance.rs) check IPv4/IPv6 address formatting.
+- The `otel`-gated [log-bridge smoke test](otel.rs) checks construction and event
+  handling without a network exporter; it does not validate collector delivery.
 
 ## Related ADRs
 

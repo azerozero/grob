@@ -1,8 +1,15 @@
 # Authentication Reference
 
-Complete configuration reference for Grob's five authentication methods: none, api_key, jwt, virtual_keys, and oauth.
+Choose how clients enter Grob and how Grob authenticates to upstream providers. These are separate decisions.
 
-Settings live under the `[auth]` section of `config.toml`, with OAuth configured per-provider in `[[providers]]`.
+| Need | Use |
+|------|-----|
+| One trusted local workstation | `[auth] mode = "none"` on a loopback listener |
+| Agents with separate permissions | `[auth] mode = "api_key"`, one administrative secret, and a virtual key per agent |
+| An existing identity provider | `[auth] mode = "jwt"` with `[auth.jwt]` |
+| A provider subscription | OAuth in `[[providers]]`; it does not authenticate clients to Grob |
+
+Restart after changing the authentication mode or JWT configuration. For live credential replacement, see [Manage Secrets](../how-to/manage-secrets.md#replace-credentials-without-changing-the-agent).
 
 ## Auth modes
 
@@ -13,11 +20,13 @@ mode = "none"  # "none" | "api_key" | "jwt"
 
 ### Exempt endpoints
 
-The following endpoints bypass authentication regardless of mode:
+The following endpoints bypass the main API-key/JWT check:
 
-- `GET /health`
-- `GET /metrics`
-- `POST /api/oauth/*` (OAuth flow endpoints)
+- `GET /health`, `GET /live`, `GET /ready`
+- `GET /metrics` (its [separate bearer token](../how-to/deploy.md#protect-metrics-with-a-bearer-token) still applies when configured)
+- OAuth callbacks: `/auth/callback` and `/api/oauth/callback`
+
+The other `/api/oauth/*` endpoints require administrative access, including token listing. Virtual keys and tenant JWTs cannot administer OAuth, approve human-in-the-loop requests, or save/reload configuration. A loopback peer on an explicitly unauthenticated loopback listener has administrative access; a proxy header does not grant it.
 
 ## 1. None (default)
 
@@ -33,7 +42,13 @@ No authentication required. Suitable only when Grob binds to localhost (`[::1]` 
 ```toml
 [auth]
 mode = "api_key"
-api_key = "$GROB_API_KEY"  # supports $ENV_VAR syntax
+api_key = "secret:grob-admin"
+```
+
+Create the named secret in the same `GROB_HOME` as the daemon:
+
+```bash
+grob secrets add grob-admin
 ```
 
 Clients authenticate via either header:
@@ -43,13 +58,15 @@ Clients authenticate via either header:
 ### Security properties
 
 - API key comparison uses **constant-time equality** (`subtle` crate) to prevent timing side-channel attacks.
-- The `$ENV_VAR` syntax resolves environment variables at startup; the plaintext key is never stored in the config file on disk.
+- `secret:<name>` resolves the current value for each authentication attempt. The configuration contains the reference rather than the plaintext key.
 - The `/api/config` endpoint redacts API keys in its response.
 
 ### Edge cases
 
-- If both `Authorization` and `x-api-key` headers are present, behavior is implementation-defined (check the middleware). Prefer using one consistently.
-- An empty `api_key` value with `mode = "api_key"` will reject all requests since no key can match.
+- A syntactically valid `Authorization: Bearer ...` takes precedence over `x-api-key`. If that bearer value is wrong, a correct `x-api-key` does not rescue it.
+- An empty administrative key cannot grant administrative access. Valid virtual keys can still authenticate in `api_key` mode.
+- `[server] api_key` remains a legacy fallback. A non-empty configured key activates API-key authentication even when `auth.mode = "none"`.
+- `$ENV_VAR` is expanded for the legacy `server.api_key`, but **not** for `auth.api_key`. Use the named secret example above instead of a dollar-prefixed value in `[auth]`.
 
 ## 3. JWT
 
@@ -58,8 +75,7 @@ Clients authenticate via either header:
 mode = "jwt"
 
 [auth.jwt]
-hmac_secret = "$JWT_SECRET"           # HMAC-SHA256 secret (HS256)
-jwks_url = "https://auth.example.com/.well-known/jwks.json"  # RS256 keys (optional)
+jwks_url = "https://auth.example.com/.well-known/jwks.json"
 jwks_refresh_interval = 3600          # seconds between JWKS refreshes (default: 3600)
 issuer = "grob-auth"                  # expected `iss` claim (optional)
 audience = "grob-proxy"               # expected `aud` claim (optional)
@@ -70,9 +86,11 @@ audience = "grob-proxy"               # expected `aud` claim (optional)
 | Algorithm | Config field | Use case |
 |-----------|-------------|----------|
 | HS256 (HMAC-SHA256) | `hmac_secret` | Self-hosted, shared-secret setups |
-| RS256 (RSA) | `jwks_url` | External identity providers (Auth0, Okta, etc.) |
+| RS256 (RSA), ES256 (EC) | `jwks_url` | External identity providers |
 
-When both are configured, Grob tries HMAC first, then falls back to JWKS keys.
+For HS256, set `auth.jwt.hmac_secret` to the actual shared secret in a protected config file. This field currently does **not** resolve `$ENV_VAR` or `secret:<name>` references; either would be treated as the literal signing secret. Prefer JWKS when the identity provider supports it.
+
+When both are configured, Grob tries HMAC first, then RSA and EC JWKS keys. Set a separate `auth.api_key = "secret:grob-admin"` if administrators need management access: tenant JWTs have operator access only.
 
 ### JWT claims format
 
@@ -90,7 +108,7 @@ When both are configured, Grob tries HMAC first, then falls back to JWKS keys.
 |-------|----------|-------------|
 | `sub` | Yes | Subject (user ID). Used as tenant ID when `tenant` is absent. |
 | `tenant` | No | Explicit tenant override. When present, takes precedence over `sub` for tenant identification. |
-| `exp` | Yes | Expiration time (UNIX timestamp). Tokens past expiration are rejected. |
+| `exp` | Yes | Expiration time (UNIX timestamp), checked during signature validation. See the cache limitation below. |
 | `iss` | No | Issuer. Validated against `auth.jwt.issuer` if configured. |
 | `aud` | No | Audience. Validated against `auth.jwt.audience` if configured. If `audience` is not set in config, audience validation is disabled. |
 
@@ -104,11 +122,11 @@ This tenant ID is used for rate limiting, spend tracking, and audit logging.
 
 ### Validation cache
 
-Validated tokens are cached in memory (keyed by `SHA-256(token)`, not the raw JWT) with a 5-minute TTL and a capacity of 10,000 entries. This avoids repeated cryptographic verification for the same token within the cache window.
+Validated tokens are cached in memory by `SHA-256(token)` for up to 5 minutes, with a capacity of 10,000 entries. Cache hits reuse stored claims without repeating signature validation or rechecking `exp`. Do not rely on this cache for immediate token expiration or revocation. JWKS key removal also does not immediately invalidate cached claims.
 
 ### JWKS key rotation
 
-When `jwks_url` is configured, Grob spawns a background task that refreshes the JWKS key set every `jwks_refresh_interval` seconds. Only RSA keys (`kty: "RSA"`) are loaded. The refresh is non-blocking and uses a 10-second HTTP timeout.
+When `jwks_url` is configured, a background task immediately fetches RSA and EC keys, then refreshes them every `jwks_refresh_interval` seconds. Failed refreshes use increasing retry intervals, up to eight times that interval. The fetch has a 10-second HTTP timeout. JWTs that depend on JWKS receive `401` until the first successful fetch; check startup logs when diagnosing this failure.
 
 ### Error responses
 
@@ -116,7 +134,8 @@ When `jwks_url` is configured, Grob spawns a background task that refreshes the 
 |-------|-------------|-----------|
 | Missing token | 401 | No `Authorization: Bearer` header |
 | Invalid token | 401 | Signature mismatch, wrong issuer/audience |
-| Expired token | 401 | `exp` claim is in the past |
+| Expired token | 401 | Signature validation rejects `exp`; the cache limitation above applies |
+| Administrative access required | 403 | A valid virtual key or tenant JWT attempts a management operation |
 
 ## 4. Virtual keys
 
@@ -124,7 +143,14 @@ Virtual keys provide multi-tenant access control with per-key budget, rate limit
 
 ### Creating a virtual key
 
-Virtual keys are managed via CLI or API. Each key record contains:
+Keep the administrative key out of agents. Create a scoped agent key, then use the emitted key as its bearer token:
+
+```bash
+grob key create --name coding-agent --tenant local --allowed-providers anthropic
+grob key list
+```
+
+Use your configured provider name instead of `anthropic`. List and revoke keys with `grob key --help`; commands use the same `GROB_HOME` as the daemon. Virtual keys are accepted in `api_key` mode, not as JWTs. Each record contains:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -135,7 +161,8 @@ Virtual keys are managed via CLI or API. Each key record contains:
 | `tenant_id` | string | Tenant this key belongs to |
 | `budget_usd` | f64? | Optional per-key monthly budget in USD |
 | `rate_limit_rps` | u32? | Optional per-key rate limit (overrides global) |
-| `allowed_models` | string[]? | Optional allowlist of model names |
+| `allowed_models` | string[]? | Optional allowlist of logical model names |
+| `allowed_providers` | string[] | Provider allowlist; empty permits all providers |
 | `created_at` | DateTime | Creation timestamp |
 | `expires_at` | DateTime? | Optional expiration (requests rejected after this time) |
 | `revoked` | bool | Whether the key has been revoked |
@@ -144,14 +171,12 @@ Virtual keys are managed via CLI or API. Each key record contains:
 ### Authentication flow
 
 1. Client sends `Authorization: Bearer grob_<hex>` or `x-api-key: grob_<hex>`.
-2. Grob computes `SHA-256(key)` and looks up the hash in the `virtual_keys` table.
+2. Grob computes `SHA-256(key)` and looks up its encrypted hash-keyed record.
 3. If found and not revoked/expired, the request proceeds with the key's tenant ID, budget, rate limit, and model allowlist applied.
 
 ### Storage
 
-Virtual key records are stored as individually encrypted files (`~/.grob/vkeys/<hash>.json.enc`, AES-256-GCM) with two index strategies:
-- **Primary**: keyed by SHA-256 hash (for O(1) authentication lookups).
-- **Secondary**: keyed by `id:<uuid>` (for list/revoke/delete by ID).
+Virtual key records are stored as individually encrypted files (`~/.grob/vkeys/<hash>.json.enc`, AES-256-GCM). One hash-keyed file is authoritative for authentication and management; listing and operations by ID scan these records. Legacy secondary index files are ignored. See [Storage Reference](storage.md).
 
 ### Security properties
 
@@ -169,6 +194,7 @@ name = "claude-max"
 provider_type = "anthropic"
 auth_type = "oauth"
 oauth_provider = "anthropic-max"   # matches provider_id in token store
+models = []                      # legacy field; define routing with [[models.mappings]]
 ```
 
 ### Supported OAuth providers

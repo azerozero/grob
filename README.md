@@ -4,7 +4,7 @@
     <strong>Don't give your coding agents a blank check &mdash; on spend or on secrets.</strong>
   </p>
   <p align="center">
-    A Rust LLM control plane with inline DLP, routing, budgets, and signed audit logs.
+    Route AI requests, screen sensitive data, and track spending through one proxy.
   </p>
   <p align="center">
     <a href="https://github.com/azerozero/grob/actions/workflows/ci.yml"><img src="https://github.com/azerozero/grob/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -16,9 +16,13 @@
 
 ---
 
-**Grob** is a high-performance LLM control plane that sits between your AI tools and your providers. It redacts secrets before they reach the API, fails over transparently when a provider goes down, enforces budgets, records signed audit logs, and ships as a 6 MB container with zero dependencies.
+**Grob** sits between your AI tools and model providers. Configure it to screen
+requests for secrets, switch providers after a failure, enforce budgets, and
+record signed audit logs. It runs as a standalone Rust binary or container.
 
-> **~90 µs overhead** with DLP, routing, caching, and rate limiting all on the hot path -- sub-millisecond where LiteLLM sits in the milliseconds. Bare proxies post lower numbers by running none of these. [Full methodology and competitor table](docs/reference/benchmarks.md).
+[Start here](docs/tutorials/getting-started.md) for your first run, or use the
+[documentation index](docs/index.md) to find a guide by task. For measured
+performance and its test conditions, see [benchmarks](docs/reference/benchmarks.md).
 
 ```mermaid
 flowchart LR
@@ -27,7 +31,7 @@ flowchart LR
     CX[Codex CLI] --> G
     FO[Forge] --> G
     CU[Cursor] --> G
-    G["Grob &lt;DLP&gt;<br/>6 MB · zero deps"] --> A["Anthropic (primary)"]
+    G["Grob<br/>routing and data screening"] --> A["Anthropic (primary)"]
     G --> OR["OpenRouter (fallback)"]
     G --> GE[Gemini]
     G --> DS[DeepSeek]
@@ -38,15 +42,19 @@ flowchart LR
 
 | Problem | How Grob solves it |
 |---------|-------------------|
-| API keys and secrets leak to LLM providers in prompts | **DLP engine** scans every request -- redacts, blocks, or warns before the data leaves |
+| API keys and secrets leak to LLM providers in prompts | **Data Loss Prevention (DLP)** scans configured traffic and can redact or block detected content |
 | Provider goes down during a coding session | **Multi-provider failover** with circuit breakers and exponential backoff. Zero client changes |
 | No visibility into what your AI tools send | **`grob watch`** -- live TUI showing every request, response, DLP action, and fallback in real time |
 | Bill shock from runaway LLM usage | **Spend tracking** with per-tenant budgets, monthly caps, and alerts at 80% |
 | Agent context grows until providers return opaque 5xx errors | **Context-window guard** estimates input tokens before dispatch, returns `context_length_exceeded`, and tells Codex/Claude to compact |
 | AI agent executes destructive tool calls without review | **HIT Gateway** -- intercepts every `tool_use` block, enforces per-policy approval rules (auto-approve / require human / deny), supports multisig and quorum |
-| Deploying in air-gapped / sovereign environments | **Single static binary, 6 MB container image, zero dependencies** -- no Python, no PostgreSQL, no Redis |
+| Deploying with local or approved providers | **Standalone binary or scratch container**; no separate database or Python runtime required |
 
-## 30-second quickstart
+## Quickstart
+
+Install your coding tool separately. The example below uses Claude Code (`claude`
+on your `PATH`) and a configured provider account. For an API key, OAuth login or
+Windows setup, follow the [getting-started tutorial](docs/tutorials/getting-started.md).
 
 **With Homebrew** (macOS / Linux):
 ```bash
@@ -64,7 +72,10 @@ grob setup        # writes ~/.grob/config.toml (override with GROB_CONFIG or --c
 grob exec -- claude
 ```
 
-That's it. Grob auto-starts, routes traffic, and stops when your tool exits. To check a long-running instance, run `grob status` or `curl http://[::1]:13456/health` (use `http://127.0.0.1:13456/health` on IPv4-only setups).
+Grob starts the proxy if needed and launches your tool. Check it from another
+terminal with `grob status`. A proxy started by `grob exec` stops when the tool
+exits; an already running proxy stays running. For IPv4-only systems, configure
+the listener as described in the tutorial.
 
 ## Local demo -- DLP, signed audit, and Grafana
 
@@ -96,7 +107,7 @@ pre-flight checklist is in
 
 ## DLP -- secrets screened before they reach the provider
 
-Every request and response passes through the DLP engine before leaving your machine:
+Enable screening in your Grob configuration:
 
 ```toml
 [dlp]
@@ -108,25 +119,12 @@ prefix = "tok_"
 pattern = "tok_[A-Za-z0-9]{40}"
 action = "redact"            # API keys, tokens, credentials → [REDACTED]
 
-[dlp.pii]
-credit_cards = true
-iban = true
-action = "redact"            # Emails, phone numbers → redacted
-
-[[dlp.names]]
-term = "Acme Corp"
-action = "pseudonym"         # Real names → consistent pseudonyms
-
-[dlp.prompt_injection]
-enabled = true
-action = "block"             # Prompt injection attempts → 400
-
-[dlp.url_exfil]
-enabled = true
-action = "block"             # Data exfiltration URLs → stripped
 ```
 
-Most LLM proxies focus on routing and spend. Grob keeps inline DLP on the hot path, so sensitive data can be redacted or blocked before it reaches a provider.
+This example adds a custom token rule to the built-in secret rules. See
+[DLP recipes](docs/how-to/dlp.md) for financial identifiers, configured names,
+prompt injection and URL filtering. Detection has limits; it cannot guarantee
+that every sensitive value is removed.
 
 ## Live traffic inspector
 
@@ -134,23 +132,15 @@ Most LLM proxies focus on routing and spend. Grob keeps inline DLP on the hot pa
 grob watch
 ```
 
-```
-┌─ Providers ──────────────────────────────────────────────────────────┐
-│  anthropic ●  142ms  99.2%  │  openrouter ●  380ms  97.1%           │
-├─ Live ───────────────────────────────────────────────────────────────┤
-│  11:24:03  → claude-sonnet-4-6    anthropic   1.2K tok              │
-│  11:24:04  ← claude-sonnet-4-6    anthropic   834 tok  1.4s  $0.02 │
-│  11:24:05  DLP: 1 secret redacted (AWS key pattern)                 │
-│  11:24:09  FALLBACK: anthropic 429 → openrouter                     │
-│  11:24:10  ← gemini-2.5-pro       openrouter  412 tok  0.6s  $0.001│
-├─ Alerts ─────────────────────────────────────────────────────────────┤
-│  DLP: 3 secrets | 1 PII | 0 injections   Circuit: all OK            │
-└──────────────────────────────────────────────────────────────────────┘
-```
+The terminal view shows traffic, provider state and DLP events from a running
+instance. See [observability](docs/reference/observability.md) for access,
+metrics and trace configuration.
 
 ## Intelligent routing
 
-Requests are classified by intent, then routed to the best model with automatic fallback:
+Configured rules choose a logical model, then try its provider mappings.
+This diagram illustrates a possible setup; Grob does not measure which model is
+best for every request:
 
 ```mermaid
 flowchart LR
@@ -164,22 +154,18 @@ flowchart LR
     CL -->|default| S[Sonnet 4.6]
 ```
 
-Presets configure everything in one command:
-
-| Preset | What it sets up | Cost |
-|--------|-----------------|------|
-| **perf** | Pure Anthropic OAuth (Pro/Max) — auto-maps `claude-*` to native | Max subscription |
-| **ultra-cheap** | Stacked free tiers (Groq + Cerebras + Z.ai + OpenRouter `:free`) | ~€0-2/month |
-| **gdpr** | EU-only routing — Mistral, Scaleway, OVH (`region = "eu"`) | Pay-as-you-go |
-| **eu-ai-act** | EU AI Act controls — EU providers + transparency headers + risk classification | Pay-as-you-go |
-| **eu-eco** | Strict-EU sovereign, budget — Scaleway FR + Nebius `eu-north1` | Pay-as-you-go |
-| **eu-pro** | Strict-EU sovereign, balanced — Hermes-4-405B + Qwen3.5-397B | Pay-as-you-go |
-| **eu-max** | Strict-EU sovereign, premium — preemptive 397B/405B everywhere | Pay-as-you-go |
+Presets provide starting configurations. Inspect their providers and required
+credentials before applying them; names do not guarantee cost or compliance.
 
 ```bash
+grob preset list
+grob preset info perf   # inspect before applying
 grob preset apply perf
-grob preset list   # see every available preset
 ```
+
+See [preset operations](docs/reference/operations.md#presets) for the available
+profiles. The [optional model supervisor](docs/decisions/0033-advisory-model-supervisor.md)
+is a proposal for future routing improvement, not a current runtime option.
 
 ## Supported providers
 
@@ -235,12 +221,13 @@ mode = "fastest"   # or "best_quality", "weighted"
 
 Grob maps technical controls to regulatory evidence needs. It does not certify
 your organization by itself; operators still need legal review, provider due
-diligence, and a hardened configuration. Every implementation claim is [verified against the codebase](docs/reference/features.md#implementation-verification-audited-2026-03-18).
+diligence, and a hardened configuration. See the
+[feature matrix and limits](docs/reference/features.md#regulatory-compliance).
 
 | Regulation | Coverage |
 |------------|----------|
-| **EU AI Act** | Art. 12 (signed audit log with model/tokens), Art. 14 (risk scoring + escalation webhook), Art. 15 (injection detection, 28 languages), Art. 50 (transparency headers) |
-| **GDPR/RGPD** | PII redaction, name pseudonymization, EU-only provider routing (`gdpr = true`), canary tokens for leak detection |
+| **EU AI Act** | Signed audit records, request risk signals, escalation webhooks and provider/model headers |
+| **GDPR/RGPD** | Configured PII redaction, name pseudonymization, region filtering with a `global` exception, canary tokens for leak detection |
 | **HDS/PCI-style evidence** | Hash-chained audit entries, Merkle batch signing, classification NC/C1/C2/C3, AES-256-GCM credentials at rest |
 | **NIS2/DORA** | Multi-provider resilience, escalation webhooks, zero-downtime upgrades, SBOM on every release. [Reporting duties stay with you](docs/reference/features.md#nis2--dora) |
 
@@ -276,12 +263,14 @@ Grob is honest about what it is:
 [[providers]]
 name = "anthropic"
 provider_type = "anthropic"
+models = []
 auth_type = "oauth"
 oauth_provider = "anthropic-max"
 
 [[providers]]
 name = "openrouter"
 provider_type = "openrouter"
+models = []
 api_key = "$OPENROUTER_API_KEY"
 
 [[models]]
@@ -298,7 +287,6 @@ priority = 2
 
 [router]
 default = "default"
-think = "claude-opus-thinking"
 
 [server]
 port = 13456
@@ -330,7 +318,7 @@ The image listens on container port `8080` and supports the same config path con
 
 ```bash
 docker volume create grob-data
-docker run --rm -p 8080:8080 \
+docker run --rm -p 127.0.0.1:8080:8080 \
   -v "$HOME/.grob/config.toml:/etc/grob/config.toml:ro" \
   -v grob-data:/var/lib/grob \
   -e GROB_CONFIG=/etc/grob/config.toml \
@@ -338,7 +326,11 @@ docker run --rm -p 8080:8080 \
   ghcr.io/azerozero/grob:latest
 ```
 
-Use `-p 13456:8080` if you want the native host default on the outside. 6 MB image, `FROM scratch`, TLS bundled via rustls. No OS layer needed.
+Use `-p 127.0.0.1:13456:8080` to expose the native host port on loopback. Supply
+the credentials required by your mounted configuration; OAuth tokens on the host
+are not automatically copied into the container volume. See the
+[deployment guide](docs/how-to/deploy.md) for credential setup, shared access and
+persistent storage. Image size depends on the target and release.
 
 ## Project structure
 
@@ -421,11 +413,14 @@ cargo bench --bench hotpath
 
 ## Documentation
 
+The [documentation index](docs/index.md) covers setup, operation, security,
+credential replacement, troubleshooting and design proposals.
+
 | Doc | Description |
 |-----|-------------|
-| [Feature Matrix](docs/reference/features.md) | Complete feature list with config references |
+| [Feature Matrix](docs/reference/features.md) | Capability overview with configuration links and limits |
 | [Getting Started](docs/tutorials/getting-started.md) | Step-by-step tutorial |
-| [Configuration Reference](docs/reference/configuration.md) | All config options |
+| [Configuration Reference](docs/reference/configuration.md) | Configuration options, defaults and advanced-guide gaps |
 | [DLP Reference](docs/reference/dlp.md) | Secret scanning, PII, injection, URL exfil |
 | [DLP How-To](docs/how-to/dlp.md) | Recipes for each DLP feature |
 | [Security Model](docs/explanation/security.md) | Rate limiting, audit, circuit breakers |

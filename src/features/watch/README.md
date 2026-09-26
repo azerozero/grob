@@ -42,9 +42,10 @@ collapses to a zero-size no-op so emit sites stay branch-free.
 
 ## Tests
 
-- Inline unit tests in `events.rs` cover `WatchEvent` serde round-trips.
-- `EventBus` non-blocking emit/drop semantics are covered in
-  `tests/integration_watch.rs`.
+- [Policy streaming tests](../policies/stream/tests.rs) subscribe to `EventBus`
+  and verify approval-request and flagged-content events.
+- There are no dedicated serde round-trip or slow-subscriber/drop tests in this
+  module; event delivery tests do not establish those properties.
 - TUI rendering is exercised manually via `grob watch`; no automated UI test.
 
 ## Related ADRs

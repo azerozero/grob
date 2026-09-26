@@ -76,7 +76,7 @@ adopt_from_system = false  # keep explicitly supplied OAuth credentials authorit
 
 ```sh
 grob secrets add grob-admin
-grob key create --name coding-agent --allowed-providers minimax
+grob key create --name coding-agent --tenant local --allowed-providers minimax
 ```
 
 Configure the agent once with the emitted `grob_...` key and the Grob endpoint.

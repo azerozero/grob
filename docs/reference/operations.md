@@ -2,17 +2,22 @@
 
 ## Presets
 
-Grob ships with 7 built-in presets. Apply with `grob preset apply <name>`.
+Grob ships with the following built-in presets. Apply with `grob preset apply <name>`.
 
-| Preset | Description | Providers |
-|--------|-------------|-----------|
-| `perf` | Pure Anthropic OAuth (Pro/Max) — auto-map `claude-*` to native | Anthropic (OAuth) |
-| `ultra-cheap` | EUR0-2/month — stacked free tiers | Groq + Cerebras + Z.ai + OpenRouter `:free` |
-| `eu-eco` | Strict-EU sovereign, budget — ~75% SWE-V | Scaleway FR + Nebius eu-north1 |
-| `eu-pro` | Strict-EU sovereign, balanced — ~82% SWE-V | Hermes-4-405B + Qwen3.5-397B |
-| `eu-max` | Strict-EU sovereign, premium — ~85% SWE-V | preemptive 397B/405B everywhere |
-| `gdpr` | EU-only GDPR-oriented routing | Mistral, Scaleway, OVH (region=eu) |
-| `eu-ai-act` | EU AI Act controls | EU providers + transparency headers + risk classification |
+| Preset | Purpose |
+|--------|---------|
+| `perf` | Anthropic subscription routing through OAuth |
+| `ultra-cheap` | Routing intended for low-cost and free-tier providers |
+| `eu-eco` | Budget-oriented routing using EU-labelled providers |
+| `eu-pro` | Balanced routing using EU-labelled providers |
+| `eu-max` | Higher-capacity models on EU-labelled providers |
+| `gdpr` | Region filtering and related data-protection settings |
+| `eu-ai-act` | Transparency, audit and risk-classification settings |
+
+Use `grob preset info <name>` to inspect the actual providers, models and required
+credentials before applying it. Cost depends on current provider prices and usage.
+Region labels and presets do not themselves establish data residency or legal
+compliance; see [region filtering](routing.md#gdpr-region-filtering).
 
 ### Preset management commands
 
@@ -136,12 +141,12 @@ readinessProbe:
 
 ## TLS / ACME configuration
 
-Native HTTPS with optional automatic certificate provisioning via Let's Encrypt.
+Native HTTPS requires a binary built with the `tls` feature. Automatic certificate provisioning requires `acme` (which includes `tls`). These features are not in the default source build. Configure a TLS-enabled binary or terminate TLS at your ingress; do not assume setting TOML fields adds a missing build feature.
 
 ### Manual TLS
 
 ```toml
-[tls]
+[server.tls]
 enabled = true
 cert_path = "/etc/ssl/certs/grob.pem"     # PEM certificate (e.g. fullchain.pem)
 key_path = "/etc/ssl/private/grob-key.pem" # PEM private key (e.g. privkey.pem)
@@ -150,10 +155,10 @@ key_path = "/etc/ssl/private/grob-key.pem" # PEM private key (e.g. privkey.pem)
 ### ACME (Let's Encrypt)
 
 ```toml
-[tls]
+[server.tls]
 enabled = true
 
-[tls.acme]
+[server.tls.acme]
 enabled = true
 domains = ["grob.example.com"]
 contacts = ["admin@example.com"]
@@ -171,7 +176,7 @@ staging = false                  # Set to true for Let's Encrypt staging (testin
 
 ## Connection warmup
 
-On startup, Grob sends fire-and-forget `HEAD` requests to all configured provider base URLs. This pre-warms TCP and TLS connections so the first real request does not pay the connection setup cost.
+Connection warmup is off by default. Set `[server] warmup_connections = true` to send background `HEAD` requests to configured provider base URLs at startup. This pre-warms TCP and TLS connections so the first real request does not pay the connection setup cost.
 
 Warmup uses a 5-second timeout per provider and runs concurrently in background tasks. Failures are logged at debug level and do not block startup.
 
@@ -180,26 +185,28 @@ Warmup uses a 5-second timeout per provider and runs concurrently in background 
 The running server can reload configuration without restart:
 
 ```bash
-# Via API
-curl -X POST http://localhost:13456/api/config/reload
+# With the administrative secret available in this shell
+curl --fail-with-body -X POST \
+  -H "Authorization: Bearer $GROB_ADMIN_KEY" \
+  'http://[::1]:13456/api/config/reload'
 
 # Via preset apply
 grob preset apply eu-pro --reload
 ```
 
-Hot-reload atomically swaps the router, provider registry, and model index. In-flight requests continue on the old snapshot.
+Use your configured address and administrative credential. On an explicitly unauthenticated loopback listener, a local caller may omit the header. Virtual agent keys cannot reload configuration. Hot-reload atomically swaps reloadable state; in-flight requests keep the old snapshot. Listener, authentication mode, DLP and other startup-only changes require a restart. See [reload without restarting](../how-to/configure.md#reload-without-restarting).
 
 ## Timeouts
 
 ```toml
-[timeouts]
+[server.timeouts]
 api_timeout_ms = 600000       # Total API request timeout (default: 10 minutes)
 connect_timeout_ms = 10000    # TCP connection timeout (default: 10 seconds)
 ```
 
 ## Diagnostics
 
-The `grob doctor` command runs 11 diagnostic checks:
+The `grob doctor` command checks local configuration and runtime state, including:
 
 1. Config file existence and location
 2. Config version

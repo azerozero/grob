@@ -2,13 +2,17 @@
 
 Common errors and how to fix them.
 
+Start with `grob doctor` for local configuration and credential diagnostics.
+Use `grob validate` only when you want real provider calls; it may consume quota.
+For the status returned by an API call, also check the [error reference](../reference/errors.md).
+
 ---
 
 ## Connection refused
 
 **Symptom:** `Connection refused` or `ECONNREFUSED` when calling `http://[::1]:13456/v1/messages`.
 
-**Cause:** Grob is not running.
+**Possible causes:** Grob is not running, or the client uses a different listener address or port.
 
 **Fix:**
 
@@ -36,29 +40,27 @@ If you changed the host/port in config, make sure your client points to the righ
 
 ## All providers failed
 
-**Symptom:** HTTP 502 response with `"All providers failed for model ..."`.
+**Symptom:** No provider returns a usable response. The final status can reflect
+the last provider error, including 401, 429 or 5xx; it is not always 502.
 
 **Causes and fixes:**
 
 1. **Missing API keys.** Check that the required environment variables are set:
 
    ```bash
-   grob doctor     # Shows config, providers, env vars, connectivity
+   grob doctor     # Checks local config, credentials and service status
    grob validate   # Tests each provider with a real API call
    ```
 
-2. **Wrong API key.** Verify your key is valid by calling the provider directly:
-
-   ```bash
-   curl -H "Authorization: Bearer $ANTHROPIC_API_KEY" \
-     https://api.anthropic.com/v1/messages \
-     -d '{"model":"claude-sonnet-4-20250514","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'
-   ```
+2. **Wrong or expired credential.** Check the provider named in the error.
+   Follow [provider setup](providers.md) for API keys or
+   [OAuth setup](oauth-setup.md) for browser authentication. A successful local
+   credential check does not prove that the provider accepts the credential.
 
 3. **Circuit breaker open.** After repeated failures, the circuit breaker blocks requests to a provider for 30 seconds. Check the `/metrics` endpoint:
 
    ```bash
-   curl -s http://[::1]:13456/metrics | grep circuit_breaker
+   curl --fail --silent --globoff 'http://[::1]:13456/metrics' | grep circuit_breaker
    ```
 
    Wait 30 seconds for half-open probes, or restart the service to reset all breakers:
@@ -85,24 +87,20 @@ grob spend
 
 **Fix options:**
 
-1. Increase the budget in `~/.grob/config.toml`:
+1. Check which limit was exceeded (global, provider, model or identity).
+   Increase the relevant limit only if the extra spend is intended. For example:
 
    ```toml
    [budget]
    monthly_limit_usd = 50.0
    ```
 
-2. Set to 0 to disable the budget cap:
-
-   ```toml
-   [budget]
-   monthly_limit_usd = 0.0
-   ```
-
-3. Reload config without restarting:
+2. Reload with an administrative credential. Set `GROB_ADMIN_TOKEN` below to a
+   configured administrator token; it is not a provider API key:
 
    ```bash
-   curl -X POST http://[::1]:13456/api/config/reload
+   curl --fail-with-body --globoff -X POST 'http://[::1]:13456/api/config/reload' \
+     -H "Authorization: Bearer $GROB_ADMIN_TOKEN"
    ```
 
 Spend resets automatically at the start of each calendar month.
@@ -115,7 +113,8 @@ Spend resets automatically at the start of each calendar month.
 
 **Cause:** Too many requests per second from the same tenant/API key/IP.
 
-**Default limits:** 100 requests/second with a burst of 200.
+The Grob request limiter is disabled by default (`rate_limit_rps = 0`). A
+preset, tenant override or policy can enable a limit. Check the active settings.
 
 **Fix options:**
 
@@ -129,14 +128,10 @@ Spend resets automatically at the start of each calendar month.
    rate_limit_burst = 400
    ```
 
-3. Disable the security middleware entirely (not recommended for production):
-
-   ```toml
-   [security]
-   enabled = false
-   ```
-
-Note: This is the Grob-level rate limit. Upstream providers have their own rate limits. If you see `429` responses from the provider itself, those are reported as provider errors, not Grob rate-limit errors. The metric `grob_ratelimit_hits_total` tracks upstream provider throttling, while `grob_ratelimit_rejected_total` tracks Grob-level rejections.
+Provider throttling can also reach the client as HTTP 429 after retries and
+fallbacks. Increasing Grob's local limit will not fix a provider quota. Use the
+error body and the metrics `grob_ratelimit_hits_total` (upstream) and
+`grob_ratelimit_rejected_total` (local) to distinguish them.
 
 ---
 
@@ -157,7 +152,7 @@ Note: This is the Grob-level rate limit. Upstream providers have their own rate 
 **Check circuit breaker state:**
 
 ```bash
-curl -s http://[::1]:13456/metrics | grep grob_circuit_breaker_state
+curl --fail --silent --globoff 'http://[::1]:13456/metrics' | grep grob_circuit_breaker_state
 # 0 = Closed, 1 = Open, 2 = HalfOpen
 ```
 
@@ -170,12 +165,8 @@ curl -s http://[::1]:13456/metrics | grep grob_circuit_breaker_state
   grob restart -d
   ```
 
-- To disable the circuit breaker (not recommended):
-
-  ```toml
-  [security]
-  circuit_breaker = false
-  ```
+If metrics are protected, include the separate metrics bearer token described
+in the [deployment guide](deploy.md#protect-metrics-with-a-bearer-token).
 
 ---
 
@@ -197,9 +188,10 @@ curl -s http://[::1]:13456/metrics | grep grob_circuit_breaker_state
 
    ```bash
    grob stop
-   # or force kill:
-   kill $(lsof -t -i :13456)
    ```
+
+   Identify the owning process before stopping anything else; another application
+   may be using this port.
 
 3. Or run on a different port:
 
@@ -225,13 +217,12 @@ The OAuth callback server also binds to `127.0.0.1:1455`. If that port is taken,
    grob doctor
    ```
 
-2. Start fresh from a preset:
+2. Fix the TOML field and line named in the error, then retry. Compare the setting
+   with the [configuration reference](../reference/configuration.md).
 
-   ```bash
-   grob preset apply perf
-   ```
-
-   This backs up your current config to `config.toml.bak` before overwriting.
+Apply a preset only if you intend to replace the current routing and provider
+configuration. `grob preset apply <name>` saves a `config.toml.backup` when a
+current configuration exists; it is not a repair command for a typo.
 
 ---
 
@@ -240,7 +231,7 @@ The OAuth callback server also binds to `127.0.0.1:1455`. If that port is taken,
 When in doubt, run the full diagnostic suite:
 
 ```bash
-grob doctor     # Check config, providers, env vars, connectivity
+grob doctor     # Check local config, credentials, environment and service
 grob validate   # Test every provider+model with real API calls
 grob status     # Service status, loaded models, active preset
 grob spend      # Monthly spend and budget

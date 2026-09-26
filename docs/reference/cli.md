@@ -20,6 +20,7 @@ Start the routing proxy. In foreground mode, the server blocks until Ctrl+C. In 
 |------|-------------|
 | `-p, --port <PORT>` | Override listen port |
 | `-d, --detach` | Run in background (daemon mode) |
+| `--adopt-from-system` | Adopt and refresh compatible OAuth tokens from co-installed CLIs for this invocation. A later restart uses the configuration's setting. |
 
 ```bash
 grob start              # Start in foreground
@@ -103,7 +104,10 @@ grob doctor
 
 ### `grob exec`
 
-Launch a command behind the Grob proxy. Automatically starts Grob if not running, sets environment variables to point at the proxy, runs the command, and stops Grob when it exits.
+Launch a command behind the Grob proxy. Starts Grob if needed, sets base-URL
+environment variables, and runs the command. When the command exits, it stops
+an instance it started; an existing instance stays running. It does not supply
+an inbound Grob credential to the child process.
 
 Alias: `grob launch`
 
@@ -111,6 +115,7 @@ Alias: `grob launch`
 |------|-------------|
 | `-p, --port <PORT>` | Override listen port |
 | `--no-stop` | Keep Grob running after the command exits |
+| `--adopt-from-system` | Enable OAuth token adoption for a proxy started by this command. Does not change an already-running instance. |
 
 Environment variables set for the child process:
 
@@ -130,7 +135,9 @@ grob exec --no-stop -- my-tool   # Keep proxy running after exit
 
 ### `grob run`
 
-Run in container/foreground mode. Binds to `::` (all interfaces), outputs JSON logs, no PID file, supports graceful shutdown via SIGTERM/SIGUSR1.
+Run in container/foreground mode. Binds to `::` (all interfaces) by default,
+uses no PID file, and supports graceful shutdown via SIGTERM/SIGUSR1 on Unix.
+Logs are human-readable unless `--json-logs` or `GROB_JSON_LOGS=true` is set.
 
 | Flag | Env var | Description |
 |------|---------|-------------|
@@ -138,6 +145,7 @@ Run in container/foreground mode. Binds to `::` (all interfaces), outputs JSON l
 | `--host <HOST>` | `GROB_HOST` | Bind address |
 | `--log-level <LEVEL>` | `GROB_LOG_LEVEL` | Log level |
 | `--json-logs` | `GROB_JSON_LOGS` | JSON log format |
+| `--adopt-from-system` | `GROB_ADOPT_FROM_SYSTEM` | Adopt and refresh compatible OAuth tokens from co-installed CLIs |
 
 ```bash
 grob run --port 8080 --json-logs    # Container-friendly invocation
@@ -181,6 +189,7 @@ Create a new virtual API key.
 | `-b, --budget <USD>` | Monthly budget in USD (optional) |
 | `-r, --rate-limit <RPS>` | Rate limit in requests per second (optional) |
 | `-a, --allowed-models <M1,M2>` | Comma-separated allowed model names (optional) |
+| `--allowed-providers <P1,P2>` | Comma-separated configured provider names (optional; omitted means any provider) |
 | `-e, --expires <DAYS>` | Key expiration in days from now (optional) |
 
 ```bash
@@ -209,7 +218,7 @@ Revoke a virtual API key by UUID or prefix.
 
 ```bash
 grob key revoke <uuid>
-grob key revoke grob-ak-xxxx    # Prefix match
+grob key revoke grob_a1b2      # Replace with a unique prefix from grob key list
 ```
 
 ### `grob bench`
@@ -342,12 +351,19 @@ Interactive credential setup for providers. Without arguments, checks all provid
 | Flag | Description |
 |------|-------------|
 | `--force-reauth` | Discard existing OAuth tokens and initiate a fresh OAuth flow. Use when `grob connect` reports a revoked token. |
+| `--from-system` | Adopt an existing compatible OAuth token from Codex CLI or Claude Code instead of opening a browser. Requires a provider argument. |
 
 ```bash
 grob connect                          # Check all providers
 grob connect anthropic                # Set up Anthropic credentials
 grob connect anthropic --force-reauth # Re-authenticate after token revocation
+grob connect anthropic --from-system # Adopt an existing Claude Code login
 ```
+
+The provider argument accepts either its configured `name` or `oauth_provider`
+identifier. Token adoption supports Codex CLI's auth file and Claude Code's
+macOS Keychain credential. See [OAuth Setup](../how-to/oauth-setup.md) for
+requirements and the ongoing `adopt_from_system` setting.
 
 ### `grob init`
 

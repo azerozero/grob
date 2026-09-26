@@ -50,8 +50,8 @@ cargo nextest run
 ```
 
 `prek install` wires the pre-commit hooks that run `cargo fmt`, `clippy`,
-and `gitleaks` on every commit, and heavier checks (tests, audit) on
-push. The configuration lives in `prek.toml`.
+and `gitleaks` on every commit, with documentation and dependency checks on
+push. The test suite runs separately and in CI. The configuration lives in `prek.toml`.
 
 ## Branching model
 
@@ -124,7 +124,8 @@ example `feat(routing):` or `fix(openai-compat):`).
 
 ### What CI checks
 
-Pull requests run the full pipeline defined in `.github/workflows/ci.yml`:
+Pull requests select jobs from `.github/workflows/ci.yml` according to changed
+files. See the [CI flow](docs/diagrams/ci-cd-pert.md) for triggers and required gates:
 
 | Stage | What it checks |
 |-------|----------------|
@@ -133,8 +134,9 @@ Pull requests run the full pipeline defined in `.github/workflows/ci.yml`:
 | Feature powerset | `cargo-hack` compiles every feature combination |
 | Audit | `cargo-audit` + `cargo-deny` for advisories and licences |
 
-Mutation testing (`cargo-mutants`) and cross-target builds run on merge
-to `main`.
+Mutation testing samples changed critical Rust files on eligible PRs; broader
+mutation jobs and cross-target builds run on `main`. Documentation outside `src/`
+skips unrelated runtime jobs; Markdown changes under `src/` trigger Rust checks.
 
 ## Code style
 

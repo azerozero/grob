@@ -1,6 +1,24 @@
 # Grob Documentation
 
-Grob is a multi-provider LLM routing proxy. It sits between your AI coding tools (Claude Code, Codex CLI, Aider, Cursor, Cline, etc.) and your LLM providers, routing requests with automatic failover, format translation, and spend tracking.
+Grob forwards requests from your AI tools to configured model providers. It can
+switch providers after a failure, translate API formats, track spending, and
+screen traffic for sensitive data.
+
+## Start with your goal
+
+| I want to… | Start here |
+|------------|------------|
+| Run an AI coding tool through Grob | [Getting started](tutorials/getting-started.md) |
+| Call Grob from my own application | [Python](examples/sdk-python.md) or [Node.js](examples/sdk-node.md) examples |
+| Choose models, add a fallback or set a budget | [Configure Grob](how-to/configure.md) |
+| Replace credentials without changing my agent | [Manage secrets](how-to/manage-secrets.md#replace-credentials-without-changing-the-agent) |
+| Run Grob for a team | [Deploy](how-to/deploy.md), then [authentication](reference/authentication.md) |
+| Understand or fix an error | [Troubleshooting](how-to/troubleshooting.md) |
+
+The tutorial is enough for a first local run. The references below explain
+individual options; architecture decisions record design history and proposals.
+An ADR marked **proposed**, including the optional model supervisor, does not
+mean its configuration is available in the current binary.
 
 ## Who is this for?
 
@@ -30,7 +48,22 @@ flowchart TB
     grob --> ollama["Ollama<br/>(local fallback)"]
 ```
 
-Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them, classifies by task type (thinking, web search, background, default), and dispatches to the best available provider. If one provider fails, the next in the priority chain is tried automatically.
+Grob accepts Anthropic and OpenAI API formats and selects a configured route.
+If that route has several provider mappings, it can try the next one after a
+failure. The diagram shows an example setup; providers and fallbacks must be
+configured before Grob can use them.
+
+### Terms used in these guides
+
+| Term | Meaning in Grob |
+|------|-----------------|
+| Provider | A service that runs models, such as Anthropic, OpenAI or a local Ollama server. |
+| Logical model | A name used by your client, such as `default`; Grob maps it to a provider's actual model. |
+| Mapping / fallback | A provider and actual model to try, followed by alternatives if configured. |
+| Preset | A ready-made configuration you can inspect and apply. |
+| DLP | Data Loss Prevention: scanning that can redact or block detected sensitive content. |
+| Tenant / virtual key | An identity and its Grob access key, used to apply separate permissions and limits. |
+| Upstream credential | The provider's API key or OAuth token; separate from the key your client uses to access Grob. |
 
 ## Quick navigation
 
@@ -55,6 +88,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Call Grob from Node.js | [Node SDK Examples](examples/sdk-node.md) |
 | Manage upstream secrets | [Manage Secrets](how-to/manage-secrets.md) |
 | Protect credential keys and lifecycle | [Credential storage](how-to/protect-credential-storage.md) |
+| Lock sensitive memory and verify limits | [Harden memory](how-to/harden-memory.md) |
 | Inject service credentials with optional Vault | [Route service credentials](how-to/route-service-credentials.md) |
 | Tune routing from traces | [Auto-tune Routing](how-to/auto-tune-routing.md) |
 | Set up the fuzzy response cache | [Configure the SimHash Cache](how-to/configure-simhash-cache.md) |
@@ -102,12 +136,16 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | Security model | [Security Model](explanation/security.md) |
 | Policy engine | [Policy Engine](explanation/policies.md) |
 | Design philosophy | [Design Principles](explanation/design-principles.md) |
+| Why dependency updates are staged | [Dependency upgrades](explanation/dependency-upgrades.md) |
 | Gemini specifics | [Gemini Integration](how-to/gemini-integration.md) |
 | OTLP exemplars (why not yet) | [OTLP Exemplars](explanation/otlp-exemplars.md) |
 | Design doc template | [Design Doc Template](design/000-template.md) |
 | Design docs in flight | [`design/`](design/) |
 
 ### Architecture decisions (ADRs)
+
+<details>
+<summary>Browse design decisions and proposals</summary>
 
 | ADR | Title |
 |-----|-------|
@@ -139,9 +177,12 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | [0027](decisions/0027-adopt-system-oauth-credentials.md) | Adopt OAuth Credentials from Co-installed CLIs (proposed) |
 | [0028](decisions/0028-open-core-boundary.md) | Open-Core Boundary — AGPL Core vs Commercial Modules (superseded) |
 | [0029](decisions/0029-relicense-core-apache.md) | Relicense Grob Core to Apache-2.0 |
+| [0030](decisions/0030-fail-closed-dependency-contract.md) | Required integrations fail closed when unavailable |
 | [0031](decisions/0031-optional-vault-credential-routing.md) | Credential routing with optional Vault and local recovery |
 | [0032](decisions/0032-credential-gateway-hardening.md) | Credential gateway protocol, transport and key custody hardening |
 | [0033](decisions/0033-advisory-model-supervisor.md) | Optional model supervisor inside policy bounds (proposed) |
+
+</details>
 
 ### Examples
 
@@ -170,4 +211,6 @@ Grob exposes Prometheus metrics at `/metrics`. A Grafana dashboard ships in
 
 ## Version
 
-Current release: see [`Cargo.toml`](../Cargo.toml) `[package].version` and [CHANGELOG](../CHANGELOG.md) for the history. The `release-plz` workflow tags every releasable commit on `main`.
+These docs describe the repository revision you are reading. See
+[`Cargo.toml`](../Cargo.toml) for its version and the [CHANGELOG](../CHANGELOG.md)
+for release history. When using an older binary, read the docs at its release tag.
