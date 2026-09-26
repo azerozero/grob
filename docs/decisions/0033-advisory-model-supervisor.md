@@ -14,6 +14,28 @@ The first experiment should select one approved logical model for a request.
 Task decomposition, autonomous worker loops and cross-agent memory are outside
 this proposal. They are unnecessary for deciding where to route a request.
 
+## Optional routing improvement
+
+The supervisor is a possible improvement to evaluate, not a prerequisite for
+using Grob. The proposed operating modes below are design requirements, not
+configuration options available in the current binary.
+
+| Proposed mode | Behavior |
+|---|---|
+| Disabled (default) | Use existing routing, with no supervisor call, credential requirement or added inference cost. |
+| Observe | Keep the existing route; compare an advisory choice on an explicitly enabled, bounded sample of eligible requests. |
+| Assist | Let a validated advisory choice influence routing only for explicitly enabled task families and permitted candidates. |
+
+Observation still sends data to the supervisor and incurs inference cost. It
+requires the same destination restrictions, data minimization and limits as
+assisted routing. Promote it to assisted routing only after a measured benefit
+in quality, cost or latency, without weakening security requirements.
+
+Operators control activation and can return to disabled mode. On supervisor
+failure, Grob uses its existing route subject to the same policy checks. The
+supervisor cannot enable itself, change configuration or expand permissions;
+improvement does not imply autonomous retraining or self-modification.
+
 ## What already exists
 
 | Need | Current mechanism | Reuse decision |
