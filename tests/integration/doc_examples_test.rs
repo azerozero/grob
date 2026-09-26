@@ -24,6 +24,7 @@ priority = 1
 fn read_doc(path: &str) -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
         .unwrap_or_else(|error| panic!("{path}: {error}"))
+        .replace("\r\n", "\n")
 }
 
 fn toml_blocks<'a>(markdown: &'a str, label: &str) -> Vec<&'a str> {
