@@ -469,9 +469,54 @@ pub(crate) async fn rate_limit_check_middleware(
         return next.run(request).await;
     }
 
-    let limiter = match &state.security.rate_limiter {
-        Some(l) => l,
-        None => return next.run(request).await,
+    // A key quota is independent of the optional deployment-wide limiter.
+    // Apply both when configured; a generous key must not bypass a lower
+    // deployment quota. The service gateway checks the same key bucket after
+    // its budget check; do not charge it twice or change its error precedence.
+    let key_quota = request
+        .extensions()
+        .get::<crate::auth::virtual_keys::VirtualKeyContext>()
+        .filter(|_| !path.starts_with("/v1/services/"))
+        .and_then(|vk| {
+            vk.rate_limit_rps
+                .filter(|rps| *rps > 0)
+                .map(|rps| (vk.key_id, rps))
+        });
+    let mut key_headers = None;
+    if let Some((id, rps)) = key_quota {
+        let config = {
+            let inner = state.snapshot();
+            let security = &inner.config.security;
+            let share = crate::security::replica_share(
+                rps,
+                security.rate_limit_replicas,
+                security.rate_limit_margin_percent,
+            );
+            crate::security::RateLimitConfig {
+                requests_per_second: share,
+                burst: share,
+            }
+        };
+        let limit = advertised_quota(&config);
+        let window = window_seconds(&config);
+        let (allowed, remaining, reset) = state
+            .scoped_rate_limiter
+            .check_with_config(
+                &RateLimitKey::Tenant(format!("credential-key:{id}")),
+                config,
+            )
+            .await;
+        if !allowed {
+            return rate_limit_response(limit, window, reset);
+        }
+        key_headers = Some((limit, remaining, window));
+    }
+    let Some(limiter) = &state.security.rate_limiter else {
+        let mut response = next.run(request).await;
+        if let Some((limit, remaining, window)) = key_headers {
+            apply_ratelimit_headers(response.headers_mut(), limit, remaining, window);
+        }
+        return response;
     };
 
     let key = if let Some(vk) = request
@@ -534,11 +579,27 @@ pub(crate) async fn rate_limit_check_middleware(
     };
 
     if !allowed {
-        metrics::counter!("grob_ratelimit_rejected_total").increment(1);
-        let retry_after = reset_after
-            .map(|d| d.as_secs().max(1).to_string())
-            .unwrap_or_else(|| "1".to_string());
-        let mut response = Response::builder()
+        return rate_limit_response(effective_limit, effective_window, reset_after);
+    }
+
+    let mut response = next.run(request).await;
+    let (limit, remaining, window) = key_headers
+        .filter(|(limit, _, _)| *limit < effective_limit)
+        .unwrap_or((effective_limit, remaining, effective_window));
+    apply_ratelimit_headers(response.headers_mut(), limit, remaining, window);
+    response
+}
+
+fn rate_limit_response(
+    effective_limit: u32,
+    effective_window: u64,
+    reset_after: Option<std::time::Duration>,
+) -> Response {
+    metrics::counter!("grob_ratelimit_rejected_total").increment(1);
+    let retry_after = reset_after
+        .map(|d| d.as_secs().max(1).to_string())
+        .unwrap_or_else(|| "1".to_string());
+    let mut response = Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
             .header("Retry-After", &retry_after)
             .header("Content-Type", "application/json")
@@ -549,20 +610,7 @@ pub(crate) async fn rate_limit_check_middleware(
             .unwrap_or_else(|_| {
                 Response::new(Body::from(r#"{"error":{"type":"rate_limit_error","message":"Rate limit exceeded."}}"#))
             });
-        apply_ratelimit_headers(response.headers_mut(), effective_limit, 0, effective_window);
-        return response;
-    }
-
-    // Advertise the quota on the *successful* path too: a client that only
-    // learns its budget from a 429 has already been throttled, which is exactly
-    // the outcome these fields exist to avoid.
-    let mut response = next.run(request).await;
-    apply_ratelimit_headers(
-        response.headers_mut(),
-        effective_limit,
-        remaining,
-        effective_window,
-    );
+    apply_ratelimit_headers(response.headers_mut(), effective_limit, 0, effective_window);
     response
 }
 
@@ -836,6 +884,48 @@ pub(crate) async fn tenant_required_middleware(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn virtual_key_quota_applies_with_or_without_global_limiter() {
+        use axum::{middleware::from_fn_with_state, routing::get, Router};
+        use tower::ServiceExt;
+
+        for global in [0, 10] {
+            let mut config = rl_config("");
+            config.security.enabled = true;
+            config.security.rate_limit_rps = global;
+            let state =
+                crate::server::test_app_state(config, crate::providers::ProviderRegistry::new());
+            let app = Router::new()
+                .route("/v1/messages", get(|| async { "ok" }))
+                .layer(from_fn_with_state(state, rate_limit_check_middleware));
+            let id = uuid::Uuid::new_v4();
+            for (key_id, expected) in [
+                (id, StatusCode::OK),
+                (id, StatusCode::TOO_MANY_REQUESTS),
+                (uuid::Uuid::new_v4(), StatusCode::OK),
+            ] {
+                let mut request = Request::builder()
+                    .uri("/v1/messages")
+                    .body(Body::empty())
+                    .unwrap();
+                request
+                    .extensions_mut()
+                    .insert(crate::auth::virtual_keys::VirtualKeyContext {
+                        key_id,
+                        tenant_id: "test".into(),
+                        name: "test".into(),
+                        budget_usd: None,
+                        rate_limit_rps: Some(1),
+                        allowed_models: None,
+                        allowed_providers: vec![],
+                    });
+                let response = app.clone().oneshot(request).await.unwrap();
+                assert_eq!(response.status(), expected, "global rate {global}");
+                assert_eq!(response.headers()["x-ratelimit-limit"], "1");
+            }
+        }
+    }
 
     // ── Per-client rate limiting ──────────────────────────────────
 

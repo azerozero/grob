@@ -45,8 +45,8 @@ RUN TARGET="$(rustc -vV | sed -n 's/^host: //p')" && \
     strip /grob && \
     mkdir -p /runtime/var/lib/grob /runtime/tmp
 
-# Runtime: scratch (no shell). Runs as root (uid 0) — matching the PUBLISHED
-# grob image — so it can read the AES-256-GCM `encryption.key` that the (root)
+# Runtime: scratch (no shell). This demo runs as root (uid 0), unlike the
+# production image, so it can read the AES-256-GCM `encryption.key` that the (root)
 # init container writes 0600 into the shared GROB_HOME. A non-root uid here
 # would fail with "failed to initialize storage encryption" (permission denied).
 FROM scratch

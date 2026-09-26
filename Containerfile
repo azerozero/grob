@@ -1,6 +1,7 @@
 # Grob - LLM Routing Proxy
 # Containerfile for Podman/Docker (rootless compatible)
 # Multi-stage build with cargo-chef for fast rebuilds
+ARG RUNTIME_SOURCE=compiled
 
 # Stage 1: Chef planner — compute dependency recipe
 FROM rust:1.98-alpine3.24 AS chef
@@ -30,8 +31,23 @@ RUN cargo build --release --locked --target x86_64-unknown-linux-musl
 RUN strip target/x86_64-unknown-linux-musl/release/grob && \
     mkdir -p /runtime/var/lib/grob /runtime/tmp
 
-# Stage 3: Runtime (scratch - empty base)
-FROM scratch
+# Normalize build outputs and release artifacts into the same runtime inputs.
+FROM scratch AS compiled
+COPY --from=builder /usr/src/grob/target/x86_64-unknown-linux-musl/release/grob /grob
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /runtime/ /runtime/
+
+# Release builds supply the already cross-compiled binary and CA bundle.
+# This path contains no RUN step and does not need QEMU or a Rust rebuild.
+FROM scratch AS prebuilt
+COPY grob /grob
+COPY ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY runtime/ /runtime/
+
+FROM ${RUNTIME_SOURCE} AS runtime-source
+
+# One runtime contract for local builds and published images.
+FROM scratch AS runtime
 
 # Metadata
 LABEL org.opencontainers.image.title="grob"
@@ -40,12 +56,13 @@ LABEL org.opencontainers.image.source="https://github.com/azerozero/grob"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 # Copy CA certificates for TLS (from builder)
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=runtime-source /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # Copy binary and create writable mount points owned by the runtime UID.
-COPY --from=builder /usr/src/grob/target/x86_64-unknown-linux-musl/release/grob /grob
-COPY --from=builder --chown=65534:65534 /runtime/var/lib/grob /var/lib/grob
-COPY --from=builder --chown=65534:65534 /runtime/tmp /tmp
+COPY --from=runtime-source /grob /grob
+COPY --from=runtime-source --chown=65534:65534 /runtime/var/lib/grob /var/lib/grob
+COPY --from=runtime-source --chown=65534:65534 /runtime/tmp /tmp
+ENV GROB_HOME=/var/lib/grob
 
 # Create non-root user (65534 = nobody)
 USER 65534:65534

@@ -53,8 +53,8 @@ flowchart LR
 ## Quickstart
 
 Install your coding tool separately. The example below uses Claude Code (`claude`
-on your `PATH`) and a configured provider account. For an API key, OAuth login or
-Windows setup, follow the [getting-started tutorial](docs/tutorials/getting-started.md).
+on your `PATH`) and a configured provider account. For prerequisites and connection
+options, follow the [getting-started tutorial](docs/tutorials/getting-started.md).
 
 **With Homebrew** (macOS / Linux):
 ```bash

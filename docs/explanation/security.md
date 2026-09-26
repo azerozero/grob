@@ -66,7 +66,7 @@ The binary must include the `dlp` feature and the configuration must set `[dlp] 
 - **Canary replacements**: selected rules can substitute traceable fake values.
 - **URL exfiltration and prompt injection**: separate opt-in detectors.
 
-Email addresses and telephone numbers are not general built-in PII detectors. DLP is pattern-based and cannot guarantee that all sensitive data is removed. Streaming scanners keep bounded chunks instead of requiring a complete response. See [DLP Reference](../reference/dlp.md) for actions and limits.
+Email addresses and telephone numbers are not general built-in PII detectors. DLP is pattern-based and cannot guarantee that all sensitive data is removed. With output scanning enabled, each text block is retained until complete, checked and then emitted. Retained SSE events are limited to 1 MiB and 4,096 events; incomplete or oversized blocks terminate the stream. This adds block-level delivery latency. See [DLP Reference](../reference/dlp.md) for actions and limits.
 
 ### Credential protection
 

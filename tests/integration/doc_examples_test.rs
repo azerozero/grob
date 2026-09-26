@@ -3,6 +3,9 @@
 use grob::cli::AppConfig;
 use std::path::Path;
 
+mod markdown;
+mod syntax;
+
 const CONFIGURATION: &str = "docs/reference/configuration.md";
 const OPERATIONS: &str = "docs/reference/operations.md";
 const BASE: &str = r#"
@@ -27,16 +30,12 @@ fn read_doc(path: &str) -> String {
         .replace("\r\n", "\n")
 }
 
-fn toml_blocks<'a>(markdown: &'a str, label: &str) -> Vec<&'a str> {
-    let blocks: Vec<_> = markdown
-        .split("```toml\n")
-        .skip(1)
-        .map(|block| {
-            block
-                .split_once("\n```")
-                .unwrap_or_else(|| panic!("{label}: unclosed TOML fence"))
-                .0
-        })
+fn toml_blocks(markdown: &str, label: &str) -> Vec<String> {
+    let blocks: Vec<_> = markdown::blocks(markdown)
+        .unwrap_or_else(|error| panic!("{label}: {error}"))
+        .into_iter()
+        .filter(|block| block.language == "toml")
+        .map(|block| block.source)
         .collect();
     assert!(!blocks.is_empty(), "{label}: no TOML examples found");
     blocks
@@ -44,17 +43,17 @@ fn toml_blocks<'a>(markdown: &'a str, label: &str) -> Vec<&'a str> {
 
 fn section_example(path: &str, heading: &str) -> String {
     let markdown = read_doc(path);
-    let (_, rest) = markdown
-        .split_once(&format!("\n{heading}\n"))
-        .unwrap_or_else(|| panic!("{path}: missing heading {heading}"));
-    let section = rest.split("\n#").next().expect("section exists");
-    let blocks = toml_blocks(section, path);
+    let blocks: Vec<_> = markdown::blocks(&markdown)
+        .unwrap_or_else(|error| panic!("{path}: {error}"))
+        .into_iter()
+        .filter(|block| block.heading == heading && block.language == "toml")
+        .collect();
     assert_eq!(
         blocks.len(),
         1,
         "{path}: {heading} must have one TOML example"
     );
-    blocks[0].to_owned()
+    blocks[0].source.clone()
 }
 
 fn parse_config(content: &str, label: &str) -> AppConfig {
@@ -120,9 +119,37 @@ fn acme_example_enables_provisioning() {
 
 #[test]
 fn timeout_example_sets_request_and_connect_limits() {
+    let source = section_example(OPERATIONS, "## Timeouts");
+    assert!(
+        has_timeout_fields(&source),
+        "timeout table and both keys must be explicit"
+    );
     let config = example_config(OPERATIONS, "## Timeouts");
     assert_eq!(config.server.timeouts.api_timeout_ms, 600_000);
     assert_eq!(config.server.timeouts.connect_timeout_ms, 10_000);
+}
+
+fn has_timeout_fields(source: &str) -> bool {
+    let value: toml::Value = toml::from_str(source).expect("valid TOML");
+    ["api_timeout_ms", "connect_timeout_ms"].iter().all(|key| {
+        value
+            .get("server")
+            .and_then(|v| v.get("timeouts"))
+            .and_then(|v| v.get(key))
+            .and_then(toml::Value::as_integer)
+            .is_some()
+    })
+}
+
+#[test]
+fn timeout_examples_cannot_fall_back_to_defaults() {
+    let source = section_example(OPERATIONS, "## Timeouts");
+    assert!(!has_timeout_fields(
+        &source.replace("[server.timeouts]", "[server.timeout]")
+    ));
+    assert!(!has_timeout_fields(
+        &source.replace("api_timeout_ms", "api_timout_ms")
+    ));
 }
 
 #[test]

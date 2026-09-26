@@ -22,9 +22,7 @@ step and covers the API-key path.
 
 ## Prerequisites
 
-- macOS or Linux for the shell commands on this page. On Windows, download the
-  matching executable from [GitHub Releases](https://github.com/azerozero/grob/releases)
-  and add its directory to `PATH`; the shell installer supports macOS and Linux.
+- macOS or Linux. The prebuilt releases and shell installer target these platforms.
 - Claude Code installed and available as `claude`. Grob does not install your AI tool.
 - An Anthropic Pro/Max subscription or an Anthropic API key for this tutorial.
   For other providers or a local Ollama instance, see [Provider Setup](../how-to/providers.md).

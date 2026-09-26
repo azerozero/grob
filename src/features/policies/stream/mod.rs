@@ -22,7 +22,7 @@
 //!
 //! # Errors
 //!
-//! `poll_next` propagates `ProviderError` items from the inner stream unchanged.
+//! Invalid, incomplete or oversized SSE/tool groups fail closed with a protocol error.
 //!
 //! # Panics
 //!
@@ -73,8 +73,8 @@ enum HitStreamState {
 /// Stream adapter that intercepts `tool_use` blocks and applies HIT policy.
 ///
 /// Performance notes:
-/// - SIMD-accelerated [`memchr::memmem`] for fast `content_block_start` detection.
-/// - Zero-copy passthrough for chunks without tool_use events.
+/// - Complete SSE events are parsed before tool authorization.
+/// - Interleaved tools are serialized in start order, with a 1 MiB / 4096-event cap.
 /// - The buffering state holds the entire tool
 ///   block (typically < 2 KiB) before emitting any chunk, enabling deny-pattern
 ///   matching on tool arguments.
@@ -82,7 +82,7 @@ enum HitStreamState {
 /// # Errors
 ///
 /// [`Stream::poll_next`] propagates `ProviderError` items from the inner stream
-/// unchanged. No additional errors are introduced by this adapter.
+/// unchanged; invalid or oversized tool groups produce a protocol error.
 ///
 /// # Panics
 ///
@@ -90,7 +90,7 @@ enum HitStreamState {
 #[pin_project]
 pub struct HitStream<S> {
     #[pin]
-    inner: S,
+    inner: crate::providers::guarded_stream::ToolBlockStream<S>,
     policy: HitOverride,
     request_id: String,
     state: HitStreamState,
@@ -112,6 +112,7 @@ pub struct HitStream<S> {
     audit_log: Option<Arc<crate::security::AuditLog>>,
     /// Tool name captured when entering `Paused` (for receipt writing on resolve).
     paused_tool_name: Option<String>,
+    blocked: bool,
 }
 
 impl<S> HitStream<S>
@@ -140,7 +141,7 @@ where
             .collect();
 
         Self {
-            inner,
+            inner: crate::providers::guarded_stream::ToolBlockStream::new(inner),
             policy,
             request_id,
             state: HitStreamState::Passthrough,
@@ -153,6 +154,7 @@ where
             last_hit_hash: None,
             audit_log,
             paused_tool_name: None,
+            blocked: false,
         }
     }
 }
@@ -481,6 +483,9 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
+        if *this.blocked {
+            return Poll::Ready(None);
+        }
 
         // Phase 1: if paused, poll the approval oneshot.
         let approval_pending = if matches!(*this.state, HitStreamState::Paused) {
@@ -501,6 +506,11 @@ where
         } else {
             false
         };
+        // Apply backpressure while waiting for approval. Reading ahead here
+        // would buffer unbounded output and could flush a later tool unchecked.
+        if approval_pending {
+            return Poll::Pending;
+        }
 
         // Phase 2: flush pending chunks (only in Passthrough).
         if matches!(*this.state, HitStreamState::Passthrough) {
@@ -530,9 +540,32 @@ where
                     }
                     this.pending_chunks.push_back(bytes.clone());
 
-                    if memmem::find(&bytes, b"content_block_stop").is_some() {
+                    if sse_parser::event_json(&bytes)
+                        .is_some_and(|value| value["type"] == "content_block_stop")
+                    {
                         if let Some(stop_idx) = extract_block_index(&bytes) {
                             if stop_idx == tidx {
+                                let input = if this.tool_input_buffer.is_empty() {
+                                    Ok(serde_json::json!({}))
+                                } else {
+                                    serde_json::from_str::<serde_json::Value>(
+                                        this.tool_input_buffer,
+                                    )
+                                };
+                                match input {
+                                    Ok(value) if value.is_object() => {
+                                        *this.tool_input_buffer = value.to_string()
+                                    }
+                                    _ => {
+                                        *this.blocked = true;
+                                        this.pending_chunks.clear();
+                                        return Poll::Ready(Some(Err(
+                                            crate::providers::guarded_stream::protocol_error(
+                                                "Invalid tool input JSON",
+                                            ),
+                                        )));
+                                    }
+                                }
                                 let tool_info = ToolUseInfo {
                                     name: tname.clone(),
                                     input_preview: this.tool_input_buffer.clone(),
@@ -569,6 +602,14 @@ where
                 if let Some(tool_name) = extract_tool_name(&bytes) {
                     let tool_index = extract_block_index(&bytes).unwrap_or(0);
                     this.tool_input_buffer.clear();
+                    if let Some(input) = sse_parser::event_json(&bytes)
+                        .and_then(|value| value["content_block"].get("input").cloned())
+                        .filter(|value| {
+                            !value.is_null() && value.as_object().is_none_or(|o| !o.is_empty())
+                        })
+                    {
+                        *this.tool_input_buffer = input.to_string();
+                    }
                     this.pending_chunks.push_back(bytes);
                     *this.state = HitStreamState::BufferingInput {
                         tool_name,

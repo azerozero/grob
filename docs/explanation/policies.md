@@ -41,6 +41,13 @@ stream is wrapped in a `HitStream` adapter. The adapter buffers every
 `tool_use` content block until `content_block_stop` (to obtain the complete
 tool input), then makes a policy decision.
 
+The adapter first reassembles complete SSE events and parses their JSON. Parallel
+tool blocks are serialized in start order and authorized separately. The retained
+tool group is limited to 1 MiB and 4,096 events; malformed or incomplete groups
+terminate the stream. While human approval is pending, the adapter stops reading
+upstream. Argument deny patterns also inspect decoded JSON string values, so JSON
+escaping does not change the decision.
+
 ```mermaid
 stateDiagram-v2
     [*] --> Passthrough
@@ -52,12 +59,12 @@ stateDiagram-v2
     BufferingInput --> Passthrough   : content_block_stop\n→ Deny\ndrop chunks + write receipt
     BufferingInput --> Paused        : content_block_stop\n→ RequireApproval\nkeep chunks + emit HitApprovalRequest
 
-    Paused --> Paused       : inner chunk\nbuffer in pending_chunks
+    Paused --> Paused       : wait for approval\nupstream paused
     Paused --> Passthrough  : oneshot → approved\nflush pending_chunks + write receipt
     Paused --> Passthrough  : oneshot → denied\ndrop pending_chunks + write receipt
 
     Passthrough --> [*] : stream ends
-    Paused --> [*]      : stream ends (treat as deny)
+    Paused --> [*]      : client disconnects
 ```
 
 > **Why buffer until `content_block_stop`?**

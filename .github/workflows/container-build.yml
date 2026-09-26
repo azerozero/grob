@@ -7,6 +7,7 @@ on:
       - deploy/demo/Containerfile
       - .github/workflows/container-build.yml
       - tests/fixtures/container-smoke.toml
+      - scripts/ci/container-contract.sh
   workflow_dispatch:
 
 permissions:
@@ -41,3 +42,14 @@ jobs:
           # Download a synthetic config over HTTPS without invoking a provider.
           docker run --rm grob:verify --config \
             "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${SOURCE_SHA}/tests/fixtures/container-smoke.toml" env
+      - name: Verify runtime defaults and the prebuilt release path
+        if: matrix.containerfile == 'Containerfile'
+        run: |
+          bash scripts/ci/container-contract.sh grob:verify
+          mkdir -p prebuilt/runtime/var/lib/grob prebuilt/runtime/tmp
+          CID=$(docker create grob:verify)
+          trap 'docker rm -f "$CID" >/dev/null' EXIT
+          docker cp "$CID:/grob" prebuilt/grob
+          docker cp "$CID:/etc/ssl/certs/ca-certificates.crt" prebuilt/ca-certificates.crt
+          docker build --build-arg RUNTIME_SOURCE=prebuilt --target runtime -f Containerfile -t grob:prebuilt prebuilt
+          bash scripts/ci/container-contract.sh grob:prebuilt

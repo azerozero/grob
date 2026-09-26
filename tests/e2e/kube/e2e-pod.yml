@@ -23,11 +23,14 @@ spec:
           set -euo pipefail
           cd /e2e
           bash auth/generate.sh
+          chown -R 65534:65534 /tmp/grob-audit
           echo "→ Auth fixtures ready"
           ls -la auth/keys/ auth/tokens/ auth/jwks.json auth/nginx.conf
       volumeMounts:
         - name: e2e-tree
           mountPath: /e2e
+        - name: grob-audit
+          mountPath: /tmp/grob-audit
 
   containers:
 
@@ -36,6 +39,7 @@ spec:
     # -------------------------------------------------------------------------
     - name: grob
       image: localhost/grob:e2e
+      args: ["run", "--json-logs", "--host", "0.0.0.0", "--port", "13456"]
       ports:
         - containerPort: 13456
           hostPort: 13456
