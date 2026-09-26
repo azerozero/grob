@@ -317,14 +317,23 @@ grob secrets list
 grob secrets test openai
 ```
 
-### `grob harness` (feature-gated)
+### `grob credentials`
 
-Record live traffic to a tape file for later replay. The command is available only when the binary is built with the `harness` feature.
+Manage credentials for a configured HTTP service binding. These commands operate
+on the local encrypted store; run them with the daemon's configuration, `GROB_HOME`
+and encryption-key source. They do not change the agent's identity.
 
-```bash
-grob harness record --output <tape.jsonl>
-grob harness replay --tape <tape.jsonl>
-```
+| Subcommand | Behavior |
+|---|---|
+| `grob credentials local <service> [--expires-at <unix-seconds>]` | Read a complete token or Basic-auth JSON bundle from stdin; publish local authority. Without a new deadline, preserve the existing bound. |
+| `grob credentials vault <service>` | Select configured Vault authority and clear an override or revocation. The next dispatch must verify Vault. |
+| `grob credentials status <service>` | Show source, generation and effective credential expiry, without values. |
+| `grob credentials check <service>` | Check local readiness and emit warnings; exit unsuccessfully if not ready. Does not probe remote authorization. |
+| `grob credentials revoke <service>` | Deny local and remote dispatch until explicit publication. |
+
+See [service credential routing](../how-to/route-service-credentials.md) for bundle
+shapes, setup, expiry semantics and upgrades. Provider `secret:<name>` references
+use the separate `secrets` commands above.
 
 ### `grob connect`
 

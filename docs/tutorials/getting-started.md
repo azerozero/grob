@@ -1,6 +1,6 @@
 # Getting Started with Grob
 
-This tutorial walks you through installing Grob, configuring it with a preset, and using it with Claude Code. By the end, you will have a working LLM routing proxy with automatic provider fallback.
+This tutorial walks you through installing Grob, configuring it with a preset, and using it with Claude Code. By the end, you will have a working LLM routing proxy. The initial preset uses one provider; fallback requires additional mappings.
 
 ## In a hurry
 
@@ -106,7 +106,7 @@ ANTHROPIC_BASE_URL=http://[::1]:13456 claude
 grob stop
 ```
 
-(The default bind address is `::1`, IPv6 localhost. Use `http://127.0.0.1:13456` if your system does not support IPv6.)
+(The default bind address is `::1`, IPv6 localhost. For an IPv4-only system, configure `[server] host = "127.0.0.1"` before starting and use `http://127.0.0.1:13456`.)
 
 If you applied an OAuth preset, a browser window will open on first start for authentication. Complete the login flow and return to the terminal.
 

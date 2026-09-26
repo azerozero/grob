@@ -273,7 +273,7 @@ default = "default"                    # Default model for unmatched requests
 think = "claude-opus-thinking"         # Model for thinking-enabled requests
 background = "background"             # Model for background/haiku requests
 websearch = "websearch"               # Model for web search tool requests
-auto_map_regex = "^claude-"           # Regex: auto-route matching model names to their provider
+auto_map_regex = "^claude-"           # Rewrite unconfigured matching model names to router.default
 background_regex = "(?i)claude.*haiku" # Regex: route matching models to background
 ```
 
@@ -282,24 +282,18 @@ background_regex = "(?i)claude.*haiku" # Regex: route matching models to backgro
 ```toml
 [router]
 gdpr = true        # Only route to providers in the allowed region
-region = "eu"      # Region filter (only providers with matching "region" field)
+region = "eu"      # Match this region; providers labelled "global" also pass
 ```
 
 ### Routing priority
 
-Order (highest to lowest):
-
-1. **web_search** -- request contains a `web_search` tool
-2. **background** -- original model name matches `background_regex`
-3. **auto_map** -- model name transformation (after background check, changes model name but not route type)
-4. **subagent** -- system prompt contains `GROB-SUBAGENT-MODEL` tag
-5. **prompt_rules** -- user message matches a prompt rule pattern
-6. **think** -- request has `thinking` enabled
-7. **default** -- everything else
+See the [routing priority table](routing.md#priority-order), including model-name
+canonicalization, explicit-model precedence and complexity tiers. Routing hints
+choose among candidates; they do not grant permissions.
 
 ### Prompt-based routing
 
-Route requests to specific models based on regex patterns matched against the first user message:
+Match the turn-starting user text described in [Prompt Rules](routing.md#prompt-rules):
 
 ```toml
 [[router.prompt_rules]]
@@ -307,6 +301,18 @@ pattern = "(?i)translate|翻译"    # Regex pattern to match
 model = "translation-model"       # Model to route to
 strip_match = false               # Remove matched text from the message (default: false)
 ```
+
+## Service credentials
+
+`[[credential_services]]` binds a tenant and dedicated agent identities to an
+exact upstream origin, pinned IPs, paths, methods and injection scheme. The optional
+`[credential_services.vault]` table selects the remote source parameters; authority
+is activated separately by an administrative command. These bindings cannot be
+combined with `[[policies]]` in the same configuration.
+
+See [service binding examples and limits](../how-to/route-service-credentials.md)
+and [key custody](../how-to/protect-credential-storage.md). The service gateway is
+separate from LLM task routing and provider `secret:<name>` references.
 
 ## Security
 

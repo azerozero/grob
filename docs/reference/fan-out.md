@@ -83,7 +83,8 @@ Waits for all providers to respond, then scores each response using a composite 
 score = output_tokens * (1 / (1 + latency_secs))
 ```
 
-The response with the highest score wins. This formula favors responses that are both comprehensive (more output tokens) and fast (lower latency).
+The response with the highest score wins. This formula favors longer, faster
+responses; it does not measure correctness, completeness or price.
 
 Example scores for the same prompt:
 
@@ -120,11 +121,22 @@ Fan-out runs as Step 6 of the dispatch pipeline, after DLP input scanning, cache
 7. All selected providers receive the request in parallel.
 8. The mode-specific selection logic picks the winner.
 9. DLP scans the output response.
-10. Cost is recorded for every provider that was called (not just the winner).
+10. Spend estimates are recorded for the provider list returned by the selection
+    path, with the limitations below.
 
 ## Cost Tracking
 
-Fan-out records spend for **every provider that returned a response**, since all providers consumed tokens. The cost for each provider is calculated independently based on the actual model and token counts.
+Current accounting applies the **winning response's usage** to each returned
+participant's model pricing; it does not retain each candidate's individual usage.
+The judge call is not included in that returned participant list, and cancellation
+does not prove the provider stopped billing. Do not use these estimates as an
+exact reconciliation of fan-out charges. Check provider invoices separately.
+
+The existing quality-judge call also uses a direct registry lookup instead of the
+ordinary request dispatch path. Do not assume it inherits every per-request
+model/provider restriction or post-route policy. Qualifying and unifying that path
+is a prerequisite for the [proposed model supervisor](../decisions/0033-advisory-model-supervisor.md),
+not a security capability supplied by the judge today.
 
 ## Full Example
 

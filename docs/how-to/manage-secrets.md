@@ -10,7 +10,7 @@ in your `config.toml`, your shell history, or your dotfiles.
 | Storage | Sensitivity | Reload-friendly | Backup-friendly |
 |---------|-------------|------------------|------------------|
 | `api_key = "secret:<name>"` (this guide) | ✅ encrypted at rest | yes — read on each request | yes — encrypted blob in `~/.grob/secrets/` |
-| `api_key = "$ENV_VAR"` | 🟡 visible to any process via `/proc/<pid>/environ`, shell history, dotfiles | yes (re-export + restart) | depends on env management |
+| `api_key = "$ENV_VAR"` | 🟡 environment readable subject to OS permissions; values may also remain in history or dotfiles | restart after changing the service environment | depends on env management |
 | `api_key = "sk-..."` plain string | ❌ cleartext on disk, in backups, in version control if `.grob/config.toml` is checked in | yes | dangerous |
 | OAuth via `grob connect` | ✅ encrypted at rest | yes | yes — refresh token blob |
 

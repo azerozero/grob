@@ -2,7 +2,8 @@
 
 ## Run in a container
 
-Grob publishes a minimal container image (~6 MB, `FROM scratch`) to GitHub Container Registry.
+Grob publishes a `FROM scratch` container image to GitHub Container Registry.
+Image size depends on the release and target; inspect the tag you deploy.
 
 ### Docker / Podman
 
