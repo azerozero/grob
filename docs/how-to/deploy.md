@@ -159,9 +159,14 @@ podman build -f Containerfile -t grob:latest .
 
 The multi-stage build uses `cargo-chef` for layer caching, so only code changes rebuild the final layer.
 
-## Run as a systemd service
+## Run as a systemd user service
 
-Create `/etc/systemd/system/grob.service`:
+First install with the shell installer and complete `grob setup` as your normal
+user. Verify `~/.local/bin/grob` and `~/.grob/config.toml` exist. For a Homebrew
+installation, replace `%h/.local/bin/grob` in `ExecStart` with the absolute path returned by
+`command -v grob`, keeping the other arguments.
+
+Create `~/.config/systemd/user/grob.service` (create the directory if needed):
 
 ```ini
 [Unit]
@@ -170,19 +175,33 @@ After=network.target
 
 [Service]
 Type=exec
-ExecStart=/usr/local/bin/grob run --json-logs --host 127.0.0.1 --port 13456
+ExecStart=%h/.local/bin/grob --config %h/.grob/config.toml run --json-logs --host 127.0.0.1 --port 13456
 Restart=on-failure
 RestartSec=5
-Environment=ANTHROPIC_API_KEY=sk-ant-...
-EnvironmentFile=-/etc/grob/env
+Environment=GROB_HOME=%h/.grob
+EnvironmentFile=-%h/.config/grob/env
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
 ```bash
-sudo systemctl enable --now grob
+systemctl --user daemon-reload
+systemctl --user enable --now grob
+systemctl --user status grob
+journalctl --user -u grob
 ```
+
+If your config references environment variables, put their `NAME=value` assignments
+(without `export`) in `~/.config/grob/env` and restrict that file to mode `0600`.
+The service does not inherit variables from your terminal. With a custom
+`XDG_CONFIG_HOME`, place the unit in that directory's `systemd/user` subdirectory;
+the explicit environment-file path above still uses `~/.config/grob/env`.
+
+This service runs with your account's permissions. To keep it running after logout
+and start it at boot, an administrator can explicitly enable lingering with
+`loginctl enable-linger USERNAME`; undo that with `loginctl disable-linger USERNAME`.
+Use `systemctl --user disable --now grob` to stop and disable the service.
 
 ## Monitor with Prometheus
 

@@ -6,7 +6,12 @@ AUDIT_DIR="/tmp/grob-audit"
 HOST="127.0.0.1:13456"
 JWT=$(cat auth/tokens/jwt-hospital-eu.txt)
 
-rm -rf "$AUDIT_DIR" && mkdir -p "$AUDIT_DIR"
+# Grob keeps this journal open: deleting it would leave writes on an unlinked
+# inode. Verify new entries instead of resetting a live mounted directory.
+before=0
+if [[ -f "$AUDIT_DIR/current.jsonl" ]]; then
+  before=$(wc -l < "$AUDIT_DIR/current.jsonl")
+fi
 
 echo "Generating audit entries..."
 for _ in $(seq 1 3); do
@@ -16,7 +21,16 @@ for _ in $(seq 1 3); do
     -d @fixtures/chat-simple.json > /dev/null
 done
 
-sleep 2
+for ((attempt=0; attempt<10; attempt++)); do
+  if [[ -f "$AUDIT_DIR/current.jsonl" ]] && (( $(wc -l < "$AUDIT_DIR/current.jsonl") > before )); then
+    break
+  fi
+  sleep 1
+done
+if [[ ! -f "$AUDIT_DIR/current.jsonl" ]] || (( $(wc -l < "$AUDIT_DIR/current.jsonl") <= before )); then
+  echo "No new audit entries were written" >&2
+  exit 1
+fi
 
 PASS=0; FAIL=0
 for test in tests/audit/A*.sh; do

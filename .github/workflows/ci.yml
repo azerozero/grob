@@ -92,6 +92,7 @@ jobs:
               - 'docs/**'
               - '**.md'
               - 'tests/integration/doc_examples_test.rs'
+              - 'tests/integration/doc_examples_test/**'
               - 'tests/integration/mod.rs'
               - 'tests/unit/example_configs_test.rs'
               - 'tests/unit/mod.rs'
@@ -198,17 +199,15 @@ jobs:
         with:
           egress-policy: audit
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check SDK and shell syntax without executing examples
-        run: python3 scripts/ci/doc-examples.py
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: doc-examples
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: taiki-e/install-action@nextest
-      - name: Check documented configuration contracts
+      - name: Check documentation contracts and compile SDK examples without execution
         run: |
-          cargo nextest run --locked --test lib --no-tests=fail doc_examples_test
+          cargo nextest run --locked --test lib --run-ignored all --no-tests=fail doc_examples_test
           cargo nextest run --locked --test lib --no-tests=fail example_configs_test
 
   clippy:
@@ -785,6 +784,10 @@ jobs:
         with:
           egress-policy: audit
 
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v8
         with:
           name: x86_64-unknown-linux-musl-${{ github.sha }}
@@ -813,30 +816,23 @@ jobs:
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | crane auth login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
-      - name: Build and push multi-arch image
+      - name: Build, verify and push multi-arch image
         run: |
           VERSION="v${{ needs.version.outputs.version }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
 
-          # Build per-arch images (static musl binary, no OS needed)
           for ARCH in amd64 arm64; do
-            mkdir -p "image-root-${ARCH}/usr/local/bin" "image-root-${ARCH}/etc/ssl/certs"
-            cp "bin/${ARCH}/${BINARY_NAME}" "image-root-${ARCH}/usr/local/bin/${BINARY_NAME}"
-            # reqwest 0.13 verifies TLS against the platform CA store.
-            cp /etc/ssl/certs/ca-certificates.crt "image-root-${ARCH}/etc/ssl/certs/"
-            tar -cf "layer-${ARCH}.tar" -C "image-root-${ARCH}" .
-
-            crane append -t "${IMAGE}:${VERSION#v}-${ARCH}" -f "layer-${ARCH}.tar"
-
-            # Set platform metadata and OCI annotations
-            crane mutate "${IMAGE}:${VERSION#v}-${ARCH}" \
-              --set-platform "linux/${ARCH}" \
-              --entrypoint "/usr/local/bin/${BINARY_NAME}" \
-              --cmd run \
-              --annotation org.opencontainers.image.description="Multi-provider LLM routing proxy with automatic fallback" \
-              --annotation org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
-              --annotation org.opencontainers.image.version="${VERSION#v}" \
-              --annotation org.opencontainers.image.licenses="Apache-2.0"
+            mkdir -p "bin/${ARCH}/runtime/var/lib/grob" "bin/${ARCH}/runtime/tmp"
+            cp /etc/ssl/certs/ca-certificates.crt "bin/${ARCH}/ca-certificates.crt"
+            TAG="${IMAGE}:${VERSION#v}-${ARCH}"
+            docker build --platform "linux/${ARCH}" --build-arg RUNTIME_SOURCE=prebuilt \
+              --target runtime -f Containerfile -t "$TAG" "bin/${ARCH}"
+            if [[ "$ARCH" == amd64 ]]; then
+              bash scripts/ci/container-contract.sh "$TAG"
+            else
+              bash scripts/ci/container-contract.sh "$TAG" --metadata-only
+            fi
+            docker push "$TAG"
           done
 
           # Create multi-arch manifest list
