@@ -5,8 +5,9 @@ use bytes::{Buf, Bytes};
 use futures::Stream;
 use pin_project::pin_project;
 use serde_json::Value;
+#[cfg(feature = "policies")]
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -191,6 +192,7 @@ impl<S: Stream<Item = Result<Bytes, ProviderError>>> Stream for FrameStream<S> {
 
 /// Serializes interleaved tool blocks in start order before single-tool authorization.
 /// Block indices and payloads stay intact; no block is released before its stop.
+#[cfg(feature = "policies")]
 #[pin_project]
 pub(crate) struct ToolBlockStream<S> {
     #[pin]
@@ -204,6 +206,7 @@ pub(crate) struct ToolBlockStream<S> {
     done: bool,
 }
 
+#[cfg(feature = "policies")]
 impl<S> ToolBlockStream<S> {
     pub fn new(inner: S) -> Self {
         Self {
@@ -219,6 +222,7 @@ impl<S> ToolBlockStream<S> {
     }
 }
 
+#[cfg(feature = "policies")]
 impl<S: Stream<Item = Result<Bytes, ProviderError>>> Stream for ToolBlockStream<S> {
     type Item = Result<Bytes, ProviderError>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
