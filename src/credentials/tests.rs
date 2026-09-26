@@ -7,6 +7,8 @@ use super::{
 use crate::storage::GrobStore;
 use std::sync::Arc;
 
+mod expiry;
+
 fn fixture() -> (tempfile::TempDir, Arc<GrobStore>, ServiceBinding) {
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(GrobStore::open(&dir.path().join("grob.db")).unwrap());

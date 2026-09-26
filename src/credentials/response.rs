@@ -19,6 +19,7 @@ pub(crate) struct ResponseFilter {
     pending: Zeroizing<Vec<u8>>,
     line: Zeroizing<Vec<u8>>,
     after_cr: bool,
+    first_line: bool,
     emitted_suffix: Zeroizing<Vec<u8>>,
 }
 
@@ -37,6 +38,7 @@ impl ResponseFilter {
             pending: Zeroizing::new(Vec::new()),
             line: Zeroizing::new(Vec::new()),
             after_cr: false,
+            first_line: true,
             emitted_suffix: Zeroizing::new(Vec::new()),
         })
     }
@@ -141,6 +143,13 @@ impl ResponseFilter {
             }
             self.after_cr = byte == b'\r';
             if byte == b'\n' || byte == b'\r' {
+                if self.first_line {
+                    // The first line already spans input chunks; strip only the stream's BOM.
+                    if self.line.starts_with(b"\xef\xbb\xbf") {
+                        self.line.drain(..3);
+                    }
+                    self.first_line = false;
+                }
                 if self.line.is_empty() {
                     out.extend(self.event()?);
                     self.pending.zeroize();

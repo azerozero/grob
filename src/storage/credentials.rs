@@ -31,7 +31,7 @@ impl GrobStore {
         );
         let record: CredentialRecord =
             serde_json::from_slice(&clear).map_err(|_| CredentialError::Storage)?;
-        if record.format != 1 || record.tenant != tenant || record.service != service {
+        if !matches!(record.format, 1 | 2) || record.tenant != tenant || record.service != service {
             return Err(CredentialError::Storage);
         }
         Ok(record)
@@ -116,7 +116,7 @@ impl GrobStore {
             .credential_lock()
             .map_err(|_| CredentialError::Storage)?;
         let existing_expiry = match self.read_credential(&binding.tenant, &binding.id) {
-            Ok(record) => record.expires_at,
+            Ok(record) => record.effective_expiry(),
             Err(CredentialError::Missing) => None,
             Err(error) => return Err(error),
         };

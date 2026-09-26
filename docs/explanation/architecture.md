@@ -13,8 +13,8 @@ flowchart TB
         mw1["1. Request ID<br/>Reads X-Request-Id or generates UUID v4"]
         mw2["2. Body Size Limit<br/>Optional max_body_size guard (disabled by default)"]
         mw3["3. Security Headers<br/>OWASP headers (X-Content-Type-Options, etc.)"]
-        mw4["4. Rate Limiter<br/>Token-bucket per tenant/API-key/IP → 429"]
-        mw5["5. Auth<br/>none / api_key / jwt"]
+        mw4["4. Auth<br/>none / api_key / jwt"]
+        mw5["5. Rate Limiter<br/>Authenticated tenant/API-key or source IP → 429"]
         mw1 --> mw2 --> mw3 --> mw4 --> mw5
     end
 
@@ -158,11 +158,15 @@ flowchart TB
 
 **Streaming-first.** Both SSE streaming and buffered responses are supported. DLP scanning operates on stream chunks using Aho-Corasick automata, so no full-response buffering is needed.
 
-**Persistent state in atomic files.** OAuth tokens are stored as individually encrypted files (`~/.grob/tokens/<id>.json.enc`, AES-256-GCM). Monthly spend is tracked in append-only JSONL journals (`~/.grob/spend/YYYY-MM.jsonl`). Virtual keys are stored in `~/.grob/vkeys/<hash>.json.enc`. All writes are crash-safe (journals use `O_APPEND`, other files use atomic rename). See ADR-0013.
+**Persistent state in atomic files.** Credentials use authenticated encryption
+and atomic publication; monthly spend uses append-only journals with batched
+fsync. These have different durability boundaries. See the
+[storage reference](../reference/storage.md) for layout, key custody and recovery.
 
 **Security middleware stack.** All security features are toggled via the `[security]` TOML section: `rate_limit_rps`, `rate_limit_burst`, `max_body_size`, `security_headers`, `circuit_breaker`, `audit_dir`. Set `enabled = false` to disable the entire security layer. Each request gets a `X-Request-Id` (UUID v4 if not provided) for tracing across logs.
 
-**jemalloc allocator.** On non-MSVC targets, jemalloc replaces the system allocator for roughly 20% better throughput under load.
+**jemalloc allocator.** The default `jemalloc` feature selects jemalloc on
+non-MSVC targets. Throughput depends on the workload; measure it on the target host.
 
 **Pass-through provider mode.** Providers with `pass_through = true` accept any model name not explicitly listed in `[[models]]`, forwarding it as-is to the upstream API. This enables wildcard model routing for providers like OpenRouter.
 

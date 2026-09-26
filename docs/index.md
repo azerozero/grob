@@ -141,6 +141,7 @@ Grob accepts requests in both Anthropic and OpenAI API formats, normalizes them,
 | [0029](decisions/0029-relicense-core-apache.md) | Relicense Grob Core to Apache-2.0 |
 | [0031](decisions/0031-optional-vault-credential-routing.md) | Credential routing with optional Vault and local recovery |
 | [0032](decisions/0032-credential-gateway-hardening.md) | Credential gateway protocol, transport and key custody hardening |
+| [0033](decisions/0033-advisory-model-supervisor.md) | Optional model supervisor inside policy bounds (proposed) |
 
 ### Examples
 

@@ -104,3 +104,33 @@ fn replacement_must_not_create_another_secret_across_emitted_chunks() {
     let mut f = filter("text/plain", &["a!", "[redacted]"]);
     assert!(f.push(b"a[redacted]", false).is_err());
 }
+
+#[test]
+fn sse_strips_only_one_leading_bom_across_every_chunk_boundary() {
+    let expected = "data: {\"text\":\"\u{feff}kept\"}\n\ndata: [DONE]\n\n";
+    for ending in ["\n", "\r\n", "\r"] {
+        let input = format!("\u{feff}{}", expected.replace('\n', ending));
+        for size in 1..=input.len() {
+            let mut f = filter("text/event-stream", &["secret"]);
+            let mut out = Vec::new();
+            for part in input.as_bytes().chunks(size) {
+                out.extend(f.push(part, false).unwrap());
+            }
+            out.extend(f.push(&[], true).unwrap());
+            assert_eq!(
+                out,
+                expected.as_bytes(),
+                "chunk size {size}, ending {ending:?}"
+            );
+        }
+    }
+    // A later BOM is part of the field name, not another stream prefix.
+    let mut f = filter("text/event-stream", &["secret"]);
+    let out = f
+        .push(
+            "\ndata: first\n\n\u{feff}data: ignored\n\n".as_bytes(),
+            true,
+        )
+        .unwrap();
+    assert_eq!(out, b"data: first\n\n");
+}

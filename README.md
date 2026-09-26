@@ -217,7 +217,10 @@ grob key list
 
 ## Fan-out racing
 
-Send the same request to multiple providers in parallel. Pick the fastest, cheapest, or best-quality response:
+Send the same request to multiple providers in parallel. Select the fastest
+successful response, use a quality judge, or rank by output-token count and latency.
+The weighted mode does not select the cheapest response. See the
+[fan-out limits](docs/reference/fan-out.md#cost-tracking) before using it with budgets.
 
 ```toml
 [[models]]

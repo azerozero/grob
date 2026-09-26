@@ -285,7 +285,7 @@ impl Router {
     /// 5. Prompt Rules - regex pattern matching on user prompt
     /// 6. Think - Plan Mode / reasoning enabled
     /// 7. Declarative tier match - `[[tiers.match]]` conditions (globs + keywords)
-    /// 8. Algorithmic complexity scoring - heuristic fallback when `[[scoring]]` is set
+    /// 8. Algorithmic complexity scoring - `[classifier]` settings or their defaults
     /// 9. Default - auto-mapped or original model name, with tier from steps 7-8
     ///
     /// Steps 0 and 3 (auto-map) mutate `request.model` but do not short-circuit;

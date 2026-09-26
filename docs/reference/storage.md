@@ -4,7 +4,7 @@ Complete reference for Grob's persistent storage layer: atomic files, append-onl
 
 ## Overview
 
-Grob uses file-based storage with atomic writes and append-only journals (see [ADR-0013](../decisions/0013-storage-files-no-redb.md)). All state is human-readable (JSONL or encrypted JSON files), crash-safe, and inspectable with standard tools (`less`, `grep`, `jq`).
+Grob uses file-based storage with atomic writes and append-only journals (see [ADR-0013](../decisions/0013-storage-files-no-redb.md)). Spend journals are readable JSONL; credential files contain authenticated ciphertext. Atomic replacement protects credential publication, while spend uses batched durability. See [crash-test boundaries](../how-to/harden-memory.md#reproduce-the-checks).
 
 **Default path**: `~/.grob/`
 
@@ -19,9 +19,13 @@ Grob uses file-based storage with atomic writes and append-only journals (see [A
 │   ├── anthropic.json.enc       # AES-256-GCM encrypted OAuth token
 │   └── openai.json.enc
 ├── vkeys/
-│   ├── <sha256_hex>.json.enc    # encrypted virtual key (by hash)
-│   └── id_<uuid>.json.enc       # encrypted virtual key (by UUID)
-└── encryption.key               # 256-bit AES key (32 bytes, binary)
+│   └── <sha256_hex>.json.enc    # encrypted virtual key (by hash)
+├── secrets/
+│   └── <name>.enc              # named provider secret
+├── credentials/
+│   └── <scope_hash>.enc        # service bundle and validity metadata
+├── encryption.check           # authenticated association with the storage key
+└── encryption.key             # local key, absent with external-only custody
 ```
 
 ## Spend journal
@@ -75,39 +79,52 @@ Decrypted payload (JSON):
 
 The `enterprise_url` field is used by GitHub Copilot Enterprise. The `project_id` field stores the Google Cloud project ID for Gemini Code Assist.
 
-**Atomic writes**: token files are written via `write(tmp) → fsync(tmp) → rename(tmp, final)`. `rename(2)` is atomic on ext4/xfs/btrfs.
+**Atomic writes**: token files are written via `write(tmp) → fsync(tmp) → rename(tmp, final)`. On Unix, the parent directory is also synced after publication. Validate the target filesystem and storage stack; process-kill tests alone do not prove physical power-loss behavior.
 
 ## Virtual keys
 
-Two encrypted files per key:
+One hash-keyed file is authoritative for authentication and administration:
+`vkeys/<sha256_hex>.json.enc`. Legacy `id_<uuid>.json.enc` index files are ignored.
+Rotation and revocation use the shared credential lock. See
+[Authentication Reference](authentication.md) for record fields.
 
-| File pattern | Purpose |
-|-------------|---------|
-| `vkeys/<sha256_hex>.json.enc` | Primary lookup during authentication |
-| `vkeys/id_<uuid>.json.enc` | Management operations (list, revoke, delete) |
+## Service credential records
 
-Values: AES-256-GCM encrypted JSON of `VirtualKeyRecord`. See [Authentication Reference](authentication.md) for the full field list.
+`credentials/<scope_hash>.enc` holds one encrypted bundle and its tenant, service,
+binding revision, generation, authority, expiry and revocation state. The hash
+covers the exact tenant/service tuple; records are checked against both values
+on read. Publication uses generation fencing to reject stale refreshes.
 
-The `list_virtual_keys()` method scans the `vkeys/` directory and skips `id_` prefixed files to avoid returning duplicates.
+Record format 2 separates administrative expiry from the current Vault version's
+expiry. Format 1 remains readable with its old deadline preserved conservatively.
+See the [upgrade procedure](../how-to/route-service-credentials.md#upgrade-records-with-an-old-combined-expiry)
+before republishing affected Vault bindings. The record format is independent of
+the outer encryption-envelope version.
 
 ## Encryption at rest
 
-All OAuth tokens and virtual key records are encrypted with AES-256-GCM before storage. Spend journals are stored as plaintext JSON (they contain no secrets).
+OAuth tokens, virtual keys, named secrets and service records are encrypted with AES-256-GCM before storage. Spend journals are stored as plaintext JSON (they contain no secrets).
 
 ### Key management
 
-**Key generation**: On first storage open, a random 256-bit key is generated using the OS CSPRNG (`OsRng`) and written to `encryption.key`. The key file is set to owner-only permissions (`0600` on Unix, restricted DACL on Windows).
+A fresh local store generates a random 32-byte key using the OS CSPRNG and
+publishes it without overwriting another process's key. Alternatively,
+`GROB_ENCRYPTION_KEY_FILE` selects an external protected 32-byte file outside the
+store. A local copy, if present, must agree with it. Existing encrypted data or
+`encryption.check` prevents silent replacement of a missing key. Missing, wrong,
+corrupt or conflicting key material fails initialization.
 
-**Key loading**: On subsequent opens, the key is loaded from `encryption.key`. If the file exists but is not exactly 32 bytes, initialization fails with an error.
-
-**Key path**: Always `<base_dir>/encryption.key`.
+Keep `encryption.check` with the data and protect backups of the key separately.
+See [key custody, migration and recovery](../how-to/protect-credential-storage.md)
+for the operational procedure. Changing the bytes is not supported key rotation;
+a data-key rotation needs coordinated re-encryption and recovery testing.
 
 ### Encryption format
 
 Encrypted values are stored as:
 
 ```
-[12-byte nonce][ciphertext + 16-byte GCM tag]
+[ASCII GRB1][version byte 1][12-byte nonce][ciphertext + 16-byte GCM tag]
 ```
 
 - **Nonce**: 96-bit random nonce generated per encryption operation using `OsRng`.
@@ -116,13 +133,17 @@ Encrypted values are stored as:
 
 ### Transparent migration from unencrypted data
 
-The `decrypt_or_plaintext()` method handles the transition from unencrypted to encrypted storage. If decryption fails (e.g., the data is legacy unencrypted JSON), the raw bytes are returned as-is. On the next write, the data is re-encrypted.
+For OAuth tokens, named provider secrets and virtual keys,
+`decrypt_or_plaintext()` first authenticates the current envelope. A damaged,
+truncated or unknown-version envelope is rejected, never treated as plaintext.
+Pre-envelope ciphertext is also read when authentication succeeds. Only bytes
+without an envelope that cannot be decrypted take the legacy plaintext path,
+with a warning; callers still parse JSON records or UTF-8 named secrets. A subsequent write uses
+the current encrypted envelope.
 
-### Edge cases
-
-- **Key rotation**: Not currently supported. Changing `encryption.key` invalidates all encrypted data.
-- **Tampered ciphertext**: AES-GCM authentication fails, returning an error. The `decrypt_or_plaintext` fallback treats corrupted data as potential legacy plaintext.
-- **Missing key file**: A new key is generated, but existing encrypted data becomes unreadable.
+Service credential records accept authenticated encryption only and never use
+that plaintext fallback. Do not manually rewrite encrypted files or remove the
+key/check to work around corruption. Restore a consistent tested backup instead.
 
 ## Legacy redb detection
 
@@ -135,12 +156,12 @@ All sensitive files created by the storage layer have restricted permissions:
 | File | Unix | Windows |
 |------|------|---------|
 | `encryption.key` | `0600` | Owner-only DACL (`GENERIC_ALL` for current user, no inherited ACEs) |
-| `tokens/*.json.enc` | inherited | inherited |
-| `vkeys/*.json.enc` | inherited | inherited |
+| Atomically written token, virtual-key, secret and service records | `0600` | Owner-only DACL |
+| `encryption.check` | `0600` | Owner-only DACL |
 | Audit signing keys | `0600` | Same |
 
 ## Configuration
 
-No TOML configuration is needed for the storage layer. The storage directory is `~/.grob/` by default and is determined internally. The encryption key path is always derived from the base directory.
+No TOML configuration is needed for the storage layer. The storage directory is `~/.grob/` by default and is determined internally. The local key is derived from that directory unless `GROB_ENCRYPTION_KEY_FILE` selects an external key.
 
 For custom storage placement (e.g., in containers), set `GROB_HOME` to the desired base directory. The container examples use `GROB_HOME=/var/lib/grob`.

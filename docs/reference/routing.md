@@ -4,21 +4,33 @@ Grob routes every incoming request through a priority-ordered classification pip
 
 ## Priority Order
 
-The router evaluates rules top-to-bottom and returns on the first match:
+The router evaluates the following steps in order. Canonicalization and auto-map
+rewrite the model name and continue; they do not choose a route by themselves.
+Task routes return early. Complexity tiers apply to the default path:
 
 | Priority | Route Type | Detection Method |
 |----------|-----------|-----------------|
+| 0 | **Canonicalization** | Normalize cosmetic model-name variants before matching |
 | 1 | **WebSearch** | `web_search` tool present in request `tools` array |
 | 2 | **Background** | Model name matches `background_regex` (default: `(?i)claude.*haiku`) |
-| 3 | **Auto-map** | Model name matches `auto_map_regex` (default: `^claude-`); rewrites model to `default` |
+| 3 | **Auto-map** | An unconfigured model matches `auto_map_regex` (default: `^claude-`); rewrite to `default`, then continue |
 | 4 | **Subagent** | `<GROB-SUBAGENT-MODEL>model</GROB-SUBAGENT-MODEL>` tag in `system[1].text` |
 | 5 | **Prompt Rule** | Regex match on turn-starting user message (first match wins) |
 | 6 | **Think** | Request has `thinking.type == "enabled"` (Plan Mode / extended reasoning) |
-| 7 | **Default** | Pass through the (possibly auto-mapped) model name unchanged |
+| 7 | **Declarative tier** | First matching `[tiers.match]` conditions, before the heuristic scorer |
+| 8 | **Complexity score** | If no declarative match, classify as trivial, medium or complex using `[classifier]` or its defaults |
+| 9 | **Default** | Return the current model name and computed tier; a configured tier can override the effective model during provider resolution |
+
+With the `mcp` feature, an explicit `grob_hint` overrides the computed tier before
+provider resolution. See [routing hints](../how-to/use-grob-hint.md). Neither hints
+nor prompt rules override the effective-model/provider permissions checked there.
 
 ## Auto-Mapping
 
-When the requested model name matches `auto_map_regex`, Grob silently rewrites it to the `default` model. This lets clients send `claude-sonnet-4-20250514` while the proxy routes to whichever model the operator configured as default.
+When an unconfigured model name matches `auto_map_regex`, Grob rewrites it to the
+`default` model. An explicit `[[models]]` entry takes precedence, comparing names
+in canonical form. This lets clients use a provider model name while the operator
+chooses a default without hiding explicitly configured fallback chains.
 
 The regex engine optimizes simple `^literal` prefix patterns (no metacharacters) into a `starts_with` check (~2 ns vs ~30 ns for a full regex).
 
@@ -144,6 +156,10 @@ If no providers remain after filtering, the request fails with a routing error:
 `No providers match region 'eu' for model 'X' (GDPR filtering enabled)`.
 
 GDPR filtering also applies to pass-through providers (those with `pass_through = true`).
+
+The `global` exception means this filter alone is not proof of EU-only processing.
+For strict residency, verify each provider's deployment and assign only approved
+region labels. Prompt text and a future model supervisor must not set those labels.
 
 ## Adaptive Provider Scoring
 

@@ -56,7 +56,7 @@ impl Revision {
         &self.full
     }
 
-    /// First [`SHORT_LEN`] hex chars of the digest, for logs and eyeballing.
+    /// First 12 hex characters of the digest, for compact logs.
     #[must_use]
     pub fn short(&self) -> &str {
         let start = self.full.find(':').map_or(0, |i| i + 1);
