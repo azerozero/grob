@@ -6,13 +6,18 @@
 |------|---------|---------------|
 | 200 | Success | Successful non-streaming response |
 | 400 | Bad Request | Invalid request body, missing required fields, schema validation failure, or context window exceeded |
-| 401 | Unauthorized | Missing or invalid `Authorization` header when `api_key` is configured |
+| 401 | Unauthorized | Missing/invalid client credentials, or an upstream credential that needs reauthentication |
+| 403 | Forbidden | Valid caller lacks the required role or model/provider permission |
 | 402 | Payment Required | Monthly budget exceeded (global, per-provider, or per-model) |
 | 404 | Not Found | Unknown endpoint |
 | 413 | Payload Too Large | Request body exceeds `max_body_size` when that limit is enabled (`0` / unlimited by default) |
-| 429 | Too Many Requests | Grob-level rate limit exceeded. Includes `Retry-After` header. |
-| 502 | Bad Gateway | All providers failed for the requested model |
-| 504 | Gateway Timeout | Provider request timed out (default: 10 minutes) |
+| 429 | Too Many Requests | Local rate limit, policy/tool-spike limit, or upstream throttling. `Retry-After` is present when available. |
+| 500 | Internal Server Error | Internal processing, provider construction or transport error |
+| 502 | Bad Gateway | Provider protocol failure or an aggregated all-providers failure |
+| 503 | Service Unavailable | Readiness failure or an upstream unavailable response |
+| 504 | Gateway Timeout | An upstream gateway timeout response |
+
+A failed fallback chain can return its last upstream status instead of `502`. Inspect the error body to distinguish client authentication, upstream authentication, local limits and provider throttling. A local HTTP-client timeout can surface as `500`; the default provider request timeout is 10 minutes.
 
 ## Error response format
 
@@ -53,8 +58,8 @@ Every provider in the model's fallback chain returned an error. Causes:
 **Diagnostics:**
 
 ```bash
-grob doctor     # Check config and connectivity
-grob validate   # Test each provider with a real API call
+grob doctor     # Check local config, credentials and service state
+grob validate   # Real provider calls; may consume quota or incur cost
 ```
 
 ### `Budget exceeded` (402)
@@ -71,7 +76,7 @@ grob spend
 
 Too many requests per second from the same client. The `Retry-After` header indicates how long to wait.
 
-This is the Grob-level rate limit, not an upstream provider limit. Upstream 429s trigger fallback to the next provider.
+An upstream `429` can trigger fallback and still reach the client if no eligible alternative succeeds. Policy and tool-spike rejections are terminal local `429`s. Check `error.type`, `error.message` and the provider logs before changing the Grob rate limit.
 
 ### `context_length_exceeded` (400)
 
@@ -120,11 +125,11 @@ A provider has accumulated 5+ consecutive failures. Grob skips it for 30 seconds
 
 ### `Failed to parse config` (startup)
 
-The TOML config file has a syntax error. Run `grob doctor` for validation details, or start fresh with `grob preset apply perf`.
+The TOML config file has a syntax error or an unsupported field. Run `grob doctor`, correct the reported location, and retry. Check for duplicated tables and compare the field with the [Configuration Reference](configuration.md). Applying a preset replaces routing/provider sections; it is a deliberate reset, not the first repair step for a typo.
 
 ## Provider-specific errors
 
-Provider errors are wrapped in the fallback logic. If a provider returns an error, Grob logs it and tries the next provider in the chain. The client only sees an error if all providers fail.
+Retryable provider failures use the fallback chain when alternatives are configured and eligible. Terminal request or policy errors are returned immediately. If fallback is exhausted, the client may receive the last upstream status and error rather than a generic `502`.
 
 Provider errors include:
 - **Authentication failures**: Invalid API key or expired OAuth token

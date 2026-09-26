@@ -19,16 +19,16 @@ Grob is a local or shared proxy that handles sensitive data: API keys, OAuth tok
 Grob supports three authentication modes for incoming requests:
 
 - **None** (default for local use): No authentication required. Suitable when Grob binds to localhost only.
-- **API key**: Set `api_key` in `[server]` config. All requests must include `Authorization: Bearer <token>` or `x-api-key: <token>`. API key comparison uses constant-time equality (`subtle` crate) to prevent timing attacks.
-- **JWT**: Validate JWTs against a JWKS endpoint with key rotation support.
+- **API key**: Set `[auth] mode = "api_key"` and an administrative `api_key = "secret:grob-admin"`. Agents use scoped virtual keys. Clients send `Authorization: Bearer <token>` or `x-api-key: <token>`; key comparison uses constant-time equality. The legacy `[server] api_key` is also accepted.
+- **JWT**: Set `[auth] mode = "jwt"` and `[auth.jwt]` to validate tokens through JWKS or a shared HMAC secret. Tenant JWTs do not grant administrative access.
 
-Health (`/health`, `/live`, `/ready`), metrics (`/metrics`), and OAuth endpoints are exempt from the API-key/JWT authentication above.
+Health (`/health`, `/live`, `/ready`), metrics (`/metrics`), and the two OAuth callback paths are exempt from the main API-key/JWT check. Other OAuth endpoints require administrative access. See [Authentication Reference](../reference/authentication.md) for exact paths, setup examples and the JWT cache limitation.
 
 `/metrics` carries spend, budget, and tenant labels, so it can be gated independently with its own bearer token via `[metrics] bearer_token` / `bearer_token_file` (constant-time comparison, `401` on mismatch). It stays public when unset; the health probes always stay public. See [how-to/deploy](../how-to/deploy.md#protect-metrics-with-a-bearer-token).
 
 ### Rate limiting
 
-Token-bucket rate limiter per tenant/API-key/IP. Default: 100 requests/second with burst of 200. Returns HTTP 429 with `Retry-After` header when exceeded. Configured via `[security]` section.
+Rate limiting is disabled by default (`rate_limit_rps = 0`). For shared deployments, configure both `rate_limit_rps` and `rate_limit_burst` under `[security]`. The token bucket is keyed by authenticated tenant, with source-IP fallback; client-based limits are also available. Exceeding the limit returns HTTP 429 with `Retry-After`. See [rate-limit configuration](../reference/configuration.md#security).
 
 ### Circuit breakers
 
@@ -58,20 +58,21 @@ When a circuit breaker opens, requests skip that provider and fall through to th
 
 ### DLP (Data Loss Prevention)
 
-When the `dlp` feature is enabled, Grob scans requests and responses for:
+The binary must include the `dlp` feature and the configuration must set `[dlp] enabled = true`. Scanning can cover requests and responses:
 
-- **Secrets**: 25 builtin rules covering AWS keys, API tokens, private keys, database connection strings, etc.
-- **PII**: Names, email addresses, phone numbers
-- **Canary tokens**: Watermarks for leak detection
-- **URL exfiltration**: Suspicious URLs in responses
+- **Secrets**: built-in rules for API tokens, private keys and database connection strings; custom rules can extend them.
+- **Financial PII**: credit cards and IBANs by default; BIC/SWIFT scanning is optional.
+- **Names**: configured names, or optional heuristic name detection.
+- **Canary replacements**: selected rules can substitute traceable fake values.
+- **URL exfiltration and prompt injection**: separate opt-in detectors.
 
-Scanning uses Aho-Corasick deterministic finite automata for O(n) performance on streaming chunks. No full-response buffering is needed.
+Email addresses and telephone numbers are not general built-in PII detectors. DLP is pattern-based and cannot guarantee that all sensitive data is removed. Streaming scanners keep bounded chunks instead of requiring a complete response. See [DLP Reference](../reference/dlp.md) for actions and limits.
 
 ### Credential protection
 
-- API keys in config support `$ENV_VAR` syntax -- resolved at startup, never stored in plaintext in the config file
+- Provider API keys and legacy `server.api_key` support `$ENV_VAR` at config load. `auth.api_key` supports live `secret:<name>` references; it does not expand dollar-prefixed environment names. See [Manage Secrets](../how-to/manage-secrets.md) for encrypted storage and rotation.
 - The `/api/config` endpoint redacts API keys in responses
-- OAuth tokens are stored with `0600` file permissions
+- OAuth tokens are encrypted at rest; files use `0600` permissions on Unix and owner-only permissions on Windows.
 - Sensitive data (OAuth codes, PKCE verifiers, token responses, upstream bodies) is excluded from debug logs
 - API key comparison uses constant-time equality to prevent timing side-channels
 - Gemini, OAuth token exchanges, device authorization, and credential probes require HTTPS outside loopback (`localhost`, loopback IPv4, or `::1`). These clients refuse redirects; configure the final endpoint URL instead of a redirecting alias.
@@ -98,22 +99,22 @@ Monthly spend limits at three levels (model > provider > global) prevent cost ov
 
 ### Audit logging
 
-When `audit_dir` is configured, Grob writes signed, hash-chained audit log entries using ECDSA P-256. Each entry is cryptographically linked to the previous one, making tampering detectable. This supports compliance requirements (HDS, PCI, SecNumCloud).
+With the `compliance` feature and `security.audit_dir` configured, Grob writes signed, hash-chained audit entries. ECDSA P-256 is the default; Ed25519 and HMAC-SHA256 are alternatives. These records support investigation and evidence collection, but do not provide regulatory certification. Protect the signing key and log storage separately. See [Audit logging](../reference/security.md#audit-logging).
 
 ## TLS
 
 Grob supports native TLS via rustls (no OpenSSL dependency):
 
-- **Manual**: Provide certificate and key files via `[tls]` config
-- **ACME**: Automatic Let's Encrypt certificates via the `acme` feature flag
+- **Manual**: Provide certificate and key files via `[server.tls]`; requires a binary built with the `tls` feature.
+- **ACME**: Configure `[server.tls.acme]` for automatic Let's Encrypt certificates; requires the `acme` feature.
 
 For most deployments, running behind a reverse proxy (nginx, Caddy, Traefik) that handles TLS is recommended over native TLS.
 
 ## Adaptive provider scoring
 
-When `adaptive_scoring = true`, Grob ranks providers by a composite score combining success rate, latency (EWMA-smoothed), and recency. Scores decay over time to prevent stale rankings from masking degraded providers. The scoring window, decay rate, and latency alpha are configurable. Scores can optionally be persisted across restarts.
+When `adaptive_scoring = true`, Grob ranks providers by a composite score combining success rate, latency (EWMA-smoothed), and recency. Scores decay over time to prevent stale rankings from masking degraded providers. The scoring window, decay rate, and latency alpha are configurable. Scores currently live in memory and reset on restart. The parsed `scoring_persist` option is not wired to persistence.
 
-This feature is opt-in because it changes the provider selection order within a priority level, which may have cost implications.
+This feature is opt-in: sorting by `priority / adaptive_factor` can change the configured order, including between different priority values. It may therefore change cost as well as latency.
 
 ## Response cache
 
@@ -132,7 +133,7 @@ The `eu-ai-act` preset enables the related controls in one command.
 
 ## Network binding
 
-By default, Grob binds to `[::1]:13456` (IPv6 localhost only). In container mode (`grob run`), it binds to `0.0.0.0`. The bind address should match the deployment scenario:
+By default, Grob binds to `[::1]:13456` (IPv6 localhost only). Plain `grob run` defaults to `::` (all interfaces); the shipped container explicitly passes `--host 0.0.0.0`. The bind address should match the deployment scenario:
 
 - **Local workstation**: `::1` (default) -- only local processes can connect (IPv6). Use `127.0.0.1` for IPv4-only environments.
 - **Container**: `0.0.0.0` -- accessible from outside the container (use network policies)

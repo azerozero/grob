@@ -6,6 +6,30 @@ Override with:
 - `--config <path>` flag
 - `GROB_CONFIG` environment variable (supports file paths and URLs)
 
+The snippets below are sections to merge into an existing configuration, not
+standalone files. For a first configuration, follow the
+[tutorial](../tutorials/getting-started.md) or use a
+[complete example](../index.md#examples).
+
+## Find a setting
+
+| Need | Reference |
+|------|-----------|
+| Listener, request timeouts, startup probes | [Server](#server) |
+| Native HTTPS and certificates | [TLS / ACME](operations.md#tls--acme-configuration), under `[server.tls]` |
+| Provider mappings and rules | [Providers](#providers), [models](#models), [router](#router) |
+| Complexity tiers and classifier | [Routing](routing.md#complexity-tier-model-overrides) and [tuning](../how-to/auto-tune-routing.md) |
+| Client authentication | [Authentication](authentication.md) |
+| Provider secrets and credential replacement | [Secret backends](../how-to/manage-secrets.md) and [service credentials](#service-credentials) |
+| Protect metrics / export telemetry | [Metrics access](../how-to/deploy.md#protect-metrics-with-a-bearer-token) and [OpenTelemetry](observability.md#opentelemetry) |
+| Record and replay traffic | [Harness CLI](cli.md#grob-harness-requires---features-harness), requires the `harness` build feature |
+
+This reference covers common configuration and links specialist guides. It is
+not an exhaustive description of every nested field. The advanced `tool_layer`,
+`media`, `pledge`, `tool_validation`, `tee` and `fips` sections still need dedicated
+operator examples. Their presence in the configuration schema does not establish
+an enabled protection or a certified deployment.
+
 ## Server
 
 ```toml
@@ -13,7 +37,7 @@ Override with:
 port = 13456              # Listen port (default: 13456)
 host = "::1"              # Bind address (default: "::1" — IPv6 localhost)
 log_level = "info"        # Log level: trace, debug, info, warn, error
-api_key = "my-secret"     # Optional: require Bearer token on incoming requests
+# api_key = "$GROB_API_KEY" # Optional legacy key; set the environment variable first
 oauth_callback_port = 1455 # Port for the OAuth callback server (default: 1455)
 warmup_connections = false # Pre-warm provider connections at startup (default: false)
 validate_on_start = false  # Probe each router model at startup (default: false)
@@ -25,18 +49,26 @@ api_timeout_ms = 600000   # Provider request timeout (default: 10 min)
 connect_timeout_ms = 10000 # TCP connect timeout (default: 10s)
 ```
 
-When `api_key` is set, all requests must include `Authorization: Bearer <token>` or `x-api-key: <token>`. Health, metrics, and OAuth endpoints are exempt.
+When an API key is configured, clients need a credential accepted by Grob.
+Health checks and OAuth callbacks bypass the main authentication check;
+metrics has a separate optional bearer token. Other management endpoints require
+administrative access. See [authentication](authentication.md#exempt-endpoints).
 
 The default host `::1` is IPv6 localhost. Use `127.0.0.1` for IPv4-only environments, or `0.0.0.0` for container deployments.
 
 ### Startup network behavior
 
-By default a fresh `grob start` performs **no outgoing network requests** and the listener binds immediately — startup is offline-safe and air-gap friendly. Two opt-in probes can be enabled:
+Provider warmup and validation calls are disabled by default. Enable either
+explicitly when needed:
 
 - `warmup_connections` — fires a background `HEAD` to each provider's base URL so the first real request avoids cold-connection latency.
 - `validate_on_start` — sends a minimal `max_tokens=1` test request to every provider mapping and logs a health summary. This consumes a small amount of provider quota per mapping, so it is off by default.
 
 Both run after the listener is already accepting traffic, so neither can stall the bind.
+
+Other configured integrations, such as remote configuration, OAuth or JWKS,
+may still contact their services. Disabling these two probes does not make
+every configuration offline-only.
 
 ### Multi-replica revision pinning
 
@@ -153,6 +185,7 @@ token_counting = "api"         # "api" (default) or "estimate"
 name = "anthropic"              # Unique name, used in model mappings
 provider_type = "anthropic"     # See provider types below
 api_key = "$ANTHROPIC_API_KEY"  # API key (supports $ENV_VAR syntax)
+models = []                    # Required legacy field; use [[models.mappings]] below
 base_url = "https://..."        # Override default base URL
 auth_type = "oauth"             # "apikey" (default) or "oauth"
 oauth_provider = "anthropic-max" # OAuth provider ID (for auth_type = "oauth")
@@ -190,6 +223,7 @@ Chain multiple API keys for a single provider. Grob rotates through them automat
 name = "openai"
 provider_type = "openai"
 api_key = "$OPENAI_API_KEY_1"
+models = []
 
 [providers.pool]
 strategy = "round_robin"   # "sequential" | "round_robin" | "fallback"
@@ -320,7 +354,7 @@ Control rate limiting, security headers, body size limits, circuit breakers, and
 
 ```toml
 [security]
-enabled = true                  # Master switch for all security middleware (default: true)
+enabled = true                  # Enable rate limiting and circuit breakers (default: true)
 rate_limit_rps = 0              # Requests per second per tenant/IP (default: 0 = disabled)
 rate_limit_burst = 0            # Burst allowance (default: 0; used only when rate_limit_rps > 0)
 rate_limit_by_client = false    # Key the limiter on the OIDC client, not the subject (default: false)
@@ -503,7 +537,7 @@ omit_system_prompt = true         # Omit system prompts from traces (default: tr
 
 ```toml
 [presets]
-active = "medium"         # Currently applied preset name
+active = "perf"         # Currently applied preset name
 sync_url = "https://..."  # URL to sync presets from (optional)
 sync_interval = "24h"     # Auto-sync interval (e.g., "1h", "24h", "7d") (optional)
 auto_sync = true          # Enable automatic preset sync (default: true)
@@ -523,13 +557,17 @@ When loaded from a URL, config is read-only (save/export commands are disabled).
 
 ```toml
 [auth]
-enabled = false
-jwks_url = "https://example.com/.well-known/jwks.json"  # JWKS endpoint for key rotation
-issuer = "https://example.com"                           # Expected JWT issuer
-audience = "grob"                                        # Expected JWT audience
+mode = "jwt"
+
+[auth.jwt]
+jwks_url = "https://example.com/.well-known/jwks.json"
+issuer = "https://example.com"  # Expected JWT issuer
+audience = "grob"              # Expected JWT audience
 ```
 
-When enabled, incoming requests must include a valid JWT in the `Authorization: Bearer` header. Keys are fetched from the JWKS endpoint and cached with automatic rotation.
+Incoming requests use a JWT in `Authorization: Bearer <token>`. The first JWKS fetch runs in the background; JWT authentication fails until keys are available. Health probes and OAuth callbacks are exempt. Administrative operations require a separate administrative credential. See [Authentication Reference](authentication.md) for API keys, virtual keys, claims, and the current JWT cache limitation.
+
+Use `mode = "jwt"` and the nested `[auth.jwt]` table exactly as shown. `[auth] enabled` is not a supported setting.
 
 ## DLP (Data Loss Prevention)
 
@@ -588,11 +626,13 @@ DLP scanning uses prefix-gated DFA matching with Aho-Corasick pre-filtering for 
 ```toml
 [tap]
 enabled = false
-url = "https://hooks.example.com/grob"   # Webhook URL to send events to
-events = ["request", "response", "error"] # Event types to emit
+webhook_url = "https://hooks.example.com/grob"
+buffer_size = 256        # Event queue capacity; events can be dropped when full
+timeout_ms = 5000        # Webhook POST timeout
+include_request = false # Omit the request body (default: true)
 ```
 
-When enabled, Grob sends non-blocking webhook events for request/response/error lifecycle events. Events include model, provider, latency, and token counts.
+The tap worker collects stream chunks and posts a completed payload containing request ID, tenant, model, response body and optionally the request body. It does not expose an `events` selector. Use a trusted webhook: response content is included even when `include_request = false`. The queue drops events when full, so this is not a durable audit channel. For structured metadata and error records, see [Observability Reference](observability.md).
 
 ## Response Cache
 
@@ -626,7 +666,7 @@ The `eu-ai-act` preset enables all compliance features. See [ADR-0005](../decisi
 ```toml
 [mcp]
 enabled = false                    # Enable MCP tool matrix
-matrix_path = "~/.grob/matrix.toml" # Path to tool capability catalogue
+matrix_path = "~/.grob/tool_matrix.toml" # Path to tool capability catalogue
 ```
 
 The MCP tool matrix is a static TOML catalogue of tools with per-provider reliability scores. A bench engine continuously tests tool-calling capabilities. The `/mcp` endpoint exposes a JSON-RPC interface for querying, benchmarking, and calibrating tool scores.
@@ -691,7 +731,7 @@ model = "claude-opus-thinking"
 monthly_limit_usd = 20.0
 
 [presets]
-active = "medium"
+active = "perf"
 ```
 
 Project config merges with global config. Router settings and prompt rules from the project file take precedence.

@@ -7,45 +7,64 @@ Image size depends on the release and target; inspect the tag you deploy.
 
 ### Docker / Podman
 
-```bash
-docker run -d \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -e OPENROUTER_API_KEY=sk-or-... \
-  -p 8080:8080 \
-  ghcr.io/azerozero/grob:latest
-```
+Prepare a working configuration first with the
+[getting-started tutorial](../tutorials/getting-started.md). For these examples,
+use provider API keys supplied through environment variables. Export the keys
+required by your configuration in the shell that launches the container.
 
-The container runs `grob run --json-logs --host 0.0.0.0 --port 8080` by default. Use `-p 13456:8080` if you want the native host default on the outside.
+The container runs as UID/GID 65534. Its mounted configuration must be readable
+by that identity; bind-mounted data directories must be writable by it. Keep
+actual secret values out of a broadly readable configuration file. OAuth tokens
+and named secrets in the host's `~/.grob` are not automatically available inside
+the container.
+
+The image listens on `0.0.0.0:8080` internally. The examples below publish only
+on host loopback. Before sharing the port, configure
+[client authentication](../reference/authentication.md) and TLS at your ingress.
+Use `127.0.0.1:13456:8080` to expose the native host port instead.
 
 ### With a config file
 
-Mount your config:
+Mount the configuration and a persistent data volume:
 
 ```bash
+docker volume create grob-data
 docker run -d \
-  -v ~/.grob/config.toml:/etc/grob/config.toml:ro \
+  --name grob \
+  -v "$HOME/.grob/config.toml:/etc/grob/config.toml:ro" \
+  -v grob-data:/var/lib/grob \
   -e GROB_CONFIG=/etc/grob/config.toml \
   -e GROB_HOME=/var/lib/grob \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -p 8080:8080 \
+  -e ANTHROPIC_API_KEY \
+  -e OPENROUTER_API_KEY \
+  -p 127.0.0.1:8080:8080 \
   ghcr.io/azerozero/grob:latest
 ```
 
 ### With remote config
 
+As an alternative, reuse the data volume and load configuration from a trusted
+URL. Forward any additional provider variables required by that configuration.
+
 ```bash
 docker run -d \
   -e GROB_CONFIG=https://config.example.com/grob.toml \
-  -e ANTHROPIC_API_KEY=sk-ant-... \
-  -p 8080:8080 \
+  -e GROB_HOME=/var/lib/grob \
+  -v grob-data:/var/lib/grob \
+  -e ANTHROPIC_API_KEY \
+  -p 127.0.0.1:8080:8080 \
   ghcr.io/azerozero/grob:latest
 ```
 
 ## Kubernetes
 
-A sample manifest is provided in `deploy/grob-kube.yml`. Key points:
+A local Podman-compatible sample is provided in
+[`deploy/grob-kube.yml`](../../deploy/grob-kube.yml). It uses a locally built
+image, `imagePullPolicy: Never` and host paths. Adapt the image policy, volumes,
+credentials and network exposure before deploying it to a cluster. Key points:
 
 - Use a Secret for API keys
+- Configure incoming authentication before sharing the service with clients
 - Mount config via ConfigMap or use remote config URL
 - Set `GROB_CONFIG=/etc/grob/config.toml` and `GROB_HOME=/var/lib/grob`
 - The health endpoint is `GET /health` (returns 200 with PID)
@@ -113,9 +132,13 @@ orchestrator — for a number the orchestrator can simply hand over. The count
 stays a declaration; the environment is just a better place to declare it than
 a ConfigMap.
 
-Each pod keeps its own `GROB_HOME` (an `emptyDir` is fine). A shared volume is
-**not** required and does not make limits shared: spend counters are in-memory
-per process, so a peer's writes are invisible until restart.
+Each pod keeps its own `GROB_HOME`. Use durable per-replica storage when spend
+history, keys or OAuth tokens must survive pod replacement. An `emptyDir` loses
+them when its pod is removed and cannot preserve a monthly budget history.
+A shared volume does not coordinate live limits: spend counters are in-memory
+per process, so a peer's writes are invisible until restart. See
+[replica consistency](multi-replica-consistency.md) and
+[credential backup and key custody](protect-credential-storage.md).
 
 ## Build from source
 

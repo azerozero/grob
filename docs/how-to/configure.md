@@ -1,5 +1,9 @@
 # How to Configure Grob
 
+Edit `~/.grob/config.toml`, or the file selected by `--config` / `GROB_CONFIG`. The snippets below are additions to an existing working configuration: replace example model and provider names with your own. Do not append a second copy of a table that already exists.
+
+Run `grob doctor` after editing. `grob validate` additionally makes real provider requests and can consume quota. Use the reload procedure below for routing and budgets; restart for startup-only settings.
+
 ## Set a monthly budget
 
 Add a global spend limit to prevent runaway costs:
@@ -17,6 +21,7 @@ Per-provider and per-model limits are also supported:
 name = "openrouter"
 provider_type = "openrouter"
 api_key = "$OPENROUTER_API_KEY"
+models = []                  # Required legacy field; mappings select models
 budget_usd = 20.0            # This provider only
 
 [[models]]
@@ -82,7 +87,7 @@ pattern = "(?i)write.*test|unit test"
 model = "background"
 ```
 
-Patterns match against the first user message. Rules are evaluated in order; the first match wins.
+Patterns match the user message that starts the current turn, so the choice persists through tool calls. Rules are evaluated in order; the first match wins. The target must be a configured logical model. See [routing priority](../reference/routing.md#priority-order) for cases that take precedence.
 
 ## Enable message tracing
 
@@ -152,8 +157,10 @@ Scan requests and responses for secrets and PII:
 [dlp]
 scan_input = true        # Scan outgoing requests
 scan_output = true       # Scan incoming responses
-block_on_match = false   # Block (true) or just log (false) matches
+enabled = true          # Activate the pipeline
 ```
+
+Restart after changing DLP settings. Built-in secret rules and financial PII use redaction by default. There is no global `block_on_match` setting. Select actions per rule or detector; see [DLP Reference](../reference/dlp.md).
 
 ## Enable pass-through mode
 
@@ -164,6 +171,7 @@ Allow a provider to accept any model name, forwarding it as-is without explicit 
 name = "openrouter"
 provider_type = "openrouter"
 api_key = "$OPENROUTER_API_KEY"
+models = []                  # Required legacy field; mappings select models
 pass_through = true         # Accept any model name
 ```
 

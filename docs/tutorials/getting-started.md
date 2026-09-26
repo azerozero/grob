@@ -1,10 +1,13 @@
 # Getting Started with Grob
 
-This tutorial walks you through installing Grob, configuring it with a preset, and using it with Claude Code. By the end, you will have a working LLM routing proxy. The initial preset uses one provider; fallback requires additional mappings.
+Install Grob, connect an Anthropic account, and run Claude Code through the proxy.
+Choose a subscription login or an API key below. The initial subscription preset
+uses one provider; fallback requires additional mappings.
 
 ## In a hurry
 
-Three commands, assuming an Anthropic Pro or Max subscription:
+With Homebrew, Claude Code already installed, and an Anthropic Pro or Max
+subscription:
 
 ```bash
 brew install azerozero/tap/grob   # or: curl -fsSL https://raw.githubusercontent.com/azerozero/grob/main/scripts/install.sh | sh
@@ -12,19 +15,25 @@ grob preset apply perf
 grob exec -- claude
 ```
 
-A browser opens once for OAuth. After that, `grob status`, `grob spend`, and
+A terminal prompt guides you through OAuth if no usable token is stored. After
+that, `grob status`, `grob spend`, and
 `grob doctor` tell you what is happening. The rest of this page explains each
 step and covers the API-key path.
 
 ## Prerequisites
 
-- A Unix-like system (macOS or Linux) or Windows
-- At least one LLM provider account (Anthropic, OpenAI, OpenRouter, or a local Ollama install)
-- Rust toolchain (if building from source) or `curl` (for the install script)
+- macOS or Linux for the shell commands on this page. On Windows, download the
+  matching executable from [GitHub Releases](https://github.com/azerozero/grob/releases)
+  and add its directory to `PATH`; the shell installer supports macOS and Linux.
+- Claude Code installed and available as `claude`. Grob does not install your AI tool.
+- An Anthropic Pro/Max subscription or an Anthropic API key for this tutorial.
+  For other providers or a local Ollama instance, see [Provider Setup](../how-to/providers.md).
+- Homebrew, or `curl` for the install script. A Rust toolchain is only needed to
+  [build from source](../how-to/contribute.md).
 
 ## Step 1: Install Grob
 
-Grob ships as a standalone binary. Choose one of two methods:
+Grob ships as a standalone binary. On macOS or Linux, choose one method:
 
 **Option A: Install script (recommended)**
 
@@ -50,67 +59,76 @@ grob --help
 
 You should see a list of available commands.
 
-## Step 2: Set your API keys
+## Step 2: Choose how Grob authenticates
 
-Grob reads API keys from environment variables. Set the ones for the providers you plan to use:
+Use **one** of these paths. An API key and a subscription login are separate
+credentials; exporting an API key does not change an OAuth preset.
 
-```bash
-# Anthropic (required for most presets)
-export ANTHROPIC_API_KEY="sk-ant-..."
+### Option A: Anthropic subscription
 
-# OpenRouter (optional, for fallback providers)
-export OPENROUTER_API_KEY="sk-or-..."
-```
-
-If you have an Anthropic Pro or Max subscription and want to use OAuth instead of an API key, skip this step -- you will authenticate via browser in Step 4.
-
-## Step 3: Apply a preset
-
-Presets are pre-built configurations that set up providers, models, and routing in one command. List them with `grob preset list`, then pick the one that matches your setup:
-
-| Preset | What it sets up | Monthly cost estimate |
-|--------|-----------------|----------------------|
-| `perf` | Pure Anthropic OAuth (Pro/Max), auto-maps `claude-*` to native | Subscription only |
-| `ultra-cheap` | Stacked free tiers (Groq + Cerebras + Z.ai + OpenRouter `:free`) | ~€0-2/month |
-| `gdpr` | EU-only routing (Mistral, Scaleway, OVH) + DLP | Pay-as-you-go |
-| `eu-ai-act` | EU AI Act controls (EU providers + transparency headers) | Pay-as-you-go |
-| `eu-eco` / `eu-pro` / `eu-max` | Strict-EU sovereign tiers (budget / balanced / premium) | Pay-as-you-go |
-
-Apply the `perf` preset (simplest — one Anthropic subscription, no fallbacks):
-
-```bash
-grob preset apply perf
-```
-
-This creates `~/.grob/config.toml` with Anthropic OAuth for every `claude-*` model.
-
-To see what a preset contains before applying:
+Inspect and apply the `perf` preset:
 
 ```bash
 grob preset info perf
+grob preset apply perf
 ```
 
-## Step 4: Start Grob and launch your tool
+This creates `~/.grob/config.toml` with Anthropic OAuth and no fallback provider.
+On the first interactive launch, follow the authentication prompt and complete
+the browser login. An existing valid token can be reused.
 
-The simplest way is `grob exec`, which starts the proxy, sets the right environment variables, launches your tool, and stops the proxy when your tool exits:
+### Option B: Anthropic API key
+
+Set your provider key in the same terminal that will start Grob, then run the
+interactive setup wizard:
+
+```bash
+export ANTHROPIC_API_KEY="replace-with-your-provider-key"
+grob setup
+```
+
+Choose Claude Code. The wizard detects `ANTHROPIC_API_KEY` and uses API-key
+authentication. For a simple first run, choose no fallback or custom endpoint,
+then choose a budget and review the recap before saving. You do not need a
+Pro/Max subscription for this path. Provider usage is billed to the API account.
+
+Do not apply `perf` afterward: that would replace your provider configuration
+with its OAuth settings. To change authentication later, use
+`grob setup --edit auth`.
+
+### Other configurations
+
+`grob preset list` lists available presets, and `grob preset info <name>` shows
+their providers and required credentials. See [Provider Setup](../how-to/providers.md)
+for other accounts and [How to Configure](../how-to/configure.md) for routing
+and budget settings.
+
+## Step 3: Start Grob and launch your tool
+
+`grob exec` starts the proxy when needed, sets the tool's base URLs, and launches
+your tool. It stops a proxy that it started when the tool exits; an existing
+instance keeps running.
 
 ```bash
 grob exec -- claude
 ```
 
-This is equivalent to:
+For a proxy that stays running between sessions, use separate commands:
 
 ```bash
 grob start -d
-ANTHROPIC_BASE_URL=http://[::1]:13456 claude
+ANTHROPIC_BASE_URL='http://[::1]:13456' claude
 grob stop
 ```
 
 (The default bind address is `::1`, IPv6 localhost. For an IPv4-only system, configure `[server] host = "127.0.0.1"` before starting and use `http://127.0.0.1:13456`.)
 
-If you applied an OAuth preset, a browser window will open on first start for authentication. Complete the login flow and return to the terminal.
+The initial configuration uses local access without an inbound API key. If you
+enable Grob authentication later, your client also needs its own Grob credential;
+`grob exec` sets URLs, not authentication headers. See
+[Authentication](../reference/authentication.md).
 
-## Step 5: Verify it works
+## Step 4: Verify it works
 
 In another terminal, check Grob's status:
 
@@ -118,14 +136,9 @@ In another terminal, check Grob's status:
 grob status
 ```
 
-You should see output like:
-
-```
-Grob is running (PID 12345)
-  Port: 13456
-  Preset: perf
-  Spend: $0.00 / $0.00 (no limit)
-```
+Check the `Service`, `Address` and `Preset` lines. The service should be running
+at your configured listener address; the preset depends on the setup path you
+chose. If it is stopped, keep the coding tool open while checking status.
 
 Run a diagnostic check:
 
@@ -133,9 +146,12 @@ Run a diagnostic check:
 grob doctor
 ```
 
-This verifies your config file, environment variables, and provider connectivity.
+This checks configuration, local credential readiness, storage, and the local
+service. It does not prove that a provider will accept a request. For an optional
+end-to-end check, `grob validate` sends real requests to configured providers and
+can incur charges.
 
-## Step 6: Check your spend
+## Step 5: Check your spend
 
 After some usage, check what it cost:
 
@@ -153,14 +169,14 @@ When you ran `grob exec -- claude`:
 2. It started an HTTP server on `[::1]:13456` (IPv6 localhost)
 3. It set `ANTHROPIC_BASE_URL=http://[::1]:13456` so Claude Code sends requests to Grob
 4. For each request, Grob classified the task type (thinking, default, web search, background)
-5. It selected the best model for that task type and tried providers in priority order
-6. If a provider failed, it automatically tried the next one in the fallback chain
-7. Responses were streamed back to Claude Code with DLP scanning and spend tracking
+5. It selected the configured model for that task type and tried its provider mappings
+6. If a provider failed and another eligible mapping existed, it tried the next one
+7. Responses were streamed back to Claude Code, with spend tracking and DLP scanning when enabled
 
 ## Next steps
 
 - **Customize your config**: Edit `~/.grob/config.toml` directly -- see [Configuration Reference](../reference/configuration.md)
-- **Add more providers**: See [Provider Setup](../how-to/providers.md) for all 13+ supported backends
+- **Add more providers**: See [Provider Setup](../how-to/providers.md) for setup recipes
 - **Set a budget**: Add `[budget] monthly_limit_usd = 50.0` to your config -- see [How to Configure](../how-to/configure.md)
 - **Understand the architecture**: Read the [Architecture Overview](../explanation/architecture.md)
 - **Fix problems**: Check [Troubleshooting](../how-to/troubleshooting.md)

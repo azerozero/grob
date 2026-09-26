@@ -4,86 +4,40 @@ Grob is a multi-provider LLM routing proxy written in Rust. It accepts requests 
 
 ## Request flow
 
+This overview follows the normal LLM request path. Security features apply when
+enabled in the configuration; credential-gateway requests use their own
+[restricted forwarding path](../how-to/route-service-credentials.md).
+
 ```mermaid
 flowchart TB
-    client(("Client<br/>(Claude Code, Aider, curl, ...)"))
+    client["Client: coding assistant or SDK"]
+    middleware["HTTP middleware<br/>Authentication before rate limiting"]
+    normalize["Parse and normalize Anthropic or OpenAI input"]
+    preflight["Input checks<br/>DLP, media and tool validation"]
+    route["Choose logical model and provider mappings"]
+    scope["Enforce model/provider scope and context limits"]
+    cache{"Eligible cached response?"}
+    dispatch["Dispatch<br/>Per-provider policy and budget checks"]
+    provider["Call provider<br/>Sequential fallback or configured fan-out"]
+    output["Process provider output<br/>DLP and response processing"]
+    response["Return client format<br/>Stream events or buffered response"]
+    telemetry["Record usage, metrics and audit events"]
 
-    subgraph server["Axum HTTP Server"]
-        direction TB
-        mw1["1. Request ID<br/>Reads X-Request-Id or generates UUID v4"]
-        mw2["2. Body Size Limit<br/>Optional max_body_size guard (disabled by default)"]
-        mw3["3. Security Headers<br/>OWASP headers (X-Content-Type-Options, etc.)"]
-        mw4["4. Auth<br/>none / api_key / jwt"]
-        mw5["5. Rate Limiter<br/>Authenticated tenant/API-key or source IP → 429"]
-        mw1 --> mw2 --> mw3 --> mw4 --> mw5
-    end
-
-    subgraph handler["Handler"]
-        h1["Parse request body (Anthropic or OpenAI)"]
-        h2["Check budget (global, per-provider, per-model)"]
-        h3["OpenAI → Anthropic internal format"]
-    end
-
-    subgraph routing["routing/ (ADR-0018)"]
-        direction TB
-        subgraph classify["routing::classify (request classification)"]
-            r1["1. WebSearch — web_search tool detected"]
-            r2["2. Background — model matches background_regex"]
-            r3["3. Auto-map regex — transform model name"]
-            r4["4. Subagent — GROB-SUBAGENT-MODEL tag"]
-            r5["5. Prompt rules — regex on user message"]
-            r6["6. Think — thinking/reasoning enabled"]
-            r7["7. Declarative tier match — [[tiers.match]] globs + keywords"]
-            r8["8. Algorithmic scoring — heuristic complexity (fallback)"]
-            r9["9. Default model — fallback"]
-        end
-        rd["RouteDecision { model, route_type, complexity_tier }"]
-        cb1["routing::circuit_breaker<br/>RE-1a passive per-endpoint CB<br/>(max_fails + fail_duration)"]
-        hc["routing::health_check<br/>RE-1b active per-provider probe<br/>(health_uri, health_interval)"]
-        gate["ProviderRegistry::is_endpoint_healthy<br/>AND-gate: RE-1a ∧ RE-1b"]
-        cb1 --> gate
-        hc --> gate
-    end
-
-    subgraph dispatch["Provider Dispatch"]
-        direction TB
-        gate2{"Healthy endpoint?<br/>(RE-1a ∧ RE-1b)"}
-        gate2 -->|Yes| cbsec{"Global CB<br/>(security::circuit_breaker)"}
-        gate2 -->|No| skip1["Skip → next provider"]
-        cbsec -->|Closed| call["Provider call<br/>(Anthropic, OpenAI, Gemini, ...)"]
-        cbsec -->|Open| skip2["Skip → next provider"]
-        cbsec -->|HalfOpen| probe["Limited probe requests"]
-        call -->|success| rec_ok["record_success<br/>(endpoint + global)"]
-        call -->|failure| rec_fail["record_failure → try next"]
-        note["Strategies: fallback (sequential) · fan_out (parallel) · tier fan-out"]
-    end
-
-    subgraph dlp["DLP (Data Loss Prevention)"]
-        dlp1["Secret patterns (25 builtin rules)"]
-        dlp2["PII (names, emails, phones)"]
-        dlp3["Canary tokens"]
-        dlp4["Aho-Corasick DFA — O(n) streaming"]
-    end
-
-    subgraph response["Response"]
-        resp1["Stream SSE events / buffer"]
-        resp2["Record metrics (latency, tokens, cost)"]
-        resp3["Update spend tracker (JSONL journal)"]
-        resp4["Emit webhook tap event"]
-        resp5["Write audit log entry"]
-    end
-
-    client -->|"POST /v1/messages\nPOST /v1/chat/completions"| server
-    server --> handler
-    handler --> dispatch
-    dispatch --> dlp
-    dlp --> routing
-    routing --> dispatch
-    dispatch --> providers
-    providers --> response
-    response --> dlp
-    dlp --> client
+    client --> middleware --> normalize --> preflight
+    preflight --> route --> scope --> cache
+    cache -->|"Yes, non-streaming"| response
+    cache -->|No| dispatch --> provider --> output --> response
+    response --> client
+    provider -.-> telemetry
+    output -.-> telemetry
 ```
+
+Input checks run before routing and any upstream request. Output checks run on
+the provider response, including stream chunks; they are a separate pass. The
+cache and fan-out paths have different accounting behavior, described in the
+[caching](../reference/caching.md) and [fan-out](../reference/fan-out.md)
+references. The [routing reference](../reference/routing.md) defines rule order
+and model overrides.
 
 ## Module layout
 

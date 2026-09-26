@@ -36,6 +36,9 @@ cargo test --doc
 - Each `docs/` page belongs to exactly one Diátaxis category (`tutorials/`, `how-to/`, `reference/`, `explanation/`, `decisions/`). Do not mix types in a single file.
 - Avoid condescending words ("just", "easy", "simple", "trivial", "obviously") — they imply the reader is slow.
 - Architecture rationale goes in an ADR (`docs/decisions/NNNN-*.md`, MADR 4.0). API contracts go in `///` doc comments. The "why" of a single line goes in a `//` inline comment.
+- When behavior changes, the author updates the relevant user guide and reference in the same PR. Reviewers check the example against the implementation.
+- State prerequisites and whether a snippet is a complete file or a fragment. Separate local checks from commands that call providers or change stored configuration.
+- Keep one detailed reference for each setting and link to it from overviews. Mark proposals as unimplemented and historical decisions as superseded when applicable.
 
 ## Testing
 

@@ -2,7 +2,7 @@
 
 Complete configuration reference for Grob's security middleware: rate limiting, circuit breakers, OWASP headers, audit logging, adaptive scoring, and EU AI Act controls.
 
-All settings live under the `[security]` section of `config.toml`.
+Most settings below live under `[security]` in `config.toml`. Risk classification uses `[compliance]`; authentication and DLP have their own sections. See the [security model](../explanation/security.md) for trust boundaries.
 
 ## Master switch
 
@@ -11,7 +11,7 @@ All settings live under the `[security]` section of `config.toml`.
 enabled = true  # default: true
 ```
 
-Setting `enabled = false` disables all security middleware (rate limiting, circuit breakers, headers, audit). Not recommended for any deployment beyond local development.
+Setting `enabled = false` disables the rate limiter and circuit breakers. It does not disable authentication, security headers, body-size limits, audit logging, DLP or adaptive scoring: those have separate configuration controls. Prefer changing the specific feature you intend to adjust.
 
 ## Rate limiting
 
@@ -34,7 +34,7 @@ rate_limit_burst = 200  # burst capacity (default: 0; ~2x rps is typical)
 
 ### Capacity planning
 
-When enabled, 100 rps sustains roughly 10 concurrent Claude Code sessions (each bursting ~10 req/s during tool-use loops). The 2x burst factor absorbs short spikes without triggering 429s.
+Measure request bursts for your own clients before choosing limits. Set both the sustained rate and burst capacity, then monitor rejected requests. For multiple replicas, use the [fleet-limit configuration](configuration.md#making-the-limit-a-real-fleet-wide-ceiling) rather than multiplying a single-process limit unintentionally.
 
 ### Edge cases
 
@@ -120,7 +120,7 @@ When set, requests exceeding the limit are rejected with HTTP `413 Payload Too L
 
 ## Audit logging
 
-Signed, hash-chained audit log for HDS, PCI DSS, SecNumCloud, and EU AI Act-style evidence.
+Signed, hash-chained event records for investigation and evidence collection. Requires the `compliance` build feature. These records do not by themselves establish regulatory compliance or certification.
 
 ```toml
 [security]
@@ -128,7 +128,7 @@ audit_dir = "/var/lib/grob/audit"  # empty = disabled (default)
 audit_signing_algorithm = "ecdsa-p256"  # "ecdsa-p256" | "ed25519" | "hmac-sha256"
 audit_hmac_key_path = ""  # only for hmac-sha256; default: <audit_dir>/audit_hmac.key
 audit_batch_size = 1  # 1 = per-entry signing, >1 = Merkle batch (default: 1)
-audit_flush_interval_ms = 5000  # max ms before flushing incomplete batch (default: 5000)
+audit_flush_interval_ms = 5000  # elapsed interval checked when another entry is written (default: 5000)
 audit_include_merkle_proof = false  # include proof in each entry (default: false)
 ```
 
@@ -136,11 +136,11 @@ audit_include_merkle_proof = false  # include proof in each entry (default: fals
 
 | Algorithm | Signature size | Key type | Key file |
 |-----------|---------------|----------|----------|
-| `ecdsa-p256` (default) | 64 bytes | Asymmetric (NIST P-256) | `<audit_dir>/audit.key` or `sign_key_path` |
-| `ed25519` | 64 bytes | Asymmetric (Curve25519) | `<audit_dir>/audit.key` or `sign_key_path` |
+| `ecdsa-p256` (default) | 64 bytes | Asymmetric (NIST P-256) | `<audit_dir>/audit_key.pem` |
+| `ed25519` | 64 bytes | Asymmetric (Curve25519) | `<audit_dir>/audit_key.pem` |
 | `hmac-sha256` | 32 bytes | Symmetric (256-bit) | `<audit_dir>/audit_hmac.key` or `audit_hmac_key_path` |
 
-Key files are generated automatically on first run if they do not exist. Keys are stored with owner-only permissions (`0600` on Unix). If no key path is configured for ECDSA/Ed25519, an ephemeral key is generated (logs cannot be verified across restarts).
+Key files are generated automatically on first run if they do not exist. Keys are stored with owner-only permissions (`0600` on Unix). The daemon supplies `<audit_dir>/audit_key.pem` for ECDSA/Ed25519; it does not use the low-level library's ephemeral-key fallback. Keep the key with an independent protected backup. Audit initialization errors are logged; check startup logs before relying on an audit trail.
 
 ### Log format
 
@@ -173,7 +173,7 @@ Each entry's `previous_hash` is the SHA-256 hash of the preceding entry. The fir
 
 ### Merkle batch signing
 
-When `audit_batch_size > 1`, entries accumulate in memory until the batch is full or `audit_flush_interval_ms` elapses, then:
+When `audit_batch_size > 1`, entries accumulate in memory. On the next entry, a full batch or an elapsed `audit_flush_interval_ms` triggers the following steps:
 
 1. A SHA-256 binary Merkle tree is built over all entry hashes in the batch.
 2. The Merkle root is signed once (instead of signing each entry individually).
@@ -192,13 +192,13 @@ To verify a single entry: recompute its hash, walk the `merkle_proof` steps (pre
 
 ### Edge cases
 
-- **Partial batch on shutdown**: Call `AuditLog::flush()` during graceful shutdown to write any buffered entries.
+- **Durability**: the interval is checked on writes; it is not a background flush deadline. An incomplete batch can remain in memory while idle. Use `audit_batch_size = 1` to avoid this batching delay; a buffered batch can be lost on a crash.
 - **Odd-sized batches**: When a Merkle level has an odd node count, the last node is promoted without hashing.
 - **Backward compatibility**: Old entries without batch fields deserialize correctly (all batch fields have `#[serde(default)]`).
 
 ## Adaptive provider scoring
 
-Ranks providers by a composite quality metric. Opt-in because it changes provider selection order within a priority level.
+Ranks providers by observed success and latency. It does not evaluate answer quality. The opt-in sort can change order across configured priority values.
 
 ```toml
 [security]
@@ -206,8 +206,10 @@ adaptive_scoring = false          # default: false (opt-in)
 scoring_latency_alpha = 0.3       # EWMA smoothing factor (default: 0.3)
 scoring_window_size = 50          # rolling window for success rate (default: 50)
 scoring_decay_rate = 0.001        # score decay per second of inactivity (default: 0.001)
-scoring_persist = false           # persist scores across restarts (default: false)
+scoring_persist = false           # parsed but currently has no persistence effect
 ```
+
+Scores live in memory and reset on restart.
 
 ### Composite score
 

@@ -4,6 +4,7 @@ mod cache_test;
 mod compliance_test;
 mod conformance_test;
 mod dlp_test;
+mod doc_examples_test;
 mod e2e_test;
 #[cfg(feature = "policies")]
 mod hit_test;

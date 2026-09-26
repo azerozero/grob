@@ -6,6 +6,23 @@ Grob supports three categories of providers:
 - **OpenAI-compatible** -- providers that speak the OpenAI Chat Completions API
 - **Google** -- Gemini (AI Studio) and Vertex AI
 
+## Use these snippets
+
+The provider blocks below are **configuration fragments**, not standalone
+config files. Add the provider you need to your existing Grob configuration,
+then connect it to a named `[[models]]` entry through `[[models.mappings]]` and
+select that model in `[router]`.
+
+Keep `models = []` in each provider block: the parser requires this legacy
+field, but routing uses the mappings. See the
+[complete model-mapping example](../examples/models.toml) or the
+[local Ollama example](../examples/ollama.toml) for a full configuration.
+After editing, `grob model` checks that Grob can load the configuration and lists
+its models without calling providers. `grob validate` makes real provider
+requests and may incur charges. Restart or
+[reload](configure.md#reload-without-restarting) an already-running proxy to
+apply changes.
+
 ## Provider overview
 
 | Provider | Type | Auth | Base URL |
@@ -40,6 +57,7 @@ Direct access to Claude models. Supports API key and OAuth (Pro/Max subscription
 name = "anthropic"
 provider_type = "anthropic"
 api_key = "$ANTHROPIC_API_KEY"
+models = []
 ```
 
 ### OAuth (Pro/Max subscription)
@@ -50,6 +68,7 @@ name = "anthropic"
 provider_type = "anthropic"
 auth_type = "oauth"
 oauth_provider = "anthropic-max"
+models = []
 ```
 
 On first `grob start`, a browser window opens for OAuth login. Tokens are stored as encrypted files in `~/.grob/tokens/` (AES-256-GCM) and refreshed automatically.
@@ -67,21 +86,29 @@ Access 200+ models through a single API key. Models are referenced by their Open
 name = "openrouter"
 provider_type = "openrouter"
 api_key = "$OPENROUTER_API_KEY"
+models = []
 ```
 
 Get an API key at [openrouter.ai/keys](https://openrouter.ai/keys).
 
 ### Using models via OpenRouter
 
+This named model tries the mappings in ascending priority order. Set your
+router target to `openrouter-fallback` to use it, or add the mappings beneath
+an existing model instead.
+
 ```toml
+[[models]]
+name = "openrouter-fallback"
+
 [[models.mappings]]
 provider = "openrouter"
-actual_model = "deepseek/deepseek-v3.2"     # $0.26/$0.38 per M tokens
+actual_model = "deepseek/deepseek-v3.2"
 priority = 2
 
 [[models.mappings]]
 provider = "openrouter"
-actual_model = "mistralai/devstral-2512"     # $0.40/$2.00 per M tokens
+actual_model = "mistralai/devstral-2512"
 priority = 3
 ```
 
@@ -91,7 +118,7 @@ Browse available models at [openrouter.ai/models](https://openrouter.ai/models).
 
 ## Mistral / Devstral (direct API)
 
-Use Mistral's API directly instead of going through OpenRouter. Useful if you want lower latency or have Mistral credits.
+Use Mistral's API directly instead of going through OpenRouter. Use this path when your credentials and billing belong to Mistral directly.
 
 ```toml
 [[providers]]
@@ -99,6 +126,7 @@ name = "mistral"
 provider_type = "openai"
 api_key = "$MISTRAL_API_KEY"
 base_url = "https://api.mistral.ai/v1"
+models = []
 ```
 
 ### Available models
@@ -122,6 +150,7 @@ Get an API key at [console.mistral.ai](https://console.mistral.ai/).
 name = "openai"
 provider_type = "openai"
 api_key = "$OPENAI_API_KEY"
+models = []
 ```
 
 ---
@@ -161,6 +190,7 @@ name = "deepseek"
 provider_type = "openai"
 api_key = "$DEEPSEEK_API_KEY"
 base_url = "https://api.deepseek.com/v1"
+models = []
 ```
 
 ---
@@ -173,6 +203,7 @@ name = "groq"
 provider_type = "openai"
 api_key = "$GROQ_API_KEY"
 base_url = "https://api.groq.com/openai/v1"
+models = []
 ```
 
 ---
@@ -187,6 +218,7 @@ name = "ollama"
 provider_type = "openai"
 api_key = "ollama"
 base_url = "http://localhost:11434/v1"
+models = []
 ```
 
 ```bash
@@ -208,6 +240,7 @@ See [Gemini Integration](gemini-integration.md) for full details including Verte
 name = "gemini"
 provider_type = "gemini"
 api_key = "$GEMINI_API_KEY"
+models = []
 ```
 
 ### OAuth (Gemini Pro subscription)
@@ -218,6 +251,7 @@ name = "gemini"
 provider_type = "gemini"
 auth_type = "oauth"
 oauth_provider = "gemini-pro"
+models = []
 ```
 
 ---
@@ -230,10 +264,12 @@ Z.ai exposes GLM models on **two parallel endpoints** — pick the one that matc
 
 | Use case | Path | `provider_type` | `base_url` |
 |----------|------|-----------------|------------|
-| Drop-in for Claude Code (paid Coding Plan or `glm-5.1` as opus replacement) | Anthropic-compatible | `z.ai` | `https://api.z.ai/api/anthropic` (default) |
-| Free-tier `glm-4.7-flash` / `glm-4.5-flash` / `glm-4.5-air` (PAYG, ongoing free) | OpenAI-compatible | `openai` | `https://api.z.ai/api/paas/v4` |
+| Anthropic Messages-compatible account | Anthropic-compatible | `z.ai` | `https://api.z.ai/api/anthropic` (default) |
+| OpenAI Chat Completions-compatible account | OpenAI-compatible | `openai` | `https://api.z.ai/api/paas/v4` |
 
-The two endpoints are **separate products** at Z.ai. The Anthropic path serves the GLM Coding Plan subscription; the OpenAI path serves the standard PAYG / free-tier access. Use whichever the API key on your account is provisioned for.
+Choose the endpoint provisioned for your account and API key. Model access,
+free-tier availability and prices are provider decisions; verify them in your
+provider account before selecting a model.
 
 ### Anthropic-compatible (drop-in for Claude Code)
 
@@ -242,11 +278,12 @@ The two endpoints are **separate products** at Z.ai. The Anthropic path serves t
 name = "zai-coding"
 provider_type = "z.ai"
 api_key = "$ZAI_API_KEY"
+models = []
 ```
 
 This routes to `AnthropicCompatibleProvider`, which means: native Anthropic Messages format, full thinking-block support, beta-feature header forwarding, and tool-use-id sanitization. The `base_url` defaults to `https://api.z.ai/api/anthropic` and never needs to be set explicitly.
 
-### OpenAI-compatible (free tier, PAYG)
+### OpenAI-compatible
 
 ```toml
 [[providers]]
@@ -285,4 +322,5 @@ provider_type = "openai"
 api_key = "$MY_API_KEY"
 base_url = "https://my-api.example.com/v1"
 headers = { "X-Custom-Header" = "value" }
+models = []
 ```
