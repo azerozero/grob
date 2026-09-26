@@ -6,6 +6,67 @@ use crate::credentials::{
 use axum::{body::to_bytes, http::Request};
 use tower::ServiceExt;
 
+#[test]
+fn media_types_normalize_case_and_http_whitespace_without_widening_allowlist() {
+    for (input, expected) in [
+        ("Application/JSON", "application/json"),
+        ("application/json ; charset=utf-8", "application/json"),
+        ("\tTEXT/EVENT-STREAM\t; charset=utf-8", "text/event-stream"),
+        ("Text/Plain", "text/plain"),
+        (
+            "Application/X-WWW-Form-Urlencoded",
+            "application/x-www-form-urlencoded",
+        ),
+        ("application/jsonp", "application/octet-stream"),
+        ("application/json, text/plain", "application/octet-stream"),
+        ("application/ json", "application/octet-stream"),
+        ("image/png", "application/octet-stream"),
+        ("", "application/octet-stream"),
+    ] {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert("content-type", input.parse().unwrap());
+        assert_eq!(safe_content_type(&headers), expected, "{input}");
+    }
+    assert_eq!(
+        safe_content_type(&axum::http::HeaderMap::new()),
+        "application/octet-stream"
+    );
+}
+
+#[tokio::test]
+async fn equivalent_json_media_types_work_in_both_directions_and_still_filter_echoes() {
+    let mut upstream = mockito::Server::new_async().await;
+    let (_home, state, app, key, binding) = fixture(&upstream.url(), Injection::Bearer).await;
+    publish_token(&state, &binding, "synthetic-private");
+    for kind in ["Application/JSON", "application/json ; charset=utf-8"] {
+        let mock = upstream
+            .mock("POST", "/test")
+            .match_header("content-type", "application/json")
+            .match_body(r#"{"ok":true}"#)
+            .with_header("content-type", kind)
+            .with_body(r#"{"echo":"synthetic-private","ok":true}"#)
+            .create_async()
+            .await;
+        let request = Request::builder()
+            .uri("/v1/services/service/test")
+            .method("POST")
+            .header("authorization", format!("Bearer {key}"))
+            .header("content-type", kind)
+            .body(Body::from(r#"{"ok":true}"#))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["content-type"], "application/json");
+        let bytes = to_bytes(response.into_body(), 65536).await.unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap(),
+            serde_json::json!({"echo":"[redacted]", "ok":true})
+        );
+        mock.assert_async().await;
+        mock.remove_async().await;
+    }
+}
+
 fn publish_token(state: &AppState, binding: &ServiceBinding, token: &str) {
     state
         .grob_store

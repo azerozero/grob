@@ -96,7 +96,7 @@ pub fn run(config: &AppConfig, action: CredentialAction) -> anyhow::Result<()> {
             let record = store.credential_read(&binding.tenant, &binding.id)?;
             println!(
                 "{}",
-                serde_json::json!({"service": binding.id, "authority": record.authority, "generation": record.generation, "revoked": record.revoked, "verified_at": record.verified_at, "expires_at": record.expires_at, "recovery": record.recovery, "policy_current": record.policy == binding.revision()})
+                serde_json::json!({"service": binding.id, "authority": record.authority, "generation": record.generation, "revoked": record.revoked, "verified_at": record.verified_at, "expires_at": record.effective_expiry(), "recovery": record.recovery, "policy_current": record.policy == binding.revision()})
             );
         }
         CredentialAction::Check { .. } => {
@@ -127,8 +127,12 @@ fn diagnose(
     let mut state = "unavailable";
     if let Ok(record) = &record {
         state = record.state(binding, crate::credentials::now());
-        if record.expires_at.is_none() && binding.expires_at.is_none() {
+        if record.effective_expiry().is_none() && binding.expires_at.is_none() {
             warnings.push("credential_has_no_expiry");
+        }
+        if record.format == 1 && record.authority == Authority::Vault && record.expires_at.is_some()
+        {
+            warnings.push("legacy_expiry_requires_review");
         }
         let valid = record.check(binding, crate::credentials::now()).is_ok();
         ready = valid

@@ -75,8 +75,11 @@ pub struct CredentialRecord {
     pub revoked: bool,
     /// Whole credential version; absent until first remote verification.
     pub bundle: Option<Bundle>,
-    /// Credential expiry, independent from offline age.
+    /// Administrative expiry; legacy records retain their conservative combined deadline.
     pub expires_at: Option<i64>,
+    /// Deletion deadline of the currently verified Vault version, independent from policy expiry.
+    #[serde(default)]
+    pub remote_expires_at: Option<i64>,
     /// Last successful remote validation, never advanced by failed requests.
     pub verified_at: Option<i64>,
     /// Highest accepted KV v2 version.
@@ -124,7 +127,7 @@ impl CredentialRecord {
         expires_at: Option<i64>,
     ) -> Self {
         Self {
-            format: 1,
+            format: 2,
             tenant: binding.tenant.clone(),
             service: binding.id.clone(),
             policy: binding.revision(),
@@ -133,6 +136,7 @@ impl CredentialRecord {
             revoked: false,
             bundle,
             expires_at,
+            remote_expires_at: None,
             verified_at: None,
             remote_version: 0,
             observed_at: super::now(),
@@ -142,6 +146,30 @@ impl CredentialRecord {
     }
 
     pub(crate) fn check(
+        &self,
+        binding: &super::config::ServiceBinding,
+        now: i64,
+    ) -> super::Result<()> {
+        self.check_authority(binding, now)?;
+        if self.version_expired(now) {
+            return Err(super::CredentialError::Denied);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn effective_expiry(&self) -> Option<i64> {
+        self.expires_at
+            .into_iter()
+            .chain(self.remote_expires_at)
+            .min()
+    }
+
+    pub(crate) fn version_expired(&self, now: i64) -> bool {
+        self.remote_expires_at.is_some_and(|e| now >= e)
+    }
+
+    // Cached version expiry may trigger a refresh; authority restrictions must never do so.
+    pub(crate) fn check_authority(
         &self,
         binding: &super::config::ServiceBinding,
         now: i64,

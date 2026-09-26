@@ -304,17 +304,21 @@ fn filter_response(
 }
 
 fn safe_content_type(headers: &axum::http::HeaderMap) -> &'static str {
-    match headers
+    let media_type = headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.split(';').next())
-    {
-        Some("application/json") => "application/json",
-        Some("text/event-stream") => "text/event-stream",
-        Some("text/plain") => "text/plain",
-        Some("application/x-www-form-urlencoded") => "application/x-www-form-urlencoded",
-        _ => "application/octet-stream",
-    }
+        .unwrap_or("")
+        .trim_matches([' ', '\t']);
+    [
+        "application/json",
+        "text/event-stream",
+        "text/plain",
+        "application/x-www-form-urlencoded",
+    ]
+    .into_iter()
+    .find(|allowed| allowed.eq_ignore_ascii_case(media_type))
+    .unwrap_or("application/octet-stream")
 }
 
 pub(super) async fn status(
@@ -327,7 +331,7 @@ pub(super) async fn status(
     let bindings = state.snapshot().config.credential_services.clone();
     let statuses = tokio::task::spawn_blocking(move || bindings.iter().map(|binding| {
         match state.grob_store.credential_read(&binding.tenant, &binding.id) {
-            Ok(record) => serde_json::json!({"service":binding.id, "authority":record.authority, "generation":record.generation, "revoked":record.revoked, "verified_at":record.verified_at, "expires_at":record.expires_at, "state": record.state(binding, crate::credentials::now())}),
+            Ok(record) => serde_json::json!({"service":binding.id, "authority":record.authority, "generation":record.generation, "revoked":record.revoked, "verified_at":record.verified_at, "expires_at":record.effective_expiry(), "state": record.state(binding, crate::credentials::now())}),
             Err(_) => serde_json::json!({"service":binding.id,"state":"unavailable"}),
         }
     }).collect::<Vec<_>>()).await.map_err(|_| CredentialError::Storage)?;

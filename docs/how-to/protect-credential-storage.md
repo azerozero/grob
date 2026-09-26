@@ -123,7 +123,7 @@ and [OpenBao Agent/Proxy](https://openbao.org/docs/agent-and-proxy/).
 |---|---|---|
 | Least privilege | Tenant + agent + exact destination/path/method, pinned IPs, separate admin plane | Dedicated identities and read-only KV path policy; no root Vault tokens |
 | Central rotation | Local atomic bundles or bounded KV refresh; pooled connections get current auth per request | Rotate the upstream credential, then publish it; check the next request |
-| Expiry and revocation | Preserved expiry, explicit deadlines, durable revocation, fail-closed recovery | Set `--expires-at`, choose offline age, revoke at the issuer as well as Grob |
+| Expiry and revocation | Separate administrative and current Vault-version deadlines, durable revocation, fail-closed recovery | Set `--expires-at` for local bundles or binding `expires_at` for persistent policy; choose offline age and revoke at the issuer too |
 | Key separation | External protected key file and authenticated key check | Separate volumes/backups and recovery keys; restore drills |
 | Audit and alerting | Metadata-only publication/revocation logs; actor/service on dispatch; `CREDENTIAL_USE` in configured signed audit log | Retain/ship logs, use OS audit for CLI administrators, alert on denial/recovery and expiry |
 | No secret exposure | Protected bounded file reads, sensitive HTTP headers, zeroizing owned buffers, decoded response filtering | No secrets in shell arguments, tracing bodies or ordinary backups; approved upstream remains trusted |
@@ -133,6 +133,8 @@ and [OpenBao Agent/Proxy](https://openbao.org/docs/agent-and-proxy/).
 calling an upstream. For Vault it explicitly reports that remote authorization
 was not probed; it cannot promise the issuer will accept a request. It flags a
 missing expiry, a colocated key and a remaining local key copy.
+It also flags old combined-expiry records that need an
+[explicit upgrade review](route-service-credentials.md#upgrade-records-with-an-old-combined-expiry).
 
 For OAuth-capable services, prefer a trusted issuer/controller that obtains
 short-lived, audience- and scope-limited tokens and publishes them with

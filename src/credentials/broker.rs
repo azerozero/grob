@@ -69,17 +69,13 @@ impl Broker {
                 .await
                 .map_err(|_| CredentialError::Storage)??;
         let now = super::now();
-        record.check(binding, now)?;
+        record.check_authority(binding, now)?;
         if record.authority == Authority::Local {
-            return checked_bundle(record, binding);
+            return usable(record, binding, now);
         }
         let vault = binding.vault.as_ref().ok_or(CredentialError::Denied)?;
-        if now < record.retry_at {
-            return if record.recovery {
-                recovery(record, binding, now)
-            } else {
-                checked_bundle(record, binding)
-            };
+        if now < record.retry_at && (record.recovery || !record.version_expired(now)) {
+            return usable(record, binding, now);
         }
         let expected = record.generation;
         let remote = tokio::time::timeout(
@@ -89,46 +85,35 @@ impl Broker {
                 self.vault_client.as_ref().ok_or(CredentialError::Denied)?,
             ),
         )
-        .await;
-        match remote {
-            Ok(Ok(remote))
-                if remote.version >= record.remote_version
-                    && remote.bundle.validate(&binding.injection).is_ok() =>
-            {
-                record.bundle = Some(remote.bundle);
-                record.remote_version = remote.version;
-                record.verified_at = Some(now);
-                record.expires_at = min_expiry(record.expires_at, remote.expires_at);
-                record.retry_at = now.saturating_add(vault.refresh_secs as i64);
-                record.recovery = false;
-            }
-            Ok(Err(CredentialError::Unavailable)) | Err(_) => {
-                record.retry_at = super::now().saturating_add(vault.refresh_secs as i64);
-                record.recovery = true;
-            }
-            _ => {
-                // Authority denials and invalid responses cannot be hidden by an older snapshot.
-                record.revoked = true;
-                record.bundle = None;
-            }
-        }
+        .await
+        .unwrap_or(Err(CredentialError::Unavailable));
+        apply_refresh(&mut record, binding, remote, super::now());
         let published = record.clone();
         record.generation = tokio::task::spawn_blocking(move || {
             store.credential_publish(published, Some(expected))
         })
         .await
         .map_err(|_| CredentialError::Storage)??;
-        let now = super::now();
-        record.check(binding, now)?;
-        if record.recovery {
-            recovery(record, binding, now)
-        } else {
-            checked_bundle(record, binding)
-        }
+        usable(record, binding, super::now())
     }
 }
 
-fn checked_bundle(record: CredentialRecord, binding: &ServiceBinding) -> Result<CredentialRecord> {
+fn usable(
+    record: CredentialRecord,
+    binding: &ServiceBinding,
+    now: i64,
+) -> Result<CredentialRecord> {
+    record.check(binding, now)?;
+    if record.recovery {
+        let vault = binding.vault.as_ref().ok_or(CredentialError::Denied)?;
+        let verified = record.verified_at.ok_or(CredentialError::Unavailable)?;
+        if vault.max_offline_secs == 0
+            || now < verified
+            || now >= verified.saturating_add(vault.max_offline_secs as i64)
+        {
+            return Err(CredentialError::Unavailable);
+        }
+    }
     record
         .bundle
         .as_ref()
@@ -137,28 +122,32 @@ fn checked_bundle(record: CredentialRecord, binding: &ServiceBinding) -> Result<
     Ok(record)
 }
 
-fn recovery(
-    record: CredentialRecord,
+fn apply_refresh(
+    record: &mut CredentialRecord,
     binding: &ServiceBinding,
+    remote: Result<Remote>,
     now: i64,
-) -> Result<CredentialRecord> {
-    let vault = binding.vault.as_ref().ok_or(CredentialError::Denied)?;
-    let verified = record.verified_at.ok_or(CredentialError::Unavailable)?;
-    if vault.max_offline_secs == 0
-        || now < verified
-        || now >= verified.saturating_add(vault.max_offline_secs as i64)
-    {
-        return Err(CredentialError::Unavailable);
+) {
+    match remote {
+        Ok(remote)
+            if remote.version >= record.remote_version
+                && remote.bundle.validate(&binding.injection).is_ok() =>
+        {
+            record.bundle = Some(remote.bundle);
+            record.remote_version = remote.version;
+            record.verified_at = Some(now);
+            record.remote_expires_at = remote.expires_at;
+            record.recovery = false;
+        }
+        Err(CredentialError::Unavailable) => record.recovery = true,
+        _ => {
+            // Authority denials and invalid responses cannot be hidden by an older snapshot.
+            record.revoked = true;
+            record.bundle = None;
+        }
     }
-    record.check(binding, now)?;
-    checked_bundle(record, binding)
-}
-
-fn min_expiry(a: Option<i64>, b: Option<i64>) -> Option<i64> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(a.min(b)),
-        (a, b) => a.or(b),
-    }
+    record.retry_at =
+        now.saturating_add(binding.vault.as_ref().map_or(0, |v| v.refresh_secs) as i64);
 }
 
 #[derive(Deserialize)]

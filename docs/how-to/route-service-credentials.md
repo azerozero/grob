@@ -131,6 +131,12 @@ also bound rotation/revocation visibility. Reads within the refresh interval use
 the last verified generation. Concurrent refreshes are coalesced per service per
 process; stale results cannot overwrite a newer administrative publication.
 
+Each successful Vault read replaces the current version's deletion deadline.
+A newer version can have a later deadline or none. Administrative and binding
+deadlines remain independent restrictions. An expired cached version can trigger
+a fresh authoritative read; it is never used during an outage. A failed refresh
+still observes retry backoff, so expiry does not create an unbounded retry loop.
+
 After reloading configuration, explicitly activate Vault authority:
 
 ```sh
@@ -172,6 +178,20 @@ generation and validity metadata. It never returns bundle values. Revocation
 survives process restarts. Only explicit local or Vault publication clears it.
 Unrelated local bindings continue working during a Vault outage.
 
+### Upgrade records with an old combined expiry
+
+New records use format 2 and keep administrative and Vault version expiry
+separate. Format 1 records remain readable, but their old combined deadline stays
+a conservative restriction: Grob cannot prove whether an administrator set it.
+`credentials check` reports `legacy_expiry_requires_review` for affected records.
+
+Before that deadline, review the intended restriction. Put any required lasting
+deadline in the binding's `expires_at`, reload the configuration, then explicitly
+run `grob credentials vault tickets` to publish a format 2 record. The next
+dispatch must validate Vault again. This command also clears revocation, so use
+it only after deciding the binding should be active. Keep a backup before the
+upgrade; older binaries reject format 2 records rather than misread their bounds.
+
 Persist `GROB_HOME/credentials/` and `GROB_HOME/encryption.check` across container
 recreation, and retain the associated encryption key in a separate protected
 location. See [key custody and lifecycle](protect-credential-storage.md). Bundles and ownership/validity metadata share one authenticated
@@ -186,6 +206,9 @@ not credential values. JSON and form documents are buffered up to 2 MiB; malform
 JSON is rejected. SSE is processed one complete event at a time, limited to 64 KiB,
 including multiline data and CR/LF boundaries. JSON event data is decoded before
 masking. A completed event does not wait for the next event or stream completion.
+One leading UTF-8 BOM is accepted; later payload characters remain unchanged.
+Media types are compared without ASCII case sensitivity, including permitted
+spaces before parameters, and are forwarded in canonical form.
 Plain text keeps only a suffix that could still match a literal credential.
 
 Unsupported or compressed response types are rejected. A rejection after response
