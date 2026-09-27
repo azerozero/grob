@@ -64,7 +64,7 @@ variable is set.
 
 ```bash
 just up            # start the pod + init Toxiproxy proxies
-just generate-all  # generate auth tokens, age keys, pairwise matrix
+just generate-all  # generate auth tokens, pairwise matrix
 just test          # run the full mock-backed suite
 just down          # stop and remove the pod
 ```
@@ -78,7 +78,6 @@ e2e/
 │   └── tokens/     Generated JWT files (git-ignored)
 ├── config/
 │   └── mock/       Grob config + Toxiproxy init
-├── crypto/         age keypair generation
 ├── fixtures/       Shared request/response payloads
 ├── images/         Containerfiles (vidaimock)
 ├── kube/           Podman pod manifest

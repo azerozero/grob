@@ -1,5 +1,5 @@
 # E2E test runner — all test tooling in one image
-# Contains: hurl, k6, python3+PyJWT+cryptography, openssl, age, curl, bash
+# Contains: hurl, k6, python3+PyJWT+cryptography, openssl, curl, bash
 #
 # Usage:
 #   podman build -t localhost/e2e-runner:latest tests/e2e/images/runner/
@@ -35,13 +35,6 @@ RUN curl -fsSL "https://github.com/grafana/k6/releases/download/v${K6_VERSION}/k
       | tar xz -C /tmp && \
     mv /tmp/k6-v${K6_VERSION}-linux-${TARGETARCH}/k6 /usr/local/bin/k6 && \
     chmod +x /usr/local/bin/k6
-
-# age — encryption for audit tests
-RUN curl -fsSL "https://github.com/FiloSottile/age/releases/download/v1.2.1/age-v1.2.1-linux-${TARGETARCH}.tar.gz" \
-      | tar xz -C /tmp && \
-    mv /tmp/age/age /usr/local/bin/age && \
-    mv /tmp/age/age-keygen /usr/local/bin/age-keygen && \
-    chmod +x /usr/local/bin/age /usr/local/bin/age-keygen
 
 # Python deps for JWT generation
 RUN pip3 install --break-system-packages --no-cache-dir PyJWT cryptography

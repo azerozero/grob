@@ -40,16 +40,12 @@ down:
 generate-auth:
     @bash auth/generate.sh
 
-# Generate age encryption keypairs (rssi, dpo, intruder)
-generate-crypto:
-    @bash crypto/generate-age-keys.sh
-
 # Generate PICT pairwise test matrix
 generate-pairwise:
     @bash pict/generate.sh
 
 # Run all generators
-generate-all: generate-auth generate-crypto generate-pairwise
+generate-all: generate-auth generate-pairwise
 
 # ---------------------------------------------------------------------------
 # Test suites
