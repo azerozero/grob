@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.119](https://github.com/azerozero/grob/compare/v0.36.118...v0.36.119) - 2026-09-27
+
+### Fixed
+
+- *(e2e)* restore streaming under output DLP and align auth tests with admin contract ([#622](https://github.com/azerozero/grob/pull/622))
+
 ## [0.36.118](https://github.com/azerozero/grob/compare/v0.36.117...v0.36.118) - 2026-09-27
 
 ### Fixed
