@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# A0: Audit files must exist after requests
+# F-AUDIT-01: the journal and its signing key exist where [security].audit_dir points.
 AUDIT_DIR="${1:?usage: $0 <audit_dir>}"
-count=$(find "$AUDIT_DIR" -type f | wc -l)
-[ "$count" -gt 0 ] || { echo "FAIL: no audit files in $AUDIT_DIR"; exit 1; }
-echo "OK: $count audit file(s) found"
+[ -s "$AUDIT_DIR/current.jsonl" ] || { echo "FAIL: $AUDIT_DIR/current.jsonl missing or empty"; exit 1; }
+[ -s "$AUDIT_DIR/audit_key.pem" ] || { echo "FAIL: $AUDIT_DIR/audit_key.pem missing"; exit 1; }
+echo "OK: journal and signing key present"

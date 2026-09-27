@@ -101,15 +101,20 @@ FUZZ = Fuzz / Malformed Input.
 
 | ID | Feature | Test Files | Technique | Risk |
 |----|---------|-----------|-----------|------|
-| F-AUDIT-01 | Audit files created | audit/A0 | EP | High |
-| F-AUDIT-02 | Audit not plaintext | audit/A1 | EP | High |
-| F-AUDIT-03 | Audit signature valid | audit/A2 | EP | Critical |
-| F-AUDIT-04 | RSSI decrypt works | audit/A3 | EP | High |
-| F-AUDIT-05 | DPO decrypt works | audit/A4 | EP | High |
-| F-AUDIT-06 | Intruder decrypt fails | audit/A5 | NEG | Critical |
-| F-AUDIT-07 | Entry contains model | audit/A6 | EP | Medium |
-| F-AUDIT-08 | Entry contains tokens | audit/A7 | EP | Medium |
-| F-AUDIT-09 | Entry contains tenant | audit/A8 | EP | Medium |
+| F-AUDIT-01 | Journal and signing key created | audit/A0 | EP | High |
+| F-AUDIT-02 | Signing key not world-readable | audit/A1 | EP | High |
+| F-AUDIT-03 | Entry signatures valid (ECDSA P-256) | audit/A2 | EP | Critical |
+| F-AUDIT-04 | Hash chain links intact | audit/A2 | EP | Critical |
+| F-AUDIT-05 | Tampered signature rejected | audit/A3 | NEG | Critical |
+| F-AUDIT-06 | Entry contains model | audit/A4, advanced/S4 | EP | Medium |
+| F-AUDIT-07 | Entry contains tokens | audit/A4, advanced/S4 | EP | Medium |
+| F-AUDIT-08 | Entry contains tenant | audit/A4, advanced/S4 | EP | Medium |
+| F-AUDIT-09 | Classification levels recorded (NC/C1/C2) | audit/A5, advanced/S2 | EP | High |
+
+The audit journal is a signed, hash-chained plaintext JSONL file
+(`current.jsonl` + `audit_key.pem`). Per-recipient `age` encryption applies to
+log *export* (`[log_export]`), not to the audit journal; the former
+RSSI/DPO/intruder decryption cases tested a design that was never built.
 
 ## Input Validation
 

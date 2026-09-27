@@ -984,6 +984,12 @@ jobs:
         timeout-minutes: 10
         run: cd tests/e2e && make test-hurl
 
+      # Signed hash chain, tamper rejection and EU AI Act fields on the journal
+      # the hurl suites just produced.
+      - name: Run audit journal tests
+        timeout-minutes: 5
+        run: cd tests/e2e && make test-audit
+
       - name: Collect logs
         if: failure()
         run: podman pod exists e2e-pod && podman logs e2e-pod-grob 2>&1 | tail -100 || true
