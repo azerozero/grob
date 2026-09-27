@@ -136,7 +136,9 @@ echo ""
 echo "--- S4: EU AI Act compliance fields ---"
 
 if [ -f "$AUDIT_FILE" ]; then
-    line=$(tail -1 "$AUDIT_FILE")
+    # The journal also records reloads and requests; check the latest RESPONSE
+    # entry rather than whichever line happens to be last.
+    line=$(tail -n 50 "$AUDIT_FILE" | grep '"action":"RESPONSE"' | tail -1)
     has_model=$(echo "$line" | python3 -c "import json,sys; e=json.load(sys.stdin); print('yes' if e.get('model_name') else 'no')" 2>/dev/null || echo "no")
     has_tokens=$(echo "$line" | python3 -c "import json,sys; e=json.load(sys.stdin); print('yes' if e.get('input_tokens') is not None else 'no')" 2>/dev/null || echo "no")
     has_tenant=$(echo "$line" | python3 -c "import json,sys; e=json.load(sys.stdin); print('yes' if e.get('tenant_id') else 'no')" 2>/dev/null || echo "no")
