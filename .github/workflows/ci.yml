@@ -39,9 +39,11 @@ on:
         type: boolean
         default: false
 
+# PR runs supersede each other; every push to main must run to completion so
+# the release commit that publishes artifacts is never cancelled by the next.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions: read-all
 
