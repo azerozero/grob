@@ -60,13 +60,15 @@ feature/* or fix/* ──► PR ──► main ──► (release-plz PR) ──
 ```
 
 - **Never commit or push directly to `main`**. All changes go through feature branches + PRs.
+  The prek `no-commit-to-branch` hook refuses a local commit on `main`; create the
+  branch (`git checkout -b fix/<topic>`) right after `git pull`, before touching files.
 - `main` is the only long-lived branch (GitHub Flow). release-plz watches `main` and opens a Release PR when releasable commits land.
 - **`main` is protected** (GitHub ruleset: no deletion, no force push, PR required).
 - **Always work on a feature branch** from `main`: `feat/<topic>` or `fix/<topic>`.
 - **Always enable auto-merge** after creating a PR: `gh pr merge <num> --auto --squash`.
   Squash only; merge commits are disabled on the repo and `--merge` is rejected.
 - **Conventional commits**: `feat:`, `fix:`, `refactor:`, `perf:` trigger version bumps via release-plz. Use `chore:`, `docs:`, `test:`, `style:` for non-release changes. The PR title becomes the squash commit, so the **title** is what must be conventional.
-- **Pre-commit hooks** via [prek](https://github.com/j178/prek): run `prek install` after cloning. Hooks run `cargo fmt`, `clippy`, `gitleaks` on commit and tests, audit, deny on push.
+- **Pre-commit hooks** via [prek](https://github.com/j178/prek): run `prek install` after cloning. Hooks refuse commits on `main` and run `cargo fmt`, `clippy`, `gitleaks` on commit; tests, audit, deny on push.
 - **Overlapping PRs**: if two PRs touch the same files, branch the second off the first, not off `main`.
 
 [CLAUDE.md](CLAUDE.md) holds the full release mechanics and the reasons behind
