@@ -17,23 +17,28 @@ RUN cargo chef prepare --recipe-path recipe.json
 # NOTE: ENV RUSTFLAGS must be set BEFORE `cargo chef cook` so the cached
 # layer matches the final build's compilation flags. Otherwise the chef
 # cache is invalidated on every build.
+# The musl target follows the image architecture (x86_64 or aarch64), so the
+# same file builds natively on amd64 and arm64 hosts and under --platform.
 FROM chef AS builder
 ENV RUSTFLAGS="-C target-feature=+crt-static -C link-self-contained=yes" \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=gcc
+    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=gcc \
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=gcc
 COPY --from=planner /usr/src/grob/recipe.json recipe.json
-RUN cargo chef cook --release --locked --target x86_64-unknown-linux-musl --recipe-path recipe.json
+RUN cargo chef cook --release --locked --target "$(rustc -vV | sed -n 's/^host: //p')" --recipe-path recipe.json
 
 # Copy source and build final binary (only this layer invalidates on code changes)
 COPY . .
-RUN cargo build --release --locked --target x86_64-unknown-linux-musl
+RUN cargo build --release --locked --target "$(rustc -vV | sed -n 's/^host: //p')"
 
 # Strip symbols for smaller binary and create runtime-owned mount points.
-RUN strip target/x86_64-unknown-linux-musl/release/grob && \
+RUN TARGET="$(rustc -vV | sed -n 's/^host: //p')" && \
+    strip "target/$TARGET/release/grob" && \
+    cp "target/$TARGET/release/grob" /grob && \
     mkdir -p /runtime/var/lib/grob /runtime/tmp
 
 # Normalize build outputs and release artifacts into the same runtime inputs.
 FROM scratch AS compiled
-COPY --from=builder /usr/src/grob/target/x86_64-unknown-linux-musl/release/grob /grob
+COPY --from=builder /grob /grob
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /runtime/ /runtime/
 

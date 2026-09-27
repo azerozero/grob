@@ -31,10 +31,13 @@ container=$("$runtime" run -d \
   -v "$volume:/var/lib/grob" \
   -e GROB_CONFIG=/etc/grob/config.toml \
   -p 127.0.0.1::8080 "$image")
-port=$("$runtime" port "$container" 8080/tcp | head -n 1)
+# Docker may allocate a different ephemeral host port after `restart`, so the
+# mapping is resolved on every attempt rather than captured once.
 health() {
+  local port
   for ((attempt=0; attempt<30; attempt++)); do
-    if curl -fsS "http://$port/health" >/dev/null; then return 0; fi
+    port=$("$runtime" port "$container" 8080/tcp 2>/dev/null | head -n 1 || true)
+    if [[ -n "$port" ]] && curl -fsS "http://$port/health" >/dev/null; then return 0; fi
     sleep 1
   done
   "$runtime" logs "$container" >&2
