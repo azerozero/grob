@@ -13,6 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 HOST="${HOST:-127.0.0.1:13456}"
 JWT=$(cat auth/tokens/jwt-default.txt)
+ADMIN_KEY="${ADMIN_KEY:-grob-siege-master-key}"  # /api/config/reload is admin-only; a tenant JWT gets 403
 CONFIG="config/mock/grob-test.toml"
 BACKUP="${CONFIG}.bak"
 
@@ -23,7 +24,7 @@ cp "$CONFIG" "$BACKUP"
 # in the script would silently drop the earlier cleanup and leak tempfiles.
 RESP_FILE="$(mktemp)"
 HEADER_FILE="$(mktemp)"
-trap 'cp "$BACKUP" "$CONFIG"; curl -sf -X POST "http://$HOST/api/config/reload" -H "Authorization: Bearer $JWT" >/dev/null 2>&1; rm -f "$BACKUP" "$RESP_FILE" "$HEADER_FILE"' EXIT
+trap 'cp "$BACKUP" "$CONFIG"; curl -sf -X POST "http://$HOST/api/config/reload" -H "x-api-key: $ADMIN_KEY" >/dev/null 2>&1; rm -f "$BACKUP" "$RESP_FILE" "$HEADER_FILE"' EXIT
 
 # Add provider (tool-mock → vidaimock-tool:8102) + model + HIT policy
 cat >> "$CONFIG" << 'TOML'
@@ -55,7 +56,7 @@ TOML
 
 # Reload config
 status=$(curl -sf -o /dev/null -w '%{http_code}' -X POST "http://$HOST/api/config/reload" \
-    -H "Authorization: Bearer $JWT")
+    -H "x-api-key: $ADMIN_KEY")
 if [ "$status" != "200" ]; then
     echo "FAIL: S5 — config reload returned $status"
     exit 1

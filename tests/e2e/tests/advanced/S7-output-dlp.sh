@@ -8,11 +8,12 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 HOST="${HOST:-127.0.0.1:13456}"
 JWT=$(cat auth/tokens/jwt-default.txt)
+ADMIN_KEY="${ADMIN_KEY:-grob-siege-master-key}"  # /api/config/reload is admin-only; a tenant JWT gets 403
 CONFIG="config/mock/grob-test.toml"
 BACKUP="${CONFIG}.bak"
 
 cp "$CONFIG" "$BACKUP"
-trap 'cp "$BACKUP" "$CONFIG"; curl -sf -X POST "http://$HOST/api/config/reload" -H "Authorization: Bearer $JWT" >/dev/null 2>&1; rm -f "$BACKUP"' EXIT
+trap 'cp "$BACKUP" "$CONFIG"; curl -sf -X POST "http://$HOST/api/config/reload" -H "x-api-key: $ADMIN_KEY" >/dev/null 2>&1; rm -f "$BACKUP"' EXIT
 
 # Add a provider pointing to vidaimock-url (8101) + model + URL exfil config
 cat >> "$CONFIG" << 'TOML'
@@ -36,7 +37,7 @@ TOML
 
 # Reload
 status=$(curl -sf -o /dev/null -w '%{http_code}' -X POST "http://$HOST/api/config/reload" \
-    -H "Authorization: Bearer $JWT")
+    -H "x-api-key: $ADMIN_KEY")
 [ "$status" = "200" ] || { echo "FAIL: S7 — reload returned $status"; exit 1; }
 
 # Send request to url-test model (routes to vidaimock-url which returns evil.com URLs)

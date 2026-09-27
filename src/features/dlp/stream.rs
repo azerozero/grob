@@ -21,9 +21,18 @@ const MAX_CANARIES_PER_STREAM: usize = 20;
 /// Checks each complete text block before releasing any of its text.
 ///
 /// SSE framing and retained events each have a 1 MiB limit. A block that is
-/// incomplete, malformed or exceeds the limit terminates the stream. Arbitrary
-/// regexes cannot safely use a fixed look-behind window, so text is delivered
-/// at block completion rather than token by token when output DLP is enabled.
+/// malformed, exceeds the limit or is still open when the upstream connection
+/// ends terminates the stream: a truncated block could split a secret so that
+/// neither half matches a rule. Arbitrary regexes cannot safely use a fixed
+/// look-behind window, so text is delivered at block completion rather than
+/// token by token when output DLP is enabled.
+///
+/// Block boundaries are normalised rather than enforced. Anthropic-compatible
+/// backends (mocks, gateways, local servers) often emit `text_delta` events
+/// without `content_block_start` or end the message without
+/// `content_block_stop`. The missing events are synthesised so the client sees
+/// a canonical stream and the text is still checked as one complete block
+/// before any of it is released.
 #[pin_project]
 pub struct DlpStream<S> {
     #[pin]
@@ -153,7 +162,18 @@ impl<S: Stream<Item = Result<Bytes, ProviderError>>> Stream for DlpStream<S> {
                 "content_block_delta" if event.value["delta"]["type"] == "text_delta" => {
                     let index = event.index()?;
                     if !this.open.contains(&index) {
-                        return Err(protocol_error("Text delta without an open block"));
+                        if this.texts.contains_key(&index) {
+                            return Err(protocol_error("Text delta after the block was closed"));
+                        }
+                        // Backend skipped `content_block_start`: open the block
+                        // on its behalf so the client still sees the start event.
+                        this.texts.insert(index, String::new());
+                        this.open.insert(index);
+                        this.pending.push(Event::from_value(serde_json::json!({
+                            "type": "content_block_start",
+                            "index": index,
+                            "content_block": {"type": "text", "text": ""},
+                        })));
                     }
                     let text = event.value["delta"]["text"]
                         .as_str()
@@ -167,7 +187,16 @@ impl<S: Stream<Item = Result<Bytes, ProviderError>>> Stream for DlpStream<S> {
                     this.open.remove(&event.index()?);
                 }
                 "message_stop" | "message_delta" if !this.open.is_empty() => {
-                    return Err(protocol_error("Message ended before DLP text block"))
+                    // The message is complete, so every open block is complete
+                    // too: close them in index order before the message event.
+                    let mut open = this.open.drain().collect::<Vec<_>>();
+                    open.sort_unstable();
+                    for index in open {
+                        this.pending.push(Event::from_value(serde_json::json!({
+                            "type": "content_block_stop",
+                            "index": index,
+                        })));
+                    }
                 }
                 _ => {}
             }
