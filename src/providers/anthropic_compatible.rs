@@ -477,9 +477,6 @@ impl LlmProvider for AnthropicCompatibleProvider {
     }
 
     fn rotate_key_pool(&self) -> bool {
-        self.base
-            .key_pool
-            .as_ref()
-            .is_some_and(|pool| pool.rotate_on_error())
+        self.base.rotate_key_pool()
     }
 }
