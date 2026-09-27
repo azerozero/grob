@@ -49,7 +49,7 @@ Sends requests natively in Anthropic Messages API format. No format translation 
 
 Translates between Anthropic canonical format and OpenAI Chat Completions API. Also supports the Responses API for Codex models.
 
-**Request transformation** (`src/providers/openai/transform.rs`):
+**Request transformation** (`src/providers/openai/transform.rs`; the Responses API request builder and SSE parser live in `transform/responses_request.rs` and `transform/responses_sse.rs`):
 
 | Anthropic concept | OpenAI equivalent |
 |-------------------|-------------------|
