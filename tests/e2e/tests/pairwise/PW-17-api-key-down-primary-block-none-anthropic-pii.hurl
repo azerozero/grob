@@ -1,9 +1,10 @@
 # Pairwise: Auth=api_key, Provider=down_primary, DLP=block, Policy=none, Format=anthropic, Payload=pii
-# API key rejected before provider or DLP evaluation.
+# The server api_key authenticates as admin; the request then goes through
+# DLP (IBAN redaction) and provider failover like any other and succeeds.
 POST http://{{host}}/v1/messages
 x-api-key: grob-siege-master-key
 Content-Type: application/json
 file,fixtures/dlp/prompt-with-iban.json;
-HTTP 401
+HTTP 200
 [Asserts]
-jsonpath "$.error.type" == "authentication_error"
+jsonpath "$.role" == "assistant"

@@ -131,7 +131,7 @@ async fn incomplete_invalid_and_oversized_text_is_never_released() {
             Bytes::from_static(b"data: {broken}\n\n"),
         ],
         vec![start(""), delta(&"x".repeat(BUFFER_LIMIT)), stop()],
-        vec![delta("test-secret-12345678"), stop()],
+        vec![delta("test-secret-12345678")],
     ] {
         let (out, failed) = collect(chunks, engine.clone()).await;
         assert!(failed);
@@ -139,8 +139,16 @@ async fn incomplete_invalid_and_oversized_text_is_never_released() {
     }
     let mut chunks = vec![start("")];
     chunks.extend((0..EVENT_COUNT_LIMIT).map(|_| delta("")));
-    let (out, failed) = collect(chunks, engine).await;
+    let (out, failed) = collect(chunks, engine.clone()).await;
     assert!(failed && out.is_empty());
+    // A delta after the block closed is malformed; the checked block before it
+    // is already released, the stream then fails.
+    let (out, failed) = collect(
+        vec![start(""), delta("test-secret-12345678"), stop(), delta("x")],
+        engine,
+    )
+    .await;
+    assert!(failed && !out.contains("test-secret-12345678"));
 }
 
 #[tokio::test]
@@ -157,4 +165,33 @@ async fn tool_events_keep_payloads_and_order() {
     let (out, failed) = collect(chunks, engine("test-secret-[0-9]{8}")).await;
     assert!(!failed);
     assert_eq!(out, expected);
+}
+
+#[tokio::test]
+async fn missing_block_boundaries_are_synthesised_and_text_still_checked() {
+    let engine = engine("test-secret-[0-9]{8}");
+    let message_stop = event(serde_json::json!({"type":"message_stop"}));
+    // No content_block_start: the block is opened implicitly.
+    let (out, failed) = collect(
+        vec![delta("a test-secret-"), delta("12345678 b"), stop()],
+        engine.clone(),
+    )
+    .await;
+    assert!(!failed, "delta without start must not fail the stream");
+    assert!(!out.contains("test-secret-12345678"));
+    assert!(out.contains("event: content_block_start"));
+    assert!(out.find("content_block_start") < out.find("content_block_delta"));
+    // No content_block_stop: message_stop closes the block.
+    let (out, failed) = collect(
+        vec![delta("test-secret-12345678"), message_stop.clone()],
+        engine.clone(),
+    )
+    .await;
+    assert!(!failed, "message_stop must close an open block");
+    assert!(!out.contains("test-secret-12345678"));
+    assert!(out.find("content_block_stop") < out.find("message_stop"));
+    // Clean text on a boundary-less stream is released verbatim.
+    let (out, failed) = collect(vec![delta("Hello "), delta("world"), message_stop], engine).await;
+    assert!(!failed);
+    assert!(out.contains("Hello world"));
 }

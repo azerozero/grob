@@ -718,7 +718,10 @@ pub(crate) async fn handle_openai_chat_completions(
             let mapped = stream
                 .map_ok(move |bytes| transformer.transform_bytes(&bytes))
                 .try_filter(|b| futures::future::ready(!b.is_empty()));
-            let body_stream = mapped.map_err(|e| std::io::Error::other(e.to_string()));
+            let body_stream = mapped.map_err(|e| {
+                error!("Stream error: {}", e);
+                std::io::Error::other(e.to_string())
+            });
             Body::from_stream(trace_response_stream(
                 body_stream,
                 tracer_for_stream,
@@ -842,7 +845,10 @@ pub(crate) async fn handle_responses(
             let mapped = stream
                 .map_ok(move |bytes| transformer.transform_bytes(&bytes))
                 .try_filter(|b| futures::future::ready(!b.is_empty()));
-            let body_stream = mapped.map_err(|e| std::io::Error::other(e.to_string()));
+            let body_stream = mapped.map_err(|e| {
+                error!("Stream error: {}", e);
+                std::io::Error::other(e.to_string())
+            });
             Body::from_stream(trace_response_stream(
                 body_stream,
                 tracer_for_stream,
