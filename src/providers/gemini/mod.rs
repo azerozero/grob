@@ -25,7 +25,7 @@ use types::*;
 /// 3. Vertex AI (Google Cloud) - Uses Vertex AI API
 ///
 /// Shares credentials, transport and model matching with the other providers
-/// through [`ProviderBase`]; only the default URL per auth mode, the
+/// through `ProviderBase`; only the default URL per auth mode, the
 /// redirect-free client and the Vertex AI fields are Gemini-specific.
 pub struct GeminiProvider {
     base: ProviderBase,
