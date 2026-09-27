@@ -43,7 +43,7 @@ fn default_matrix_path() -> PathBuf {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpServerConfig {
     /// Enable the `/mcp` JSON-RPC endpoint.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub enabled: bool,
 }
 
@@ -144,10 +144,6 @@ pub struct ToolChain {
     pub min_score: f64,
     /// Provider fallback order.
     pub providers: Vec<String>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 #[cfg(test)]

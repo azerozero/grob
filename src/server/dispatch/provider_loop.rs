@@ -3,19 +3,19 @@
 //! The hot path of the dispatch pipeline. For each mapping in the sorted
 //! priority list this function:
 //!
-//! 1. Asks [`resolver::resolve_provider`] whether the mapping is usable
+//! 1. Asks [`resolver::resolve_provider`](super::resolver::resolve_provider) whether the mapping is usable
 //!    (registry + CB + RE-1a passive CB).
 //! 2. Checks the tenant / provider / model budget.
 //! 3. Emits the `RequestStart` event for `grob watch`.
 //! 4. Prepares the provider-specific request (model substitution, DLP,
 //!    continuation injection).
-//! 5. Dispatches a single attempt through [`retry::dispatch_streaming`] or
-//!    [`retry::dispatch_non_streaming`] depending on the request mode.
-//! 6. On `RateLimited` tries pool rotation via [`retry::try_rotate_and_retry`].
+//! 5. Dispatches a single attempt through [`retry::dispatch_streaming`](super::retry::dispatch_streaming) or
+//!    [`retry::dispatch_non_streaming`](super::retry::dispatch_non_streaming) depending on the request mode.
+//! 6. On `RateLimited` tries pool rotation via [`retry::try_rotate_and_retry`](super::retry::try_rotate_and_retry).
 //! 7. On `AuthRevoked` aborts the cascade (user-actionable 401).
 //! 8. Otherwise moves on to the next mapping.
 //!
-//! After the loop exhausts the list, [`resolver::try_direct_provider_lookup`]
+//! After the loop exhausts the list, [`resolver::try_direct_provider_lookup`](super::resolver::try_direct_provider_lookup)
 //! offers a backward-compat path for unmapped models. A final audit entry
 //! is written before returning `RequestError::ProviderUpstream`.
 

@@ -341,7 +341,7 @@ pub fn print_preset_info(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Merge preset sections (router, providers, models, security, compliance, dlp) into config, preserving [user].
+/// Merge preset sections (router, providers, models, security, compliance, dlp) into config, preserving `[user]`.
 fn merge_preset_into_config(
     config_table: &mut toml::map::Map<String, toml::Value>,
     preset_table: &toml::map::Map<String, toml::Value>,
@@ -366,7 +366,7 @@ fn merge_preset_into_config(
     }
 }
 
-/// Ensure the [server] section exists with sensible defaults.
+/// Ensure the `[server]` section exists with sensible defaults.
 fn ensure_server_defaults(config_table: &mut toml::map::Map<String, toml::Value>) {
     if !config_table.contains_key("server") {
         let mut server = toml::map::Map::new();

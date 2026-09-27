@@ -14,7 +14,7 @@
 //! | [`routing`] | Router rules, model mappings, fan-out, tiers, project overlays |
 //! | [`providers`] | Provider definitions, auth, key pools |
 //! | [`reliability`] | Circuit breaker and health check TOML views (`parse_duration`) |
-//! | [`harness`] | Record-and-replay harness (opt-in) |
+//! | `harness` | Record-and-replay harness (opt-in, `--features harness`) |
 //!
 //! All public types are re-exported at the crate root of [`crate::cli`] for
 //! backwards compatibility with existing call sites.
@@ -49,9 +49,3 @@ pub use security::{ComplianceConfig, EnforcementMode, FipsConfig, SecurityConfig
 pub use server::{AcmeConfig, ServerConfig, TimeoutConfig, TlsConfig};
 pub use telemetry::{MetricsConfig, OtelConfig, TracingConfig};
 pub use user::{PresetConfig, UserConfig};
-
-// Shared across security.rs and telemetry.rs (any serde `default = "..."`
-// path must resolve from the submodule's `super::`).
-pub(crate) fn default_true() -> bool {
-    true
-}

@@ -3,7 +3,7 @@
 use secrecy::SecretString;
 use serde::{Deserialize, Serialize};
 
-use super::default_true;
+use crate::shared::serde_defaults::default_true;
 
 /// Message tracing configuration
 #[derive(Debug, Clone, Deserialize, Serialize)]

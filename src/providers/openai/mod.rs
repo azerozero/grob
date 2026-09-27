@@ -632,7 +632,7 @@ fn process_codex_sse_event(
 }
 
 /// Transform a single OpenAI SSE event into Anthropic SSE format.
-/// Returns empty bytes for events that should be filtered out (empty, [DONE], post-end).
+/// Returns empty bytes for events that should be filtered out (empty, `[DONE]`, post-end).
 fn process_sse_event(
     data: &str,
     state: &std::sync::Arc<std::sync::Mutex<StreamTransformState>>,

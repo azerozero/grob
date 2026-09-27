@@ -169,10 +169,10 @@ pub async fn get_policy(
 
 /// Resolves which policy applies to a given request context.
 ///
-/// The `context` JSON is parsed into a [`RequestContext`]; missing fields
+/// The `context` JSON is parsed into a `RequestContext`; missing fields
 /// fall back to defaults (`""` for required string fields, `None` for
 /// optional ones). The matcher is invoked in evaluate mode; the merged
-/// [`ResolvedPolicy`] is projected to JSON for the response.
+/// `ResolvedPolicy` is projected to JSON for the response.
 ///
 /// # Errors
 ///
@@ -262,7 +262,7 @@ fn parse_request_context(value: &serde_json::Value) -> Result<RequestContext, Er
     })
 }
 
-/// Projects a [`ResolvedPolicy`] to JSON for transport. Each override
+/// Projects a `ResolvedPolicy` to JSON for transport. Each override
 /// field is reported as present/absent; the precise override shape is
 /// not currently part of the JSON-RPC contract (callers that need the
 /// full HIT/DLP/budget/log shape go through `policies/get_policy`).

@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ToolValidationConfig {
     /// Master switch. Enabled by default — malformed tools are stripped + logged.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub enabled: bool,
     /// When true, a malformed tool aborts the request with `400` instead of being
     /// stripped. Opt-in; the default is the non-fatal strip-and-log behaviour.
@@ -34,10 +34,6 @@ impl Default for ToolValidationConfig {
             reject: false,
         }
     }
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// Validates the well-formedness of every inbound tool on `request`.

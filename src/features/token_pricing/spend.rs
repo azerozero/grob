@@ -203,20 +203,6 @@ impl SpendTracker {
         self.data.by_model.get(model).copied().unwrap_or(0.0)
     }
 
-    /// Load spend for a specific tenant.
-    ///
-    /// # Errors
-    ///
-    /// Propagates a damaged-journal error from the store.
-    #[allow(dead_code)]
-    pub(crate) fn tenant_spend(&self, tenant: &str) -> anyhow::Result<SpendData> {
-        if let Some(ref store) = self.store {
-            store.load_tenant_spend(tenant)
-        } else {
-            Ok(SpendData::default())
-        }
-    }
-
     /// Persist spend data to disk
     pub fn save(&self) {
         if let Some(ref store) = self.store {

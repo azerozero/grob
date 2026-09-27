@@ -210,7 +210,7 @@ impl StorageCipher {
             .map_err(|e| anyhow::anyhow!("AES-GCM decryption failed: {}", e))
     }
 
-    /// Decrypts a blob produced by [`encrypt`].
+    /// Decrypts a blob produced by [`Self::encrypt`].
     ///
     /// Accepts both the current envelope (`MAGIC || VERSION || nonce ||
     /// ciphertext`) and the legacy bare-body form (`nonce || ciphertext`) so

@@ -315,7 +315,7 @@ impl AnthropicCompatibleProvider {
 /// OpenAI and Codex clients have no `cache_control` concept, so a request
 /// translated from those surfaces reaches Anthropic with no breakpoint and its
 /// large, stable system prompt is re-billed every turn. When
-/// [`RequestExtensions::inject_anthropic_cache`] is set, this places an
+/// [`RequestExtensions::inject_anthropic_cache`](crate::models::extensions::RequestExtensions::inject_anthropic_cache) is set, this places an
 /// ephemeral breakpoint on the last system block (caching the tools + system
 /// prefix). Anthropic-native requests leave the flag unset and keep full control
 /// of their own breakpoints; an existing breakpoint is always respected.

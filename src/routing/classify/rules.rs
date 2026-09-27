@@ -136,7 +136,7 @@ impl Router {
     }
 
     /// Extract subagent model from system prompt tag.
-    /// Checks for <GROB-SUBAGENT-MODEL>model-name</GROB-SUBAGENT-MODEL> in system[1].text
+    /// Checks for `<GROB-SUBAGENT-MODEL>model-name</GROB-SUBAGENT-MODEL>` in `system[1].text`
     /// and removes the tag after extraction.
     pub(super) fn extract_subagent_model(&self, request: &mut CanonicalRequest) -> Option<String> {
         let system = request.system.as_mut()?;

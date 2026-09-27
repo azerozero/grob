@@ -242,7 +242,7 @@ fn sanitize_with_circuit_breaker<'a>(
     result
 }
 
-/// Redact-only mode: replace any detected secret with [REDACTED] instead of canary.
+/// Redact-only mode: replace any detected secret with `[REDACTED]` instead of canary.
 fn redact_only<'a>(text: &'a str, engine: &Arc<DlpEngine>) -> Cow<'a, str> {
     let mut modified: Option<String> = None;
 
