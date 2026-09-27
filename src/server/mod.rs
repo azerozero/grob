@@ -19,7 +19,6 @@ mod handlers;
 pub(crate) mod helpers;
 mod init;
 mod lifecycle;
-/// MCP JSON-RPC handlers (Axum glue + self-tuning configuration).
 #[cfg(feature = "mcp")]
 pub(crate) mod mcp_handlers;
 mod middleware;

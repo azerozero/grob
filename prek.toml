@@ -81,13 +81,15 @@ types = ["toml"]
 pass_filenames = false
 stages = ["pre-push"]
 
-# Doc coverage — no undocumented public items
+# Doc coverage — no undocumented public items, no dead intra-doc links.
+# Private items are documented too: their links rotted unnoticed (22 broken)
+# while the public-only check stayed green.
 [[repos.hooks]]
 id = "cargo-doc-coverage"
 name = "cargo doc coverage"
 language = "system"
 entry = "sh"
-args = ["-c", "RUSTDOCFLAGS='-D missing-docs -D rustdoc::broken_intra_doc_links' cargo doc --no-deps"]
+args = ["-c", "RUSTDOCFLAGS='-D warnings -D missing-docs' cargo doc --no-deps --all-features --document-private-items"]
 types = ["rust"]
 pass_filenames = false
 stages = ["pre-push"]

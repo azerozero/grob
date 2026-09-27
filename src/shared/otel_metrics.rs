@@ -81,7 +81,7 @@ pub(crate) fn build_recorder(config: &crate::cli::OtelConfig) -> anyhow::Result<
 /// Cheap to clone — every field lives behind an [`Arc`], so a clone shares the
 /// same provider, instrument caches, and handle state. Cloning before handing
 /// one copy to the fan-out lets callers keep a probe for inspection (used in
-/// tests via [`OtelRecorder::instrument_count`]).
+/// tests via `OtelRecorder::instrument_count`).
 #[derive(Clone)]
 pub(crate) struct OtelRecorder {
     inner: Arc<Inner>,

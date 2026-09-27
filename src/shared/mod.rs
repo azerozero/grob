@@ -35,3 +35,4 @@ pub mod otel_metrics;
 pub mod pid;
 
 pub(crate) mod secret_file;
+pub(crate) mod serde_defaults;

@@ -9,10 +9,10 @@ pub struct DlpConfig {
     #[serde(default)]
     pub enabled: bool,
     /// Scans inbound prompts for secrets and PII.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub scan_input: bool,
     /// Scans model responses for secrets and PII.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub scan_output: bool,
     /// If non-empty, load and merge additional rules from this TOML file.
     #[serde(default)]
@@ -67,10 +67,6 @@ fn default_key_rotation_hours() -> u64 {
 
 fn default_auto_detect_cache_limit() -> usize {
     64
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// Gitleaks-style secret pattern rule.
@@ -135,10 +131,10 @@ impl Default for EntropyConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PiiConfig {
     /// Detect credit card numbers (Luhn-validated). Default: true.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub credit_cards: bool,
     /// Detect IBAN numbers (mod97-validated). Default: true.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub iban: bool,
     /// Detect BIC/SWIFT codes. Default: false (risk of false positives).
     #[serde(default)]
@@ -279,22 +275,22 @@ pub struct UrlExfilConfig {
     #[serde(default)]
     pub action: DlpAction,
     /// Scans Markdown image tags (`![](url)`) for data exfiltration.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub scan_markdown_images: bool,
     /// Scans Markdown link tags (`[text](url)`) for data exfiltration.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub scan_markdown_links: bool,
     /// Scans bare URLs outside Markdown syntax.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub scan_raw_urls: bool,
     /// Flags URLs whose query string exceeds `max_query_length`.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub flag_long_query_params: bool,
     /// Flags URLs containing base64-encoded segments in the path.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub flag_base64_in_path: bool,
     /// Flags `data:` URIs that may embed exfiltrated content.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub flag_data_uris: bool,
     /// Byte threshold for flagging long query parameters. Defaults to 200.
     #[serde(default = "default_max_query_length")]
@@ -352,10 +348,10 @@ pub struct PromptInjectionConfig {
     #[serde(default = "default_languages")]
     pub languages: Vec<String>,
     /// Scans LLM responses for indirect injection patterns.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub scan_responses: bool,
     /// Scans `tool_result` content blocks for indirect injection patterns.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub scan_tool_results: bool,
     /// Remediation action for indirect injection (responses and tool results).
     #[serde(default)]

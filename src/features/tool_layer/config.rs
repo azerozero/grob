@@ -24,7 +24,7 @@ pub struct ToolLayerConfig {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CapabilityEntry {
     /// Whether this provider supports function calling.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub tools_supported: bool,
     /// Optional set of model prefixes that lack tool support (e.g. `["o1"]`).
     #[serde(default)]
@@ -37,7 +37,7 @@ pub struct InjectRule {
     /// Canonical tool name to inject (must exist in the embedded catalog).
     pub tool: String,
     /// Only inject when no tool with this name is already present.
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub if_absent: bool,
 }
 
@@ -48,8 +48,4 @@ pub struct AliasRule {
     pub from: String,
     /// Canonical name in the catalog (e.g. "bash").
     pub to: String,
-}
-
-fn default_true() -> bool {
-    true
 }

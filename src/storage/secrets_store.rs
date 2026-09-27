@@ -1,6 +1,6 @@
 //! Named-secret persistence for [`crate::storage::GrobStore`] (upstream provider API keys).
 //!
-//! Distinct from [`super::secrets`], which defines the pluggable secret
+//! Distinct from [`super::secrets`](crate::storage::secrets), which defines the pluggable secret
 //! *backends*; this module is the on-disk AES-256-GCM store those backends
 //! (and direct callers) read and write through `GrobStore`.
 

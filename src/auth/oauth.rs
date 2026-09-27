@@ -16,7 +16,7 @@ fn is_localhost_url(url: &str) -> bool {
 }
 
 /// Google Gemini CLI public OAuth client ID (split to avoid secret scanners).
-/// Source: https://github.com/google-gemini/gemini-cli (public, installed-app type)
+/// Source: <https://github.com/google-gemini/gemini-cli> (public, installed-app type)
 fn gemini_default_client_id() -> String {
     [
         "681255809395",

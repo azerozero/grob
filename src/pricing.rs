@@ -162,9 +162,9 @@ pub static KNOWN_PRICING: &[ModelPricing] = &[
         input_per_million: 0.5,
         output_per_million: 1.5,
     },
-    // OpenAI reasoning models (o-series). Listed price excludes the
-    // reasoning-token surcharge — token billing infra (PR #TODO) adds the 3×
-    // multiplier on `reasoning_tokens` for accurate cost.
+    // OpenAI reasoning models (o-series). Prices are per token at the
+    // published output rate; reasoning tokens are billed as output tokens and
+    // no separate surcharge is applied.
     ModelPricing {
         model: "o1",
         input_per_million: 15.0,

@@ -148,7 +148,7 @@ fn apply_disable(
 
 /// Rebuilds reloadable state from a mutated config and atomically swaps
 /// it. Mirrors the helper used by `config_ns::set` and `server_ns::reload_config`.
-/// In-memory only — see [`tools/enable`] / [`tools/disable`] for rationale.
+/// In-memory only — see `tools/enable` / `tools/disable` for rationale.
 fn swap_state(
     state: &Arc<AppState>,
     new_config: crate::config::AppConfig,

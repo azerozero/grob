@@ -15,7 +15,7 @@ use super::AppState;
 /// Streams live dispatch events as Server-Sent Events.
 ///
 /// Clients connect to `GET /api/events` and receive a JSON-encoded
-/// [`WatchEvent`] per SSE `data:` line. A keep-alive ping is sent
+/// [`WatchEvent`](crate::features::watch::events::WatchEvent) per SSE `data:` line. A keep-alive ping is sent
 /// every 15 seconds to prevent proxy/load-balancer timeouts.
 pub(crate) async fn watch_events_sse(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let rx = state.event_bus.subscribe();

@@ -402,7 +402,7 @@ proptest! {
     }
 
     /// Sanitized output length is bounded: never more than input + a constant
-    /// (redaction markers like [REDACTED] or canary tokens have bounded size).
+    /// (redaction markers like `[REDACTED]` or canary tokens have bounded size).
     #[test]
     fn prop_sanitize_length_bounded(text in ".{0,500}") {
         let config = test_config();

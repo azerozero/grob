@@ -149,7 +149,7 @@ fn optional_string(value: &serde_json::Value) -> Result<Option<String>, ErrorObj
 /// Splits `key` at the first `.` into `(section, sub_key)`, validates the
 /// pair against [`is_section_or_key_denied`], then writes the JSON `value`
 /// into the matching field. The mutation contract mirrors
-/// [`crate::server::mcp_handlers::config::apply_config_update`] so that the
+/// `mcp_handlers::config::apply_config_update` (private to that module) so that the
 /// MCP and JSON-RPC self-tuning surfaces stay aligned (per #228 plan).
 ///
 /// Supported sections: `router`, `budget`, `cache`, `classifier`. The

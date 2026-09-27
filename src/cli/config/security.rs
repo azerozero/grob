@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::cli::BodySizeLimit;
 
-use super::default_true;
+use crate::shared::serde_defaults::default_true;
 
 /// Security configuration (wired into middleware stack)
 #[derive(Debug, Clone, Deserialize, Serialize)]

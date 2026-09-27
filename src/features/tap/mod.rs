@@ -25,7 +25,7 @@ pub struct TapConfig {
     #[serde(default = "default_timeout_ms")]
     pub timeout_ms: u64,
     /// Include request body in the tap payload
-    #[serde(default = "default_true")]
+    #[serde(default = "crate::shared::serde_defaults::default_true")]
     pub include_request: bool,
 }
 
@@ -35,10 +35,6 @@ fn default_buffer_size() -> usize {
 
 fn default_timeout_ms() -> u64 {
     5000
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// Events sent through the tap channel
