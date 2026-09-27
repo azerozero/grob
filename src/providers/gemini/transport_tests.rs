@@ -1,4 +1,6 @@
 use super::*;
+use secrecy::SecretString;
+use std::time::Duration;
 
 fn provider(base_url: &str) -> GeminiProvider {
     GeminiProvider::new(

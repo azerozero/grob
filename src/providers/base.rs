@@ -66,14 +66,12 @@ impl ProviderBase {
         self.pass_through || self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
     }
 
-    /// Resolves the auth token: OAuth refresh if configured, key pool if
-    /// available, otherwise the primary API key.
-    pub async fn resolve_auth(
-        &self,
-        config_fn: fn() -> OAuthConfig,
-    ) -> Result<zeroize::Zeroizing<String>, ProviderError> {
-        // When a key pool is configured, use its current key instead of the
-        // static api_key field. Round-robin pools advance on every call.
+    /// Selects the API key for this call and resolves secret references.
+    ///
+    /// When a key pool is configured its current key is used instead of the
+    /// static `api_key` field; round-robin pools advance on every call. The
+    /// result may be empty when the provider relies on OAuth instead.
+    pub fn resolve_api_key(&self) -> Result<SecretString, ProviderError> {
         let reference = if let Some(ref pool) = self.key_pool {
             if *pool.strategy() == crate::cli::PoolStrategy::RoundRobin {
                 pool.advance();
@@ -82,10 +80,23 @@ impl ProviderBase {
         } else {
             &self.api_key
         };
-        let effective_key = super::auth::resolve_api_key(
-            reference.expose_secret(),
-            self.secret_backend.as_deref(),
-        )?;
+        super::auth::resolve_api_key(reference.expose_secret(), self.secret_backend.as_deref())
+    }
+
+    /// Reports whether the key pool wants to rotate after an upstream error.
+    pub fn rotate_key_pool(&self) -> bool {
+        self.key_pool
+            .as_ref()
+            .is_some_and(|pool| pool.rotate_on_error())
+    }
+
+    /// Resolves the auth token: OAuth refresh if configured, key pool if
+    /// available, otherwise the primary API key.
+    pub async fn resolve_auth(
+        &self,
+        config_fn: fn() -> OAuthConfig,
+    ) -> Result<zeroize::Zeroizing<String>, ProviderError> {
+        let effective_key = self.resolve_api_key()?;
 
         if !effective_key.expose_secret().is_empty()
             || self.oauth_provider.is_some()

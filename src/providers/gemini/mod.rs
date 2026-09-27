@@ -6,45 +6,32 @@ mod transform;
 mod transport_tests;
 pub(crate) mod types;
 
+use super::base::ProviderBase;
 use super::{
-    error::is_context_window_exceeded_message, key_pool::KeyPool, provider_client_builder,
-    LlmProvider, ProviderError, ProviderResponse, StreamResponse,
+    error::is_context_window_exceeded_message, provider_client_builder, LlmProvider, ProviderError,
+    ProviderResponse, StreamResponse,
 };
-use crate::auth::{OAuthConfig, TokenStore};
+use crate::auth::OAuthConfig;
 use crate::models::CanonicalRequest;
 use crate::shared::credential_transport;
 use async_trait::async_trait;
-use reqwest::Client;
-use secrecy::{ExposeSecret, SecretString};
+use secrecy::ExposeSecret;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
 use types::*;
-
-// NOTE: GeminiProvider does not use ProviderBase because it has a fundamentally
-// different auth model (Option<api_key>, HashMap headers, Vertex AI fields).
 
 /// Google Gemini provider supporting three authentication methods:
 /// 1. OAuth 2.0 (Google AI Pro/Ultra) - Uses Code Assist API
 /// 2. API Key (Google AI Studio) - Uses public Gemini API
 /// 3. Vertex AI (Google Cloud) - Uses Vertex AI API
+///
+/// Shares credentials, transport and model matching with the other providers
+/// through `ProviderBase`; only the default URL per auth mode, the
+/// redirect-free client and the Vertex AI fields are Gemini-specific.
 pub struct GeminiProvider {
-    api_key: Option<SecretString>,
-    secret_backend: Option<Arc<dyn crate::storage::secrets::SecretBackend>>,
-    base_url: String,
-    models: Vec<String>,
-    client: Client,
-    custom_headers: HashMap<String, String>,
+    base: ProviderBase,
     // Vertex AI fields
     project_id: Option<String>,
     location: Option<String>,
-    // OAuth fields
-    oauth_provider: Option<String>,
-    token_store: Option<TokenStore>,
-    /// Per-request timeout from server config
-    api_timeout: Duration,
-    pass_through: bool,
-    key_pool: Option<Arc<KeyPool>>,
 }
 
 /// Max retries for Gemini 429 rate-limit errors (higher than default because
@@ -63,18 +50,12 @@ struct PreparedRequest {
 impl GeminiProvider {
     /// Creates a Gemini provider with custom headers and optional Vertex AI fields.
     pub fn new(
-        params: super::ProviderParams,
+        mut params: super::ProviderParams,
         custom_headers: HashMap<String, String>,
         project_id: Option<String>,
         location: Option<String>,
     ) -> Self {
-        let api_key = if params.api_key.expose_secret().is_empty() {
-            None
-        } else {
-            Some(params.api_key)
-        };
-
-        let base_url = params.base_url.unwrap_or_else(|| {
+        let base_url = params.base_url.take().unwrap_or_else(|| {
             if params.oauth_provider.is_some() {
                 "https://cloudcode-pa.googleapis.com/v1internal".to_string()
             } else if project_id.is_some() && location.is_some() {
@@ -86,33 +67,31 @@ impl GeminiProvider {
                 "https://generativelanguage.googleapis.com/v1beta".to_string()
             }
         });
+        params.base_url = Some(base_url);
 
-        let client =
-            provider_client_builder(params.connect_timeout, params.tls_identity, params.tls_ca)
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("Failed to build Gemini HTTP client");
-        let key_pool = params.key_pool;
+        // Gemini must never follow a redirect: the API key travels in a
+        // header and a redirect could hand it to another origin.
+        let client = provider_client_builder(
+            params.connect_timeout,
+            params.tls_identity.take(),
+            params.tls_ca.take(),
+        )
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("Failed to build Gemini HTTP client");
+
+        let mut base = ProviderBase::new(params, custom_headers.into_iter().collect());
+        base.client = client;
         Self {
-            secret_backend: params.secret_backend,
-            api_key,
-            base_url,
-            models: params.models,
-            client,
-            custom_headers,
+            base,
             project_id,
             location,
-            oauth_provider: params.oauth_provider,
-            token_store: params.token_store,
-            api_timeout: params.api_timeout,
-            pass_through: params.pass_through,
-            key_pool,
         }
     }
 
     /// Check if this provider uses OAuth (Code Assist API)
     fn is_oauth(&self) -> bool {
-        self.oauth_provider.is_some() && self.token_store.is_some()
+        self.base.is_oauth()
     }
 
     /// Check if this provider uses Vertex AI
@@ -127,10 +106,10 @@ impl GeminiProvider {
     }
 
     async fn auth_header(&self) -> Result<Option<zeroize::Zeroizing<String>>, ProviderError> {
-        if self.oauth_provider.is_some() {
+        if self.base.oauth_provider.is_some() {
             let token = super::auth::resolve_access_token(
-                self.oauth_provider.as_deref(),
-                self.token_store.as_ref(),
+                self.base.oauth_provider.as_deref(),
+                self.base.token_store.as_ref(),
                 OAuthConfig::gemini,
                 "",
             )
@@ -204,7 +183,7 @@ impl GeminiProvider {
         request: &CanonicalRequest,
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
-        credential_transport::validate_endpoint(&self.base_url)
+        credential_transport::validate_endpoint(&self.base.base_url)
             .map_err(|reason| ProviderError::ConfigError(reason.to_string()))?;
         let supports_tools = self.supports_tools(&request.model);
         let gemini_request = transform::transform_request(request, supports_tools)?;
@@ -231,9 +210,10 @@ impl GeminiProvider {
         })?;
 
         let project_id = self
+            .base
             .oauth_provider
             .as_ref()
-            .zip(self.token_store.as_ref())
+            .zip(self.base.token_store.as_ref())
             .and_then(|(prov, store)| store.get(prov).and_then(|t| t.project_id.clone()));
 
         if project_id.is_none() {
@@ -261,7 +241,7 @@ impl GeminiProvider {
         } else {
             ":generateContent"
         };
-        let url = format!("{}{}", self.base_url, suffix);
+        let url = format!("{}{}", self.base.base_url, suffix);
 
         tracing::debug!(
             "🔐 Using OAuth Code Assist API{}: {}",
@@ -306,7 +286,7 @@ impl GeminiProvider {
         let (action, alt_sse) = Self::url_parts(streaming);
         let url = format!(
             "{}/projects/{}/locations/{}/publishers/google/models/{}:{}{}",
-            self.base_url, project, location, request.model, action, alt_sse
+            self.base.base_url, project, location, request.model, action, alt_sse
         );
 
         if streaming {
@@ -323,27 +303,18 @@ impl GeminiProvider {
         gemini_request: GeminiRequest,
         streaming: bool,
     ) -> Result<PreparedRequest, ProviderError> {
-        // Use key pool if available, otherwise fall back to static api_key.
-        let reference = if let Some(pool) = &self.key_pool {
-            if *pool.strategy() == crate::cli::PoolStrategy::RoundRobin {
-                pool.advance();
-            }
-            pool.current_key()
-        } else {
-            self.api_key.as_ref().ok_or_else(|| {
-                ProviderError::ConfigError("Gemini requires an API credential".into())
-            })?
-        };
-        let key = super::auth::resolve_api_key(
-            reference.expose_secret(),
-            self.secret_backend.as_deref(),
-        )?;
+        let key = self.base.resolve_api_key()?;
         let key_str = key.expose_secret();
+        if key_str.is_empty() {
+            return Err(ProviderError::ConfigError(
+                "Gemini requires an API credential".into(),
+            ));
+        }
 
         let (action, alt_sse) = Self::url_parts(streaming);
         let url = format!(
             "{}/models/{}:{}{}",
-            self.base_url, request.model, action, alt_sse
+            self.base.base_url, request.model, action, alt_sse
         );
 
         if streaming {
@@ -390,6 +361,7 @@ impl GeminiProvider {
         prep: &PreparedRequest,
     ) -> Result<reqwest::RequestBuilder, ProviderError> {
         let mut req_builder = self
+            .base
             .client
             .post(&prep.url)
             .header("Content-Type", "application/json");
@@ -404,11 +376,10 @@ impl GeminiProvider {
             req_builder = req_builder.header("x-goog-api-key", api_key);
         }
 
-        let headers =
-            super::auth::resolve_headers(&self.custom_headers, self.secret_backend.as_deref())?;
-        Ok(req_builder
-            .headers(headers)
-            .timeout(self.api_timeout)
+        Ok(self
+            .base
+            .apply_headers(req_builder)?
+            .timeout(self.base.api_timeout)
             .json(&prep.body))
     }
 
@@ -480,9 +451,11 @@ impl LlmProvider for GeminiProvider {
         let is_oauth = prep.is_oauth;
 
         // Clone data for the retry closure
-        let client = self.client.clone();
-        let custom_headers =
-            super::auth::resolve_headers(&self.custom_headers, self.secret_backend.as_deref())?;
+        let client = self.base.client.clone();
+        let custom_headers = super::auth::resolve_headers(
+            self.base.custom_headers.iter().map(|(k, v)| (k, v)),
+            self.base.secret_backend.as_deref(),
+        )?;
         let auth_header = prep
             .auth_header
             .as_ref()
@@ -491,7 +464,7 @@ impl LlmProvider for GeminiProvider {
         let api_key = prep.api_key;
         let body = prep.body;
         let url = prep.url;
-        let api_timeout = self.api_timeout;
+        let api_timeout = self.base.api_timeout;
 
         let response = self
             .handle_rate_limit_retry(
@@ -556,17 +529,15 @@ impl LlmProvider for GeminiProvider {
     }
 
     fn supports_model(&self, model: &str) -> bool {
-        self.pass_through || self.models.iter().any(|m| m.eq_ignore_ascii_case(model))
+        self.base.supports_model(model)
     }
 
     fn base_url(&self) -> Option<&str> {
-        Some(&self.base_url)
+        Some(&self.base.base_url)
     }
 
     fn rotate_key_pool(&self) -> bool {
-        self.key_pool
-            .as_ref()
-            .is_some_and(|pool| pool.rotate_on_error())
+        self.base.rotate_key_pool()
     }
 }
 
@@ -574,6 +545,7 @@ impl LlmProvider for GeminiProvider {
 mod tests {
     use super::*;
     use crate::models::{ContentBlock, Tool};
+    use std::time::Duration;
 
     #[test]
     fn test_parse_retry_delay_seconds() {
