@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.120](https://github.com/azerozero/grob/compare/v0.36.119...v0.36.120) - 2026-09-27
+
+### Other
+
+- compose GeminiProvider from ProviderBase and split the two oversized modules ([#625](https://github.com/azerozero/grob/pull/625))
+- *(e2e)* rewrite audit journal tests against the real format and gate them in CI ([#624](https://github.com/azerozero/grob/pull/624))
+
 ## [0.36.119](https://github.com/azerozero/grob/compare/v0.36.118...v0.36.119) - 2026-09-27
 
 ### Fixed
