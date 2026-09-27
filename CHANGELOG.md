@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.118](https://github.com/azerozero/grob/compare/v0.36.117...v0.36.118) - 2026-09-27
+
+### Fixed
+
+- *(ci)* unblock container publication and validate every main run ([#619](https://github.com/azerozero/grob/pull/619))
+
+### Other
+
+- fix private intra-doc links, drop dead code and duplicate defaults ([#620](https://github.com/azerozero/grob/pull/620))
+
 ## [0.36.117](https://github.com/azerozero/grob/compare/v0.36.116...v0.36.117) - 2026-09-26
 
 ### Fixed
