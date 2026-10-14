@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.125](https://github.com/azerozero/grob/compare/v0.36.124...v0.36.125) - 2026-10-14
+
+### Added
+
+- *(effort)* carry the client's effort level to Codex and Anthropic backends ([#644](https://github.com/azerozero/grob/pull/644))
+
+### Other
+
+- skip the no-commit-to-branch hook in the prek gate ([#641](https://github.com/azerozero/grob/pull/641))
+
 ## [0.36.124](https://github.com/azerozero/grob/compare/v0.36.123...v0.36.124) - 2026-10-14
 
 ### Fixed
