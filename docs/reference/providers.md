@@ -66,6 +66,8 @@ Translates between Anthropic canonical format and OpenAI Chat Completions API. A
 
 **Extension fields**: OpenAI-specific fields (`response_format`, `reasoning_effort`, `seed`, `frequency_penalty`, `presence_penalty`, `parallel_tool_calls`, `user`, `logprobs`, `top_logprobs`, `service_tier`) are preserved in `RequestExtensions` and restored on the outbound request.
 
+**Effort**: `reasoning_effort` is shared across providers. A `/v1/messages` `output_config.effort` feeds it, a Codex `reasoning.effort` feeds it, and each backend receives it in its own vocabulary (`src/models/effort.rs`): `max`/`ultra` clamp to `xhigh` on gpt-5 models, `minimal` becomes `low` and `ultra` becomes `max` on Anthropic. Native `/v1/messages` fields without a canonical slot (`output_config`, `context_management`, `thinking.display`) are forwarded unchanged to `api.anthropic.com` and dropped for other Anthropic-compatible backends.
+
 **Streaming** (`src/providers/openai/streaming.rs`):
 Converts OpenAI SSE chunks to Anthropic SSE format using stateful `StreamTransformState`. Key mappings:
 - First chunk triggers `message_start`

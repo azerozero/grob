@@ -5,6 +5,8 @@
 //! structs whose modules depend on these core types, which would otherwise form
 //! a `models → features → models` cycle.
 
+/// Reasoning-effort translation between the Codex and Anthropic vocabularies.
+pub mod effort;
 /// Provider-specific request extensions for lossless roundtrips.
 pub mod extensions;
 /// Spend tracking data types shared between storage and pricing.

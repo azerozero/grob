@@ -87,10 +87,11 @@ pub struct ProviderConfig {
     pub pass_through: Option<bool>,
 
     /// Forces a Codex reasoning effort (`"minimal"`, `"low"`, `"medium"`,
-    /// `"high"`, `"xhigh"`) for this provider, overriding the per-request
-    /// auto-mapping. The value is sent verbatim — the backend validates it — so
-    /// newer tiers work without a grob release. Only affects the OpenAI
-    /// Responses (Codex) path. Lower effort cuts latency.
+    /// `"high"`, `"xhigh"`, and `"max"` / `"ultra"` on the gpt-6 line) for this
+    /// provider, overriding the per-request effort. The value is sent as-is
+    /// except that `max`/`ultra` clamp to `xhigh` on gpt-5 models, which reject
+    /// them; newer tiers otherwise work without a grob release. Only affects the
+    /// OpenAI Responses (Codex) path. Lower effort cuts latency.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
 

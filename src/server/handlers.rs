@@ -461,6 +461,42 @@ pub(crate) fn enforce_allowed_models(
     }
 }
 
+/// Keeps the native `/v1/messages` fields that [`CanonicalRequest`] cannot hold.
+///
+/// Serde drops unknown top-level keys at the parse, which silently discarded
+/// Claude Code's `output_config.effort`, `context_management` and the
+/// `display` key inside `thinking`. The raw `thinking` object rides along for
+/// that last one. The Anthropic provider merges the map back into the outbound
+/// body; see [`RequestExtensions::anthropic_passthrough`].
+///
+/// [`RequestExtensions::anthropic_passthrough`]: crate::models::extensions::RequestExtensions::anthropic_passthrough
+fn collect_anthropic_passthrough(
+    body: &serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    const CANONICAL: [&str; 12] = [
+        "model",
+        "messages",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "top_k",
+        "stop_sequences",
+        "stream",
+        "metadata",
+        "system",
+        "tools",
+        "tool_choice",
+    ];
+    body.as_object()
+        .map(|o| {
+            o.iter()
+                .filter(|(k, _)| !CANONICAL.contains(&k.as_str()))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// Forwards the `anthropic-beta` header into the canonical request extensions.
 fn forward_beta_header(request: &mut CanonicalRequest, headers: &HeaderMap) {
     request.extensions.client_beta = headers
@@ -921,11 +957,21 @@ pub(crate) async fn handle_messages(
         }
     }
 
+    let passthrough = collect_anthropic_passthrough(&request_json);
     let mut request: CanonicalRequest = serde_json::from_value(request_json).map_err(|e| {
         tracing::error!("❌ Failed to parse request: {}", e);
         RequestError::ParseError(format!("Invalid request format: {}", e))
     })?;
     forward_beta_header(&mut request, &headers);
+    // Claude Code's `/effort` arrives as `output_config.effort`. Exposing it as
+    // the generic effort lets the Codex path honour it instead of its flat
+    // default, and the Anthropic provider re-emits it as `output_config`.
+    request.extensions.reasoning_effort = passthrough
+        .get("output_config")
+        .and_then(|c| c.get("effort"))
+        .and_then(|e| e.as_str())
+        .map(str::to_string);
+    request.extensions.anthropic_passthrough = passthrough;
 
     let is_streaming = request.stream == Some(true);
 
@@ -1123,6 +1169,30 @@ fn evaluate_policy_if_configured(
         estimated_cost: 0.0,
     };
     Some(matcher.evaluate(&ctx))
+}
+
+#[cfg(test)]
+mod passthrough_tests {
+    use super::collect_anthropic_passthrough;
+    use serde_json::json;
+
+    #[test]
+    fn keeps_only_what_the_canonical_request_drops() {
+        let body = json!({
+            "model": "claude-fable-5-1",
+            "max_tokens": 8,
+            "messages": [],
+            "thinking": { "type": "adaptive", "display": "omitted" },
+            "output_config": { "effort": "xhigh" },
+            "context_management": { "edits": [] }
+        });
+        let kept = collect_anthropic_passthrough(&body);
+        let mut keys: Vec<_> = kept.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["context_management", "output_config", "thinking"]);
+        assert_eq!(kept["thinking"]["display"], "omitted");
+        assert!(collect_anthropic_passthrough(&json!("not an object")).is_empty());
+    }
 }
 
 #[cfg(test)]
