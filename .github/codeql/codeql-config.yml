@@ -1,0 +1,19 @@
+# CodeQL analysis scope. Referenced from .github/workflows/codeql.yml.
+#
+# CodeQL has no inline `codeql[...]` suppression for Rust, so recurring
+# false positives can only be filtered here. Dismissing an alert in the UI
+# is bound to a code location: the same finding comes back as soon as the
+# code moves.
+
+# Benches deliberately disable TLS verification and hit arbitrary URLs;
+# tests log request bodies on purpose. Neither ships in the binary.
+paths-ignore:
+  - benches
+  - tests
+
+query-filters:
+  # Every filesystem path in grob is rooted at grob_home() (HOME / GROB_HOME)
+  # plus a fixed name or a hash, so the "user-provided value" is always the
+  # operator's own data directory. 6 of 6 alerts dismissed as false positive.
+  - exclude:
+      id: rust/path-injection
