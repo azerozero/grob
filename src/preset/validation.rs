@@ -152,10 +152,14 @@ async fn validate_provider_mapping(
     }
 }
 
-/// Validates router models (default/think/background/websearch) by sending a minimal request to each provider mapping in parallel.
+/// Validates router models, plus every `[[models]]` entry when `all_models` is set.
+///
+/// Startup and reload probes pass `false` to keep upstream calls to the four
+/// router roles; `grob validate` passes `true` so explicit aliases are tested too.
 pub async fn validate_config(
     config: &AppConfig,
     registry: &ProviderRegistry,
+    all_models: bool,
 ) -> Vec<ModelValidation> {
     // Collect router models to test
     let mut models_to_test: Vec<(&str, &str)> = vec![(&config.router.default, "default")];
@@ -167,6 +171,9 @@ pub async fn validate_config(
     }
     if let Some(ref m) = config.router.websearch {
         models_to_test.push((m, "websearch"));
+    }
+    if all_models {
+        models_to_test.extend(config.models.iter().map(|m| (m.name.as_str(), "model")));
     }
 
     // Deduplicate (a model can be used for multiple roles)

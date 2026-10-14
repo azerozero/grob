@@ -247,7 +247,7 @@ pub(crate) async fn reload_config(State(state): State<Arc<AppState>>) -> Respons
 pub(crate) fn spawn_health_probe(config: AppConfig, registry: Arc<ProviderRegistry>) {
     tokio::spawn(async move {
         info!("🔍 Probing reloaded config provider health...");
-        let results = crate::preset::validate_config(&config, &registry).await;
+        let results = crate::preset::validate_config(&config, &registry, false).await;
         crate::preset::log_validation_results(&results);
 
         let total = results.len();

@@ -20,7 +20,7 @@ pub async fn cmd_validate(config: &cli::AppConfig) -> anyhow::Result<()> {
     );
     println!();
 
-    let results = preset::validate_config(config, &registry).await;
+    let results = preset::validate_config(config, &registry, true).await;
     preset::print_validation_results(&results);
     Ok(())
 }

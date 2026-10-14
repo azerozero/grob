@@ -85,7 +85,7 @@ pub(crate) async fn init_core_services(
         let registry_ref = provider_registry.clone();
         tokio::spawn(async move {
             info!("🔍 Validating providers and models...");
-            let results = crate::preset::validate_config(&config_ref, &registry_ref).await;
+            let results = crate::preset::validate_config(&config_ref, &registry_ref, false).await;
             crate::preset::log_validation_results(&results);
 
             let total = results.len();
