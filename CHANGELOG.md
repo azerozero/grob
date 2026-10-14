@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.124](https://github.com/azerozero/grob/compare/v0.36.123...v0.36.124) - 2026-10-14
+
+### Fixed
+
+- *(deps)* bump rustls to 0.23.46 for RUSTSEC-2026-0346..0349 ([#642](https://github.com/azerozero/grob/pull/642))
+
 ## [0.36.123](https://github.com/azerozero/grob/compare/v0.36.122...v0.36.123) - 2026-10-14
 
 ### Added
