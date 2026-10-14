@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.123](https://github.com/azerozero/grob/compare/v0.36.122...v0.36.123) - 2026-10-14
+
+### Added
+
+- *(pricing)* price the Claude 5 family and validate every configured model ([#634](https://github.com/azerozero/grob/pull/634))
+
 ## [0.36.122](https://github.com/azerozero/grob/compare/v0.36.121...v0.36.122) - 2026-10-14
 
 ### Fixed
