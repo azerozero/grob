@@ -71,8 +71,54 @@ impl ModelPricing {
 /// Known model pricing (USD) — fallback for models not available on OpenRouter.
 pub static KNOWN_PRICING: &[ModelPricing] = &[
     // -----------------------------------------------------------------
+    // Anthropic — Claude 5 family (Oct 2026). Point releases precede their
+    // base id because the substring fallback in `pricing()` scans in order.
+    // Haiku 5.5 is $0.10/$0.50 up to 100K input tokens ($0.50/$2.50 beyond);
+    // the static table keeps the base tier.
+    // -----------------------------------------------------------------
+    ModelPricing {
+        model: "claude-fable-5-1",
+        input_per_million: 10.0,
+        output_per_million: 50.0,
+    },
+    ModelPricing {
+        model: "claude-fable-5",
+        input_per_million: 10.0,
+        output_per_million: 50.0,
+    },
+    ModelPricing {
+        model: "claude-opus-5-5",
+        input_per_million: 4.0,
+        output_per_million: 20.0,
+    },
+    ModelPricing {
+        model: "claude-opus-5",
+        input_per_million: 5.0,
+        output_per_million: 25.0,
+    },
+    ModelPricing {
+        model: "claude-sonnet-5-5",
+        input_per_million: 2.0,
+        output_per_million: 10.0,
+    },
+    ModelPricing {
+        model: "claude-sonnet-5",
+        input_per_million: 2.0,
+        output_per_million: 10.0,
+    },
+    ModelPricing {
+        model: "claude-haiku-5-5",
+        input_per_million: 0.1,
+        output_per_million: 0.5,
+    },
+    // -----------------------------------------------------------------
     // Anthropic — Opus 4.6+ moved to $5/$25 (was $15/$75 on 4.5 and earlier).
     // -----------------------------------------------------------------
+    ModelPricing {
+        model: "claude-opus-4-8",
+        input_per_million: 5.0,
+        output_per_million: 25.0,
+    },
     ModelPricing {
         model: "claude-opus-4-7",
         input_per_million: 5.0,
@@ -406,6 +452,20 @@ mod tests {
         let p = pricing("claude-opus-4-7").expect("opus 4.7 listed");
         assert_eq!(p.input_per_million, 5.0);
         assert_eq!(p.output_per_million, 25.0);
+    }
+
+    #[test]
+    fn claude_5_point_releases_win_over_base_id_in_substring_fallback() {
+        // A suffixed id misses the exact map and falls back to the ordered
+        // substring scan; `claude-opus-5-5-x` also contains `claude-opus-5`.
+        let p = pricing("claude-opus-5-5-preview").expect("opus 5.5 listed");
+        assert_eq!(p.input_per_million, 4.0);
+        let p = pricing("claude-opus-5-preview").expect("opus 5 listed");
+        assert_eq!(p.input_per_million, 5.0);
+        let p = pricing("claude-fable-5-1").expect("fable 5.1 listed");
+        assert_eq!(p.output_per_million, 50.0);
+        let p = pricing("claude-haiku-5-5").expect("haiku 5.5 listed");
+        assert_eq!(p.input_per_million, 0.1);
     }
 
     #[test]

@@ -382,6 +382,8 @@ const MODEL_MAX_TOKENS_CONTAINS: &[(&str, u32)] = &[
     ("gemini-1.5", 8_192),       // Gemini 1.5
     ("gemini-1.0", 8_192),       // Gemini 1.0
     ("claude-opus", 16_384),     // Claude 4.x Opus (up to 128k with extended output)
+    ("claude-fable", 16_384),    // Claude Fable 5.x (up to 128k when streaming)
+    ("claude-sonnet-5", 16_384), // Claude 5.x Sonnet
     ("claude-sonnet-4", 16_384), // Claude 4.x Sonnet
     ("claude-3.5", 8_192),       // Claude 3.5
     ("claude-3-5", 8_192),       // Claude 3.5 (alternate naming)
@@ -428,6 +430,9 @@ mod tests {
         assert_eq!(default_max_tokens("claude-sonnet-4-6"), 16384);
         assert_eq!(default_max_tokens("claude-sonnet-4-5-20250514"), 16384);
         assert_eq!(default_max_tokens("claude-haiku-4-5"), 8192);
+        assert_eq!(default_max_tokens("claude-fable-5-1"), 16384);
+        assert_eq!(default_max_tokens("claude-sonnet-5-5"), 16384);
+        assert_eq!(default_max_tokens("claude-opus-5-5"), 16384);
         assert_eq!(default_max_tokens("claude-3.5-sonnet-20241022"), 8192);
         assert_eq!(default_max_tokens("claude-3-5-sonnet-20241022"), 8192);
         assert_eq!(default_max_tokens("claude-3-opus-20240229"), 4096);
