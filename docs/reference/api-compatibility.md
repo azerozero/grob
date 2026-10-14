@@ -46,6 +46,11 @@ The native endpoint. Requests pass through the dispatch pipeline with no format 
 | `tools` | array | no | Tool definitions for function calling |
 | `tool_choice` | object | no | Tool selection strategy |
 | `metadata` | object | no | Request metadata (e.g., `user_id`) |
+| `output_config` | object | no | Effort level (`output_config.effort`: `low` … `max`) |
+| `thinking` | object | no | Thinking configuration, including `display` |
+| `context_management` | object | no | Context editing (tool-call clearing) |
+
+The last three, and any other top-level field grob has no canonical slot for, are forwarded unchanged to `api.anthropic.com` only. `output_config.effort` additionally drives the effort sent to a Codex backend when the request is routed there (see [Effort translation](#effort-translation)).
 
 ### Response format
 
@@ -453,9 +458,23 @@ Other Anthropic events (e.g. `ping`, `message_delta`) are silently skipped.
 
 | Effort value | Description |
 |-------------|-------------|
-| `"low"` | Minimal reasoning |
+| `"minimal"` / `"low"` | Minimal reasoning |
 | `"medium"` | Balanced reasoning |
 | `"high"` | Deep reasoning (extended thinking) |
+| `"xhigh"` | Deepest tier on the gpt-5 line |
+| `"max"` / `"ultra"` | gpt-6 line only; clamped to `xhigh` on gpt-5 models |
+
+### Effort translation
+
+Effort crosses providers in both directions, so a client keeps its setting whichever backend the route picks:
+
+| Client sends | Codex backend receives | Anthropic backend receives |
+|--------------|------------------------|----------------------------|
+| `/v1/messages` `output_config.effort` (Claude Code `/effort`) | `reasoning.effort`, same value, `max`/`ultra` → `xhigh` on gpt-5 | `output_config.effort` verbatim |
+| `/v1/responses` `reasoning.effort` (Codex CLI) | verbatim, same clamp | `output_config.effort`, `minimal` → `low`, `ultra` → `max` |
+| nothing | provider default (`xhigh` for `priority_models`) | model default |
+
+Anthropic models older than Opus/Sonnet 4.6 (`claude-haiku-4-5`, `claude-opus-4-1`, Claude 3.x) reject `output_config`, so no effort is sent to them.
 
 ---
 

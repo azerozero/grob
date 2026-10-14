@@ -175,6 +175,7 @@ impl AnthropicCompatibleProvider {
         auth_value: &str,
         request: &CanonicalRequest,
     ) -> Result<reqwest::Response, ProviderError> {
+        let body = outbound_body(request, self.base.base_url.contains(ANTHROPIC_DOMAIN))?;
         // Wire-debug: verbatim outbound body (canonical == Anthropic shape).
         // Enabled by `log_level = "debug"`; pairs with the inbound `📥` log.
         if tracing::event_enabled!(tracing::Level::DEBUG) {
@@ -182,13 +183,13 @@ impl AnthropicCompatibleProvider {
                 target: "grob::wire",
                 "📤 Outbound to {}:\n{}",
                 url,
-                serde_json::to_string_pretty(request).unwrap_or_default()
+                serde_json::to_string_pretty(&body).unwrap_or_default()
             );
         }
         let response = self
             .build_anthropic_request(url, auth_value, request.extensions.client_beta.as_deref())?
             .timeout(self.base.api_timeout)
-            .json(request)
+            .json(&body)
             .send()
             .await?;
 
@@ -311,6 +312,48 @@ impl AnthropicCompatibleProvider {
         let auth_value = self.base.resolve_auth(OAuthConfig::anthropic).await?;
         Ok((auth_value, is_anthropic, id_map))
     }
+}
+
+/// Builds the outbound JSON body for `request`.
+///
+/// For api.anthropic.com the native fields serde dropped at the inbound parse
+/// ([`RequestExtensions::anthropic_passthrough`]) are merged back, and an
+/// effort that arrived in the Codex vocabulary (a Codex CLI client, or the
+/// provider's forced effort) becomes `output_config.effort`. Both only when
+/// the resolved model takes an effort: a request mapped onto an older Claude
+/// would otherwise 400. Other Anthropic-compatible backends get the canonical
+/// shape only, since they reject fields they do not know.
+///
+/// [`RequestExtensions::anthropic_passthrough`]: crate::models::extensions::RequestExtensions::anthropic_passthrough
+fn outbound_body(
+    request: &CanonicalRequest,
+    is_anthropic: bool,
+) -> Result<serde_json::Value, ProviderError> {
+    let mut body = serde_json::to_value(request)?;
+    if !is_anthropic {
+        return Ok(body);
+    }
+    let Some(obj) = body.as_object_mut() else {
+        return Ok(body);
+    };
+    let passthrough = &request.extensions.anthropic_passthrough;
+    for (key, value) in passthrough {
+        if key != "output_config" {
+            obj.insert(key.clone(), value.clone());
+        }
+    }
+    if crate::models::effort::anthropic_supports_effort(&request.model) {
+        if let Some(config) = passthrough.get("output_config") {
+            obj.insert("output_config".to_string(), config.clone());
+        } else if let Some(effort) = request.extensions.reasoning_effort.as_deref() {
+            let effort = crate::models::effort::to_anthropic(effort);
+            obj.insert(
+                "output_config".to_string(),
+                serde_json::json!({ "effort": effort }),
+            );
+        }
+    }
+    Ok(body)
 }
 
 /// Prefixes the system prompt with the Claude Code identity line on OAuth requests.
@@ -568,5 +611,49 @@ mod tests {
         let mut already = request(Some(SystemPrompt::Text(original.clone())));
         inject_claude_code_identity(&mut already);
         assert!(matches!(already.system, Some(SystemPrompt::Text(ref t)) if *t == original));
+    }
+
+    #[test]
+    fn outbound_body_restores_native_fields_and_translates_effort() {
+        // Claude Code: its own output_config, thinking.display and
+        // context_management reach Anthropic verbatim.
+        let mut native = request(None);
+        native.extensions.reasoning_effort = Some("xhigh".to_string());
+        native.extensions.anthropic_passthrough = serde_json::json!({
+            "output_config": { "effort": "xhigh" },
+            "thinking": { "type": "adaptive", "display": "omitted" },
+            "context_management": { "edits": [] }
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+        let body = outbound_body(&native, true).unwrap();
+        assert_eq!(body["output_config"]["effort"], "xhigh");
+        assert_eq!(body["thinking"]["display"], "omitted");
+        assert!(body["context_management"].is_object());
+
+        // Codex CLI at `ultra` landing on Claude: translated into the
+        // Anthropic vocabulary, nothing else added.
+        let mut codex = request(None);
+        codex.extensions.reasoning_effort = Some("ultra".to_string());
+        let body = outbound_body(&codex, true).unwrap();
+        assert_eq!(
+            body["output_config"],
+            serde_json::json!({ "effort": "max" })
+        );
+        assert!(body.get("context_management").is_none());
+
+        // A model without effort support never receives output_config.
+        let mut old = request(None);
+        old.model = "claude-haiku-4-5".to_string();
+        old.extensions.reasoning_effort = Some("high".to_string());
+        old.extensions.anthropic_passthrough = codex.extensions.anthropic_passthrough.clone();
+        let body = outbound_body(&old, true).unwrap();
+        assert!(body.get("output_config").is_none());
+
+        // Non-Anthropic backends keep the canonical shape only.
+        let body = outbound_body(&native, false).unwrap();
+        assert!(body.get("output_config").is_none());
+        assert!(body.get("context_management").is_none());
     }
 }

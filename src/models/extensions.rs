@@ -12,6 +12,16 @@ pub struct RequestExtensions {
     // ── Anthropic ──
     /// Client-provided beta feature flags forwarded to Anthropic.
     pub client_beta: Option<String>,
+    /// Top-level `/v1/messages` fields [`super::CanonicalRequest`] has no slot
+    /// for (`output_config`, `context_management`, …) plus the raw `thinking`
+    /// object, whose `display` key [`super::ThinkingConfig`] drops.
+    ///
+    /// Serde discards unknown keys at the inbound parse, so without this Claude
+    /// Code's effort level, context editing and thinking display never reached
+    /// the backend. The Anthropic provider merges them back into the outbound
+    /// body for api.anthropic.com only: other Anthropic-compatible backends
+    /// reject fields they do not know.
+    pub anthropic_passthrough: serde_json::Map<String, serde_json::Value>,
 
     // ── OpenAI ──
     /// Structured output format (e.g. `json_schema`, `json_object`).

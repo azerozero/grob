@@ -96,6 +96,7 @@ pub(crate) fn transform_to_responses_request(
     let items = responses_input_items(request, replay.as_ref())?;
 
     let reasoning = resolve_reasoning_effort(request, tuning)
+        .map(|effort| crate::models::effort::to_codex(&request.model, &effort))
         .map(|effort| serde_json::json!({ "effort": effort }));
     // Reasoning models only engage prompt caching under `store = false` when the
     // request opts into encrypted reasoning state (Codex CLI does this); without
@@ -317,7 +318,8 @@ fn resolve_reasoning_effort(
 /// for every `think`/`think hard`/`ultrathink` keyword, so they cannot be told
 /// apart) maps to `xhigh`, the backend's max tier; an explicit budget maps to
 /// `xhigh` at/above `xhigh_min_budget`, else `medium`. Effort tiers:
-/// `low` < `medium` < `high` < `xhigh` (`max` is rejected by the backend).
+/// `low` < `medium` < `high` < `xhigh` (the gpt-6 line also takes `max` and
+/// `ultra`; see [`crate::models::effort`]).
 ///
 /// Note: Claude Code's `/effort` slider is client-internal and never reaches the
 /// API, so it cannot be mapped here — only the thinking keywords, which set a

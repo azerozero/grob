@@ -286,6 +286,7 @@ pub fn transform_openai_to_canonical(
         // OpenAI clients have no `cache_control`; let an Anthropic backend cache.
         inject_anthropic_cache: true,
         codex_native: false,
+        anthropic_passthrough: Default::default(),
     };
 
     Ok(CanonicalRequest {
