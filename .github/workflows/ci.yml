@@ -174,12 +174,16 @@ jobs:
           # cargo-sweep  — prunes a developer's target/ dir; meaningless here.
           # lychee-offline — the Docs Lint workflow runs the online check, a
           #                strict superset, and lychee is not in install-action.
+          # no-commit-to-branch — guards a developer's *local* commit on main;
+          #                on a push-to-main run the checkout IS main, so the
+          #                hook fails every run. The ruleset enforces this in CI.
           extra-args: >-
             --all-files
             --stage pre-push
             --skip gitleaks
             --skip cargo-sweep
             --skip lychee-offline
+            --skip no-commit-to-branch
       # `cargo fmt --all --` rewrites files and still exits 0, so a formatting
       # violation would otherwise pass CI silently. This also catches the
       # builtin fixers if they ever stop reporting their own edits.
