@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.121](https://github.com/azerozero/grob/compare/v0.36.120...v0.36.121) - 2026-10-14
+
+### Fixed
+
+- *(providers)* send the Claude Code identity line on Anthropic OAuth requests ([#635](https://github.com/azerozero/grob/pull/635))
+
+### Other
+
+- *(deps)* update opentelemetry stack to v0.33.1 ([#633](https://github.com/azerozero/grob/pull/633))
+- *(deps)* update cargo patch updates ([#632](https://github.com/azerozero/grob/pull/632))
+- *(deps)* update cargo patch updates ([#630](https://github.com/azerozero/grob/pull/630))
+- *(deps)* update cargo patch updates ([#628](https://github.com/azerozero/grob/pull/628))
+- refuse local commits on main via prek hook ([#627](https://github.com/azerozero/grob/pull/627))
+
 ## [0.36.120](https://github.com/azerozero/grob/compare/v0.36.119...v0.36.120) - 2026-09-27
 
 ### Other
