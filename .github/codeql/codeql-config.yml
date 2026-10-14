@@ -1,0 +1,12 @@
+# CodeQL analysis scope. Referenced from .github/workflows/codeql.yml.
+#
+# CodeQL has no inline `codeql[...]` suppression for Rust, so recurring
+# false positives can only be filtered here. Dismissing an alert in the UI
+# is bound to a code location: the same finding comes back as soon as the
+# code moves.
+
+# Benches deliberately disable TLS verification and hit arbitrary URLs;
+# tests log request bodies on purpose. Neither ships in the binary.
+paths-ignore:
+  - benches
+  - tests
