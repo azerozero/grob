@@ -120,16 +120,17 @@ hook to `prek.toml` adds it to CI, with no workflow edit.
 Reproduce the CI gate exactly:
 
 ```bash
-prek run --all-files --stage pre-push --skip gitleaks --skip cargo-sweep --skip lychee-offline
+prek run --all-files --stage pre-push --skip gitleaks --skip cargo-sweep --skip lychee-offline --skip no-commit-to-branch
 ```
 
-Three hooks are skipped in CI, each for a reason that does not weaken the gate:
+Four hooks are skipped in CI, each for a reason that does not weaken the gate:
 
 | Hook | Why skipped | What covers it in CI |
 |------|-------------|----------------------|
 | `gitleaks` | The hook scans the *staged* diff, which does not exist on a runner | The `gitleaks` job scans the PR's commit range (wider) |
 | `cargo-sweep` | Prunes a developer's `target/` directory | Nothing to cover — irrelevant on ephemeral runners |
 | `lychee-offline` | Deliberately offline to stay fast locally | The `docs-lint` workflow runs the online check, a strict superset |
+| `no-commit-to-branch` | Guards a developer's *local* commit on `main`; on a push-to-main run the checkout *is* `main`, so it would fail every run | The GitHub ruleset enforces it server-side |
 
 CI additionally fails if any hook *rewrote* a file: `cargo fmt --all --` fixes
 formatting and still exits 0, so `git diff --exit-code` is what actually enforces
