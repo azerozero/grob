@@ -16,6 +16,9 @@ on:
 permissions:
   contents: read
   issues: write
+  # rustsec/audit-check reports through a check run; without this it ends
+  # with "Resource not accessible by integration" even when the audit is clean.
+  checks: write
 
 concurrency:
   group: audit-cron-${{ github.ref }}
