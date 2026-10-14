@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.122](https://github.com/azerozero/grob/compare/v0.36.121...v0.36.122) - 2026-10-14
+
+### Fixed
+
+- *(server)* read the axum State field explicitly in the credential status handler ([#638](https://github.com/azerozero/grob/pull/638))
+
+### Other
+
+- *(codeql)* scope analysis with a config file to stop recurring false positives ([#637](https://github.com/azerozero/grob/pull/637))
+
 ## [0.36.121](https://github.com/azerozero/grob/compare/v0.36.120...v0.36.121) - 2026-10-14
 
 ### Fixed
