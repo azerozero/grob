@@ -2,6 +2,8 @@
 pub const ANTHROPIC_API_VERSION: &str = "2023-06-01";
 /// Comma-separated beta feature flags for Anthropic API requests.
 pub const ANTHROPIC_BETA_FEATURES: &str = "oauth-2025-04-20,claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14,prompt-caching-scope-2026-01-05";
+/// System prompt line that places OAuth requests under Claude Code's rate limits.
+pub const CLAUDE_CODE_IDENTITY: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
 /// Domain substring used to identify Anthropic backend URLs.
 pub const ANTHROPIC_DOMAIN: &str = "anthropic.com";
 /// Minimum length for a valid Anthropic webhook signature.

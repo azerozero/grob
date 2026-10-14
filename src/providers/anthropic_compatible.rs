@@ -1,8 +1,8 @@
 use super::{
     base::ProviderBase,
     constants::{
-        ANTHROPIC_API_VERSION, ANTHROPIC_BETA_FEATURES, ANTHROPIC_DOMAIN, RATE_LIMIT_REQUESTS_LOW,
-        RATE_LIMIT_TOKENS_LOW,
+        ANTHROPIC_API_VERSION, ANTHROPIC_BETA_FEATURES, ANTHROPIC_DOMAIN, CLAUDE_CODE_IDENTITY,
+        RATE_LIMIT_REQUESTS_LOW, RATE_LIMIT_TOKENS_LOW,
     },
     error::{is_context_window_exceeded_message, ProviderError},
     LlmProvider, ProviderResponse, StreamResponse,
@@ -303,11 +303,50 @@ impl AnthropicCompatibleProvider {
         if is_anthropic {
             sanitize_tool_use_ids(request, &mut id_map);
             strip_non_anthropic_thinking(request);
+            if self.base.is_oauth() {
+                inject_claude_code_identity(request);
+            }
         }
         inject_anthropic_cache_control(request);
         let auth_value = self.base.resolve_auth(OAuthConfig::anthropic).await?;
         Ok((auth_value, is_anthropic, id_map))
     }
+}
+
+/// Prefixes the system prompt with the Claude Code identity line on OAuth requests.
+///
+/// Anthropic serves Pro/Max OAuth tokens under Claude Code's rate limits only
+/// when the system prompt opens with this exact line; Opus-class models
+/// otherwise answer `429 rate_limit_error` with an empty message (Haiku is
+/// exempt). Claude Code sends the line itself, so this only changes requests
+/// from other clients (curl, Codex, `grob validate`). An existing identity is
+/// left untouched to keep Claude Code's cache prefix byte-identical.
+fn inject_claude_code_identity(request: &mut CanonicalRequest) {
+    let present = match &request.system {
+        Some(SystemPrompt::Text(text)) => text.starts_with(CLAUDE_CODE_IDENTITY),
+        Some(SystemPrompt::Blocks(blocks)) => blocks
+            .first()
+            .is_some_and(|b| b.text.starts_with(CLAUDE_CODE_IDENTITY)),
+        None => false,
+    };
+    if present {
+        return;
+    }
+    let block = |text: String| SystemBlock {
+        r#type: "text".to_string(),
+        text,
+        cache_control: None,
+    };
+    request.system = Some(match request.system.take() {
+        Some(SystemPrompt::Text(text)) if !text.is_empty() => {
+            SystemPrompt::Blocks(vec![block(CLAUDE_CODE_IDENTITY.to_string()), block(text)])
+        }
+        Some(SystemPrompt::Blocks(mut blocks)) => {
+            blocks.insert(0, block(CLAUDE_CODE_IDENTITY.to_string()));
+            SystemPrompt::Blocks(blocks)
+        }
+        _ => SystemPrompt::Text(CLAUDE_CODE_IDENTITY.to_string()),
+    });
 }
 
 /// Marks the system prefix cacheable when a non-Anthropic client was translated.
@@ -478,5 +517,56 @@ impl LlmProvider for AnthropicCompatibleProvider {
 
     fn rotate_key_pool(&self) -> bool {
         self.base.rotate_key_pool()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Message, MessageContent};
+
+    fn request(system: Option<SystemPrompt>) -> CanonicalRequest {
+        CanonicalRequest {
+            model: "claude-fable-5-1".to_string(),
+            messages: vec![Message {
+                role: "user".to_string(),
+                content: MessageContent::Text("hi".to_string()),
+            }],
+            max_tokens: 1,
+            thinking: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            stream: None,
+            metadata: None,
+            system,
+            tools: None,
+            tool_choice: None,
+            extensions: Default::default(),
+        }
+    }
+
+    #[test]
+    fn claude_code_identity_prepended_once() {
+        let mut none = request(None);
+        inject_claude_code_identity(&mut none);
+        assert!(
+            matches!(none.system, Some(SystemPrompt::Text(ref t)) if t == CLAUDE_CODE_IDENTITY)
+        );
+
+        let mut text = request(Some(SystemPrompt::Text("Be terse.".to_string())));
+        inject_claude_code_identity(&mut text);
+        let Some(SystemPrompt::Blocks(blocks)) = &text.system else {
+            panic!("text prompt becomes blocks");
+        };
+        assert_eq!(blocks[0].text, CLAUDE_CODE_IDENTITY);
+        assert_eq!(blocks[1].text, "Be terse.");
+
+        // Claude Code already sends it: the prefix must stay byte-identical.
+        let original = format!("{CLAUDE_CODE_IDENTITY}\n\nMore.");
+        let mut already = request(Some(SystemPrompt::Text(original.clone())));
+        inject_claude_code_identity(&mut already);
+        assert!(matches!(already.system, Some(SystemPrompt::Text(ref t)) if *t == original));
     }
 }
