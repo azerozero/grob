@@ -10,10 +10,3 @@
 paths-ignore:
   - benches
   - tests
-
-query-filters:
-  # Every filesystem path in grob is rooted at grob_home() (HOME / GROB_HOME)
-  # plus a fixed name or a hash, so the "user-provided value" is always the
-  # operator's own data directory. 6 of 6 alerts dismissed as false positive.
-  - exclude:
-      id: rust/path-injection
