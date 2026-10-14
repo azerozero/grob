@@ -322,12 +322,17 @@ fn safe_content_type(headers: &axum::http::HeaderMap) -> &'static str {
 }
 
 pub(super) async fn status(
-    State(state): State<Arc<AppState>>,
+    state: State<Arc<AppState>>,
     Extension(caller): Extension<super::rpc::auth::CallerIdentity>,
 ) -> Result<Json<serde_json::Value>, CredentialError> {
     if !caller.role.has_at_least(super::rpc::types::Role::Admin) {
         return Err(CredentialError::Denied);
     }
+    // NOTE: Read the extractor's field instead of destructuring `State(state)`
+    // in the signature: CodeQL's axum model taints every handler parameter and
+    // only exempts the explicit `State.0` read, so the pattern form reports
+    // every store path as rust/path-injection.
+    let state = state.0;
     let bindings = state.snapshot().config.credential_services.clone();
     let statuses = tokio::task::spawn_blocking(move || bindings.iter().map(|binding| {
         match state.grob_store.credential_read(&binding.tenant, &binding.id) {
