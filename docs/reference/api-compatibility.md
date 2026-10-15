@@ -476,6 +476,10 @@ Effort crosses providers in both directions, so a client keeps its setting which
 
 Anthropic models older than Opus/Sonnet 4.6 (`claude-haiku-4-5`, `claude-opus-4-1`, Claude 3.x) reject `output_config`, so no effort is sent to them.
 
+### Tool schemas on a Codex backend
+
+A `/v1/messages` tool `input_schema` is forwarded to the Codex backend as the function's `parameters` with `strict: false`. The Responses API defaults `strict` to `true`, which constrains decoding so that every property is emitted; an Anthropic-style schema lists optional properties outside `required`, and a strict decode would force the model to invent values for them (for example a placeholder `resume` id on every call). The schema itself is not rewritten.
+
 ---
 
 ## Cross-endpoint comparison

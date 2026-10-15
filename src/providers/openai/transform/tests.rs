@@ -81,6 +81,8 @@ fn responses_request_forwards_tools_and_tool_history() {
     assert_eq!(json["tools"][0]["type"], "function");
     assert_eq!(json["tools"][0]["name"], "Bash");
     assert!(json["tools"][0]["parameters"]["properties"]["command"].is_object());
+    // Explicit, because the Responses default (strict = true) would force every optional property.
+    assert_eq!(json["tools"][0]["strict"], false);
     assert_eq!(json["parallel_tool_calls"], true);
 
     // The full Codex prompt is swapped for the tool-deferring preamble.
