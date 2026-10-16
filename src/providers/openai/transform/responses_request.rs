@@ -547,9 +547,12 @@ fn transform_responses_tools(
                 "OpenAI Responses tool definition at index {index} is missing a non-empty name"
             )));
         };
+        // The Responses API defaults `strict` to true, which constrains decoding so every
+        // property must be emitted; Anthropic-style schemas keep optional fields optional.
         let mut entry = serde_json::json!({
             "type": "function",
             "name": name,
+            "strict": false,
             "parameters": tool
                 .input_schema
                 .clone()
