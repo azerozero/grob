@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.126](https://github.com/azerozero/grob/compare/v0.36.125...v0.36.126) - 2026-10-16
+
+### Fixed
+
+- *(codex)* send strict=false on function tools translated for the Codex backend ([#646](https://github.com/azerozero/grob/pull/646))
+
 ## [0.36.125](https://github.com/azerozero/grob/compare/v0.36.124...v0.36.125) - 2026-10-14
 
 ### Added
