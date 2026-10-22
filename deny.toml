@@ -10,6 +10,10 @@ version = 2
 # Prefer moving off an affected crate over adding an entry here; an ignore is a
 # standing decision that nobody re-reads.
 ignore = []
+# Flag unmaintained crates only when we depend on them directly. Transitive
+# ones (e.g. basic-toml via age's i18n) have no upgrade path we control;
+# vulnerabilities still fail CI at any depth.
+unmaintained = "workspace"
 
 # ── Licenses ─────────────────────────────────────────────────────────────────
 # Grob is Apache-2.0. We allow permissive licenses, weak-copyleft licenses that
