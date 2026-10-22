@@ -523,6 +523,47 @@ fn prompt_cache_key_is_stable_across_message_tails() {
 }
 
 #[test]
+fn prompt_cache_key_ignores_client_cache_control_on_first_message() {
+    // Pi/Claude Code mark the last user message with cache_control, so turn 1's
+    // first message is a cache-marked block and turn 2's is a bare string.
+    let opts = CodexOptions::default();
+    let key = |messages: Vec<Message>| {
+        let mut req = base_request();
+        req.system = None;
+        req.messages = messages;
+        serde_json::to_value(
+            transform_to_responses_request(
+                &req,
+                "INSTR",
+                &CodexTuning::from_options(&opts, None, None),
+            )
+            .unwrap(),
+        )
+        .unwrap()["prompt_cache_key"]
+            .clone()
+    };
+    let marked: Message = serde_json::from_value(serde_json::json!({
+        "role": "user",
+        "content": [{"type": "text", "text": "first prompt", "cache_control": {"type": "ephemeral"}}]
+    }))
+    .unwrap();
+
+    let turn1 = key(vec![marked]);
+    let turn2 = key(vec![
+        Message {
+            role: "user".to_string(),
+            content: MessageContent::Text("first prompt".to_string()),
+        },
+        Message {
+            role: "assistant".to_string(),
+            content: MessageContent::Text("reply".to_string()),
+        },
+    ]);
+
+    assert_eq!(turn1, turn2, "cache_control must not shift the key");
+}
+
+#[test]
 fn prompt_cache_key_separates_conversations_and_instructions() {
     let opts = CodexOptions::default();
     let key = |instructions: &str, first: &str| {
