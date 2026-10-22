@@ -221,7 +221,7 @@ fn derive_prompt_cache_key(
         }
     }
     if let Some(message) = first_message {
-        if let Ok(bytes) = serde_json::to_vec(message) {
+        if let Ok(bytes) = serde_json::to_vec(&cache_key_view(message)) {
             hasher.update(&bytes);
         }
     }
@@ -234,6 +234,34 @@ fn derive_prompt_cache_key(
         let _ = write!(key, "{byte:02x}");
     }
     key
+}
+
+/// Normalizes the first message so client-side cache markers do not change the key.
+///
+/// Anthropic clients (Pi, Claude Code) put a `cache_control` breakpoint on the
+/// *last* user message, promoting a string body to a text block to carry it. On
+/// turn 1 the first message is also the last one, so it arrives as
+/// `[{type: text, cache_control}]`; from turn 2 on it is a bare string again.
+/// Hashing it verbatim made the key shift between turns 1 and 2, cooling the
+/// prompt cache and orphaning the reasoning stored on turn 1.
+fn cache_key_view(message: &Message) -> serde_json::Value {
+    fn strip_cache_control(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("cache_control");
+                map.values_mut().for_each(strip_cache_control);
+            }
+            serde_json::Value::Array(items) => items.iter_mut().for_each(strip_cache_control),
+            _ => {}
+        }
+    }
+
+    let mut value = serde_json::to_value(message).unwrap_or_default();
+    if let Some(text) = value["content"].as_str().map(str::to_string) {
+        value["content"] = serde_json::json!([{ "type": "text", "text": text }]);
+    }
+    strip_cache_control(&mut value);
+    value
 }
 
 /// Resolves the Codex `service_tier` (processing speed) for a request.
