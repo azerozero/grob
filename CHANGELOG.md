@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.127](https://github.com/azerozero/grob/compare/v0.36.126...v0.36.127) - 2026-10-22
+
+### Fixed
+
+- *(deps)* bump webpki crates for RUSTSEC-2026-0381/0382/0383 ([#654](https://github.com/azerozero/grob/pull/654))
+
 ## [0.36.126](https://github.com/azerozero/grob/compare/v0.36.125...v0.36.126) - 2026-10-16
 
 ### Fixed
