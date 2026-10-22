@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.128](https://github.com/azerozero/grob/compare/v0.36.127...v0.36.128) - 2026-10-22
+
+### Fixed
+
+- *(codex)* keep prompt_cache_key stable when the client marks the first message ([#656](https://github.com/azerozero/grob/pull/656))
+
 ## [0.36.127](https://github.com/azerozero/grob/compare/v0.36.126...v0.36.127) - 2026-10-22
 
 ### Fixed
