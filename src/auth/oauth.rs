@@ -439,7 +439,23 @@ impl OAuthClient {
         }
 
         self.token_store.begin_refresh(&existing_token)?;
-        let response = self.do_refresh(&existing_token).await?;
+        let response = match self.do_refresh(&existing_token).await {
+            Ok(response) => response,
+            Err(error) => {
+                // A connection that never opened proves the issuer never received
+                // this request, so the refresh token was neither spent nor rotated.
+                // Clear the uncertainty marker so the next attempt can reuse the
+                // still-valid token, instead of wedging every future refresh on
+                // "Previous OAuth refresh outcome is unknown".
+                if error
+                    .downcast_ref::<reqwest::Error>()
+                    .is_some_and(reqwest::Error::is_connect)
+                {
+                    self.token_store.finish_refresh(provider_id)?;
+                }
+                return Err(error);
+            }
+        };
 
         if !response.status().is_success() {
             // A server/transport failure can occur after rotation. Only explicit
@@ -777,5 +793,56 @@ mod tests {
         let original = OAuthConfig::anthropic().redirect_uri;
         let cfg = OAuthConfig::anthropic().with_callback_port(9999);
         assert_eq!(cfg.redirect_uri, original);
+    }
+
+    /// A connection that never opens must not poison later refreshes.
+    ///
+    /// Regression test for the permanent wedge: a transient connect failure
+    /// (brief outage, DNS hiccup, daemon waking from sleep) used to leave the
+    /// `.refresh.pending` marker behind, so every subsequent refresh aborted
+    /// with "Previous OAuth refresh outcome is unknown" even though the stored
+    /// refresh token was still valid and had never reached the issuer.
+    #[tokio::test]
+    async fn connect_failure_does_not_wedge_future_refreshes() {
+        use crate::storage::GrobStore;
+        use chrono::Utc;
+        use secrecy::SecretString;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(GrobStore::open(&dir.path().join("grob.db")).unwrap());
+        store
+            .save_oauth_token(&OAuthToken {
+                provider_id: "provider".into(),
+                access_token: SecretString::from("synthetic-access"),
+                refresh_token: SecretString::from("synthetic-refresh"),
+                expires_at: Utc::now() - chrono::Duration::minutes(1),
+                enterprise_url: None,
+                project_id: None,
+                needs_reauth: None,
+            })
+            .unwrap();
+
+        // Loopback port 1 has no listener: reqwest fails at connect, before any
+        // request bytes could reach an issuer, so the refresh token is provably
+        // neither spent nor rotated.
+        let mut config = OAuthConfig::openai_codex();
+        config.token_url = "http://127.0.0.1:1/token".into();
+        let client = OAuthClient::new(config, TokenStore::with_store(store).unwrap());
+
+        let first = client.refresh_token("provider").await.unwrap_err();
+        assert!(
+            !first.to_string().contains("outcome is unknown"),
+            "first refresh should surface the connect failure, not the wedge: {first:#}"
+        );
+
+        // Before the fix, the marker left by the first attempt made this second
+        // refresh fail with the uncertainty guard instead of retrying the
+        // still-valid token.
+        let second = client.refresh_token("provider").await.unwrap_err();
+        assert!(
+            !second.to_string().contains("outcome is unknown"),
+            "a transient connect failure must not wedge later refreshes: {second:#}"
+        );
     }
 }
