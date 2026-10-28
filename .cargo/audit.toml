@@ -1,6 +1,13 @@
-# Review date: 2026-07-24 — the ignore list is empty and should stay that way.
-# Kept in sync with the `ignore` list in deny.toml. Prefer moving off an
-# affected crate over adding an entry here; an ignore is a standing decision
-# that nobody re-reads.
+# Review date: 2026-10-27 — keep this list minimal and in sync with the `ignore`
+# list in deny.toml. Prefer moving off an affected crate over adding an entry
+# here; an ignore is a standing decision that nobody re-reads.
 [advisories]
-ignore = []
+ignore = [
+    # RUSTSEC-2026-0387: crypto-bigint timing variability. Still pulled by
+    # crypto-bigint 0.5.5 via age 0.12.1 (latest) -> its non-optional hpke/p256
+    # 0.13 -> elliptic-curve 0.13.8 deps; 0.5.x has no patched release and no
+    # grob feature toggles that path off. The fixed 0.7.x line (0.7.10) is taken
+    # in Cargo.lock. Remove when age ships on a fixed crypto-bigint. Mirror of
+    # the deny.toml entry.
+    "RUSTSEC-2026-0387",
+]
