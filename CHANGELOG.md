@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.129](https://github.com/azerozero/grob/compare/v0.36.128...v0.36.129) - 2026-10-28
+
+### Fixed
+
+- *(oauth)* clear refresh marker on connection failures ([#664](https://github.com/azerozero/grob/pull/664))
+- *(deps)* clear RUSTSEC-2026-0385 and RUSTSEC-2026-0387 ([#665](https://github.com/azerozero/grob/pull/665))
+
+### Other
+
+- *(deps)* update cargo minor updates ([#661](https://github.com/azerozero/grob/pull/661))
+- *(deps)* update docker.io/grafana/otel-lgtm docker tag to v0.38.1 ([#662](https://github.com/azerozero/grob/pull/662))
+- *(deps)* update docker.io/curlimages/curl docker tag to v8.23.0 ([#649](https://github.com/azerozero/grob/pull/649))
+
 ## [0.36.128](https://github.com/azerozero/grob/compare/v0.36.127...v0.36.128) - 2026-10-22
 
 ### Fixed
