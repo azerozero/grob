@@ -51,7 +51,7 @@ impl ModelPricing {
 
     /// Calculates the cost of prompt-cache *read* tokens (USD).
     ///
-    /// Billed at [`CACHE_READ_COST_RATIO`] × the input rate. This is the
+    /// Billed at [`cache_read_ratio`] × the input rate. This is the
     /// dimension that was missing: cache reads are excluded from billable input
     /// upstream, so without this they were billed at $0.
     ///
@@ -61,11 +61,20 @@ impl ModelPricing {
     /// use grob::pricing::ModelPricing;
     /// let p = ModelPricing { model: "test", input_per_million: 3.0, output_per_million: 15.0 };
     /// let cost = p.calculate_cache_read(1_000_000);
-    /// assert!((cost - 0.3).abs() < 1e-9); // 3.0 × 0.1
+    /// assert!((cost - 0.3).abs() < 1e-9); // 3.0 × 0.1 (default ratio)
     /// ```
     pub fn calculate_cache_read(&self, cache_read_tokens: u32) -> f64 {
-        cache_read_tokens as f64 * self.input_per_million * CACHE_READ_COST_RATIO / 1_000_000.0
+        cache_read_tokens as f64 * self.input_per_million * cache_read_ratio(self.model)
+            / 1_000_000.0
     }
+}
+
+/// Cache-read price as a fraction of input for `model`, from `llm-prices`
+/// (Anthropic 0.1x, OpenAI gpt-4o 0.5x, o3 0.25x); [`CACHE_READ_COST_RATIO`] otherwise.
+pub fn cache_read_ratio(model: &str) -> f64 {
+    llm_prices::lookup(model)
+        .and_then(|p| Some(p.cache_read? / p.input.filter(|i| *i > 0.0)?))
+        .unwrap_or(CACHE_READ_COST_RATIO)
 }
 
 /// Known model pricing (USD) — fallback for models not available on OpenRouter.
@@ -112,7 +121,7 @@ pub static KNOWN_PRICING: &[ModelPricing] = &[
         output_per_million: 0.5,
     },
     // -----------------------------------------------------------------
-    // Anthropic — Opus 4.6+ moved to $5/$25 (was $15/$75 on 4.5 and earlier).
+    // Anthropic — Opus 4.5+ moved to $5/$25 (was $15/$75 on 4.1 and earlier).
     // -----------------------------------------------------------------
     ModelPricing {
         model: "claude-opus-4-8",
@@ -131,8 +140,8 @@ pub static KNOWN_PRICING: &[ModelPricing] = &[
     },
     ModelPricing {
         model: "claude-opus-4-5",
-        input_per_million: 15.0,
-        output_per_million: 75.0,
+        input_per_million: 5.0,
+        output_per_million: 25.0,
     },
     ModelPricing {
         model: "claude-opus-4-1",
@@ -446,6 +455,24 @@ pub fn pricing(model: &str) -> Option<&'static ModelPricing> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opus_45_listed_at_5_25() {
+        let p = pricing("claude-opus-4-5").expect("opus 4.5 listed");
+        assert_eq!(p.input_per_million, 5.0);
+        assert_eq!(p.output_per_million, 25.0);
+    }
+
+    #[test]
+    fn cache_read_ratio_is_per_provider() {
+        // OpenAI caches at half the input rate, Anthropic at a tenth.
+        assert!((cache_read_ratio("gpt-4o") - 0.5).abs() < 1e-9);
+        assert!((cache_read_ratio("o3") - 0.25).abs() < 1e-9);
+        assert!((cache_read_ratio("claude-sonnet-4-6") - 0.1).abs() < 1e-9);
+        assert_eq!(cache_read_ratio("unknown-model-xyz"), CACHE_READ_COST_RATIO);
+        let p = pricing("gpt-4o").expect("gpt-4o listed");
+        assert!((p.calculate_cache_read(1_000_000) - 1.25).abs() < 1e-9);
+    }
 
     #[test]
     fn opus_47_listed_at_new_price() {

@@ -236,9 +236,9 @@ impl TokenCounter {
                 .get(model)
                 .map(|(inp, out, cache_read_rate)| {
                     // Prefer the feed's explicit cache-read rate; otherwise derive
-                    // it from input (see `pricing::CACHE_READ_COST_RATIO`).
+                    // it from input (see `pricing::cache_read_ratio`).
                     let cache_read_rate =
-                        cache_read_rate.unwrap_or(inp * crate::pricing::CACHE_READ_COST_RATIO);
+                        cache_read_rate.unwrap_or(inp * crate::pricing::cache_read_ratio(model));
                     (input_tokens as f64 / 1_000_000.0) * inp
                         + (output_tokens as f64 / 1_000_000.0) * out
                         + (cache_read_tokens as f64 / 1_000_000.0) * cache_read_rate
