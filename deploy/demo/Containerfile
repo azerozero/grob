@@ -11,7 +11,7 @@
 # cross-target is forced, unlike the production Containerfile.
 # Keep the build toolchain aligned with the production Containerfile.
 # Rust 1.93+ is required by str::floor/ceil_char_boundary in grob.
-FROM rust:1.98-alpine3.24 AS builder
+FROM rust:1.100-alpine3.24 AS builder
 # musl-dev + openssl for the crates; make builds the bundled jemalloc (C).
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static make cmake
 WORKDIR /usr/src/grob

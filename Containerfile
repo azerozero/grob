@@ -4,7 +4,7 @@
 ARG RUNTIME_SOURCE=compiled
 
 # Stage 1: Chef planner — compute dependency recipe
-FROM rust:1.98-alpine3.24 AS chef
+FROM rust:1.100-alpine3.24 AS chef
 RUN apk add --no-cache musl-dev openssl-dev openssl-libs-static make cmake && \
     cargo install cargo-chef --locked
 WORKDIR /usr/src/grob
