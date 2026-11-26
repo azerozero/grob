@@ -164,7 +164,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny,cargo-machete,cargo-audit
-      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
+      - uses: j178/prek-action@7b101f8338a08d2bd6fdb3625e4e7692428763a3 # v3.1.1
         with:
           # --stage pre-push selects every hook: the pre-push-only ones plus the
           # unstaged (all-stage) defaults.
@@ -862,7 +862,7 @@ jobs:
           output-file: sbom-grob.spdx.json
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.3
+        uses: sigstore/cosign-installer@v4.1.4
 
       - name: Sign container image
         run: |
